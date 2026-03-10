@@ -1,0 +1,297 @@
+[
+  {
+    "id": 1,
+    "title": "Bench Press: Barbell",
+    "alias": ["Barbell Bench Press", "Flat Bench Press"],
+    "primer": "The barbell bench press is a compound exercise that primarily targets the chest muscles.",
+    "primary": ["pectoralis"],
+    "secondary": ["triceps", "deltoid"],
+    "equipment": ["barbell", "bench"],
+    "steps": [
+      "Lie flat on the bench with feet firmly on the floor",
+      "Grip the barbell slightly wider than shoulder width",
+      "Unrack the bar and lower it to mid-chest",
+      "Press the bar back up to starting position"
+    ],
+    "tips": [
+      "Keep your shoulder blades retracted throughout the movement",
+      "Maintain a slight arch in your lower back",
+      "Don't bounce the bar off your chest"
+    ]
+  },
+  {
+    "id": 2,
+    "title": "Squat: Barbell",
+    "alias": ["Barbell Squat", "Back Squat"],
+    "primer": "The barbell squat is a fundamental compound exercise for lower body strength.",
+    "primary": ["quadriceps", "glutes"],
+    "secondary": ["hamstrings", "erector spinae"],
+    "equipment": ["barbell", "rack"],
+    "steps": [
+      "Position the bar on your upper back",
+      "Stand with feet shoulder-width apart",
+      "Lower down by bending at hips and knees",
+      "Push through heels to return to standing"
+    ],
+    "tips": [
+      "Keep your chest up and core engaged",
+      "Knees should track over toes",
+      "Aim for at least parallel depth"
+    ]
+  },
+  {
+    "id": 3,
+    "title": "Deadlift: Barbell",
+    "alias": ["Barbell Deadlift", "Conventional Deadlift"],
+    "primer": "The deadlift is one of the most effective exercises for overall strength development.",
+    "primary": ["erector spinae", "glutes", "hamstrings"],
+    "secondary": ["quadriceps", "trapezius", "latissimus"],
+    "equipment": ["barbell"],
+    "steps": [
+      "Stand with feet hip-width apart, bar over mid-foot",
+      "Bend down and grip the bar just outside your legs",
+      "Keep your back straight and lift the bar by extending hips and knees",
+      "Lower the bar back to the ground with control"
+    ],
+    "tips": [
+      "Keep the bar close to your body throughout",
+      "Engage your lats and core",
+      "Don't round your lower back"
+    ]
+  },
+  {
+    "id": 4,
+    "title": "Pull-up",
+    "alias": ["Pullup", "Chin-up"],
+    "primer": "Pull-ups are an excellent bodyweight exercise for back and arm development.",
+    "primary": ["latissimus", "biceps"],
+    "secondary": ["trapezius", "deltoid"],
+    "equipment": ["pull-up bar"],
+    "steps": [
+      "Hang from a bar with hands slightly wider than shoulders",
+      "Pull yourself up until chin is over the bar",
+      "Lower yourself back down with control"
+    ],
+    "tips": [
+      "Avoid swinging or using momentum",
+      "Focus on squeezing your shoulder blades together",
+      "Full range of motion is key"
+    ]
+  },
+  {
+    "id": 5,
+    "title": "Overhead Press: Barbell",
+    "alias": ["Military Press", "Shoulder Press"],
+    "primer": "The overhead press builds shoulder strength and stability.",
+    "primary": ["deltoid"],
+    "secondary": ["triceps", "trapezius"],
+    "equipment": ["barbell"],
+    "steps": [
+      "Start with bar at shoulder height",
+      "Press the bar straight overhead",
+      "Lock out arms at the top",
+      "Lower back to shoulders with control"
+    ],
+    "tips": [
+      "Keep your core tight",
+      "Don't lean back excessively",
+      "Press in a straight line"
+    ]
+  },
+  {
+    "id": 6,
+    "title": "Bicep Curl: Dumbbell",
+    "alias": ["Dumbbell Curl", "DB Curl"],
+    "primer": "Dumbbell curls isolate and build the bicep muscles.",
+    "primary": ["biceps"],
+    "secondary": [],
+    "equipment": ["dumbbell"],
+    "steps": [
+      "Stand with dumbbells at your sides, palms forward",
+      "Curl the weights up while keeping elbows stationary",
+      "Squeeze at the top",
+      "Lower with control"
+    ],
+    "tips": [
+      "Don't swing the weights",
+      "Keep elbows close to your body",
+      "Control the eccentric portion"
+    ]
+  },
+  {
+    "id": 7,
+    "title": "Tricep Extension: Dumbbell",
+    "alias": ["Overhead Tricep Extension", "Skull Crusher"],
+    "primer": "Tricep extensions target the back of the upper arm.",
+    "primary": ["triceps"],
+    "secondary": [],
+    "equipment": ["dumbbell"],
+    "steps": [
+      "Hold dumbbell overhead with both hands",
+      "Lower the weight behind your head",
+      "Extend arms back to starting position"
+    ],
+    "tips": [
+      "Keep elbows pointing forward",
+      "Don't flare elbows out",
+      "Control the movement"
+    ]
+  },
+  {
+    "id": 8,
+    "title": "Leg Press: Machine",
+    "alias": ["Machine Leg Press"],
+    "primer": "The leg press is a compound exercise for leg development using a machine.",
+    "primary": ["quadriceps", "glutes"],
+    "secondary": ["hamstrings"],
+    "equipment": ["machine"],
+    "steps": [
+      "Sit in the machine with feet on the platform",
+      "Lower the weight by bending knees",
+      "Press through heels to extend legs"
+    ],
+    "tips": [
+      "Don't lock out knees completely",
+      "Keep lower back against the pad",
+      "Control the descent"
+    ]
+  },
+  {
+    "id": 9,
+    "title": "Lat Pulldown: Machine",
+    "alias": ["Cable Pulldown", "Lat Pull"],
+    "primer": "Lat pulldowns target the back muscles, similar to pull-ups.",
+    "primary": ["latissimus"],
+    "secondary": ["biceps", "trapezius"],
+    "equipment": ["machine", "cable"],
+    "steps": [
+      "Sit at the machine with knees secured",
+      "Grip the bar wider than shoulders",
+      "Pull the bar down to upper chest",
+      "Return with control"
+    ],
+    "tips": [
+      "Lead with your elbows",
+      "Squeeze shoulder blades together",
+      "Don't lean back too much"
+    ]
+  },
+  {
+    "id": 10,
+    "title": "Romanian Deadlift: Barbell",
+    "alias": ["RDL", "Stiff-Leg Deadlift"],
+    "primer": "The Romanian deadlift emphasizes the hamstrings and glutes.",
+    "primary": ["hamstrings", "glutes"],
+    "secondary": ["erector spinae"],
+    "equipment": ["barbell"],
+    "steps": [
+      "Hold bar at hip level with slight knee bend",
+      "Hinge at hips, lowering bar down legs",
+      "Keep back straight throughout",
+      "Return to standing by driving hips forward"
+    ],
+    "tips": [
+      "Feel the stretch in hamstrings",
+      "Don't round your back",
+      "Bar should stay close to legs"
+    ]
+  },
+  {
+    "id": 11,
+    "title": "Plank",
+    "alias": ["Front Plank", "Abdominal Plank"],
+    "primer": "The plank is a core stability exercise.",
+    "primary": ["abdominals"],
+    "secondary": ["erector spinae", "deltoid"],
+    "equipment": ["bodyweight"],
+    "steps": [
+      "Start in push-up position on forearms",
+      "Keep body in straight line from head to heels",
+      "Hold position while engaging core"
+    ],
+    "tips": [
+      "Don't let hips sag",
+      "Squeeze glutes and core",
+      "Breathe steadily"
+    ]
+  },
+  {
+    "id": 12,
+    "title": "Crunch",
+    "alias": ["Abdominal Crunch", "Sit-up"],
+    "primer": "Crunches isolate the abdominal muscles.",
+    "primary": ["abdominals"],
+    "secondary": ["obliques"],
+    "equipment": ["bodyweight"],
+    "steps": [
+      "Lie on back with knees bent",
+      "Place hands behind head",
+      "Lift shoulders off ground by contracting abs",
+      "Lower back down with control"
+    ],
+    "tips": [
+      "Don't pull on your neck",
+      "Focus on ab contraction",
+      "Exhale as you crunch up"
+    ]
+  },
+  {
+    "id": 13,
+    "title": "Lunge: Dumbbell",
+    "alias": ["Walking Lunge", "DB Lunge"],
+    "primer": "Lunges are a unilateral leg exercise that builds strength and balance.",
+    "primary": ["quadriceps", "glutes"],
+    "secondary": ["hamstrings"],
+    "equipment": ["dumbbell"],
+    "steps": [
+      "Hold dumbbells at sides",
+      "Step forward with one leg",
+      "Lower back knee toward ground",
+      "Push through front heel to return"
+    ],
+    "tips": [
+      "Keep torso upright",
+      "Front knee should not pass toes",
+      "Equal weight on both legs"
+    ]
+  },
+  {
+    "id": 14,
+    "title": "Lateral Raise: Dumbbell",
+    "alias": ["Side Raise", "DB Lateral Raise"],
+    "primer": "Lateral raises target the side deltoid muscles.",
+    "primary": ["deltoid"],
+    "secondary": [],
+    "equipment": ["dumbbell"],
+    "steps": [
+      "Stand with dumbbells at sides",
+      "Raise arms out to sides to shoulder height",
+      "Lower with control"
+    ],
+    "tips": [
+      "Keep slight bend in elbows",
+      "Don't shrug shoulders",
+      "Lead with elbows, not hands"
+    ]
+  },
+  {
+    "id": 15,
+    "title": "Row: Barbell",
+    "alias": ["Bent-Over Row", "Barbell Row"],
+    "primer": "Barbell rows build back thickness and strength.",
+    "primary": ["latissimus", "trapezius"],
+    "secondary": ["biceps", "erector spinae"],
+    "equipment": ["barbell"],
+    "steps": [
+      "Bend at hips holding barbell",
+      "Pull bar to lower chest",
+      "Squeeze shoulder blades together",
+      "Lower with control"
+    ],
+    "tips": [
+      "Keep back straight",
+      "Don't use momentum",
+      "Pull with your back, not arms"
+    ]
+  }
+]
