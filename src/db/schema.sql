@@ -5,16 +5,16 @@ CREATE TABLE IF NOT EXISTS exercises (
   uuid TEXT PRIMARY KEY,
   everkinetic_id INTEGER NOT NULL,
   title TEXT NOT NULL,
-  alias TEXT NOT NULL DEFAULT '[]', -- JSON array
+  alias JSONB NOT NULL DEFAULT '[]'::jsonb,
   description TEXT,
-  primary_muscles TEXT NOT NULL DEFAULT '[]', -- JSON array
-  secondary_muscles TEXT NOT NULL DEFAULT '[]', -- JSON array
-  equipment TEXT NOT NULL DEFAULT '[]', -- JSON array
-  steps TEXT NOT NULL DEFAULT '[]', -- JSON array
-  tips TEXT NOT NULL DEFAULT '[]', -- JSON array
-  is_custom BOOLEAN NOT NULL DEFAULT 0,
-  is_hidden BOOLEAN NOT NULL DEFAULT 0,
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  primary_muscles JSONB NOT NULL DEFAULT '[]'::jsonb,
+  secondary_muscles JSONB NOT NULL DEFAULT '[]'::jsonb,
+  equipment JSONB NOT NULL DEFAULT '[]'::jsonb,
+  steps JSONB NOT NULL DEFAULT '[]'::jsonb,
+  tips JSONB NOT NULL DEFAULT '[]'::jsonb,
+  is_custom BOOLEAN NOT NULL DEFAULT false,
+  is_hidden BOOLEAN NOT NULL DEFAULT false,
+  created_at TIMESTAMP DEFAULT NOW()
 );
 
 CREATE INDEX IF NOT EXISTS idx_exercises_title ON exercises(title);
@@ -28,15 +28,15 @@ CREATE TABLE IF NOT EXISTS workouts (
   end_time TIMESTAMP,
   title TEXT,
   comment TEXT,
-  is_current BOOLEAN NOT NULL DEFAULT 0,
-  workout_routine_uuid TEXT, -- Link to routine if created from plan
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  is_current BOOLEAN NOT NULL DEFAULT false,
+  workout_routine_uuid TEXT,
+  created_at TIMESTAMP DEFAULT NOW(),
   FOREIGN KEY (workout_routine_uuid) REFERENCES workout_routines(uuid) ON DELETE SET NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_workouts_start_time ON workouts(start_time DESC);
 CREATE INDEX IF NOT EXISTS idx_workouts_is_current ON workouts(is_current);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_workouts_is_current_unique ON workouts(is_current) WHERE is_current = 1;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_workouts_is_current_unique ON workouts(is_current) WHERE is_current = true;
 
 -- Exercises in a workout
 CREATE TABLE IF NOT EXISTS workout_exercises (
@@ -45,7 +45,7 @@ CREATE TABLE IF NOT EXISTS workout_exercises (
   exercise_uuid TEXT NOT NULL,
   comment TEXT,
   order_index INTEGER NOT NULL,
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  created_at TIMESTAMP DEFAULT NOW(),
   FOREIGN KEY (workout_uuid) REFERENCES workouts(uuid) ON DELETE CASCADE,
   FOREIGN KEY (exercise_uuid) REFERENCES exercises(uuid) ON DELETE CASCADE
 );
@@ -57,16 +57,16 @@ CREATE INDEX IF NOT EXISTS idx_workout_exercises_exercise ON workout_exercises(e
 CREATE TABLE IF NOT EXISTS workout_sets (
   uuid TEXT PRIMARY KEY,
   workout_exercise_uuid TEXT NOT NULL,
-  weight REAL,
+  weight NUMERIC,
   repetitions INTEGER,
   min_target_reps INTEGER,
   max_target_reps INTEGER,
-  rpe REAL CHECK(rpe IS NULL OR (rpe >= 7.0 AND rpe <= 10.0)),
+  rpe NUMERIC CHECK(rpe IS NULL OR (rpe >= 7.0 AND rpe <= 10.0)),
   tag TEXT CHECK(tag IS NULL OR tag IN ('dropSet', 'failure')),
   comment TEXT,
-  is_completed BOOLEAN NOT NULL DEFAULT 0,
+  is_completed BOOLEAN NOT NULL DEFAULT false,
   order_index INTEGER NOT NULL,
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  created_at TIMESTAMP DEFAULT NOW(),
   FOREIGN KEY (workout_exercise_uuid) REFERENCES workout_exercises(uuid) ON DELETE CASCADE
 );
 
@@ -77,7 +77,7 @@ CREATE INDEX IF NOT EXISTS idx_workout_sets_completed ON workout_sets(is_complet
 CREATE TABLE IF NOT EXISTS workout_plans (
   uuid TEXT PRIMARY KEY,
   title TEXT,
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  created_at TIMESTAMP DEFAULT NOW()
 );
 
 -- Routines in a plan
@@ -87,7 +87,7 @@ CREATE TABLE IF NOT EXISTS workout_routines (
   title TEXT,
   comment TEXT,
   order_index INTEGER NOT NULL,
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  created_at TIMESTAMP DEFAULT NOW(),
   FOREIGN KEY (workout_plan_uuid) REFERENCES workout_plans(uuid) ON DELETE CASCADE
 );
 
@@ -100,7 +100,7 @@ CREATE TABLE IF NOT EXISTS workout_routine_exercises (
   exercise_uuid TEXT NOT NULL,
   comment TEXT,
   order_index INTEGER NOT NULL,
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  created_at TIMESTAMP DEFAULT NOW(),
   FOREIGN KEY (workout_routine_uuid) REFERENCES workout_routines(uuid) ON DELETE CASCADE,
   FOREIGN KEY (exercise_uuid) REFERENCES exercises(uuid) ON DELETE CASCADE
 );
@@ -116,7 +116,7 @@ CREATE TABLE IF NOT EXISTS workout_routine_sets (
   tag TEXT CHECK(tag IS NULL OR tag = 'dropSet'),
   comment TEXT,
   order_index INTEGER NOT NULL,
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  created_at TIMESTAMP DEFAULT NOW(),
   FOREIGN KEY (workout_routine_exercise_uuid) REFERENCES workout_routine_exercises(uuid) ON DELETE CASCADE
 );
 

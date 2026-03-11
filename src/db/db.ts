@@ -1,29 +1,40 @@
-import Database from 'better-sqlite3';
-import { join } from 'path';
-import { existsSync } from 'fs';
+import { Pool, neonConfig } from '@neondatabase/serverless';
+import ws from 'ws';
 
-const DB_PATH = process.env.IRON_DB_PATH || join(process.cwd(), 'iron.db');
+// Configure WebSocket for Node.js environments
+if (typeof window === 'undefined') {
+  neonConfig.webSocketConstructor = ws;
+}
 
-let db: Database.Database | null = null;
+let pool: Pool | null = null;
 
-export function getDb(): Database.Database {
-  if (!db) {
-    db = new Database(DB_PATH);
-    db.pragma('journal_mode = WAL');
-    db.pragma('foreign_keys = ON');
+export function getPool(): Pool {
+  if (!pool) {
+    const connectionString = process.env.POSTGRES_URL || process.env.DATABASE_URL;
+
+    if (!connectionString) {
+      throw new Error('Missing database connection string. Set POSTGRES_URL or DATABASE_URL environment variable.');
+    }
+
+    pool = new Pool({ connectionString });
   }
-  return db;
+  return pool;
 }
 
-export function closeDb(): void {
-  if (db) {
-    db.close();
-    db = null;
+export async function closePool(): Promise<void> {
+  if (pool) {
+    await pool.end();
+    pool = null;
   }
 }
 
-export function dbExists(): boolean {
-  return existsSync(DB_PATH);
+export async function query<T = any>(text: string, params?: any[]): Promise<T[]> {
+  const client = getPool();
+  const result = await client.query(text, params);
+  return result.rows;
 }
 
-export { DB_PATH };
+export async function queryOne<T = any>(text: string, params?: any[]): Promise<T | null> {
+  const rows = await query<T>(text, params);
+  return rows.length > 0 ? rows[0] : null;
+}

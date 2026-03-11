@@ -1,4 +1,4 @@
-import { getDb } from './db';
+import { query, queryOne } from './db';
 import type {
   Exercise,
   Workout,
@@ -11,44 +11,43 @@ import { randomUUID } from 'crypto';
 
 // ===== EXERCISES =====
 
-export function listExercises(options: {
+export async function listExercises(options: {
   search?: string;
   muscleGroup?: string;
   includeHidden?: boolean;
-} = {}): Exercise[] {
-  const db = getDb();
+} = {}): Promise<Exercise[]> {
   let sql = 'SELECT * FROM exercises WHERE 1=1';
   const params: any[] = [];
+  let paramCount = 0;
 
   if (!options.includeHidden) {
-    sql += ' AND is_hidden = 0';
+    sql += ' AND is_hidden = false';
   }
 
   if (options.search) {
-    sql += ' AND (title LIKE ? OR alias LIKE ?)';
+    sql += ` AND (title ILIKE $${++paramCount} OR alias::text ILIKE $${++paramCount})`;
     const searchTerm = `%${options.search}%`;
     params.push(searchTerm, searchTerm);
   }
 
   if (options.muscleGroup) {
-    sql += ' AND (primary_muscles LIKE ? OR secondary_muscles LIKE ?)';
+    sql += ` AND (primary_muscles::text ILIKE $${++paramCount} OR secondary_muscles::text ILIKE $${++paramCount})`;
     const muscleTerm = `%${options.muscleGroup}%`;
     params.push(muscleTerm, muscleTerm);
   }
 
   sql += ' ORDER BY is_custom ASC, title ASC';
 
-  const rows = db.prepare(sql).all(...params) as any[];
+  const rows = await query<any>(sql, params);
   return rows.map(parseExercise);
 }
 
-export function getExercise(uuid: string): Exercise | null {
-  const db = getDb();
-  const row = db.prepare('SELECT * FROM exercises WHERE uuid = ?').get(uuid) as any;
+export async function getExercise(uuid: string): Promise<Exercise | null> {
+  const row = await queryOne<any>('SELECT * FROM exercises WHERE uuid = $1', [uuid]);
   return row ? parseExercise(row) : null;
 }
 
-export function createCustomExercise(data: {
+export async function createCustomExercise(data: {
   title: string;
   description?: string;
   primaryMuscles: string[];
@@ -56,266 +55,254 @@ export function createCustomExercise(data: {
   equipment?: string[];
   steps?: string[];
   tips?: string[];
-}): Exercise {
-  const db = getDb();
+}): Promise<Exercise> {
   const uuid = randomUUID();
 
-  db.prepare(`
+  await query(`
     INSERT INTO exercises (
       uuid, everkinetic_id, title, description,
       primary_muscles, secondary_muscles, equipment,
       steps, tips, is_custom
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
-  `).run(
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, true)
+  `, [
     uuid,
-    10000 + Date.now(), // Custom exercises have IDs >= 10000
+    10000 + Date.now(),
     data.title,
     data.description || null,
     JSON.stringify(data.primaryMuscles),
     JSON.stringify(data.secondaryMuscles || []),
     JSON.stringify(data.equipment || []),
     JSON.stringify(data.steps || []),
-    JSON.stringify(data.tips || [])
-  );
+    JSON.stringify(data.tips || []),
+  ]);
 
-  return getExercise(uuid)!;
+  return (await getExercise(uuid))!;
 }
 
 // ===== WORKOUTS =====
 
-export function startWorkout(routineUuid?: string): Workout {
-  const db = getDb();
+export async function startWorkout(routineUuid?: string): Promise<Workout> {
   const uuid = randomUUID();
   const now = new Date().toISOString();
 
-  db.prepare(`
+  await query(`
     INSERT INTO workouts (uuid, start_time, is_current, workout_routine_uuid)
-    VALUES (?, ?, 1, ?)
-  `).run(uuid, now, routineUuid || null);
+    VALUES ($1, $2, true, $3)
+  `, [uuid, now, routineUuid || null]);
 
-  return getWorkout(uuid)!;
+  return (await getWorkout(uuid))!;
 }
 
-export function getCurrentWorkout(): Workout | null {
-  const db = getDb();
-  const row = db.prepare('SELECT * FROM workouts WHERE is_current = 1').get() as any;
+export async function getCurrentWorkout(): Promise<Workout | null> {
+  const row = await queryOne<any>('SELECT * FROM workouts WHERE is_current = true');
   return row ? parseWorkout(row) : null;
 }
 
-export function getWorkout(uuid: string): Workout | null {
-  const db = getDb();
-  const row = db.prepare('SELECT * FROM workouts WHERE uuid = ?').get(uuid) as any;
+export async function getWorkout(uuid: string): Promise<Workout | null> {
+  const row = await queryOne<any>('SELECT * FROM workouts WHERE uuid = $1', [uuid]);
   return row ? parseWorkout(row) : null;
 }
 
-export function listWorkouts(options: {
+export async function listWorkouts(options: {
   limit?: number;
   offset?: number;
   since?: Date;
-} = {}): Workout[] {
-  const db = getDb();
-  let sql = 'SELECT * FROM workouts WHERE is_current = 0 ORDER BY start_time DESC';
+} = {}): Promise<Workout[]> {
+  let sql = 'SELECT * FROM workouts WHERE is_current = false ORDER BY start_time DESC';
   const params: any[] = [];
+  let paramCount = 0;
 
   if (options.since) {
-    sql = sql.replace('WHERE', 'WHERE start_time >= ? AND');
+    sql = sql.replace('WHERE', `WHERE start_time >= $${++paramCount} AND`);
     params.push(options.since.toISOString());
   }
 
   if (options.limit) {
-    sql += ' LIMIT ?';
+    sql += ` LIMIT $${++paramCount}`;
     params.push(options.limit);
   }
 
   if (options.offset) {
-    sql += ' OFFSET ?';
+    sql += ` OFFSET $${++paramCount}`;
     params.push(options.offset);
   }
 
-  const rows = db.prepare(sql).all(...params) as any[];
+  const rows = await query<any>(sql, params);
   return rows.map(parseWorkout);
 }
 
-export function finishWorkout(uuid: string): Workout {
-  const db = getDb();
+export async function finishWorkout(uuid: string): Promise<Workout> {
   const now = new Date().toISOString();
 
   // Clean up exercises with no completed sets
-  db.prepare(`
+  await query(`
     DELETE FROM workout_exercises
-    WHERE workout_uuid = ?
+    WHERE workout_uuid = $1
     AND uuid NOT IN (
       SELECT DISTINCT workout_exercise_uuid
       FROM workout_sets
-      WHERE is_completed = 1
+      WHERE is_completed = true
     )
-  `).run(uuid);
+  `, [uuid]);
 
   // Mark workout as complete
-  db.prepare(`
+  await query(`
     UPDATE workouts
-    SET end_time = ?, is_current = 0
-    WHERE uuid = ?
-  `).run(now, uuid);
+    SET end_time = $1, is_current = false
+    WHERE uuid = $2
+  `, [now, uuid]);
 
-  return getWorkout(uuid)!;
+  return (await getWorkout(uuid))!;
 }
 
-export function cancelWorkout(uuid: string): void {
-  const db = getDb();
-  db.prepare('DELETE FROM workouts WHERE uuid = ?').run(uuid);
+export async function cancelWorkout(uuid: string): Promise<void> {
+  await query('DELETE FROM workouts WHERE uuid = $1', [uuid]);
 }
 
 // ===== WORKOUT EXERCISES =====
 
-export function addExerciseToWorkout(
+export async function addExerciseToWorkout(
   workoutUuid: string,
   exerciseUuid: string
-): WorkoutExercise {
-  const db = getDb();
+): Promise<WorkoutExercise> {
   const uuid = randomUUID();
 
   // Get next order index
-  const maxOrder = db.prepare(`
-    SELECT MAX(order_index) as max FROM workout_exercises WHERE workout_uuid = ?
-  `).get(workoutUuid) as any;
+  const maxOrder = await queryOne<any>(`
+    SELECT MAX(order_index) as max FROM workout_exercises WHERE workout_uuid = $1
+  `, [workoutUuid]);
   const orderIndex = (maxOrder?.max ?? -1) + 1;
 
-  db.prepare(`
+  await query(`
     INSERT INTO workout_exercises (uuid, workout_uuid, exercise_uuid, order_index)
-    VALUES (?, ?, ?, ?)
-  `).run(uuid, workoutUuid, exerciseUuid, orderIndex);
+    VALUES ($1, $2, $3, $4)
+  `, [uuid, workoutUuid, exerciseUuid, orderIndex]);
 
   // Guess number of sets from history (median of last 3 workouts)
-  const historySets = db.prepare(`
+  const historySets = await query<any>(`
     SELECT COUNT(*) as set_count
     FROM workout_sets ws
     JOIN workout_exercises we ON ws.workout_exercise_uuid = we.uuid
-    WHERE we.exercise_uuid = ?
+    WHERE we.exercise_uuid = $1
     GROUP BY we.uuid
     ORDER BY we.created_at DESC
     LIMIT 3
-  `).all(exerciseUuid) as any[];
+  `, [exerciseUuid]);
 
   const defaultSets = historySets.length > 0
-    ? Math.round(historySets.reduce((sum, r) => sum + r.set_count, 0) / historySets.length)
+    ? Math.round(historySets.reduce((sum, r) => sum + Number(r.set_count), 0) / historySets.length)
     : 3; // Default 3 sets
 
   // Create empty sets
   for (let i = 0; i < defaultSets; i++) {
-    db.prepare(`
+    await query(`
       INSERT INTO workout_sets (uuid, workout_exercise_uuid, order_index, is_completed)
-      VALUES (?, ?, ?, 0)
-    `).run(randomUUID(), uuid, i);
+      VALUES ($1, $2, $3, false)
+    `, [randomUUID(), uuid, i]);
   }
 
-  return getWorkoutExercise(uuid)!;
+  return (await getWorkoutExercise(uuid))!;
 }
 
-export function getWorkoutExercise(uuid: string): WorkoutExercise | null {
-  const db = getDb();
-  const row = db.prepare('SELECT * FROM workout_exercises WHERE uuid = ?').get(uuid) as any;
+export async function getWorkoutExercise(uuid: string): Promise<WorkoutExercise | null> {
+  const row = await queryOne<any>('SELECT * FROM workout_exercises WHERE uuid = $1', [uuid]);
   return row ? parseWorkoutExercise(row) : null;
 }
 
-export function listWorkoutExercises(workoutUuid: string): WorkoutExercise[] {
-  const db = getDb();
-  const rows = db.prepare(`
-    SELECT * FROM workout_exercises WHERE workout_uuid = ? ORDER BY order_index
-  `).all(workoutUuid) as any[];
+export async function listWorkoutExercises(workoutUuid: string): Promise<WorkoutExercise[]> {
+  const rows = await query<any>(`
+    SELECT * FROM workout_exercises WHERE workout_uuid = $1 ORDER BY order_index
+  `, [workoutUuid]);
   return rows.map(parseWorkoutExercise);
 }
 
 // ===== WORKOUT SETS =====
 
-export function logSet(data: {
+export async function logSet(data: {
   workoutExerciseUuid: string;
   weight: number;
   repetitions: number;
   rpe?: number;
   tag?: 'dropSet' | 'failure';
   orderIndex?: number;
-}): WorkoutSet {
-  const db = getDb();
+}): Promise<WorkoutSet> {
   const uuid = randomUUID();
 
   // Get next order index if not specified
   let orderIndex = data.orderIndex;
   if (orderIndex === undefined) {
-    const maxOrder = db.prepare(`
-      SELECT MAX(order_index) as max FROM workout_sets WHERE workout_exercise_uuid = ?
-    `).get(data.workoutExerciseUuid) as any;
+    const maxOrder = await queryOne<any>(`
+      SELECT MAX(order_index) as max FROM workout_sets WHERE workout_exercise_uuid = $1
+    `, [data.workoutExerciseUuid]);
     orderIndex = (maxOrder?.max ?? -1) + 1;
   }
 
-  db.prepare(`
+  await query(`
     INSERT INTO workout_sets (
       uuid, workout_exercise_uuid, weight, repetitions, rpe, tag, order_index, is_completed
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, 1)
-  `).run(
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, true)
+  `, [
     uuid,
     data.workoutExerciseUuid,
     data.weight,
     data.repetitions,
     data.rpe || null,
     data.tag || null,
-    orderIndex
-  );
+    orderIndex,
+  ]);
 
-  return getWorkoutSet(uuid)!;
+  return (await getWorkoutSet(uuid))!;
 }
 
-export function updateSet(uuid: string, data: {
+export async function updateSet(uuid: string, data: {
   weight?: number;
   repetitions?: number;
   rpe?: number;
   tag?: 'dropSet' | 'failure' | null;
   isCompleted?: boolean;
-}): WorkoutSet {
-  const db = getDb();
+}): Promise<WorkoutSet> {
   const fields: string[] = [];
   const values: any[] = [];
+  let paramCount = 0;
 
   if (data.weight !== undefined) {
-    fields.push('weight = ?');
+    fields.push(`weight = $${++paramCount}`);
     values.push(data.weight);
   }
   if (data.repetitions !== undefined) {
-    fields.push('repetitions = ?');
+    fields.push(`repetitions = $${++paramCount}`);
     values.push(data.repetitions);
   }
   if (data.rpe !== undefined) {
-    fields.push('rpe = ?');
+    fields.push(`rpe = $${++paramCount}`);
     values.push(data.rpe);
   }
   if (data.tag !== undefined) {
-    fields.push('tag = ?');
+    fields.push(`tag = $${++paramCount}`);
     values.push(data.tag);
   }
   if (data.isCompleted !== undefined) {
-    fields.push('is_completed = ?');
-    values.push(data.isCompleted ? 1 : 0);
+    fields.push(`is_completed = $${++paramCount}`);
+    values.push(data.isCompleted);
   }
 
   if (fields.length > 0) {
     values.push(uuid);
-    db.prepare(`UPDATE workout_sets SET ${fields.join(', ')} WHERE uuid = ?`).run(...values);
+    await query(`UPDATE workout_sets SET ${fields.join(', ')} WHERE uuid = $${++paramCount}`, values);
   }
 
-  return getWorkoutSet(uuid)!;
+  return (await getWorkoutSet(uuid))!;
 }
 
-export function getWorkoutSet(uuid: string): WorkoutSet | null {
-  const db = getDb();
-  const row = db.prepare('SELECT * FROM workout_sets WHERE uuid = ?').get(uuid) as any;
+export async function getWorkoutSet(uuid: string): Promise<WorkoutSet | null> {
+  const row = await queryOne<any>('SELECT * FROM workout_sets WHERE uuid = $1', [uuid]);
   return row ? parseWorkoutSet(row) : null;
 }
 
-export function listWorkoutSets(workoutExerciseUuid: string): WorkoutSet[] {
-  const db = getDb();
-  const rows = db.prepare(`
-    SELECT * FROM workout_sets WHERE workout_exercise_uuid = ? ORDER BY order_index
-  `).all(workoutExerciseUuid) as any[];
+export async function listWorkoutSets(workoutExerciseUuid: string): Promise<WorkoutSet[]> {
+  const rows = await query<any>(`
+    SELECT * FROM workout_sets WHERE workout_exercise_uuid = $1 ORDER BY order_index
+  `, [workoutExerciseUuid]);
   return rows.map(parseWorkoutSet);
 }
 
@@ -326,13 +313,13 @@ function parseExercise(row: any): Exercise {
     uuid: row.uuid,
     everkinetic_id: row.everkinetic_id,
     title: row.title,
-    alias: JSON.parse(row.alias || '[]'),
+    alias: Array.isArray(row.alias) ? row.alias : JSON.parse(row.alias || '[]'),
     description: row.description,
-    primary_muscles: JSON.parse(row.primary_muscles || '[]'),
-    secondary_muscles: JSON.parse(row.secondary_muscles || '[]'),
-    equipment: JSON.parse(row.equipment || '[]'),
-    steps: JSON.parse(row.steps || '[]'),
-    tips: JSON.parse(row.tips || '[]'),
+    primary_muscles: Array.isArray(row.primary_muscles) ? row.primary_muscles : JSON.parse(row.primary_muscles || '[]'),
+    secondary_muscles: Array.isArray(row.secondary_muscles) ? row.secondary_muscles : JSON.parse(row.secondary_muscles || '[]'),
+    equipment: Array.isArray(row.equipment) ? row.equipment : JSON.parse(row.equipment || '[]'),
+    steps: Array.isArray(row.steps) ? row.steps : JSON.parse(row.steps || '[]'),
+    tips: Array.isArray(row.tips) ? row.tips : JSON.parse(row.tips || '[]'),
     is_custom: Boolean(row.is_custom),
     is_hidden: Boolean(row.is_hidden),
   };
@@ -363,11 +350,11 @@ function parseWorkoutSet(row: any): WorkoutSet {
   return {
     uuid: row.uuid,
     workout_exercise_uuid: row.workout_exercise_uuid,
-    weight: row.weight,
+    weight: row.weight ? parseFloat(row.weight) : null,
     repetitions: row.repetitions,
     min_target_reps: row.min_target_reps,
     max_target_reps: row.max_target_reps,
-    rpe: row.rpe,
+    rpe: row.rpe ? parseFloat(row.rpe) : null,
     tag: row.tag,
     comment: row.comment,
     is_completed: Boolean(row.is_completed),

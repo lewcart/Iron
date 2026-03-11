@@ -17,19 +17,20 @@
     "cli": "tsx src/cli.ts"
   },
   "dependencies": {
-    "better-sqlite3": "^11.7.0",
+    "@neondatabase/serverless": "^0.10.4",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "commander": "^12.1.0",
     "lucide-react": "^0.577.0",
     "next": "^15.5.12",
+    "ws": "^8.18.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "tailwind-merge": "^3.5.0",
     "zod": "^3.24.1"
   },
   "devDependencies": {
-    "@types/better-sqlite3": "^7.6.12",
+    "@types/ws": "^8.5.13",
     "@types/node": "^22",
     "@types/react": "^19",
     "@types/react-dom": "^19",

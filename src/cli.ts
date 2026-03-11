@@ -17,7 +17,6 @@ import {
   updateSet,
   listWorkoutSets,
 } from './db/queries.js';
-import { dbExists } from './db/db.js';
 import { migrate } from './db/migrate.js';
 
 const program = new Command();
@@ -32,12 +31,8 @@ program
 program
   .command('init')
   .description('Initialize database')
-  .action(() => {
-    if (dbExists()) {
-      console.log('⚠️  Database already exists');
-      return;
-    }
-    migrate();
+  .action(async () => {
+    await migrate();
     console.log('✓ Database initialized. Run "iron seed" to load exercises.');
   });
 
@@ -49,8 +44,8 @@ program
   .option('-s, --search <term>', 'Search by name')
   .option('-m, --muscle <group>', 'Filter by muscle group')
   .option('--hidden', 'Include hidden exercises')
-  .action((options) => {
-    const exercises = listExercises({
+  .action(async (options) => {
+    const exercises = await listExercises({
       search: options.search,
       muscleGroup: options.muscle,
       includeHidden: options.hidden,
@@ -75,8 +70,8 @@ program
 program
   .command('show-exercise <uuid>')
   .description('Show exercise details')
-  .action((uuid) => {
-    const exercise = getExercise(uuid);
+  .action(async (uuid) => {
+    const exercise = await getExercise(uuid);
     if (!exercise) {
       console.log('❌ Exercise not found');
       return;
@@ -114,8 +109,8 @@ program
   .requiredOption('-m, --muscles <muscles>', 'Primary muscles (comma-separated)')
   .option('-d, --description <text>', 'Exercise description')
   .option('-e, --equipment <items>', 'Equipment (comma-separated)')
-  .action((name, options) => {
-    const exercise = createCustomExercise({
+  .action(async (name, options) => {
+    const exercise = await createCustomExercise({
       title: name,
       description: options.description,
       primaryMuscles: options.muscles.split(',').map((m: string) => m.trim()),
@@ -132,8 +127,8 @@ program
   .command('start-workout')
   .description('Start a new workout')
   .option('-r, --routine <uuid>', 'Start from a routine template')
-  .action((options) => {
-    const current = getCurrentWorkout();
+  .action(async (options) => {
+    const current = await getCurrentWorkout();
     if (current) {
       console.log('❌ A workout is already in progress');
       console.log(`   UUID: ${current.uuid}`);
@@ -141,7 +136,7 @@ program
       return;
     }
 
-    const workout = startWorkout(options.routine);
+    const workout = await startWorkout(options.routine);
     console.log(`✓ Started workout`);
     console.log(`  UUID: ${workout.uuid}`);
     console.log(`  Time: ${new Date(workout.start_time).toLocaleString()}`);
@@ -151,8 +146,8 @@ program
 program
   .command('current-workout')
   .description('Show current workout details')
-  .action(() => {
-    const workout = getCurrentWorkout();
+  .action(async () => {
+    const workout = await getCurrentWorkout();
     if (!workout) {
       console.log('No workout in progress');
       console.log('Start one with: iron start-workout');
@@ -163,15 +158,15 @@ program
     console.log(`UUID: ${workout.uuid}`);
     console.log(`Started: ${new Date(workout.start_time).toLocaleString()}\n`);
 
-    const exercises = listWorkoutExercises(workout.uuid);
+    const exercises = await listWorkoutExercises(workout.uuid);
     if (exercises.length === 0) {
       console.log('No exercises added yet');
       return;
     }
 
-    exercises.forEach((we, i) => {
-      const exercise = getExercise(we.exercise_uuid);
-      const sets = listWorkoutSets(we.uuid);
+    for (const [i, we] of exercises.entries()) {
+      const exercise = await getExercise(we.exercise_uuid);
+      const sets = await listWorkoutSets(we.uuid);
       const completedSets = sets.filter((s) => s.is_completed).length;
 
       console.log(`${i + 1}. ${exercise?.title}`);
@@ -185,28 +180,28 @@ program
         console.log(`   ${status} Set ${j + 1}: ${weight} × ${reps}`);
       });
       console.log('');
-    });
+    }
   });
 
 program
   .command('add-exercise <exercise-uuid>')
   .description('Add exercise to current workout')
-  .action((exerciseUuid) => {
-    const workout = getCurrentWorkout();
+  .action(async (exerciseUuid) => {
+    const workout = await getCurrentWorkout();
     if (!workout) {
       console.log('❌ No workout in progress');
       console.log('Start one with: iron start-workout');
       return;
     }
 
-    const exercise = getExercise(exerciseUuid);
+    const exercise = await getExercise(exerciseUuid);
     if (!exercise) {
       console.log('❌ Exercise not found');
       return;
     }
 
-    const we = addExerciseToWorkout(workout.uuid, exerciseUuid);
-    const sets = listWorkoutSets(we.uuid);
+    const we = await addExerciseToWorkout(workout.uuid, exerciseUuid);
+    const sets = await listWorkoutSets(we.uuid);
 
     console.log(`✓ Added ${exercise.title} to workout`);
     console.log(`  Exercise UUID: ${we.uuid}`);
@@ -218,21 +213,21 @@ program
   .description('Log a set (weight in kg)')
   .option('-r, --rpe <value>', 'Rate of perceived exertion (7.0-10.0)')
   .option('-t, --tag <tag>', 'Tag (dropSet or failure)')
-  .action((exerciseUuid, weight, reps, options) => {
-    const workout = getCurrentWorkout();
+  .action(async (exerciseUuid, weight, reps, options) => {
+    const workout = await getCurrentWorkout();
     if (!workout) {
       console.log('❌ No workout in progress');
       return;
     }
 
-    const exercises = listWorkoutExercises(workout.uuid);
+    const exercises = await listWorkoutExercises(workout.uuid);
     const we = exercises.find((e) => e.uuid === exerciseUuid);
     if (!we) {
       console.log('❌ Exercise not found in current workout');
       return;
     }
 
-    const set = logSet({
+    const set = await logSet({
       workoutExerciseUuid: exerciseUuid,
       weight: parseFloat(weight),
       repetitions: parseInt(reps),
@@ -240,7 +235,7 @@ program
       tag: options.tag,
     });
 
-    const exercise = getExercise(we.exercise_uuid);
+    const exercise = await getExercise(we.exercise_uuid);
     console.log(`✓ Logged set for ${exercise?.title}`);
     console.log(`  ${weight}kg × ${reps} reps`);
     if (options.rpe) console.log(`  RPE: ${options.rpe}`);
@@ -249,14 +244,14 @@ program
 program
   .command('finish-workout')
   .description('Finish current workout')
-  .action(() => {
-    const workout = getCurrentWorkout();
+  .action(async () => {
+    const workout = await getCurrentWorkout();
     if (!workout) {
       console.log('❌ No workout in progress');
       return;
     }
 
-    const finished = finishWorkout(workout.uuid);
+    const finished = await finishWorkout(workout.uuid);
     const duration = new Date(finished.end_time!).getTime() - new Date(finished.start_time).getTime();
     const minutes = Math.round(duration / 60000);
 
@@ -268,14 +263,14 @@ program
 program
   .command('cancel-workout')
   .description('Cancel current workout')
-  .action(() => {
-    const workout = getCurrentWorkout();
+  .action(async () => {
+    const workout = await getCurrentWorkout();
     if (!workout) {
       console.log('❌ No workout in progress');
       return;
     }
 
-    cancelWorkout(workout.uuid);
+    await cancelWorkout(workout.uuid);
     console.log('✓ Workout cancelled');
   });
 
@@ -286,8 +281,8 @@ program
   .description('List workout history')
   .option('-l, --limit <n>', 'Limit results', '10')
   .option('-o, --offset <n>', 'Offset results', '0')
-  .action((options) => {
-    const workouts = listWorkouts({
+  .action(async (options) => {
+    const workouts = await listWorkouts({
       limit: parseInt(options.limit),
       offset: parseInt(options.offset),
     });
@@ -314,8 +309,8 @@ program
 program
   .command('show-workout <uuid>')
   .description('Show workout details')
-  .action((uuid) => {
-    const workout = getWorkout(uuid);
+  .action(async (uuid) => {
+    const workout = await getWorkout(uuid);
     if (!workout) {
       console.log('❌ Workout not found');
       return;
@@ -329,10 +324,10 @@ program
     }
     console.log('');
 
-    const exercises = listWorkoutExercises(uuid);
-    exercises.forEach((we, i) => {
-      const exercise = getExercise(we.exercise_uuid);
-      const sets = listWorkoutSets(we.uuid);
+    const exercises = await listWorkoutExercises(uuid);
+    for (const [i, we] of exercises.entries()) {
+      const exercise = await getExercise(we.exercise_uuid);
+      const sets = await listWorkoutSets(we.uuid);
       const completedSets = sets.filter((s) => s.is_completed);
 
       console.log(`${i + 1}. ${exercise?.title}`);
@@ -343,7 +338,7 @@ program
         console.log(`   Set ${j + 1}: ${weight} × ${reps}${rpe}`);
       });
       console.log('');
-    });
+    }
   });
 
 program.parse();
