@@ -1,4 +1,4 @@
-import { getDb } from './db.js';
+import { getDb } from './db';
 import type {
   Exercise,
   Workout,
@@ -6,7 +6,7 @@ import type {
   WorkoutSet,
   WorkoutPlan,
   WorkoutRoutine,
-} from '../types.js';
+} from '../types';
 import { randomUUID } from 'crypto';
 
 // ===== EXERCISES =====
