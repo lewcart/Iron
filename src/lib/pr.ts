@@ -1,0 +1,82 @@
+import type { PersonalRecord } from '../types';
+
+/**
+ * Estimate one-rep max using the Epley formula: weight × (1 + reps / 30)
+ * Returns 0 if weight or reps is 0.
+ */
+export function estimate1RM(weight: number, reps: number): number {
+  if (weight === 0 || reps === 0) return 0;
+  return weight * (1 + reps / 30);
+}
+
+export interface PRSet {
+  weight: number;
+  repetitions: number;
+  date: string;
+  workout_uuid?: string;
+  exercise_uuid?: string;
+}
+
+export interface PRResult {
+  estimated1RM: PersonalRecord | null;
+  heaviestWeight: PersonalRecord | null;
+  mostReps: PersonalRecord | null;
+}
+
+/**
+ * Calculate personal records from an array of completed sets.
+ * Returns the best set for each of three categories:
+ *   - estimated1RM: highest Epley 1RM estimate
+ *   - heaviestWeight: highest weight lifted
+ *   - mostReps: most repetitions in a single set
+ */
+export function calculatePRs(
+  sets: PRSet[],
+): PRResult {
+  if (sets.length === 0) {
+    return { estimated1RM: null, heaviestWeight: null, mostReps: null };
+  }
+
+  let best1RMSet: PRSet | null = null;
+  let best1RMValue = -Infinity;
+
+  let heaviestSet: PRSet | null = null;
+  let heaviestValue = -Infinity;
+
+  let mostRepsSet: PRSet | null = null;
+  let mostRepsValue = -Infinity;
+
+  for (const set of sets) {
+    const orm = estimate1RM(set.weight, set.repetitions);
+
+    if (orm > best1RMValue) {
+      best1RMValue = orm;
+      best1RMSet = set;
+    }
+
+    if (set.weight > heaviestValue) {
+      heaviestValue = set.weight;
+      heaviestSet = set;
+    }
+
+    if (set.repetitions > mostRepsValue) {
+      mostRepsValue = set.repetitions;
+      mostRepsSet = set;
+    }
+  }
+
+  const toPersonalRecord = (set: PRSet): PersonalRecord => ({
+    exercise_uuid: set.exercise_uuid ?? '',
+    weight: set.weight,
+    repetitions: set.repetitions,
+    estimated_1rm: estimate1RM(set.weight, set.repetitions),
+    date: set.date,
+    workout_uuid: set.workout_uuid ?? '',
+  });
+
+  return {
+    estimated1RM: best1RMSet ? toPersonalRecord(best1RMSet) : null,
+    heaviestWeight: heaviestSet ? toPersonalRecord(heaviestSet) : null,
+    mostReps: mostRepsSet ? toPersonalRecord(mostRepsSet) : null,
+  };
+}

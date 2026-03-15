@@ -4,7 +4,9 @@ import type {
   Workout,
   WorkoutExercise,
   WorkoutSet,
+  PersonalRecord,
 } from '../types';
+import { calculatePRs } from '../lib/pr';
 
 export type DbRow = Record<string, unknown>;
 import { randomUUID } from 'crypto';
@@ -304,6 +306,158 @@ export async function listWorkoutSets(workoutExerciseUuid: string): Promise<Work
     SELECT * FROM workout_sets WHERE workout_exercise_uuid = $1 ORDER BY order_index
   `, [workoutExerciseUuid]);
   return rows.map(parseWorkoutSet);
+}
+
+// ===== EXERCISE PROGRESS & PRs =====
+
+export async function getExerciseProgress(exerciseUuid: string): Promise<Array<{
+  date: string;
+  maxWeight: number;
+  totalVolume: number;
+  estimated1RM: number;
+}>> {
+  const rows = await query<{
+    date: string;
+    max_weight: string;
+    total_volume: string;
+    max_reps_at_max_weight: number;
+  }>(`
+    SELECT
+      w.start_time AS date,
+      MAX(ws.weight) AS max_weight,
+      SUM(ws.weight * ws.repetitions) AS total_volume,
+      MAX(ws.repetitions) FILTER (WHERE ws.weight = MAX(ws.weight) OVER (PARTITION BY w.uuid)) AS max_reps_at_max_weight
+    FROM workout_sets ws
+    JOIN workout_exercises we ON ws.workout_exercise_uuid = we.uuid
+    JOIN workouts w ON we.workout_uuid = w.uuid
+    WHERE we.exercise_uuid = $1
+      AND ws.is_completed = true
+      AND ws.weight IS NOT NULL
+      AND ws.repetitions IS NOT NULL
+    GROUP BY w.uuid, w.start_time
+    ORDER BY w.start_time ASC
+  `, [exerciseUuid]);
+
+  return rows.map((row) => {
+    const maxWeight = parseFloat(row.max_weight) || 0;
+    const totalVolume = parseFloat(row.total_volume) || 0;
+    const reps = row.max_reps_at_max_weight || 1;
+    const estimated1RM = maxWeight * (1 + reps / 30);
+    return {
+      date: row.date,
+      maxWeight,
+      totalVolume,
+      estimated1RM,
+    };
+  });
+}
+
+export async function getExercisePRs(exerciseUuid: string): Promise<{
+  estimated1RM: PersonalRecord | null;
+  heaviestWeight: PersonalRecord | null;
+  mostReps: PersonalRecord | null;
+}> {
+  const rows = await query<{
+    date: string;
+    weight: string;
+    repetitions: number;
+    workout_uuid: string;
+  }>(`
+    SELECT
+      w.start_time AS date,
+      ws.weight,
+      ws.repetitions,
+      w.uuid AS workout_uuid
+    FROM workout_sets ws
+    JOIN workout_exercises we ON ws.workout_exercise_uuid = we.uuid
+    JOIN workouts w ON we.workout_uuid = w.uuid
+    WHERE we.exercise_uuid = $1
+      AND ws.is_completed = true
+      AND ws.weight IS NOT NULL
+      AND ws.repetitions IS NOT NULL
+    ORDER BY w.start_time ASC
+  `, [exerciseUuid]);
+
+  const sets = rows.map((row) => ({
+    weight: parseFloat(row.weight),
+    repetitions: row.repetitions,
+    date: row.date,
+    workout_uuid: row.workout_uuid,
+    exercise_uuid: exerciseUuid,
+  }));
+
+  return calculatePRs(sets);
+}
+
+export async function getExerciseVolumeTrend(exerciseUuid: string): Promise<Array<{
+  date: string;
+  totalVolume: number;
+}>> {
+  const rows = await query<{
+    date: string;
+    total_volume: string;
+  }>(`
+    SELECT
+      w.start_time AS date,
+      SUM(ws.weight * ws.repetitions) AS total_volume
+    FROM workout_sets ws
+    JOIN workout_exercises we ON ws.workout_exercise_uuid = we.uuid
+    JOIN workouts w ON we.workout_uuid = w.uuid
+    WHERE we.exercise_uuid = $1
+      AND ws.is_completed = true
+      AND ws.weight IS NOT NULL
+      AND ws.repetitions IS NOT NULL
+    GROUP BY w.uuid, w.start_time
+    ORDER BY w.start_time ASC
+  `, [exerciseUuid]);
+
+  return rows.map((row) => ({
+    date: row.date,
+    totalVolume: parseFloat(row.total_volume) || 0,
+  }));
+}
+
+export async function getExerciseRecentSets(
+  exerciseUuid: string,
+  limit = 20,
+): Promise<Array<{
+  date: string;
+  weight: number;
+  repetitions: number;
+  rpe: number | null;
+  workoutUuid: string;
+}>> {
+  const rows = await query<{
+    date: string;
+    weight: string;
+    repetitions: number;
+    rpe: string | null;
+    workout_uuid: string;
+  }>(`
+    SELECT
+      w.start_time AS date,
+      ws.weight,
+      ws.repetitions,
+      ws.rpe,
+      w.uuid AS workout_uuid
+    FROM workout_sets ws
+    JOIN workout_exercises we ON ws.workout_exercise_uuid = we.uuid
+    JOIN workouts w ON we.workout_uuid = w.uuid
+    WHERE we.exercise_uuid = $1
+      AND ws.is_completed = true
+      AND ws.weight IS NOT NULL
+      AND ws.repetitions IS NOT NULL
+    ORDER BY w.start_time DESC, ws.order_index ASC
+    LIMIT $2
+  `, [exerciseUuid, limit]);
+
+  return rows.map((row) => ({
+    date: row.date,
+    weight: parseFloat(row.weight),
+    repetitions: row.repetitions,
+    rpe: row.rpe ? parseFloat(row.rpe) : null,
+    workoutUuid: row.workout_uuid,
+  }));
 }
 
 // ===== HELPERS =====
