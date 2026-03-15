@@ -11,7 +11,10 @@ export async function GET(request: Request) {
   }
 
   const limit = searchParams.get('limit') ? parseInt(searchParams.get('limit')!) : undefined;
-  const workouts = await listWorkouts({ limit });
+  const from = searchParams.get('from') || undefined;
+  const to = searchParams.get('to') || undefined;
+  const exerciseUuid = searchParams.get('exerciseUuid') || undefined;
+  const workouts = await listWorkouts({ limit, from, to, exerciseUuid });
   return NextResponse.json(workouts);
 }
 
