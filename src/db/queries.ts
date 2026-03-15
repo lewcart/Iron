@@ -6,7 +6,7 @@ import type {
   WorkoutSet,
 } from '../types';
 
-type DbRow = Record<string, unknown>;
+export type DbRow = Record<string, unknown>;
 import { randomUUID } from 'crypto';
 
 // ===== EXERCISES =====
@@ -308,7 +308,7 @@ export async function listWorkoutSets(workoutExerciseUuid: string): Promise<Work
 
 // ===== HELPERS =====
 
-function parseExercise(row: DbRow): Exercise {
+export function parseExercise(row: DbRow): Exercise {
   return {
     uuid: row.uuid as string,
     everkinetic_id: row.everkinetic_id as number,
@@ -325,7 +325,7 @@ function parseExercise(row: DbRow): Exercise {
   };
 }
 
-function parseWorkout(row: DbRow): Workout {
+export function parseWorkout(row: DbRow): Workout {
   return {
     uuid: row.uuid as string,
     start_time: row.start_time as string,
@@ -336,7 +336,7 @@ function parseWorkout(row: DbRow): Workout {
   };
 }
 
-function parseWorkoutExercise(row: DbRow): WorkoutExercise {
+export function parseWorkoutExercise(row: DbRow): WorkoutExercise {
   return {
     uuid: row.uuid as string,
     workout_uuid: row.workout_uuid as string,
@@ -346,7 +346,7 @@ function parseWorkoutExercise(row: DbRow): WorkoutExercise {
   };
 }
 
-function parseWorkoutSet(row: DbRow): WorkoutSet {
+export function parseWorkoutSet(row: DbRow): WorkoutSet {
   return {
     uuid: row.uuid as string,
     workout_exercise_uuid: row.workout_exercise_uuid as string,
