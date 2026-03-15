@@ -1,107 +1,198 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import Link from 'next/link';
-import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Input } from '@/components/ui/input';
-import { Badge } from '@/components/ui/badge';
-import { ArrowLeft, Search } from 'lucide-react';
+import { ChevronRight, Search, X } from 'lucide-react';
 import type { Exercise } from '@/types';
+import ExerciseDetail from './ExerciseDetail';
+
+// Known muscle groups with display info
+const MUSCLE_GROUPS = [
+  { key: 'chest', label: 'Chest', emoji: '💪' },
+  { key: 'back', label: 'Back', emoji: '🔙' },
+  { key: 'shoulders', label: 'Shoulders', emoji: '🤷' },
+  { key: 'arms', label: 'Arms', emoji: '💪' },
+  { key: 'legs', label: 'Legs', emoji: '🦵' },
+  { key: 'abdominals', label: 'Abdominals', emoji: '⭕' },
+];
 
 export default function ExercisesPage() {
-  const [exercises, setExercises] = useState<Exercise[]>([]);
+  const [allExercises, setAllExercises] = useState<Exercise[]>([]);
+  const [searchResults, setSearchResults] = useState<Exercise[]>([]);
   const [search, setSearch] = useState('');
+  const [searching, setSearching] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [selectedExercise, setSelectedExercise] = useState<Exercise | null>(null);
+  const [selectedMuscle, setSelectedMuscle] = useState<string | null>(null);
+  const [muscleExercises, setMuscleExercises] = useState<Exercise[]>([]);
 
+  // Load all exercises once for counts
   useEffect(() => {
-    fetchExercises();
+    fetch('/api/exercises')
+      .then(r => r.json())
+      .then(data => { setAllExercises(data); setLoading(false); });
+  }, []);
+
+  // Search
+  useEffect(() => {
+    if (!search) { setSearchResults([]); setSearching(false); return; }
+    setSearching(true);
+    const params = new URLSearchParams({ search });
+    fetch(`/api/exercises?${params}`)
+      .then(r => r.json())
+      .then(data => { setSearchResults(data); setSearching(false); });
   }, [search]);
 
-  const fetchExercises = async () => {
-    setLoading(true);
-    const params = new URLSearchParams();
-    if (search) params.set('search', search);
-
-    const res = await fetch(`/api/exercises?${params}`);
-    const data = await res.json();
-    setExercises(data);
-    setLoading(false);
+  // Muscle group filter
+  const handleMuscleSelect = async (muscle: string) => {
+    setSelectedMuscle(muscle);
+    const params = new URLSearchParams({ muscleGroup: muscle });
+    const data = await fetch(`/api/exercises?${params}`).then(r => r.json());
+    setMuscleExercises(data);
   };
 
-  return (
-    <main className="min-h-screen bg-gradient-to-b from-slate-50 to-slate-100 p-8">
-      <div className="max-w-6xl mx-auto">
-        <div className="mb-8">
-          <Link href="/">
-            <Button variant="ghost" className="mb-4">
-              <ArrowLeft className="h-4 w-4 mr-2" />
-              Back to Home
-            </Button>
-          </Link>
+  const countForMuscle = (muscle: string) =>
+    allExercises.filter(e => e.primary_muscles.some(m => m.toLowerCase().includes(muscle))).length;
 
-          <h1 className="text-4xl font-bold mb-4">Exercise Library</h1>
+  // ── Exercise detail ──
+  if (selectedExercise) {
+    return (
+      <ExerciseDetail
+        exercise={selectedExercise}
+        onBack={() => setSelectedExercise(null)}
+      />
+    );
+  }
 
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <Input
-              placeholder="Search exercises..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="pl-10"
-            />
+  // ── Muscle group drill-down ──
+  if (selectedMuscle) {
+    const groupLabel = MUSCLE_GROUPS.find(g => g.key === selectedMuscle)?.label ?? selectedMuscle;
+    return (
+      <main className="tab-content bg-background">
+        <div className="flex items-center gap-3 px-4 pt-14 pb-3">
+          <button
+            onClick={() => setSelectedMuscle(null)}
+            className="flex items-center gap-1 text-primary font-medium text-base"
+          >
+            <span className="text-lg">‹</span>
+            Exercises
+          </button>
+          <h1 className="text-lg font-semibold capitalize">{groupLabel}</h1>
+        </div>
+        <div className="px-4">
+          <div className="ios-section">
+            {muscleExercises.map((ex) => (
+              <button
+                key={ex.uuid}
+                onClick={() => setSelectedExercise(ex)}
+                className="ios-row w-full text-left"
+              >
+                <span className="flex-1 text-sm font-medium">{ex.title}</span>
+                <ChevronRight className="h-4 w-4 text-muted-foreground" />
+              </button>
+            ))}
+            {muscleExercises.length === 0 && (
+              <div className="px-4 py-8 text-center text-sm text-muted-foreground">No exercises found</div>
+            )}
           </div>
         </div>
+      </main>
+    );
+  }
 
-        {loading ? (
-          <div className="text-center py-12">
-            <p className="text-muted-foreground">Loading exercises...</p>
-          </div>
-        ) : (
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-            {exercises.map((exercise) => (
-              <Card key={exercise.uuid} className="hover:shadow-lg transition-shadow">
-                <CardHeader>
-                  <CardTitle className="text-lg">{exercise.title}</CardTitle>
-                  <CardDescription className="line-clamp-2">
-                    {exercise.description || 'No description available'}
-                  </CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <div className="space-y-2">
-                    <div>
-                      <p className="text-xs text-muted-foreground mb-1">Primary Muscles</p>
-                      <div className="flex flex-wrap gap-1">
-                        {exercise.primary_muscles.map((muscle) => (
-                          <Badge key={muscle} variant="default">
-                            {muscle}
-                          </Badge>
-                        ))}
-                      </div>
+  return (
+    <main className="tab-content bg-background">
+      <div className="px-4 pt-14 pb-3">
+        <h1 className="text-2xl font-bold mb-3">Exercises</h1>
+
+        {/* Search bar */}
+        <div className="relative">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <input
+            type="text"
+            placeholder="Search exercises"
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            className="w-full pl-9 pr-8 py-2 bg-secondary rounded-lg text-sm outline-none"
+          />
+          {search && (
+            <button onClick={() => setSearch('')} className="absolute right-3 top-1/2 -translate-y-1/2">
+              <X className="h-4 w-4 text-muted-foreground" />
+            </button>
+          )}
+        </div>
+      </div>
+
+      <div className="px-4 space-y-4 pb-4">
+        {search ? (
+          /* Search results */
+          <>
+            {searching ? (
+              <p className="text-center py-8 text-muted-foreground text-sm">Searching…</p>
+            ) : searchResults.length === 0 ? (
+              <p className="text-center py-8 text-muted-foreground text-sm">No results for &ldquo;{search}&rdquo;</p>
+            ) : (
+              <div className="ios-section">
+                {searchResults.map((ex) => (
+                  <button
+                    key={ex.uuid}
+                    onClick={() => setSelectedExercise(ex)}
+                    className="ios-row w-full text-left"
+                  >
+                    <div className="flex-1">
+                      <p className="text-sm font-medium">{ex.title}</p>
+                      <p className="text-xs text-muted-foreground capitalize">{ex.primary_muscles.join(', ')}</p>
                     </div>
-                    {exercise.equipment.length > 0 && (
-                      <div>
-                        <p className="text-xs text-muted-foreground mb-1">Equipment</p>
-                        <div className="flex flex-wrap gap-1">
-                          {exercise.equipment.map((eq) => (
-                            <Badge key={eq} variant="outline">
-                              {eq}
-                            </Badge>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-        )}
+                    <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                  </button>
+                ))}
+              </div>
+            )}
+          </>
+        ) : (
+          /* Default: All + muscle group list */
+          <>
+            <div className="ios-section">
+              <button
+                onClick={() => { setSelectedMuscle('all'); setMuscleExercises(allExercises); }}
+                className="ios-row w-full text-left"
+              >
+                <span className="flex-1 font-medium text-sm">All</span>
+                <span className="text-sm text-muted-foreground mr-2">{allExercises.length}</span>
+                <ChevronRight className="h-4 w-4 text-muted-foreground" />
+              </button>
+            </div>
 
-        {!loading && exercises.length === 0 && (
-          <div className="text-center py-12">
-            <p className="text-muted-foreground">No exercises found</p>
-          </div>
+            <div className="ios-section">
+              {MUSCLE_GROUPS.map(({ key, label }) => (
+                <button
+                  key={key}
+                  onClick={() => handleMuscleSelect(key)}
+                  className="ios-row w-full text-left"
+                >
+                  <span className="flex-1 font-medium text-sm capitalize">{label}</span>
+                  <span className="text-sm text-muted-foreground mr-2">({countForMuscle(key)})</span>
+                  <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                </button>
+              ))}
+            </div>
+
+            {!loading && (
+              <div className="ios-section">
+                <button
+                  onClick={() => {
+                    const custom = allExercises.filter(e => e.is_custom);
+                    setSelectedMuscle('Custom');
+                    setMuscleExercises(custom);
+                  }}
+                  className="ios-row w-full text-left"
+                >
+                  <span className="flex-1 font-medium text-sm">Custom</span>
+                  <span className="text-sm text-muted-foreground mr-2">{allExercises.filter(e => e.is_custom).length}</span>
+                  <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                </button>
+              </div>
+            )}
+          </>
         )}
       </div>
     </main>
