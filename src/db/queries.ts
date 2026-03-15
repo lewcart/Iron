@@ -103,19 +103,62 @@ export async function getWorkout(uuid: string): Promise<Workout | null> {
   return row ? parseWorkout(row) : null;
 }
 
+export interface WorkoutSummary extends Workout {
+  exercise_count: number;
+  total_volume: number;
+}
+
 export async function listWorkouts(options: {
   limit?: number;
   offset?: number;
   since?: Date;
-} = {}): Promise<Workout[]> {
-  let sql = 'SELECT * FROM workouts WHERE is_current = false ORDER BY start_time DESC';
+  from?: string;
+  to?: string;
+  exerciseUuid?: string;
+} = {}): Promise<WorkoutSummary[]> {
+  const conditions: string[] = ['w.is_current = false'];
   const params: unknown[] = [];
   let paramCount = 0;
 
   if (options.since) {
-    sql = sql.replace('WHERE', `WHERE start_time >= $${++paramCount} AND`);
+    conditions.push(`w.start_time >= $${++paramCount}`);
     params.push(options.since.toISOString());
   }
+
+  if (options.from) {
+    conditions.push(`w.start_time >= $${++paramCount}`);
+    params.push(options.from);
+  }
+
+  if (options.to) {
+    // Include the full "to" day by going to end of day
+    conditions.push(`w.start_time < ($${++paramCount}::date + INTERVAL '1 day')`);
+    params.push(options.to);
+  }
+
+  if (options.exerciseUuid) {
+    conditions.push(`w.uuid IN (
+      SELECT DISTINCT we.workout_uuid
+      FROM workout_exercises we
+      WHERE we.exercise_uuid = $${++paramCount}
+    )`);
+    params.push(options.exerciseUuid);
+  }
+
+  const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+
+  let sql = `
+    SELECT
+      w.*,
+      COUNT(DISTINCT we.uuid) AS exercise_count,
+      COALESCE(SUM(CASE WHEN ws.is_completed THEN ws.weight * ws.repetitions ELSE 0 END), 0) AS total_volume
+    FROM workouts w
+    LEFT JOIN workout_exercises we ON we.workout_uuid = w.uuid
+    LEFT JOIN workout_sets ws ON ws.workout_exercise_uuid = we.uuid
+    ${whereClause}
+    GROUP BY w.uuid
+    ORDER BY w.start_time DESC
+  `;
 
   if (options.limit) {
     sql += ` LIMIT $${++paramCount}`;
@@ -128,7 +171,15 @@ export async function listWorkouts(options: {
   }
 
   const rows = await query<DbRow>(sql, params);
-  return rows.map(parseWorkout);
+  return rows.map(parseWorkoutWithStats);
+}
+
+export function parseWorkoutWithStats(row: DbRow): WorkoutSummary {
+  return {
+    ...parseWorkout(row),
+    exercise_count: Number(row.exercise_count ?? 0),
+    total_volume: parseFloat((row.total_volume as string | number | null) as string ?? '0') || 0,
+  };
 }
 
 export async function finishWorkout(uuid: string): Promise<Workout> {
