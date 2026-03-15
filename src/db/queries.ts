@@ -16,6 +16,7 @@ import { randomUUID } from 'crypto';
 export async function listExercises(options: {
   search?: string;
   muscleGroup?: string;
+  equipment?: string;
   includeHidden?: boolean;
 } = {}): Promise<Exercise[]> {
   let sql = 'SELECT * FROM exercises WHERE 1=1';
@@ -36,6 +37,11 @@ export async function listExercises(options: {
     sql += ` AND (primary_muscles::text ILIKE $${++paramCount} OR secondary_muscles::text ILIKE $${++paramCount})`;
     const muscleTerm = `%${options.muscleGroup}%`;
     params.push(muscleTerm, muscleTerm);
+  }
+
+  if (options.equipment) {
+    sql += ` AND equipment::text ILIKE $${++paramCount}`;
+    params.push(`%${options.equipment}%`);
   }
 
   sql += ' ORDER BY is_custom ASC, title ASC';
