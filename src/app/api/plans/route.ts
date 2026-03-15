@@ -10,7 +10,7 @@ export async function GET() {
         return { ...plan, routines };
       })
     );
-    return NextResponse.json(plansWithRoutines);
+    return NextResponse.json({ plans: plansWithRoutines });
   } catch {
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }

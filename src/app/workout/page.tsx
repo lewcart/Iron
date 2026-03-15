@@ -1,8 +1,9 @@
 'use client';
 
 import { useEffect, useRef, useState, useCallback } from 'react';
+import Link from 'next/link';
 import { Check, ChevronRight, Plus, Search, X } from 'lucide-react';
-import type { Workout, WorkoutExercise, WorkoutSet, Exercise } from '@/types';
+import type { Workout, WorkoutExercise, WorkoutSet, Exercise, WorkoutPlan, WorkoutRoutine } from '@/types';
 import { formatTime, calcCompletedSets, calcTotalVolume } from './workout-utils';
 import type { WorkoutExerciseEntry } from './workout-utils';
 
@@ -518,6 +519,10 @@ async function addSet(workoutExerciseUuid: string) {
   });
 }
 
+interface PlanWithRoutines extends WorkoutPlan {
+  routines: WorkoutRoutine[];
+}
+
 // ─── Main page ────────────────────────────────────────────────────────────────
 export default function WorkoutPage() {
   const [workout, setWorkout] = useState<WorkoutWithExercises | null>(null);
@@ -525,6 +530,8 @@ export default function WorkoutPage() {
   const [showExercises, setShowExercises] = useState(false);
   const [showRestTimer, setShowRestTimer] = useState(false);
   const [showFinishModal, setShowFinishModal] = useState(false);
+  const [plans, setPlans] = useState<PlanWithRoutines[]>([]);
+  const [startingRoutine, setStartingRoutine] = useState<string | null>(null);
 
   const elapsed = useElapsed(workout?.start_time ?? null);
 
@@ -562,6 +569,19 @@ export default function WorkoutPage() {
   }, []);
 
   useEffect(() => { fetchCurrentWorkout(); }, [fetchCurrentWorkout]);
+
+  useEffect(() => {
+    fetch('/api/plans')
+      .then(r => r.json())
+      .then(data => setPlans(data.plans ?? []));
+  }, []);
+
+  const startWorkoutFromRoutine = async (planUuid: string, routineUuid: string) => {
+    setStartingRoutine(routineUuid);
+    await fetch(`/api/plans/${planUuid}/routines/${routineUuid}/start`, { method: 'POST' });
+    await fetchCurrentWorkout();
+    setStartingRoutine(null);
+  };
 
   const startWorkout = async () => {
     await fetch('/api/workouts', { method: 'POST' });
@@ -615,23 +635,62 @@ export default function WorkoutPage() {
 
   // ── No active workout ──
   if (!workout) {
+    const routinesExist = plans.some(p => p.routines.length > 0);
     return (
-      <main className="tab-content bg-background">
+      <main className="tab-content bg-background overflow-y-auto">
         <div className="px-4 pt-14 pb-4">
           <h1 className="text-2xl font-bold">Workout</h1>
         </div>
-        <div className="px-4">
+        <div className="px-4 space-y-4">
           <div className="ios-section">
             <button
               onClick={startWorkout}
               className="w-full py-3.5 text-center text-primary font-semibold text-base min-h-[44px]"
             >
-              Start Workout
+              Start Empty Workout
             </button>
           </div>
-          <p className="text-center text-muted-foreground text-sm mt-8">
-            Start a workout to begin tracking your session.
-          </p>
+
+          {routinesExist && (
+            <div>
+              <div className="flex items-center justify-between mb-1 px-1">
+                <p className="text-xs font-semibold text-primary uppercase tracking-wide">Start from Routine</p>
+                <Link href="/plans" className="text-xs text-primary font-medium">Manage</Link>
+              </div>
+              <div className="space-y-2">
+                {plans.filter(p => p.routines.length > 0).map(plan => (
+                  <div key={plan.uuid} className="ios-section">
+                    <p className="px-4 pt-3 pb-1 text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                      {plan.title ?? 'Untitled Plan'}
+                    </p>
+                    {plan.routines.map(routine => (
+                      <button
+                        key={routine.uuid}
+                        onClick={() => startWorkoutFromRoutine(plan.uuid, routine.uuid)}
+                        disabled={startingRoutine === routine.uuid}
+                        className="ios-row w-full text-left min-h-[52px] disabled:opacity-50"
+                      >
+                        <span className="flex-1 font-medium text-sm">
+                          {routine.title ?? 'Untitled Routine'}
+                        </span>
+                        {startingRoutine === routine.uuid ? (
+                          <span className="text-xs text-muted-foreground">Starting…</span>
+                        ) : (
+                          <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {!routinesExist && (
+            <p className="text-center text-muted-foreground text-sm">
+              <Link href="/plans" className="text-primary">Create a routine</Link> to start a pre-planned session.
+            </p>
+          )}
         </div>
         {showExercises && (
           <AddExerciseSheet onAdd={handleAddExercise} onClose={() => setShowExercises(false)} />
