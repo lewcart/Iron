@@ -171,7 +171,7 @@ export async function addExerciseToWorkout(
   const maxOrder = await queryOne<DbRow>(`
     SELECT MAX(order_index) as max FROM workout_exercises WHERE workout_uuid = $1
   `, [workoutUuid]);
-  const orderIndex = (maxOrder?.max ?? -1) + 1;
+  const orderIndex = (Number(maxOrder?.max ?? -1)) + 1;
 
   await query(`
     INSERT INTO workout_exercises (uuid, workout_uuid, exercise_uuid, order_index)
@@ -234,7 +234,7 @@ export async function logSet(data: {
     const maxOrder = await queryOne<DbRow>(`
       SELECT MAX(order_index) as max FROM workout_sets WHERE workout_exercise_uuid = $1
     `, [data.workoutExerciseUuid]);
-    orderIndex = (maxOrder?.max ?? -1) + 1;
+    orderIndex = (Number(maxOrder?.max ?? -1)) + 1;
   }
 
   await query(`
@@ -310,16 +310,16 @@ export async function listWorkoutSets(workoutExerciseUuid: string): Promise<Work
 
 function parseExercise(row: DbRow): Exercise {
   return {
-    uuid: row.uuid,
-    everkinetic_id: row.everkinetic_id,
-    title: row.title,
-    alias: Array.isArray(row.alias) ? row.alias : JSON.parse(row.alias || '[]'),
-    description: row.description,
-    primary_muscles: Array.isArray(row.primary_muscles) ? row.primary_muscles : JSON.parse(row.primary_muscles || '[]'),
-    secondary_muscles: Array.isArray(row.secondary_muscles) ? row.secondary_muscles : JSON.parse(row.secondary_muscles || '[]'),
-    equipment: Array.isArray(row.equipment) ? row.equipment : JSON.parse(row.equipment || '[]'),
-    steps: Array.isArray(row.steps) ? row.steps : JSON.parse(row.steps || '[]'),
-    tips: Array.isArray(row.tips) ? row.tips : JSON.parse(row.tips || '[]'),
+    uuid: row.uuid as string,
+    everkinetic_id: row.everkinetic_id as number,
+    title: row.title as string,
+    alias: Array.isArray(row.alias) ? row.alias as string[] : JSON.parse(row.alias as string || '[]'),
+    description: row.description as string | null,
+    primary_muscles: Array.isArray(row.primary_muscles) ? row.primary_muscles as string[] : JSON.parse(row.primary_muscles as string || '[]'),
+    secondary_muscles: Array.isArray(row.secondary_muscles) ? row.secondary_muscles as string[] : JSON.parse(row.secondary_muscles as string || '[]'),
+    equipment: Array.isArray(row.equipment) ? row.equipment as string[] : JSON.parse(row.equipment as string || '[]'),
+    steps: Array.isArray(row.steps) ? row.steps as string[] : JSON.parse(row.steps as string || '[]'),
+    tips: Array.isArray(row.tips) ? row.tips as string[] : JSON.parse(row.tips as string || '[]'),
     is_custom: Boolean(row.is_custom),
     is_hidden: Boolean(row.is_hidden),
   };
@@ -327,37 +327,37 @@ function parseExercise(row: DbRow): Exercise {
 
 function parseWorkout(row: DbRow): Workout {
   return {
-    uuid: row.uuid,
-    start_time: row.start_time,
-    end_time: row.end_time,
-    title: row.title,
-    comment: row.comment,
+    uuid: row.uuid as string,
+    start_time: row.start_time as string,
+    end_time: row.end_time as string | null,
+    title: row.title as string | null,
+    comment: row.comment as string | null,
     is_current: Boolean(row.is_current),
   };
 }
 
 function parseWorkoutExercise(row: DbRow): WorkoutExercise {
   return {
-    uuid: row.uuid,
-    workout_uuid: row.workout_uuid,
-    exercise_uuid: row.exercise_uuid,
-    comment: row.comment,
-    order_index: row.order_index,
+    uuid: row.uuid as string,
+    workout_uuid: row.workout_uuid as string,
+    exercise_uuid: row.exercise_uuid as string,
+    comment: row.comment as string | null,
+    order_index: row.order_index as number,
   };
 }
 
 function parseWorkoutSet(row: DbRow): WorkoutSet {
   return {
-    uuid: row.uuid,
-    workout_exercise_uuid: row.workout_exercise_uuid,
-    weight: row.weight ? parseFloat(row.weight) : null,
-    repetitions: row.repetitions,
-    min_target_reps: row.min_target_reps,
-    max_target_reps: row.max_target_reps,
-    rpe: row.rpe ? parseFloat(row.rpe) : null,
-    tag: row.tag,
-    comment: row.comment,
+    uuid: row.uuid as string,
+    workout_exercise_uuid: row.workout_exercise_uuid as string,
+    weight: row.weight ? parseFloat(row.weight as string) : null,
+    repetitions: row.repetitions as number | null,
+    min_target_reps: row.min_target_reps as number | null,
+    max_target_reps: row.max_target_reps as number | null,
+    rpe: row.rpe ? parseFloat(row.rpe as string) : null,
+    tag: row.tag as 'dropSet' | 'failure' | null,
+    comment: row.comment as string | null,
     is_completed: Boolean(row.is_completed),
-    order_index: row.order_index,
+    order_index: row.order_index as number,
   };
 }
