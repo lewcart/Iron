@@ -15,6 +15,17 @@ const MUSCLE_GROUPS = [
   { key: 'abdominals', label: 'Abdominals', emoji: '⭕' },
 ];
 
+const EQUIPMENT_FILTERS = [
+  { key: 'barbell', label: 'Barbell' },
+  { key: 'dumbbell', label: 'Dumbbell' },
+  { key: 'cable', label: 'Cable' },
+  { key: 'machine', label: 'Machine' },
+  { key: 'bodyweight', label: 'Bodyweight' },
+  { key: 'kettlebell', label: 'Kettlebell' },
+  { key: 'resistance band', label: 'Bands' },
+  { key: 'pull-up bar', label: 'Pull-up Bar' },
+];
+
 export default function ExercisesPage() {
   const [allExercises, setAllExercises] = useState<Exercise[]>([]);
   const [searchResults, setSearchResults] = useState<Exercise[]>([]);
@@ -24,6 +35,8 @@ export default function ExercisesPage() {
   const [selectedExercise, setSelectedExercise] = useState<Exercise | null>(null);
   const [selectedMuscle, setSelectedMuscle] = useState<string | null>(null);
   const [muscleExercises, setMuscleExercises] = useState<Exercise[]>([]);
+  const [selectedEquipment, setSelectedEquipment] = useState<string | null>(null);
+  const [equipmentExercises, setEquipmentExercises] = useState<Exercise[]>([]);
 
   // Load all exercises once for counts
   useEffect(() => {
@@ -50,8 +63,19 @@ export default function ExercisesPage() {
     setMuscleExercises(data);
   };
 
+  // Equipment filter
+  const handleEquipmentSelect = async (equipment: string) => {
+    setSelectedEquipment(equipment);
+    const params = new URLSearchParams({ equipment });
+    const data = await fetch(`/api/exercises?${params}`).then(r => r.json());
+    setEquipmentExercises(data);
+  };
+
   const countForMuscle = (muscle: string) =>
     allExercises.filter(e => e.primary_muscles.some(m => m.toLowerCase().includes(muscle))).length;
+
+  const countForEquipment = (equipment: string) =>
+    allExercises.filter(e => e.equipment.some(eq => eq.toLowerCase().includes(equipment))).length;
 
   // ── Exercise detail ──
   if (selectedExercise) {
@@ -60,6 +84,42 @@ export default function ExercisesPage() {
         exercise={selectedExercise}
         onBack={() => setSelectedExercise(null)}
       />
+    );
+  }
+
+  // ── Equipment drill-down ──
+  if (selectedEquipment) {
+    const equipLabel = EQUIPMENT_FILTERS.find(e => e.key === selectedEquipment)?.label ?? selectedEquipment;
+    return (
+      <main className="tab-content bg-background">
+        <div className="flex items-center gap-3 px-4 pt-14 pb-3">
+          <button
+            onClick={() => setSelectedEquipment(null)}
+            className="flex items-center gap-1 text-primary font-medium text-base"
+          >
+            <span className="text-lg">‹</span>
+            Exercises
+          </button>
+          <h1 className="text-lg font-semibold capitalize">{equipLabel}</h1>
+        </div>
+        <div className="px-4">
+          <div className="ios-section">
+            {equipmentExercises.map((ex) => (
+              <button
+                key={ex.uuid}
+                onClick={() => setSelectedExercise(ex)}
+                className="ios-row w-full text-left"
+              >
+                <span className="flex-1 text-sm font-medium">{ex.title}</span>
+                <ChevronRight className="h-4 w-4 text-muted-foreground" />
+              </button>
+            ))}
+            {equipmentExercises.length === 0 && (
+              <div className="px-4 py-8 text-center text-sm text-muted-foreground">No exercises found</div>
+            )}
+          </div>
+        </div>
+      </main>
     );
   }
 
@@ -174,6 +234,22 @@ export default function ExercisesPage() {
                   <ChevronRight className="h-4 w-4 text-muted-foreground" />
                 </button>
               ))}
+            </div>
+
+            <div>
+              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide px-1 mb-2">By Equipment</p>
+              <div className="flex flex-wrap gap-2">
+                {EQUIPMENT_FILTERS.map(({ key, label }) => (
+                  <button
+                    key={key}
+                    onClick={() => handleEquipmentSelect(key)}
+                    className="px-3 py-1.5 rounded-full bg-secondary text-sm font-medium hover:bg-secondary/80 transition-colors"
+                  >
+                    {label}
+                    <span className="ml-1.5 text-xs text-muted-foreground">({countForEquipment(key)})</span>
+                  </button>
+                ))}
+              </div>
             </div>
 
             {!loading && (
