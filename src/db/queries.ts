@@ -306,6 +306,102 @@ export async function listWorkoutSets(workoutExerciseUuid: string): Promise<Work
   return rows.map(parseWorkoutSet);
 }
 
+// ===== SUMMARY STATS =====
+
+export async function getWeekWorkouts(): Promise<{ uuid: string; start_time: string; end_time: string }[]> {
+  const rows = await query<DbRow>(`
+    SELECT uuid, start_time, end_time FROM workouts
+    WHERE start_time >= date_trunc('week', CURRENT_DATE)
+    AND end_time IS NOT NULL
+    AND is_current = false
+    ORDER BY start_time DESC
+  `);
+  return rows as { uuid: string; start_time: string; end_time: string }[];
+}
+
+export async function getWeekVolume(): Promise<number> {
+  const row = await queryOne<DbRow>(`
+    SELECT COALESCE(SUM(ws.weight * ws.repetitions), 0) as total_volume
+    FROM workout_sets ws
+    JOIN workout_exercises we ON ws.workout_exercise_uuid = we.uuid
+    JOIN workouts w ON we.workout_uuid = w.uuid
+    WHERE w.start_time >= date_trunc('week', CURRENT_DATE)
+    AND w.end_time IS NOT NULL AND ws.is_completed = true
+  `);
+  return row ? Number(row.total_volume) : 0;
+}
+
+export async function getWorkoutStreak(): Promise<{ week_start: string }[]> {
+  const rows = await query<DbRow>(`
+    WITH weekly AS (
+      SELECT DISTINCT date_trunc('week', start_time)::date as week_start
+      FROM workouts WHERE end_time IS NOT NULL AND is_current = false
+    )
+    SELECT week_start FROM weekly ORDER BY week_start DESC
+  `);
+  return rows as { week_start: string }[];
+}
+
+export async function getWeekMuscleFrequency(): Promise<{ primary_muscles: string[] | string }[]> {
+  const rows = await query<DbRow>(`
+    SELECT e.primary_muscles
+    FROM workout_exercises we
+    JOIN exercises e ON we.exercise_uuid = e.uuid
+    JOIN workouts w ON we.workout_uuid = w.uuid
+    WHERE w.start_time >= date_trunc('week', CURRENT_DATE)
+    AND w.end_time IS NOT NULL
+  `);
+  return rows as { primary_muscles: string[] | string }[];
+}
+
+export async function getLastWorkoutsWithDetails(limit: number = 3): Promise<{
+  uuid: string;
+  start_time: string;
+  end_time: string | null;
+  title: string | null;
+  exercises: string[];
+  volume: number;
+}[]> {
+  const workoutRows = await query<DbRow>(`
+    SELECT uuid, start_time, end_time, title
+    FROM workouts
+    WHERE is_current = false AND end_time IS NOT NULL
+    ORDER BY start_time DESC
+    LIMIT $1
+  `, [limit]);
+
+  const results = [];
+  for (const w of workoutRows) {
+    const uuid = w.uuid as string;
+
+    const exerciseRows = await query<DbRow>(`
+      SELECT e.title
+      FROM workout_exercises we
+      JOIN exercises e ON we.exercise_uuid = e.uuid
+      WHERE we.workout_uuid = $1
+      ORDER BY we.order_index
+    `, [uuid]);
+
+    const volumeRow = await queryOne<DbRow>(`
+      SELECT COALESCE(SUM(ws.weight * ws.repetitions), 0) as total_volume
+      FROM workout_sets ws
+      JOIN workout_exercises we ON ws.workout_exercise_uuid = we.uuid
+      WHERE we.workout_uuid = $1 AND ws.is_completed = true
+    `, [uuid]);
+
+    results.push({
+      uuid,
+      start_time: w.start_time as string,
+      end_time: w.end_time as string | null,
+      title: w.title as string | null,
+      exercises: exerciseRows.map(r => r.title as string),
+      volume: volumeRow ? Number(volumeRow.total_volume) : 0,
+    });
+  }
+
+  return results;
+}
+
 // ===== HELPERS =====
 
 export function parseExercise(row: DbRow): Exercise {
