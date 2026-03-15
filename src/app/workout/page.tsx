@@ -452,10 +452,6 @@ export default function WorkoutPage() {
   }
 
   // ── Active workout ──
-  const allCompleted = workout.exercises.every(we =>
-    we.sets.length > 0 && we.sets.every(s => s.is_completed)
-  );
-
   return (
     <>
       <main className="tab-content bg-background">

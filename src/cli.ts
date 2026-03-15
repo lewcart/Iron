@@ -14,7 +14,6 @@ import {
   addExerciseToWorkout,
   listWorkoutExercises,
   logSet,
-  updateSet,
   listWorkoutSets,
 } from './db/queries.js';
 import { migrate } from './db/migrate.js';
@@ -227,7 +226,7 @@ program
       return;
     }
 
-    const set = await logSet({
+    await logSet({
       workoutExerciseUuid: exerciseUuid,
       weight: parseFloat(weight),
       repetitions: parseInt(reps),

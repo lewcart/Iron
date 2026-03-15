@@ -4,9 +4,9 @@ import type {
   Workout,
   WorkoutExercise,
   WorkoutSet,
-  WorkoutPlan,
-  WorkoutRoutine,
 } from '../types';
+
+type DbRow = Record<string, unknown>;
 import { randomUUID } from 'crypto';
 
 // ===== EXERCISES =====
@@ -17,7 +17,7 @@ export async function listExercises(options: {
   includeHidden?: boolean;
 } = {}): Promise<Exercise[]> {
   let sql = 'SELECT * FROM exercises WHERE 1=1';
-  const params: any[] = [];
+  const params: unknown[] = [];
   let paramCount = 0;
 
   if (!options.includeHidden) {
@@ -38,12 +38,12 @@ export async function listExercises(options: {
 
   sql += ' ORDER BY is_custom ASC, title ASC';
 
-  const rows = await query<any>(sql, params);
+  const rows = await query<DbRow>(sql, params);
   return rows.map(parseExercise);
 }
 
 export async function getExercise(uuid: string): Promise<Exercise | null> {
-  const row = await queryOne<any>('SELECT * FROM exercises WHERE uuid = $1', [uuid]);
+  const row = await queryOne<DbRow>('SELECT * FROM exercises WHERE uuid = $1', [uuid]);
   return row ? parseExercise(row) : null;
 }
 
@@ -94,12 +94,12 @@ export async function startWorkout(routineUuid?: string): Promise<Workout> {
 }
 
 export async function getCurrentWorkout(): Promise<Workout | null> {
-  const row = await queryOne<any>('SELECT * FROM workouts WHERE is_current = true');
+  const row = await queryOne<DbRow>('SELECT * FROM workouts WHERE is_current = true');
   return row ? parseWorkout(row) : null;
 }
 
 export async function getWorkout(uuid: string): Promise<Workout | null> {
-  const row = await queryOne<any>('SELECT * FROM workouts WHERE uuid = $1', [uuid]);
+  const row = await queryOne<DbRow>('SELECT * FROM workouts WHERE uuid = $1', [uuid]);
   return row ? parseWorkout(row) : null;
 }
 
@@ -109,7 +109,7 @@ export async function listWorkouts(options: {
   since?: Date;
 } = {}): Promise<Workout[]> {
   let sql = 'SELECT * FROM workouts WHERE is_current = false ORDER BY start_time DESC';
-  const params: any[] = [];
+  const params: unknown[] = [];
   let paramCount = 0;
 
   if (options.since) {
@@ -127,7 +127,7 @@ export async function listWorkouts(options: {
     params.push(options.offset);
   }
 
-  const rows = await query<any>(sql, params);
+  const rows = await query<DbRow>(sql, params);
   return rows.map(parseWorkout);
 }
 
@@ -168,7 +168,7 @@ export async function addExerciseToWorkout(
   const uuid = randomUUID();
 
   // Get next order index
-  const maxOrder = await queryOne<any>(`
+  const maxOrder = await queryOne<DbRow>(`
     SELECT MAX(order_index) as max FROM workout_exercises WHERE workout_uuid = $1
   `, [workoutUuid]);
   const orderIndex = (maxOrder?.max ?? -1) + 1;
@@ -179,7 +179,7 @@ export async function addExerciseToWorkout(
   `, [uuid, workoutUuid, exerciseUuid, orderIndex]);
 
   // Guess number of sets from history (median of last 3 workouts)
-  const historySets = await query<any>(`
+  const historySets = await query<DbRow>(`
     SELECT COUNT(*) as set_count
     FROM workout_sets ws
     JOIN workout_exercises we ON ws.workout_exercise_uuid = we.uuid
@@ -205,12 +205,12 @@ export async function addExerciseToWorkout(
 }
 
 export async function getWorkoutExercise(uuid: string): Promise<WorkoutExercise | null> {
-  const row = await queryOne<any>('SELECT * FROM workout_exercises WHERE uuid = $1', [uuid]);
+  const row = await queryOne<DbRow>('SELECT * FROM workout_exercises WHERE uuid = $1', [uuid]);
   return row ? parseWorkoutExercise(row) : null;
 }
 
 export async function listWorkoutExercises(workoutUuid: string): Promise<WorkoutExercise[]> {
-  const rows = await query<any>(`
+  const rows = await query<DbRow>(`
     SELECT * FROM workout_exercises WHERE workout_uuid = $1 ORDER BY order_index
   `, [workoutUuid]);
   return rows.map(parseWorkoutExercise);
@@ -231,7 +231,7 @@ export async function logSet(data: {
   // Get next order index if not specified
   let orderIndex = data.orderIndex;
   if (orderIndex === undefined) {
-    const maxOrder = await queryOne<any>(`
+    const maxOrder = await queryOne<DbRow>(`
       SELECT MAX(order_index) as max FROM workout_sets WHERE workout_exercise_uuid = $1
     `, [data.workoutExerciseUuid]);
     orderIndex = (maxOrder?.max ?? -1) + 1;
@@ -262,7 +262,7 @@ export async function updateSet(uuid: string, data: {
   isCompleted?: boolean;
 }): Promise<WorkoutSet> {
   const fields: string[] = [];
-  const values: any[] = [];
+  const values: unknown[] = [];
   let paramCount = 0;
 
   if (data.weight !== undefined) {
@@ -295,12 +295,12 @@ export async function updateSet(uuid: string, data: {
 }
 
 export async function getWorkoutSet(uuid: string): Promise<WorkoutSet | null> {
-  const row = await queryOne<any>('SELECT * FROM workout_sets WHERE uuid = $1', [uuid]);
+  const row = await queryOne<DbRow>('SELECT * FROM workout_sets WHERE uuid = $1', [uuid]);
   return row ? parseWorkoutSet(row) : null;
 }
 
 export async function listWorkoutSets(workoutExerciseUuid: string): Promise<WorkoutSet[]> {
-  const rows = await query<any>(`
+  const rows = await query<DbRow>(`
     SELECT * FROM workout_sets WHERE workout_exercise_uuid = $1 ORDER BY order_index
   `, [workoutExerciseUuid]);
   return rows.map(parseWorkoutSet);
@@ -308,7 +308,7 @@ export async function listWorkoutSets(workoutExerciseUuid: string): Promise<Work
 
 // ===== HELPERS =====
 
-function parseExercise(row: any): Exercise {
+function parseExercise(row: DbRow): Exercise {
   return {
     uuid: row.uuid,
     everkinetic_id: row.everkinetic_id,
@@ -325,7 +325,7 @@ function parseExercise(row: any): Exercise {
   };
 }
 
-function parseWorkout(row: any): Workout {
+function parseWorkout(row: DbRow): Workout {
   return {
     uuid: row.uuid,
     start_time: row.start_time,
@@ -336,7 +336,7 @@ function parseWorkout(row: any): Workout {
   };
 }
 
-function parseWorkoutExercise(row: any): WorkoutExercise {
+function parseWorkoutExercise(row: DbRow): WorkoutExercise {
   return {
     uuid: row.uuid,
     workout_uuid: row.workout_uuid,
@@ -346,7 +346,7 @@ function parseWorkoutExercise(row: any): WorkoutExercise {
   };
 }
 
-function parseWorkoutSet(row: any): WorkoutSet {
+function parseWorkoutSet(row: DbRow): WorkoutSet {
   return {
     uuid: row.uuid,
     workout_exercise_uuid: row.workout_exercise_uuid,

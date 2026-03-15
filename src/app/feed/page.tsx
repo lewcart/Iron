@@ -7,10 +7,6 @@ interface StatsData {
   weeklyData: { week: string; count: number }[];
 }
 
-function formatDayLabel(date: Date) {
-  return date.toLocaleDateString('en-US', { weekday: 'short' });
-}
-
 function isoDate(date: Date) {
   return date.toISOString().slice(0, 10);
 }
