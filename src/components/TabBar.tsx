@@ -2,13 +2,14 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { BarChart2, Clock, Plus, Dumbbell, Settings } from 'lucide-react';
+import { BarChart2, Clock, Plus, Dumbbell, Settings, ClipboardList } from 'lucide-react';
 
 const tabs = [
   { href: '/feed', label: 'Feed', icon: BarChart2 },
   { href: '/history', label: 'History', icon: Clock },
   { href: '/workout', label: 'Workout', icon: Plus },
   { href: '/exercises', label: 'Exercises', icon: Dumbbell },
+  { href: '/plans', label: 'Plans', icon: ClipboardList },
   { href: '/settings', label: 'Settings', icon: Settings },
 ];
 
@@ -28,7 +29,7 @@ export function TabBar() {
                 active ? 'text-primary' : 'text-muted-foreground'
               }`}
             >
-              <Icon className={`h-6 w-6 ${href === '/workout' ? 'h-7 w-7' : ''}`} strokeWidth={active ? 2.5 : 1.75} />
+              <Icon className={`h-5 w-5 ${href === '/workout' ? 'h-6 w-6' : ''}`} strokeWidth={active ? 2.5 : 1.75} />
               {label}
             </Link>
           );
