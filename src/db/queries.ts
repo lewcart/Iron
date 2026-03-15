@@ -306,6 +306,105 @@ export async function listWorkoutSets(workoutExerciseUuid: string): Promise<Work
   return rows.map(parseWorkoutSet);
 }
 
+// ===== EXERCISE PROGRESS =====
+
+export interface ExerciseProgressRow {
+  date: string;
+  max_weight: number;
+  total_volume: number;
+  estimated_1rm: number;
+}
+
+export interface RecentSetRow {
+  date: string;
+  weight: number;
+  repetitions: number;
+  rpe: number | null;
+  workout_uuid: string;
+}
+
+export interface ExercisePRRow {
+  exercise_uuid: string;
+  weight: number;
+  repetitions: number;
+  estimated_1rm: number;
+  date: string;
+}
+
+export async function getExerciseProgress(exerciseUuid: string): Promise<ExerciseProgressRow[]> {
+  return query<ExerciseProgressRow>(`
+    SELECT w.start_time as date,
+           MAX(ws.weight)::float as max_weight,
+           SUM(ws.weight * ws.repetitions)::float as total_volume,
+           MAX(ws.weight * (1 + ws.repetitions::numeric / 30))::float as estimated_1rm
+    FROM workout_sets ws
+    JOIN workout_exercises we ON ws.workout_exercise_uuid = we.uuid
+    JOIN workouts w ON we.workout_uuid = w.uuid
+    WHERE we.exercise_uuid = $1 AND ws.is_completed = true AND w.end_time IS NOT NULL
+    GROUP BY w.uuid, w.start_time
+    ORDER BY w.start_time
+  `, [exerciseUuid]);
+}
+
+export async function getExerciseVolumeTrend(exerciseUuid: string): Promise<{ date: string; total_volume: number }[]> {
+  return query<{ date: string; total_volume: number }>(`
+    SELECT w.start_time as date,
+           SUM(ws.weight * ws.repetitions)::float as total_volume
+    FROM workout_sets ws
+    JOIN workout_exercises we ON ws.workout_exercise_uuid = we.uuid
+    JOIN workouts w ON we.workout_uuid = w.uuid
+    WHERE we.exercise_uuid = $1 AND ws.is_completed = true AND w.end_time IS NOT NULL
+    GROUP BY w.uuid, w.start_time
+    ORDER BY w.start_time
+  `, [exerciseUuid]);
+}
+
+export async function getExerciseRecentSets(exerciseUuid: string, limit = 20): Promise<RecentSetRow[]> {
+  return query<RecentSetRow>(`
+    SELECT w.start_time as date,
+           ws.weight::float,
+           ws.repetitions,
+           ws.rpe::float,
+           w.uuid as workout_uuid
+    FROM workout_sets ws
+    JOIN workout_exercises we ON ws.workout_exercise_uuid = we.uuid
+    JOIN workouts w ON we.workout_uuid = w.uuid
+    WHERE we.exercise_uuid = $1 AND ws.is_completed = true AND w.end_time IS NOT NULL
+    ORDER BY w.start_time DESC, ws.order_index ASC
+    LIMIT $2
+  `, [exerciseUuid, limit]);
+}
+
+export async function getExercisePRs(exerciseUuid: string): Promise<{
+  estimated1RM: ExercisePRRow | null;
+  heaviestWeight: ExercisePRRow | null;
+  mostReps: ExercisePRRow | null;
+}> {
+  const base = `
+    SELECT we.exercise_uuid,
+           ws.weight::float,
+           ws.repetitions,
+           (ws.weight * (1 + ws.repetitions::numeric / 30))::float as estimated_1rm,
+           w.start_time as date
+    FROM workout_sets ws
+    JOIN workout_exercises we ON ws.workout_exercise_uuid = we.uuid
+    JOIN workouts w ON we.workout_uuid = w.uuid
+    WHERE we.exercise_uuid = $1 AND ws.is_completed = true AND w.end_time IS NOT NULL
+  `;
+
+  const [est1RM, heaviest, mostReps] = await Promise.all([
+    queryOne<ExercisePRRow>(`${base} ORDER BY estimated_1rm DESC LIMIT 1`, [exerciseUuid]),
+    queryOne<ExercisePRRow>(`${base} ORDER BY weight DESC LIMIT 1`, [exerciseUuid]),
+    queryOne<ExercisePRRow>(`${base} ORDER BY repetitions DESC LIMIT 1`, [exerciseUuid]),
+  ]);
+
+  return {
+    estimated1RM: est1RM ?? null,
+    heaviestWeight: heaviest ?? null,
+    mostReps: mostReps ?? null,
+  };
+}
+
 // ===== HELPERS =====
 
 export function parseExercise(row: DbRow): Exercise {
