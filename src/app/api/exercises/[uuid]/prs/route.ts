@@ -9,7 +9,7 @@ export async function GET(
     const { uuid } = await params;
     const { estimated1RM, heaviestWeight, mostReps } = await getExercisePRs(uuid);
     return NextResponse.json({ estimated1RM, heaviestWeight, mostReps });
-  } catch (error) {
+  } catch {
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }

@@ -22,7 +22,7 @@ export async function GET(
     );
 
     return NextResponse.json({ ...plan, routines: routinesWithExercises });
-  } catch (error) {
+  } catch {
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
@@ -44,7 +44,7 @@ export async function PUT(
       return NextResponse.json({ error: 'Plan not found' }, { status: 404 });
     }
     return NextResponse.json(plan);
-  } catch (error) {
+  } catch {
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
@@ -57,7 +57,7 @@ export async function DELETE(
     const { uuid } = await params;
     await deletePlan(uuid);
     return new NextResponse(null, { status: 204 });
-  } catch (error) {
+  } catch {
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }

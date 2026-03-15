@@ -19,7 +19,7 @@ export async function PUT(
       return NextResponse.json({ error: 'Routine not found' }, { status: 404 });
     }
     return NextResponse.json(routine);
-  } catch (error) {
+  } catch {
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
@@ -32,7 +32,7 @@ export async function DELETE(
     const { routineUuid } = await params;
     await deleteRoutine(routineUuid);
     return new NextResponse(null, { status: 204 });
-  } catch (error) {
+  } catch {
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }

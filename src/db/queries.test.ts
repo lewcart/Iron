@@ -576,7 +576,7 @@ describe('listWorkouts', () => {
 
     const [sql, params] = vi.mocked(db.query).mock.calls[0];
     expect(sql).toContain('is_current = false');
-    expect(sql).toContain('ORDER BY start_time DESC');
+    expect(sql).toContain('ORDER BY w.start_time DESC');
     expect(params).toEqual([]);
   });
 

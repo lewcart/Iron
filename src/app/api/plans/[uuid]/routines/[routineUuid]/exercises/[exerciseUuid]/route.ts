@@ -9,7 +9,7 @@ export async function DELETE(
     const { exerciseUuid } = await params;
     await removeExerciseFromRoutine(exerciseUuid);
     return new NextResponse(null, { status: 204 });
-  } catch (error) {
+  } catch {
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }

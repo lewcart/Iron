@@ -15,7 +15,7 @@ export async function GET(
       })
     );
     return NextResponse.json(exercisesWithSets);
-  } catch (error) {
+  } catch {
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
@@ -34,7 +34,7 @@ export async function POST(
 
     const exercise = await addExerciseToRoutine(routineUuid, body.exerciseUuid);
     return NextResponse.json(exercise, { status: 201 });
-  } catch (error) {
+  } catch {
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }

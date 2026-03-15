@@ -107,9 +107,9 @@ async function runCli(...args: string[]): Promise<void> {
 
 describe('CLI commands', () => {
   let consoleLogSpy: ReturnType<typeof vi.spyOn>;
-  let consoleErrorSpy: ReturnType<typeof vi.spyOn>;
-  let processExitSpy: ReturnType<typeof vi.spyOn>;
-  let stderrSpy: ReturnType<typeof vi.spyOn>;
+  let _consoleErrorSpy: ReturnType<typeof vi.spyOn>;
+  let _processExitSpy: ReturnType<typeof vi.spyOn>;
+  let _stderrSpy: ReturnType<typeof vi.spyOn>;
 
   // We need access to the mocked queries inside tests. We import them once
   // per test after resetting modules. To avoid repetition, we expose them via
@@ -121,9 +121,9 @@ describe('CLI commands', () => {
     vi.clearAllMocks();
 
     consoleLogSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
-    consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-    stderrSpy = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
-    processExitSpy = vi.spyOn(process, 'exit').mockImplementation(() => {
+    _consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    _stderrSpy = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    _processExitSpy = vi.spyOn(process, 'exit').mockImplementation(() => {
       throw new Error('process.exit');
     });
 

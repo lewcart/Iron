@@ -11,7 +11,7 @@ export async function GET() {
       })
     );
     return NextResponse.json(plansWithRoutines);
-  } catch (error) {
+  } catch {
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
@@ -24,7 +24,7 @@ export async function POST(request: NextRequest) {
     }
     const plan = await createPlan(body.title);
     return NextResponse.json(plan, { status: 201 });
-  } catch (error) {
+  } catch {
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }

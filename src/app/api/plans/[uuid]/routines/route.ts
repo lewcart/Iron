@@ -15,7 +15,7 @@ export async function POST(
 
     const routine = await createRoutine(uuid, body.title);
     return NextResponse.json(routine, { status: 201 });
-  } catch (error) {
+  } catch {
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
