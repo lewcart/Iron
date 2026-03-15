@@ -4,6 +4,10 @@ import type {
   Workout,
   WorkoutExercise,
   WorkoutSet,
+  WorkoutPlan,
+  WorkoutRoutine,
+  WorkoutRoutineExercise,
+  WorkoutRoutineSet,
 } from '../types';
 
 export type DbRow = Record<string, unknown>;
@@ -306,6 +310,212 @@ export async function listWorkoutSets(workoutExerciseUuid: string): Promise<Work
   return rows.map(parseWorkoutSet);
 }
 
+// ===== WORKOUT PLANS =====
+
+export async function listPlans(): Promise<WorkoutPlan[]> {
+  const rows = await query<DbRow>('SELECT * FROM workout_plans ORDER BY title ASC');
+  return rows.map(parsePlan);
+}
+
+export async function getPlan(uuid: string): Promise<WorkoutPlan | undefined> {
+  const row = await queryOne<DbRow>('SELECT * FROM workout_plans WHERE uuid = $1', [uuid]);
+  return row ? parsePlan(row) : undefined;
+}
+
+export async function createPlan(title: string): Promise<WorkoutPlan> {
+  const uuid = randomUUID();
+  await query('INSERT INTO workout_plans (uuid, title) VALUES ($1, $2)', [uuid, title]);
+  return (await getPlan(uuid))!;
+}
+
+export async function updatePlan(uuid: string, title: string): Promise<WorkoutPlan | undefined> {
+  await query('UPDATE workout_plans SET title = $1 WHERE uuid = $2', [title, uuid]);
+  return getPlan(uuid);
+}
+
+export async function deletePlan(uuid: string): Promise<void> {
+  await query('DELETE FROM workout_plans WHERE uuid = $1', [uuid]);
+}
+
+// ===== WORKOUT ROUTINES =====
+
+export async function listRoutines(planUuid: string): Promise<WorkoutRoutine[]> {
+  const rows = await query<DbRow>(
+    'SELECT * FROM workout_routines WHERE workout_plan_uuid = $1 ORDER BY order_index ASC',
+    [planUuid]
+  );
+  return rows.map(parseRoutine);
+}
+
+export async function getRoutine(uuid: string): Promise<WorkoutRoutine | undefined> {
+  const row = await queryOne<DbRow>('SELECT * FROM workout_routines WHERE uuid = $1', [uuid]);
+  return row ? parseRoutine(row) : undefined;
+}
+
+export async function createRoutine(planUuid: string, title: string): Promise<WorkoutRoutine> {
+  const uuid = randomUUID();
+  const maxOrder = await queryOne<DbRow>(
+    'SELECT MAX(order_index) as max FROM workout_routines WHERE workout_plan_uuid = $1',
+    [planUuid]
+  );
+  const orderIndex = (Number(maxOrder?.max ?? -1)) + 1;
+  await query(
+    'INSERT INTO workout_routines (uuid, workout_plan_uuid, title, order_index) VALUES ($1, $2, $3, $4)',
+    [uuid, planUuid, title, orderIndex]
+  );
+  return (await getRoutine(uuid))!;
+}
+
+export async function updateRoutine(
+  uuid: string,
+  data: { title?: string; comment?: string; orderIndex?: number }
+): Promise<WorkoutRoutine | undefined> {
+  const fields: string[] = [];
+  const values: unknown[] = [];
+  let paramCount = 0;
+
+  if (data.title !== undefined) {
+    fields.push(`title = $${++paramCount}`);
+    values.push(data.title);
+  }
+  if (data.comment !== undefined) {
+    fields.push(`comment = $${++paramCount}`);
+    values.push(data.comment);
+  }
+  if (data.orderIndex !== undefined) {
+    fields.push(`order_index = $${++paramCount}`);
+    values.push(data.orderIndex);
+  }
+
+  if (fields.length > 0) {
+    values.push(uuid);
+    await query(`UPDATE workout_routines SET ${fields.join(', ')} WHERE uuid = $${++paramCount}`, values);
+  }
+
+  return getRoutine(uuid);
+}
+
+export async function deleteRoutine(uuid: string): Promise<void> {
+  await query('DELETE FROM workout_routines WHERE uuid = $1', [uuid]);
+}
+
+// ===== WORKOUT ROUTINE EXERCISES =====
+
+export async function listRoutineExercises(routineUuid: string): Promise<WorkoutRoutineExercise[]> {
+  const rows = await query<DbRow>(
+    'SELECT * FROM workout_routine_exercises WHERE workout_routine_uuid = $1 ORDER BY order_index ASC',
+    [routineUuid]
+  );
+  return rows.map(parseRoutineExercise);
+}
+
+export async function getRoutineExercise(uuid: string): Promise<WorkoutRoutineExercise | undefined> {
+  const row = await queryOne<DbRow>('SELECT * FROM workout_routine_exercises WHERE uuid = $1', [uuid]);
+  return row ? parseRoutineExercise(row) : undefined;
+}
+
+export async function addExerciseToRoutine(
+  routineUuid: string,
+  exerciseUuid: string
+): Promise<WorkoutRoutineExercise> {
+  const uuid = randomUUID();
+  const maxOrder = await queryOne<DbRow>(
+    'SELECT MAX(order_index) as max FROM workout_routine_exercises WHERE workout_routine_uuid = $1',
+    [routineUuid]
+  );
+  const orderIndex = (Number(maxOrder?.max ?? -1)) + 1;
+  await query(
+    'INSERT INTO workout_routine_exercises (uuid, workout_routine_uuid, exercise_uuid, order_index) VALUES ($1, $2, $3, $4)',
+    [uuid, routineUuid, exerciseUuid, orderIndex]
+  );
+  return (await getRoutineExercise(uuid))!;
+}
+
+export async function removeExerciseFromRoutine(uuid: string): Promise<void> {
+  await query('DELETE FROM workout_routine_exercises WHERE uuid = $1', [uuid]);
+}
+
+// ===== WORKOUT ROUTINE SETS =====
+
+export async function listRoutineSets(routineExerciseUuid: string): Promise<WorkoutRoutineSet[]> {
+  const rows = await query<DbRow>(
+    'SELECT * FROM workout_routine_sets WHERE workout_routine_exercise_uuid = $1 ORDER BY order_index ASC',
+    [routineExerciseUuid]
+  );
+  return rows.map(parseRoutineSet);
+}
+
+export async function getRoutineSet(uuid: string): Promise<WorkoutRoutineSet | undefined> {
+  const row = await queryOne<DbRow>('SELECT * FROM workout_routine_sets WHERE uuid = $1', [uuid]);
+  return row ? parseRoutineSet(row) : undefined;
+}
+
+export async function addRoutineSet(
+  routineExerciseUuid: string,
+  data: { minRepetitions?: number; maxRepetitions?: number }
+): Promise<WorkoutRoutineSet> {
+  const uuid = randomUUID();
+  const maxOrder = await queryOne<DbRow>(
+    'SELECT MAX(order_index) as max FROM workout_routine_sets WHERE workout_routine_exercise_uuid = $1',
+    [routineExerciseUuid]
+  );
+  const orderIndex = (Number(maxOrder?.max ?? -1)) + 1;
+  await query(
+    'INSERT INTO workout_routine_sets (uuid, workout_routine_exercise_uuid, min_repetitions, max_repetitions, order_index) VALUES ($1, $2, $3, $4, $5)',
+    [uuid, routineExerciseUuid, data.minRepetitions ?? null, data.maxRepetitions ?? null, orderIndex]
+  );
+  return (await getRoutineSet(uuid))!;
+}
+
+// ===== START WORKOUT FROM ROUTINE =====
+
+export async function startWorkoutFromRoutine(routineUuid: string): Promise<Workout> {
+  // Create the workout linked to this routine
+  const workout = await startWorkout(routineUuid);
+
+  // Get all exercises in the routine
+  const routineExercises = await listRoutineExercises(routineUuid);
+
+  for (const routineExercise of routineExercises) {
+    const weUuid = randomUUID();
+    await query(
+      'INSERT INTO workout_exercises (uuid, workout_uuid, exercise_uuid, order_index) VALUES ($1, $2, $3, $4)',
+      [weUuid, workout.uuid, routineExercise.exercise_uuid, routineExercise.order_index]
+    );
+
+    // Get sets defined for this routine exercise
+    const routineSets = await listRoutineSets(routineExercise.uuid);
+
+    if (routineSets.length > 0) {
+      // Create workout sets from routine sets
+      for (const routineSet of routineSets) {
+        await query(
+          'INSERT INTO workout_sets (uuid, workout_exercise_uuid, min_target_reps, max_target_reps, tag, comment, order_index, is_completed) VALUES ($1, $2, $3, $4, $5, $6, $7, false)',
+          [
+            randomUUID(),
+            weUuid,
+            routineSet.min_repetitions,
+            routineSet.max_repetitions,
+            routineSet.tag,
+            routineSet.comment,
+            routineSet.order_index,
+          ]
+        );
+      }
+    } else {
+      // Default to 3 empty sets
+      for (let i = 0; i < 3; i++) {
+        await query(
+          'INSERT INTO workout_sets (uuid, workout_exercise_uuid, order_index, is_completed) VALUES ($1, $2, $3, false)',
+          [randomUUID(), weUuid, i]
+        );
+      }
+    }
+  }
+
+  return workout;
+}
+
 // ===== HELPERS =====
 
 export function parseExercise(row: DbRow): Exercise {
@@ -358,6 +568,45 @@ export function parseWorkoutSet(row: DbRow): WorkoutSet {
     tag: row.tag as 'dropSet' | 'failure' | null,
     comment: row.comment as string | null,
     is_completed: Boolean(row.is_completed),
+    order_index: row.order_index as number,
+  };
+}
+
+export function parsePlan(row: DbRow): WorkoutPlan {
+  return {
+    uuid: row.uuid as string,
+    title: row.title as string | null,
+  };
+}
+
+export function parseRoutine(row: DbRow): WorkoutRoutine {
+  return {
+    uuid: row.uuid as string,
+    workout_plan_uuid: row.workout_plan_uuid as string,
+    title: row.title as string | null,
+    comment: row.comment as string | null,
+    order_index: row.order_index as number,
+  };
+}
+
+export function parseRoutineExercise(row: DbRow): WorkoutRoutineExercise {
+  return {
+    uuid: row.uuid as string,
+    workout_routine_uuid: row.workout_routine_uuid as string,
+    exercise_uuid: row.exercise_uuid as string,
+    comment: row.comment as string | null,
+    order_index: row.order_index as number,
+  };
+}
+
+export function parseRoutineSet(row: DbRow): WorkoutRoutineSet {
+  return {
+    uuid: row.uuid as string,
+    workout_routine_exercise_uuid: row.workout_routine_exercise_uuid as string,
+    min_repetitions: row.min_repetitions as number | null,
+    max_repetitions: row.max_repetitions as number | null,
+    tag: row.tag as 'dropSet' | null,
+    comment: row.comment as string | null,
     order_index: row.order_index as number,
   };
 }
