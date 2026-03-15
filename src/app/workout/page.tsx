@@ -3,12 +3,11 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { Check, ChevronRight, Plus, Search, X } from 'lucide-react';
 import type { Workout, WorkoutExercise, WorkoutSet, Exercise } from '@/types';
+import { formatTime, calcCompletedSets, calcTotalVolume } from './workout-utils';
+import type { WorkoutExerciseEntry } from './workout-utils';
 
 interface WorkoutWithExercises extends Workout {
-  exercises: (WorkoutExercise & {
-    exercise: Exercise;
-    sets: WorkoutSet[];
-  })[];
+  exercises: WorkoutExerciseEntry[];
 }
 
 // ─── Elapsed timer ───────────────────────────────────────────────────────────
@@ -24,12 +23,128 @@ function useElapsed(startTime: string | null) {
   return elapsed;
 }
 
-function formatTime(seconds: number) {
-  const h = Math.floor(seconds / 3600);
-  const m = Math.floor((seconds % 3600) / 60);
-  const s = seconds % 60;
-  if (h > 0) return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
-  return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+// ─── Running summary panel ────────────────────────────────────────────────────
+function WorkoutSummaryBar({
+  elapsed,
+  exercises,
+}: {
+  elapsed: number;
+  exercises: WorkoutWithExercises['exercises'];
+}) {
+  const completedSets = calcCompletedSets(exercises);
+  const totalVolume = calcTotalVolume(exercises);
+  const exerciseCount = exercises.length;
+
+  return (
+    <div className="sticky top-0 z-10 mx-4 mb-3 rounded-xl bg-zinc-900 border border-zinc-800 shadow-lg">
+      <div className="flex items-center justify-between px-4 py-2.5">
+        <div className="flex flex-col items-center">
+          <span className="text-xs text-zinc-400 font-medium">Time</span>
+          <span className="text-sm font-mono font-semibold text-zinc-100 tabular-nums">
+            {formatTime(elapsed)}
+          </span>
+        </div>
+        <div className="w-px h-8 bg-zinc-800" />
+        <div className="flex flex-col items-center">
+          <span className="text-xs text-zinc-400 font-medium">Exercises</span>
+          <span className="text-sm font-semibold text-zinc-100">{exerciseCount}</span>
+        </div>
+        <div className="w-px h-8 bg-zinc-800" />
+        <div className="flex flex-col items-center">
+          <span className="text-xs text-zinc-400 font-medium">Sets Done</span>
+          <span className="text-sm font-semibold text-zinc-100">{completedSets}</span>
+        </div>
+        <div className="w-px h-8 bg-zinc-800" />
+        <div className="flex flex-col items-center">
+          <span className="text-xs text-zinc-400 font-medium">Volume</span>
+          <span className="text-sm font-semibold text-zinc-100">
+            {totalVolume >= 1000
+              ? `${(totalVolume / 1000).toFixed(1)}t`
+              : `${totalVolume.toFixed(0)}kg`}
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Finish confirmation modal ────────────────────────────────────────────────
+function FinishWorkoutModal({
+  elapsed,
+  exercises,
+  onConfirm,
+  onCancel,
+}: {
+  elapsed: number;
+  exercises: WorkoutWithExercises['exercises'];
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  const completedSets = calcCompletedSets(exercises);
+  const totalVolume = calcTotalVolume(exercises);
+  const exerciseCount = exercises.length;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      {/* Overlay */}
+      <div
+        className="absolute inset-0 bg-black/70 backdrop-blur-sm"
+        onClick={onCancel}
+      />
+
+      {/* Card */}
+      <div className="relative w-full max-w-sm bg-zinc-900 border border-zinc-800 rounded-2xl shadow-2xl overflow-hidden">
+        {/* Header */}
+        <div className="px-6 pt-6 pb-4 text-center border-b border-zinc-800">
+          <div className="w-12 h-12 rounded-full bg-green-500/20 flex items-center justify-center mx-auto mb-3">
+            <Check className="h-6 w-6 text-green-500" strokeWidth={2.5} />
+          </div>
+          <h2 className="text-lg font-bold text-zinc-100">Finish Workout?</h2>
+          <p className="text-sm text-zinc-400 mt-1">Are you sure you want to finish this workout?</p>
+        </div>
+
+        {/* Summary stats */}
+        <div className="px-6 py-4 grid grid-cols-2 gap-3">
+          <div className="bg-zinc-800/60 rounded-xl p-3 text-center">
+            <p className="text-xs text-zinc-400 mb-0.5">Duration</p>
+            <p className="text-base font-semibold text-zinc-100 tabular-nums font-mono">{formatTime(elapsed)}</p>
+          </div>
+          <div className="bg-zinc-800/60 rounded-xl p-3 text-center">
+            <p className="text-xs text-zinc-400 mb-0.5">Exercises</p>
+            <p className="text-base font-semibold text-zinc-100">{exerciseCount}</p>
+          </div>
+          <div className="bg-zinc-800/60 rounded-xl p-3 text-center">
+            <p className="text-xs text-zinc-400 mb-0.5">Sets Completed</p>
+            <p className="text-base font-semibold text-zinc-100">{completedSets}</p>
+          </div>
+          <div className="bg-zinc-800/60 rounded-xl p-3 text-center">
+            <p className="text-xs text-zinc-400 mb-0.5">Total Volume</p>
+            <p className="text-base font-semibold text-zinc-100">
+              {totalVolume >= 1000
+                ? `${(totalVolume / 1000).toFixed(1)}t`
+                : `${totalVolume.toFixed(0)} kg`}
+            </p>
+          </div>
+        </div>
+
+        {/* Actions */}
+        <div className="px-6 pb-6 flex flex-col gap-2">
+          <button
+            onClick={onConfirm}
+            className="w-full h-12 rounded-xl bg-green-500 hover:bg-green-600 text-white font-semibold text-sm transition-colors"
+          >
+            Finish Workout
+          </button>
+          <button
+            onClick={onCancel}
+            className="w-full h-12 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-100 font-semibold text-sm transition-colors"
+          >
+            Keep Going
+          </button>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 // ─── Rest timer ──────────────────────────────────────────────────────────────
@@ -156,6 +271,26 @@ function RestTimerSheet({ onClose }: { onClose: () => void }) {
   );
 }
 
+// ─── Muscle group colour map ──────────────────────────────────────────────────
+const MUSCLE_BADGE_COLORS: Record<string, string> = {
+  chest: 'bg-blue-500/20 text-blue-300 border-blue-500/30',
+  back: 'bg-orange-500/20 text-orange-300 border-orange-500/30',
+  shoulders: 'bg-purple-500/20 text-purple-300 border-purple-500/30',
+  arms: 'bg-pink-500/20 text-pink-300 border-pink-500/30',
+  legs: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30',
+  abdominals: 'bg-amber-500/20 text-amber-300 border-amber-500/30',
+};
+
+function getMuscleChipClass(muscle: string): string {
+  const key = muscle.toLowerCase();
+  for (const [k, v] of Object.entries(MUSCLE_BADGE_COLORS)) {
+    if (key.includes(k)) return v;
+  }
+  return 'bg-zinc-700/60 text-zinc-300 border-zinc-600/50';
+}
+
+const MUSCLE_GROUPS = ['chest', 'back', 'shoulders', 'arms', 'legs', 'abdominals'];
+
 // ─── Exercise selector sheet ─────────────────────────────────────────────────
 function AddExerciseSheet({
   onAdd,
@@ -167,17 +302,19 @@ function AddExerciseSheet({
   const [exercises, setExercises] = useState<Exercise[]>([]);
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(false);
+  const [selectedMuscle, setSelectedMuscle] = useState<string | null>(null);
 
   useEffect(() => {
     setLoading(true);
     const params = new URLSearchParams();
     if (search) params.set('search', search);
+    if (selectedMuscle) params.set('muscleGroup', selectedMuscle);
     fetch(`/api/exercises?${params}`)
       .then(r => r.json())
       .then(data => { setExercises(data); setLoading(false); });
-  }, [search]);
+  }, [search, selectedMuscle]);
 
-  // Group by primary muscle
+  // Group by primary muscle (only when no muscle filter active)
   const grouped: Record<string, Exercise[]> = {};
   for (const ex of exercises) {
     const muscle = ex.primary_muscles[0] ?? 'Other';
@@ -190,7 +327,7 @@ function AddExerciseSheet({
     <div className="fixed inset-0 z-50 flex flex-col bg-background">
       {/* Header */}
       <div className="flex items-center justify-between px-4 pt-14 pb-3 border-b border-border">
-        <button onClick={onClose} className="text-primary font-medium text-base">Cancel</button>
+        <button onClick={onClose} className="text-primary font-medium text-base min-h-[44px] flex items-center">Cancel</button>
         <h2 className="font-semibold">Add Exercise</h2>
         <div className="w-14" />
       </div>
@@ -205,13 +342,45 @@ function AddExerciseSheet({
             placeholder="Search exercises"
             value={search}
             onChange={e => setSearch(e.target.value)}
-            className="w-full pl-9 pr-4 py-2 bg-secondary rounded-lg text-sm outline-none"
+            className="w-full pl-9 pr-4 py-2.5 bg-secondary rounded-lg text-sm outline-none min-h-[44px]"
           />
           {search && (
-            <button onClick={() => setSearch('')} className="absolute right-3 top-1/2 -translate-y-1/2">
+            <button
+              onClick={() => setSearch('')}
+              className="absolute right-3 top-1/2 -translate-y-1/2 min-h-[44px] min-w-[44px] flex items-center justify-center"
+            >
               <X className="h-4 w-4 text-muted-foreground" />
             </button>
           )}
+        </div>
+      </div>
+
+      {/* Muscle group filter chips */}
+      <div className="px-4 py-2 border-b border-border overflow-x-auto">
+        <div className="flex gap-2 w-max">
+          <button
+            onClick={() => setSelectedMuscle(null)}
+            className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition-colors whitespace-nowrap min-h-[36px] ${
+              selectedMuscle === null
+                ? 'bg-blue-500 text-white border-blue-500'
+                : 'bg-zinc-800/60 text-zinc-300 border-zinc-700 hover:border-zinc-500'
+            }`}
+          >
+            All
+          </button>
+          {MUSCLE_GROUPS.map(muscle => (
+            <button
+              key={muscle}
+              onClick={() => setSelectedMuscle(selectedMuscle === muscle ? null : muscle)}
+              className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition-colors capitalize whitespace-nowrap min-h-[36px] ${
+                selectedMuscle === muscle
+                  ? 'bg-blue-500 text-white border-blue-500'
+                  : `${getMuscleChipClass(muscle)} hover:opacity-80`
+              }`}
+            >
+              {muscle}
+            </button>
+          ))}
         </div>
       </div>
 
@@ -230,13 +399,30 @@ function AddExerciseSheet({
                   <button
                     key={ex.uuid}
                     onClick={() => onAdd(ex)}
-                    className="ios-row w-full text-left"
+                    className="ios-row w-full text-left min-h-[56px]"
                   >
-                    <div className="flex-1">
+                    <div className="flex-1 min-w-0">
                       <p className="font-medium text-sm">{ex.title}</p>
-                      <p className="text-xs text-muted-foreground capitalize">{ex.primary_muscles.join(', ')}</p>
+                      <div className="flex flex-wrap gap-1 mt-1">
+                        {ex.primary_muscles.slice(0, 2).map(m => (
+                          <span
+                            key={m}
+                            className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold border capitalize ${getMuscleChipClass(m)}`}
+                          >
+                            {m}
+                          </span>
+                        ))}
+                        {ex.secondary_muscles.slice(0, 1).map(m => (
+                          <span
+                            key={m}
+                            className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium border bg-zinc-800/40 text-zinc-400 border-zinc-700/50 capitalize"
+                          >
+                            {m}
+                          </span>
+                        ))}
+                      </div>
                     </div>
-                    <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                    <ChevronRight className="h-4 w-4 text-muted-foreground flex-shrink-0 ml-2" />
                   </button>
                 ))}
               </div>
@@ -285,7 +471,8 @@ function SetRow({
           placeholder="—"
           value={weight}
           onChange={e => setWeight(e.target.value)}
-          className="w-full text-right text-sm font-medium bg-transparent outline-none"
+          onFocus={e => e.target.scrollIntoView({ behavior: 'smooth', block: 'center' })}
+          className="w-full text-right text-sm font-medium bg-transparent outline-none min-h-[44px]"
         />
         <span className="text-xs text-muted-foreground">kg</span>
       </div>
@@ -300,16 +487,17 @@ function SetRow({
           placeholder="—"
           value={reps}
           onChange={e => setReps(e.target.value)}
-          className="w-full text-right text-sm font-medium bg-transparent outline-none"
+          onFocus={e => e.target.scrollIntoView({ behavior: 'smooth', block: 'center' })}
+          className="w-full text-right text-sm font-medium bg-transparent outline-none min-h-[44px]"
         />
         <span className="text-xs text-muted-foreground">reps</span>
       </div>
 
-      {/* Complete button */}
+      {/* Complete button — 44×44 touch target */}
       <button
         onClick={handleComplete}
         disabled={saving}
-        className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 transition-colors ${
+        className={`w-11 h-11 rounded-full flex items-center justify-center flex-shrink-0 transition-colors ${
           completed
             ? 'bg-green-500 text-white'
             : 'border-2 border-border text-transparent hover:border-primary'
@@ -336,6 +524,7 @@ export default function WorkoutPage() {
   const [loading, setLoading] = useState(true);
   const [showExercises, setShowExercises] = useState(false);
   const [showRestTimer, setShowRestTimer] = useState(false);
+  const [showFinishModal, setShowFinishModal] = useState(false);
 
   const elapsed = useElapsed(workout?.start_time ?? null);
 
@@ -381,12 +570,12 @@ export default function WorkoutPage() {
 
   const finishWorkout = async () => {
     if (!workout) return;
-    if (!confirm('Finish this workout?')) return;
     await fetch(`/api/workouts/${workout.uuid}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action: 'finish' }),
     });
+    setShowFinishModal(false);
     setWorkout(null);
   };
 
@@ -435,7 +624,7 @@ export default function WorkoutPage() {
           <div className="ios-section">
             <button
               onClick={startWorkout}
-              className="w-full py-3.5 text-center text-primary font-semibold text-base"
+              className="w-full py-3.5 text-center text-primary font-semibold text-base min-h-[44px]"
             >
               Start Workout
             </button>
@@ -454,49 +643,48 @@ export default function WorkoutPage() {
   // ── Active workout ──
   return (
     <>
-      <main className="tab-content bg-background">
+      <main className="tab-content bg-background overflow-x-hidden">
         {/* Nav bar */}
         <div className="flex items-center justify-between px-4 pt-14 pb-3">
           <h1 className="text-lg font-semibold truncate flex-1">
             {workout.title || workout.exercises.map(e => e.exercise?.title).filter(Boolean).slice(0, 2).join(', ') || 'Workout'}
           </h1>
           <button
-            onClick={finishWorkout}
-            className="ml-4 text-primary font-semibold text-sm"
+            onClick={() => setShowFinishModal(true)}
+            className="ml-4 text-primary font-semibold text-sm min-h-[44px] flex items-center"
           >
             Finish
           </button>
         </div>
 
-        {/* Timer banner */}
-        <div className="mx-4 mb-3 rounded-xl bg-secondary/60 flex items-center justify-between px-4 py-2.5">
-          <button className="flex items-center gap-2 text-sm font-mono font-medium">
-            <span className="text-muted-foreground">⏱</span>
-            {formatTime(elapsed)}
-          </button>
+        {/* Running summary panel */}
+        <WorkoutSummaryBar elapsed={elapsed} exercises={workout.exercises} />
+
+        {/* Rest timer button */}
+        <div className="mx-4 mb-3 rounded-xl bg-secondary/60 flex items-center justify-end px-4 py-2.5">
           <button
             onClick={() => setShowRestTimer(true)}
-            className="flex items-center gap-2 text-sm font-medium text-primary"
+            className="flex items-center gap-2 text-sm font-medium text-primary min-h-[44px]"
           >
             <span>⏲</span>
-            Rest
+            Rest Timer
           </button>
         </div>
 
-        <div className="px-4 space-y-4 pb-4">
+        <div className="px-4 space-y-4 pb-safe-or-4">
           {/* Title / comment fields */}
           <div className="ios-section">
             <input
               type="text"
               placeholder="Title"
               defaultValue={workout.title ?? ''}
-              className="ios-row w-full text-sm font-medium bg-transparent outline-none"
+              className="ios-row w-full text-sm font-medium bg-transparent outline-none min-h-[44px]"
             />
             <input
               type="text"
               placeholder="Comment"
               defaultValue={workout.comment ?? ''}
-              className="ios-row w-full text-sm text-muted-foreground bg-transparent outline-none"
+              className="ios-row w-full text-sm text-muted-foreground bg-transparent outline-none min-h-[44px]"
             />
           </div>
 
@@ -514,16 +702,26 @@ export default function WorkoutPage() {
                     <div key={we.uuid} className="ios-section">
                       {/* Exercise header */}
                       <div className="flex items-center gap-3 px-4 py-3 border-b border-border">
-                        <div className="flex-1">
+                        <div className="flex-1 min-w-0">
                           <p className={`font-semibold text-sm ${allDone ? 'text-muted-foreground' : ''}`}>
                             {we.exercise?.title ?? 'Unknown Exercise'}
                           </p>
-                          <p className="text-xs text-muted-foreground mt-0.5">
-                            {completedSets} / {totalSets} sets
-                          </p>
+                          <div className="flex items-center gap-2 mt-0.5">
+                            <p className="text-xs text-muted-foreground">
+                              {completedSets} / {totalSets} sets
+                            </p>
+                            {we.exercise?.primary_muscles?.slice(0, 1).map(m => (
+                              <span
+                                key={m}
+                                className={`inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-semibold border capitalize ${getMuscleChipClass(m)}`}
+                              >
+                                {m}
+                              </span>
+                            ))}
+                          </div>
                         </div>
                         {allDone && (
-                          <div className="w-6 h-6 rounded-full bg-green-500 flex items-center justify-center">
+                          <div className="w-6 h-6 rounded-full bg-green-500 flex items-center justify-center flex-shrink-0">
                             <Check className="h-3.5 w-3.5 text-white" strokeWidth={3} />
                           </div>
                         )}
@@ -535,7 +733,7 @@ export default function WorkoutPage() {
                         <div className="flex-1 text-right text-[11px] font-medium text-muted-foreground">Weight</div>
                         <div className="w-4" />
                         <div className="flex-1 text-right text-[11px] font-medium text-muted-foreground">Reps</div>
-                        <div className="w-8" />
+                        <div className="w-11" />
                       </div>
 
                       {/* Sets */}
@@ -552,7 +750,7 @@ export default function WorkoutPage() {
                       {/* Add set */}
                       <button
                         onClick={() => handleAddSet(we.uuid)}
-                        className="flex items-center gap-2 px-4 py-3 text-primary text-sm font-medium w-full"
+                        className="flex items-center gap-2 px-4 py-3 text-primary text-sm font-medium w-full min-h-[44px]"
                       >
                         <Plus className="h-4 w-4" />
                         Add Set
@@ -568,7 +766,7 @@ export default function WorkoutPage() {
           <div className="ios-section">
             <button
               onClick={() => setShowExercises(true)}
-              className="flex items-center gap-2 px-4 py-3.5 text-primary text-sm font-medium w-full"
+              className="flex items-center gap-2 px-4 py-3.5 text-primary text-sm font-medium w-full min-h-[44px]"
             >
               <Plus className="h-4 w-4" />
               Add Exercises
@@ -578,8 +776,8 @@ export default function WorkoutPage() {
           {/* Finish button */}
           <div className="ios-section">
             <button
-              onClick={finishWorkout}
-              className="flex items-center justify-center gap-2 px-4 py-3.5 text-primary text-sm font-semibold w-full"
+              onClick={() => setShowFinishModal(true)}
+              className="flex items-center justify-center gap-2 px-4 py-3.5 text-primary text-sm font-semibold w-full min-h-[44px]"
             >
               <Check className="h-4 w-4" />
               Finish Workout
@@ -593,6 +791,14 @@ export default function WorkoutPage() {
       )}
       {showRestTimer && (
         <RestTimerSheet onClose={() => setShowRestTimer(false)} />
+      )}
+      {showFinishModal && (
+        <FinishWorkoutModal
+          elapsed={elapsed}
+          exercises={workout.exercises}
+          onConfirm={finishWorkout}
+          onCancel={() => setShowFinishModal(false)}
+        />
       )}
     </>
   );
