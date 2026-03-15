@@ -1,40 +1,28 @@
-import { Pool, neonConfig } from '@neondatabase/serverless';
-import ws from 'ws';
+import { neon } from '@neondatabase/serverless';
 
-// Configure WebSocket for Node.js environments
-if (typeof window === 'undefined') {
-  neonConfig.webSocketConstructor = ws;
-}
+let cachedSql: ReturnType<typeof neon> | null = null;
 
-let pool: Pool | null = null;
-
-export function getPool(): Pool {
-  if (!pool) {
+function getSql() {
+  if (!cachedSql) {
     const connectionString = process.env.POSTGRES_URL || process.env.DATABASE_URL;
-
     if (!connectionString) {
       throw new Error('Missing database connection string. Set POSTGRES_URL or DATABASE_URL environment variable.');
     }
-
-    pool = new Pool({ connectionString });
+    cachedSql = neon(connectionString);
   }
-  return pool;
-}
-
-export async function closePool(): Promise<void> {
-  if (pool) {
-    await pool.end();
-    pool = null;
-  }
+  return cachedSql;
 }
 
 export async function query<T = Record<string, unknown>>(text: string, params?: unknown[]): Promise<T[]> {
-  const client = getPool();
-  const result = await client.query(text, params);
-  return result.rows;
+  const sql = getSql();
+  const result = await sql(text, params as never[]);
+  return result as T[];
 }
 
 export async function queryOne<T = Record<string, unknown>>(text: string, params?: unknown[]): Promise<T | null> {
   const rows = await query<T>(text, params);
   return rows.length > 0 ? rows[0] : null;
 }
+
+// No-op kept for compatibility with migrate.ts
+export async function closePool(): Promise<void> {}

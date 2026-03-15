@@ -11,8 +11,15 @@ async function migrate() {
 
   const schema = readFileSync(join(__dirname, 'schema.sql'), 'utf-8');
 
-  // Execute the schema (PostgreSQL can handle multiple statements)
-  await query(schema);
+  // Split into individual statements and execute each one
+  const statements = schema
+    .split(';')
+    .map(s => s.trim())
+    .filter(s => s.length > 0);
+
+  for (const statement of statements) {
+    await query(statement);
+  }
 
   console.log('✓ Database migrations completed');
   await closePool();
