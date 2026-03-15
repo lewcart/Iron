@@ -6,7 +6,7 @@ export async function GET(
   { params }: { params: Promise<{ uuid: string }> }
 ) {
   const { uuid } = await params;
-  const sets = listWorkoutSets(uuid);
+  const sets = await listWorkoutSets(uuid);
   return NextResponse.json(sets);
 }
 
@@ -19,7 +19,7 @@ export async function POST(
 
   if (body.setUuid) {
     // Update existing set
-    const set = updateSet(body.setUuid, {
+    const set = await updateSet(body.setUuid, {
       weight: body.weight,
       repetitions: body.repetitions,
       rpe: body.rpe,
@@ -28,7 +28,7 @@ export async function POST(
     return NextResponse.json(set);
   } else {
     // Log new set
-    const set = logSet({
+    const set = await logSet({
       workoutExerciseUuid: uuid,
       weight: body.weight,
       repetitions: body.repetitions,

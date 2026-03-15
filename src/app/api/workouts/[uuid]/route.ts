@@ -6,13 +6,13 @@ export async function GET(
   { params }: { params: Promise<{ uuid: string }> }
 ) {
   const { uuid } = await params;
-  const workout = getWorkout(uuid);
+  const workout = await getWorkout(uuid);
 
   if (!workout) {
     return NextResponse.json({ error: 'Workout not found' }, { status: 404 });
   }
 
-  const exercises = listWorkoutExercises(uuid);
+  const exercises = await listWorkoutExercises(uuid);
   return NextResponse.json({ ...workout, exercises });
 }
 
@@ -24,12 +24,12 @@ export async function POST(
   const body = await request.json();
 
   if (body.action === 'finish') {
-    const workout = finishWorkout(uuid);
+    const workout = await finishWorkout(uuid);
     return NextResponse.json(workout);
   }
 
   if (body.action === 'add-exercise') {
-    const workoutExercise = addExerciseToWorkout(uuid, body.exerciseUuid);
+    const workoutExercise = await addExerciseToWorkout(uuid, body.exerciseUuid);
     return NextResponse.json(workoutExercise);
   }
 

@@ -21,6 +21,26 @@ CREATE INDEX IF NOT EXISTS idx_exercises_title ON exercises(title);
 CREATE INDEX IF NOT EXISTS idx_exercises_is_custom ON exercises(is_custom);
 CREATE INDEX IF NOT EXISTS idx_exercises_is_hidden ON exercises(is_hidden);
 
+-- Workout plans (templates)
+CREATE TABLE IF NOT EXISTS workout_plans (
+  uuid TEXT PRIMARY KEY,
+  title TEXT,
+  created_at TIMESTAMP DEFAULT NOW()
+);
+
+-- Routines in a plan
+CREATE TABLE IF NOT EXISTS workout_routines (
+  uuid TEXT PRIMARY KEY,
+  workout_plan_uuid TEXT NOT NULL,
+  title TEXT,
+  comment TEXT,
+  order_index INTEGER NOT NULL,
+  created_at TIMESTAMP DEFAULT NOW(),
+  FOREIGN KEY (workout_plan_uuid) REFERENCES workout_plans(uuid) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_workout_routines_plan ON workout_routines(workout_plan_uuid, order_index);
+
 -- Workouts
 CREATE TABLE IF NOT EXISTS workouts (
   uuid TEXT PRIMARY KEY,
@@ -72,26 +92,6 @@ CREATE TABLE IF NOT EXISTS workout_sets (
 
 CREATE INDEX IF NOT EXISTS idx_workout_sets_exercise ON workout_sets(workout_exercise_uuid, order_index);
 CREATE INDEX IF NOT EXISTS idx_workout_sets_completed ON workout_sets(is_completed);
-
--- Workout plans (templates)
-CREATE TABLE IF NOT EXISTS workout_plans (
-  uuid TEXT PRIMARY KEY,
-  title TEXT,
-  created_at TIMESTAMP DEFAULT NOW()
-);
-
--- Routines in a plan
-CREATE TABLE IF NOT EXISTS workout_routines (
-  uuid TEXT PRIMARY KEY,
-  workout_plan_uuid TEXT NOT NULL,
-  title TEXT,
-  comment TEXT,
-  order_index INTEGER NOT NULL,
-  created_at TIMESTAMP DEFAULT NOW(),
-  FOREIGN KEY (workout_plan_uuid) REFERENCES workout_plans(uuid) ON DELETE CASCADE
-);
-
-CREATE INDEX IF NOT EXISTS idx_workout_routines_plan ON workout_routines(workout_plan_uuid, order_index);
 
 -- Exercises in a routine template
 CREATE TABLE IF NOT EXISTS workout_routine_exercises (

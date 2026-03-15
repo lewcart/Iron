@@ -6,16 +6,16 @@ export async function GET(request: Request) {
   const current = searchParams.get('current');
 
   if (current === 'true') {
-    const workout = getCurrentWorkout();
+    const workout = await getCurrentWorkout();
     return NextResponse.json(workout);
   }
 
   const limit = searchParams.get('limit') ? parseInt(searchParams.get('limit')!) : undefined;
-  const workouts = listWorkouts({ limit });
+  const workouts = await listWorkouts({ limit });
   return NextResponse.json(workouts);
 }
 
 export async function POST() {
-  const workout = startWorkout();
+  const workout = await startWorkout();
   return NextResponse.json(workout);
 }

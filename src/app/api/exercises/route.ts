@@ -6,6 +6,6 @@ export async function GET(request: Request) {
   const search = searchParams.get('search') || undefined;
   const muscleGroup = searchParams.get('muscleGroup') || undefined;
 
-  const exercises = listExercises({ search, muscleGroup });
+  const exercises = await listExercises({ search, muscleGroup });
   return NextResponse.json(exercises);
 }
