@@ -5,6 +5,7 @@ import { ChevronLeft, RotateCcw } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import type { Workout, WorkoutExercise, WorkoutSet, Exercise } from '@/types';
 import { getMuscleColor } from '@/lib/muscle-colors';
+import { useUnit } from '@/context/UnitContext';
 
 interface WorkoutWithExercises extends Workout {
   exercises: (WorkoutExercise & {
@@ -33,8 +34,13 @@ function totalWeight(exercises: WorkoutWithExercises['exercises']) {
       s2 + (set.weight ?? 0) * (set.repetitions ?? 0), 0), 0);
 }
 
+function totalPRs(exercises: WorkoutWithExercises['exercises']) {
+  return exercises.reduce((sum, e) => sum + e.sets.filter(s => s.is_pr).length, 0);
+}
+
 export default function WorkoutDetail({ workout, onBack }: { workout: Workout; onBack: () => void }) {
   const router = useRouter();
+  const { toDisplay, label } = useUnit();
   const [detail, setDetail] = useState<WorkoutWithExercises | null>(null);
   const [loading, setLoading] = useState(true);
   const [repeating, setRepeating] = useState(false);
@@ -123,10 +129,17 @@ export default function WorkoutDetail({ workout, onBack }: { workout: Workout; o
                 <p className="text-xs mt-0.5 opacity-80">Sets</p>
               </div>
               <div>
-                <p className="text-2xl font-bold">{totalWeight(detail.exercises).toLocaleString()}</p>
-                <p className="text-xs mt-0.5 opacity-80">Total kg</p>
+                <p className="text-2xl font-bold">{toDisplay(totalWeight(detail.exercises)).toLocaleString()}</p>
+                <p className="text-xs mt-0.5 opacity-80">Total {label}</p>
               </div>
             </div>
+            {totalPRs(detail.exercises) > 0 && (
+              <div className="mt-3 pt-3 border-t border-white/20 text-center">
+                <span className="inline-flex items-center gap-1.5 bg-amber-400/20 border border-amber-400/40 text-amber-200 text-xs font-semibold px-3 py-1 rounded-full">
+                  🏆 {totalPRs(detail.exercises)} Personal Record{totalPRs(detail.exercises) > 1 ? 's' : ''}
+                </span>
+              </div>
+            )}
           </div>
 
           {/* Title / comment */}
@@ -152,22 +165,33 @@ export default function WorkoutDetail({ workout, onBack }: { workout: Workout; o
               <div className="space-y-3">
                 {detail.exercises.map((we) => {
                   const completedSets = we.sets.filter(s => s.is_completed);
+                  const prCount = we.sets.filter(s => s.is_pr).length;
                   return (
                     <div key={we.uuid} className="ios-section">
                       <div className="px-4 py-3 border-b border-border">
-                        <p className="font-semibold text-sm">{we.exercise?.title ?? 'Unknown Exercise'}</p>
+                        <div className="flex items-center gap-2">
+                          <p className="font-semibold text-sm flex-1">{we.exercise?.title ?? 'Unknown Exercise'}</p>
+                          {prCount > 0 && (
+                            <span className="text-[10px] font-bold text-amber-400 bg-amber-400/15 border border-amber-400/30 px-1.5 py-0.5 rounded-full">
+                              {prCount} PR{prCount > 1 ? 's' : ''}
+                            </span>
+                          )}
+                        </div>
                         {we.comment && (
                           <p className="text-xs text-muted-foreground italic mt-0.5">{we.comment}</p>
                         )}
                       </div>
                       {completedSets.map((set, i) => (
-                        <div key={set.uuid} className="flex items-center gap-3 px-4 py-2.5 border-b border-border last:border-0">
-                          <div className="w-6 h-6 rounded-full bg-green-500 flex items-center justify-center flex-shrink-0">
+                        <div key={set.uuid} className={`flex items-center gap-3 px-4 py-2.5 border-b border-border last:border-0 ${set.is_pr ? 'bg-amber-500/5' : ''}`}>
+                          <div className={`w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 ${set.is_pr ? 'bg-amber-400' : 'bg-green-500'}`}>
                             <span className="text-white text-[10px] font-bold">{i + 1}</span>
                           </div>
-                          <p className="text-sm font-mono text-muted-foreground">
-                            {set.weight != null ? `${set.weight} kg` : '—'} × {set.repetitions ?? '—'}
+                          <p className="text-sm font-mono text-muted-foreground flex-1">
+                            {set.weight != null ? `${toDisplay(set.weight)} ${label}` : '—'} × {set.repetitions ?? '—'}
                           </p>
+                          {set.is_pr && (
+                            <span className="text-[10px] font-bold text-amber-400">PR</span>
+                          )}
                         </div>
                       ))}
                       {completedSets.length === 0 && (

@@ -43,6 +43,7 @@ export interface WorkoutSet {
   tag: 'dropSet' | 'failure' | null;
   comment: string | null;
   is_completed: boolean;
+  is_pr: boolean;
   order_index: number;
 }
 
@@ -107,4 +108,11 @@ export interface PersonalRecord {
   estimated_1rm: number;
   date: string;
   workout_uuid: string;
+}
+
+export interface BodyweightLog {
+  uuid: string;
+  weight_kg: number;
+  logged_at: string;
+  note: string | null;
 }

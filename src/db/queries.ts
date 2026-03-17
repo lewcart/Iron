@@ -9,6 +9,7 @@ import type {
   WorkoutRoutine,
   WorkoutRoutineExercise,
   WorkoutRoutineSet,
+  BodyweightLog,
 } from '../types';
 import { calculatePRs } from '../lib/pr';
 
@@ -323,6 +324,7 @@ export async function updateSet(uuid: string, data: {
   rpe?: number;
   tag?: 'dropSet' | 'failure' | null;
   isCompleted?: boolean;
+  isPr?: boolean;
 }): Promise<WorkoutSet> {
   const fields: string[] = [];
   const values: unknown[] = [];
@@ -348,6 +350,10 @@ export async function updateSet(uuid: string, data: {
     fields.push(`is_completed = $${++paramCount}`);
     values.push(data.isCompleted);
   }
+  if (data.isPr !== undefined) {
+    fields.push(`is_pr = $${++paramCount}`);
+    values.push(data.isPr);
+  }
 
   if (fields.length > 0) {
     values.push(uuid);
@@ -367,6 +373,36 @@ export async function listWorkoutSets(workoutExerciseUuid: string): Promise<Work
     SELECT * FROM workout_sets WHERE workout_exercise_uuid = $1 ORDER BY order_index
   `, [workoutExerciseUuid]);
   return rows.map(parseWorkoutSet);
+}
+
+export async function getHistoricalBestsForExercise(
+  exerciseUuid: string,
+  excludeWorkoutUuid: string,
+): Promise<{ bestWeight: number; bestReps: number; best1RM: number }> {
+  const row = await queryOne<{
+    best_weight: string | null;
+    best_reps: string | null;
+    best_1rm: string | null;
+  }>(`
+    SELECT
+      MAX(ws.weight) AS best_weight,
+      MAX(ws.repetitions) AS best_reps,
+      MAX(ws.weight * (1 + ws.repetitions::float / 30)) AS best_1rm
+    FROM workout_sets ws
+    JOIN workout_exercises we ON ws.workout_exercise_uuid = we.uuid
+    JOIN workouts w ON we.workout_uuid = w.uuid
+    WHERE we.exercise_uuid = $1
+      AND w.uuid != $2
+      AND ws.is_completed = true
+      AND ws.weight IS NOT NULL
+      AND ws.repetitions IS NOT NULL
+  `, [exerciseUuid, excludeWorkoutUuid]);
+
+  return {
+    bestWeight: row?.best_weight ? parseFloat(row.best_weight) : 0,
+    bestReps: row?.best_reps ? parseFloat(row.best_reps) : 0,
+    best1RM: row?.best_1rm ? parseFloat(row.best_1rm) : 0,
+  };
 }
 
 // ===== EXERCISE PROGRESS & PRs =====
@@ -1002,6 +1038,7 @@ export function parseWorkoutSet(row: DbRow): WorkoutSet {
     tag: row.tag as 'dropSet' | 'failure' | null,
     comment: row.comment as string | null,
     is_completed: Boolean(row.is_completed),
+    is_pr: Boolean(row.is_pr),
     order_index: row.order_index as number,
   };
 }
@@ -1043,4 +1080,44 @@ export function parseRoutineSet(row: DbRow): WorkoutRoutineSet {
     comment: row.comment as string | null,
     order_index: row.order_index as number,
   };
+}
+
+// ===== BODYWEIGHT =====
+
+export function parseBodyweightLog(row: DbRow): BodyweightLog {
+  return {
+    uuid: row.uuid as string,
+    weight_kg: parseFloat(row.weight_kg as string),
+    logged_at: row.logged_at as string,
+    note: row.note as string | null,
+  };
+}
+
+export async function logBodyweight(weight_kg: number, note?: string): Promise<BodyweightLog> {
+  const uuid = randomUUID();
+  const row = await queryOne(
+    `INSERT INTO bodyweight_logs (uuid, weight_kg, note) VALUES ($1, $2, $3) RETURNING *`,
+    [uuid, weight_kg, note ?? null],
+  );
+  return parseBodyweightLog(row!);
+}
+
+export async function listBodyweightLogs(limit = 90): Promise<BodyweightLog[]> {
+  const rows = await query(
+    `SELECT * FROM bodyweight_logs ORDER BY logged_at DESC LIMIT $1`,
+    [limit],
+  );
+  return rows.map(parseBodyweightLog);
+}
+
+export async function getLatestBodyweight(): Promise<BodyweightLog | null> {
+  const row = await queryOne(
+    `SELECT * FROM bodyweight_logs ORDER BY logged_at DESC LIMIT 1`,
+    [],
+  );
+  return row ? parseBodyweightLog(row) : null;
+}
+
+export async function deleteBodyweightLog(uuid: string): Promise<void> {
+  await query(`DELETE FROM bodyweight_logs WHERE uuid = $1`, [uuid]);
 }

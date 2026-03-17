@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { ChevronLeft, Trophy, Medal, Award } from 'lucide-react';
 import type { Exercise } from '@/types';
+import { useUnit } from '@/context/UnitContext';
 import {
   LineChart,
   Line,
@@ -137,6 +138,7 @@ export default function ExerciseDetail({
   exercise: Exercise;
   onBack: () => void;
 }) {
+  const { toDisplay, label } = useUnit();
   const [progressData, setProgressData] = useState<ProgressData | null>(null);
   const [loading, setLoading] = useState(true);
   const [range, setRange] = useState<Range>('all');
@@ -160,14 +162,14 @@ export default function ExerciseDetail({
   const chartData = progressData?.progress.map(p => ({
     date: formatDate(p.date),
     rawDate: p.date,
-    estimated1RM: Math.round(p.estimated1RM * 10) / 10,
-    maxWeight: Math.round(p.maxWeight * 10) / 10,
+    estimated1RM: Math.round(toDisplay(p.estimated1RM) * 10) / 10,
+    maxWeight: Math.round(toDisplay(p.maxWeight) * 10) / 10,
     isPR: prDate ? new Date(p.date).getTime() === new Date(prDate).getTime() : false,
   })) ?? [];
 
   const volumeData = progressData?.volumeTrend.map(v => ({
     date: formatDate(v.date),
-    totalVolume: Math.round(v.totalVolume),
+    totalVolume: Math.round(toDisplay(v.totalVolume)),
   })) ?? [];
 
   const tooltipStyle = {
@@ -210,7 +212,7 @@ export default function ExerciseDetail({
                   label="Est. 1RM"
                   value={
                     progressData.prs.estimated1RM
-                      ? `${Math.round(progressData.prs.estimated1RM.estimated1RM)} kg`
+                      ? `${Math.round(toDisplay(progressData.prs.estimated1RM.estimated1RM))} ${label}`
                       : '—'
                   }
                   sub={
@@ -224,7 +226,7 @@ export default function ExerciseDetail({
                   label="Heaviest"
                   value={
                     progressData.prs.heaviestWeight
-                      ? `${progressData.prs.heaviestWeight.weight} kg`
+                      ? `${toDisplay(progressData.prs.heaviestWeight.weight)} ${label}`
                       : '—'
                   }
                   sub={
@@ -243,7 +245,7 @@ export default function ExerciseDetail({
                   }
                   sub={
                     progressData.prs.mostReps
-                      ? `@ ${progressData.prs.mostReps.weight} kg`
+                      ? `@ ${toDisplay(progressData.prs.mostReps.weight)} ${label}`
                       : 'No data'
                   }
                 />
@@ -276,7 +278,7 @@ export default function ExerciseDetail({
                     <LineChart data={chartData} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
                       <CartesianGrid strokeDasharray="3 3" stroke="#3f3f46" />
                       <XAxis dataKey="date" stroke="#71717a" fontSize={11} tick={{ fill: '#71717a' }} />
-                      <YAxis stroke="#71717a" fontSize={11} tick={{ fill: '#71717a' }} unit=" kg" />
+                      <YAxis stroke="#71717a" fontSize={11} tick={{ fill: '#71717a' }} unit={` ${label}`} />
                       <Tooltip {...tooltipStyle} />
                       <Line
                         type="monotone"
@@ -337,7 +339,7 @@ export default function ExerciseDetail({
                       <XAxis dataKey="date" stroke="#71717a" fontSize={11} tick={{ fill: '#71717a' }} />
                       <YAxis stroke="#71717a" fontSize={11} tick={{ fill: '#71717a' }} />
                       <Tooltip {...tooltipStyle} />
-                      <Bar dataKey="totalVolume" name="Volume (kg)" fill="#3b82f6" radius={[3, 3, 0, 0]} />
+                      <Bar dataKey="totalVolume" name={`Volume (${label})`} fill="#3b82f6" radius={[3, 3, 0, 0]} />
                     </BarChart>
                   </ResponsiveContainer>
                 </div>
@@ -363,7 +365,7 @@ export default function ExerciseDetail({
                       className={`grid grid-cols-4 px-3 py-2 ${i % 2 === 0 ? 'bg-zinc-900' : 'bg-zinc-950'}`}
                     >
                       <span className="text-xs text-zinc-400">{formatDate(set.date)}</span>
-                      <span className="text-xs text-zinc-200 text-right">{set.weight} kg</span>
+                      <span className="text-xs text-zinc-200 text-right">{set.weight != null ? toDisplay(set.weight) : '—'} {label}</span>
                       <span className="text-xs text-zinc-200 text-right">{set.repetitions}</span>
                       <span className="text-xs text-zinc-400 text-right">{set.rpe != null ? set.rpe : '—'}</span>
                     </div>

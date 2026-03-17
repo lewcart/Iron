@@ -85,10 +85,14 @@ CREATE TABLE IF NOT EXISTS workout_sets (
   tag TEXT CHECK(tag IS NULL OR tag IN ('dropSet', 'failure')),
   comment TEXT,
   is_completed BOOLEAN NOT NULL DEFAULT false,
+  is_pr BOOLEAN NOT NULL DEFAULT false,
   order_index INTEGER NOT NULL,
   created_at TIMESTAMP DEFAULT NOW(),
   FOREIGN KEY (workout_exercise_uuid) REFERENCES workout_exercises(uuid) ON DELETE CASCADE
 );
+
+-- Add is_pr to existing databases
+ALTER TABLE workout_sets ADD COLUMN IF NOT EXISTS is_pr BOOLEAN NOT NULL DEFAULT false;
 
 CREATE INDEX IF NOT EXISTS idx_workout_sets_exercise ON workout_sets(workout_exercise_uuid, order_index);
 CREATE INDEX IF NOT EXISTS idx_workout_sets_completed ON workout_sets(is_completed);

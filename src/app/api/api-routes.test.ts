@@ -68,6 +68,7 @@ const mockSet = {
   tag: null,
   comment: null,
   is_completed: false,
+  is_pr: false,
   order_index: 0,
 };
 

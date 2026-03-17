@@ -1,7 +1,9 @@
 'use client';
 
-import { useState } from 'react';
-import { ChevronRight } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { ChevronRight, Trash2 } from 'lucide-react';
+import { useUnit } from '@/context/UnitContext';
+import type { BodyweightLog } from '@/types';
 
 const REST_TIMES = [30, 60, 90, 120, 150, 180, 210, 240, 300];
 
@@ -17,8 +19,17 @@ function readLS(key: string, fallback: string): string {
   return localStorage.getItem(key) ?? fallback;
 }
 
+function formatLogDate(isoStr: string) {
+  return new Date(isoStr).toLocaleDateString('en-GB', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+  });
+}
+
 export default function SettingsPage() {
-  const [weightUnit, setWeightUnit] = useState<'kg' | 'lb'>('kg');
+  const { unit, setUnit, toDisplay, fromInput, label } = useUnit();
+
   const [defaultRest, setDefaultRest] = useState(() =>
     parseInt(readLS('iron-rest-default', '90'), 10)
   );
@@ -28,6 +39,23 @@ export default function SettingsPage() {
   const [keepRestRunning, setKeepRestRunning] = useState(() =>
     readLS('iron-rest-keep-running', 'false') === 'true'
   );
+
+  // Bodyweight state
+  const [bwInput, setBwInput] = useState('');
+  const [bwNote, setBwNote] = useState('');
+  const [bwLogs, setBwLogs] = useState<BodyweightLog[]>([]);
+  const [bwLoading, setBwLoading] = useState(true);
+  const [bwSaving, setBwSaving] = useState(false);
+
+  useEffect(() => {
+    fetch('/api/bodyweight?limit=30')
+      .then(r => r.json())
+      .then((data: BodyweightLog[]) => {
+        setBwLogs(data);
+        setBwLoading(false);
+      })
+      .catch(() => setBwLoading(false));
+  }, []);
 
   const updateDefaultRest = (v: number) => {
     setDefaultRest(v);
@@ -47,6 +75,33 @@ export default function SettingsPage() {
     localStorage.setItem('iron-rest-keep-running', String(v));
   };
 
+  const handleLogBodyweight = async () => {
+    const val = parseFloat(bwInput);
+    if (!val || val <= 0) return;
+    setBwSaving(true);
+    try {
+      const weight_kg = fromInput(val);
+      const res = await fetch('/api/bodyweight', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ weight_kg, note: bwNote || undefined }),
+      });
+      if (res.ok) {
+        const log: BodyweightLog = await res.json();
+        setBwLogs(prev => [log, ...prev]);
+        setBwInput('');
+        setBwNote('');
+      }
+    } finally {
+      setBwSaving(false);
+    }
+  };
+
+  const handleDeleteBw = async (uuid: string) => {
+    await fetch(`/api/bodyweight/${uuid}`, { method: 'DELETE' });
+    setBwLogs(prev => prev.filter(l => l.uuid !== uuid));
+  };
+
   return (
     <main className="tab-content bg-background">
       <div className="px-4 pt-14 pb-4">
@@ -63,22 +118,87 @@ export default function SettingsPage() {
             <div className="ios-row justify-between">
               <span className="text-sm font-medium">Weight Unit</span>
               <div className="flex rounded-lg overflow-hidden border border-border">
-                {(['kg', 'lb'] as const).map(unit => (
+                {(['kg', 'lbs'] as const).map(u => (
                   <button
-                    key={unit}
-                    onClick={() => setWeightUnit(unit)}
+                    key={u}
+                    onClick={() => setUnit(u)}
                     className={`px-4 py-1.5 text-sm font-medium transition-colors ${
-                      weightUnit === unit
+                      unit === u
                         ? 'bg-primary text-white'
                         : 'text-foreground'
                     }`}
                   >
-                    {unit}
+                    {u}
                   </button>
                 ))}
               </div>
             </div>
           </div>
+        </div>
+
+        {/* Bodyweight */}
+        <div>
+          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1 px-1">Bodyweight</p>
+          <div className="ios-section">
+            {/* Log entry row */}
+            <div className="ios-row gap-2">
+              <input
+                type="number"
+                inputMode="decimal"
+                placeholder={`Weight (${label})`}
+                value={bwInput}
+                onChange={e => setBwInput(e.target.value)}
+                className="flex-1 bg-transparent text-sm outline-none min-h-[44px]"
+              />
+              <input
+                type="text"
+                placeholder="Note (optional)"
+                value={bwNote}
+                onChange={e => setBwNote(e.target.value)}
+                className="flex-1 bg-transparent text-sm outline-none min-h-[44px] text-muted-foreground"
+              />
+              <button
+                onClick={handleLogBodyweight}
+                disabled={bwSaving || !bwInput}
+                className="px-3 py-1.5 bg-primary text-white text-sm font-medium rounded-lg disabled:opacity-40"
+              >
+                Log
+              </button>
+            </div>
+          </div>
+
+          {/* History */}
+          {!bwLoading && bwLogs.length > 0 && (
+            <div className="ios-section mt-2">
+              {bwLogs.map((log, i) => (
+                <div
+                  key={log.uuid}
+                  className={`ios-row justify-between ${i < bwLogs.length - 1 ? 'border-b border-border' : ''}`}
+                >
+                  <div className="flex-1 min-w-0">
+                    <span className="text-sm font-medium">
+                      {toDisplay(log.weight_kg)} {label}
+                    </span>
+                    {log.note && (
+                      <span className="text-xs text-muted-foreground ml-2">{log.note}</span>
+                    )}
+                  </div>
+                  <span className="text-xs text-muted-foreground mr-3">
+                    {formatLogDate(log.logged_at)}
+                  </span>
+                  <button
+                    onClick={() => handleDeleteBw(log.uuid)}
+                    className="text-red-500 p-1 min-h-[44px] min-w-[44px] flex items-center justify-center"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+          {!bwLoading && bwLogs.length === 0 && (
+            <p className="text-xs text-muted-foreground px-1 mt-2">No bodyweight entries yet.</p>
+          )}
         </div>
 
         {/* Rest Timer */}

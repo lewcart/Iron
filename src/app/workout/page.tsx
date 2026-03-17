@@ -6,6 +6,7 @@ import { Check, ChevronRight, Plus, Search, X } from 'lucide-react';
 import type { Workout, WorkoutExercise, WorkoutSet, Exercise, WorkoutPlan, WorkoutRoutine } from '@/types';
 import { formatTime, calcCompletedSets, calcTotalVolume } from './workout-utils';
 import type { WorkoutExerciseEntry } from './workout-utils';
+import { useUnit } from '@/context/UnitContext';
 
 interface WorkoutWithExercises extends Workout {
   exercises: WorkoutExerciseEntry[];
@@ -88,6 +89,16 @@ function useElapsed(startTime: string | null) {
 }
 
 // ─── Running summary panel ────────────────────────────────────────────────────
+function formatVolume(volumeKg: number, unit: string, toDisplay: (kg: number) => number): string {
+  if (unit === 'kg') {
+    return volumeKg >= 1000
+      ? `${(volumeKg / 1000).toFixed(1)}t`
+      : `${volumeKg.toFixed(0)}kg`;
+  }
+  const lbs = toDisplay(volumeKg);
+  return `${Math.round(lbs).toLocaleString()}lbs`;
+}
+
 function WorkoutSummaryBar({
   elapsed,
   exercises,
@@ -95,6 +106,7 @@ function WorkoutSummaryBar({
   elapsed: number;
   exercises: WorkoutWithExercises['exercises'];
 }) {
+  const { unit, toDisplay } = useUnit();
   const completedSets = calcCompletedSets(exercises);
   const totalVolume = calcTotalVolume(exercises);
   const exerciseCount = exercises.length;
@@ -122,9 +134,7 @@ function WorkoutSummaryBar({
         <div className="flex flex-col items-center">
           <span className="text-xs text-zinc-400 font-medium">Volume</span>
           <span className="text-sm font-semibold text-zinc-100">
-            {totalVolume >= 1000
-              ? `${(totalVolume / 1000).toFixed(1)}t`
-              : `${totalVolume.toFixed(0)}kg`}
+            {formatVolume(totalVolume, unit, toDisplay)}
           </span>
         </div>
       </div>
@@ -144,6 +154,7 @@ function FinishWorkoutModal({
   onConfirm: () => void;
   onCancel: () => void;
 }) {
+  const { unit, toDisplay } = useUnit();
   const completedSets = calcCompletedSets(exercises);
   const totalVolume = calcTotalVolume(exercises);
   const exerciseCount = exercises.length;
@@ -184,9 +195,7 @@ function FinishWorkoutModal({
           <div className="bg-zinc-800/60 rounded-xl p-3 text-center">
             <p className="text-xs text-zinc-400 mb-0.5">Total Volume</p>
             <p className="text-base font-semibold text-zinc-100">
-              {totalVolume >= 1000
-                ? `${(totalVolume / 1000).toFixed(1)}t`
-                : `${totalVolume.toFixed(0)} kg`}
+              {formatVolume(totalVolume, unit, toDisplay)}
             </p>
           </div>
         </div>
@@ -507,20 +516,26 @@ function SetRow({
   workoutExerciseUuid: string;
   onUpdate: (weUuid: string, setUuid: string, weight: number, reps: number) => Promise<void>;
 }) {
-  const [weight, setWeight] = useState(set.weight?.toString() ?? '');
+  const { toDisplay, fromInput, label } = useUnit();
+  const [weight, setWeight] = useState(
+    set.weight != null ? toDisplay(set.weight).toString() : ''
+  );
   const [reps, setReps] = useState(set.repetitions?.toString() ?? '');
   const [saving, setSaving] = useState(false);
 
   const handleComplete = async () => {
     setSaving(true);
-    await onUpdate(workoutExerciseUuid, set.uuid, parseFloat(weight) || 0, parseInt(reps) || 0);
+    // Convert display unit value back to kg for storage
+    const weightKg = fromInput(parseFloat(weight) || 0);
+    await onUpdate(workoutExerciseUuid, set.uuid, weightKg, parseInt(reps) || 0);
     setSaving(false);
   };
 
   const completed = set.is_completed;
+  const isPR = set.is_pr;
 
   return (
-    <div className={`flex items-center gap-3 py-2.5 px-4 border-b border-border last:border-0 ${completed ? 'opacity-60' : ''}`}>
+    <div className={`flex items-center gap-3 py-2.5 px-4 border-b border-border last:border-0 ${completed && !isPR ? 'opacity-60' : ''} ${isPR ? 'bg-amber-500/5' : ''}`}>
       {/* Set number */}
       <div className="w-6 text-center text-sm font-semibold text-muted-foreground">{setNumber}</div>
 
@@ -535,7 +550,7 @@ function SetRow({
           onFocus={e => e.target.scrollIntoView({ behavior: 'smooth', block: 'center' })}
           className="w-full text-right text-sm font-medium bg-transparent outline-none min-h-[44px]"
         />
-        <span className="text-xs text-muted-foreground">kg</span>
+        <span className="text-xs text-muted-foreground">{label}</span>
       </div>
 
       <span className="text-muted-foreground text-sm">×</span>
@@ -554,12 +569,21 @@ function SetRow({
         <span className="text-xs text-muted-foreground">reps</span>
       </div>
 
+      {/* PR badge */}
+      {isPR && (
+        <span className="text-[10px] font-bold text-amber-400 bg-amber-400/15 border border-amber-400/30 px-1.5 py-0.5 rounded-full flex-shrink-0">
+          PR
+        </span>
+      )}
+
       {/* Complete button — 44×44 touch target */}
       <button
         onClick={handleComplete}
         disabled={saving}
         className={`w-11 h-11 rounded-full flex items-center justify-center flex-shrink-0 transition-colors ${
-          completed
+          isPR
+            ? 'bg-amber-400 text-white ring-2 ring-amber-400/40'
+            : completed
             ? 'bg-green-500 text-white'
             : 'border-2 border-border text-transparent hover:border-primary'
         }`}
@@ -592,6 +616,7 @@ export default function WorkoutPage() {
   const [showFinishModal, setShowFinishModal] = useState(false);
   const [plans, setPlans] = useState<PlanWithRoutines[]>([]);
   const [startingRoutine, setStartingRoutine] = useState<string | null>(null);
+  const [prToast, setPrToast] = useState<string | null>(null);
 
   const restTimer = useRestTimer();
   const elapsed = useElapsed(workout?.start_time ?? null);
@@ -680,12 +705,20 @@ export default function WorkoutPage() {
   };
 
   const updateSet = async (workoutExerciseUuid: string, setUuid: string, weight: number, reps: number) => {
-    await fetch(`/api/workout-exercises/${workoutExerciseUuid}/sets`, {
+    const res = await fetch(`/api/workout-exercises/${workoutExerciseUuid}/sets`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ setUuid, weight, repetitions: reps, isCompleted: true }),
     });
+    const savedSet = await res.json();
     await fetchCurrentWorkout();
+
+    // Show PR toast if this set is a new personal record
+    if (savedSet?.is_pr) {
+      const exerciseName = workout?.exercises.find(e => e.uuid === workoutExerciseUuid)?.exercise?.title ?? 'Exercise';
+      setPrToast(exerciseName);
+      setTimeout(() => setPrToast(null), 3500);
+    }
 
     // Auto-start rest timer if enabled in settings
     const { defaultRest, autoStart } = getRestSettings();
@@ -953,6 +986,14 @@ export default function WorkoutPage() {
           onConfirm={finishWorkout}
           onCancel={() => setShowFinishModal(false)}
         />
+      )}
+
+      {/* PR toast */}
+      {prToast && (
+        <div className="fixed bottom-24 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 bg-amber-400 text-zinc-900 font-semibold text-sm px-4 py-2.5 rounded-full shadow-lg animate-in fade-in slide-in-from-bottom-2">
+          <span>🏆</span>
+          <span>New PR — {prToast}!</span>
+        </div>
       )}
     </>
   );

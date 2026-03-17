@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import { TabBar } from "@/components/TabBar";
+import { UnitProvider } from "@/context/UnitContext";
 
 export const metadata: Metadata = {
   title: "Iron",
@@ -21,8 +22,10 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className="bg-background">
-        {children}
-        <TabBar />
+        <UnitProvider>
+          {children}
+          <TabBar />
+        </UnitProvider>
       </body>
     </html>
   );
