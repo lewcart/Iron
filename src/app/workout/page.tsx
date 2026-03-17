@@ -11,6 +11,69 @@ interface WorkoutWithExercises extends Workout {
   exercises: WorkoutExerciseEntry[];
 }
 
+// ─── Settings (localStorage-backed) ──────────────────────────────────────────
+function getRestSettings() {
+  if (typeof window === 'undefined') return { defaultRest: 90, autoStart: true };
+  return {
+    defaultRest: parseInt(localStorage.getItem('iron-rest-default') ?? '90', 10),
+    autoStart: localStorage.getItem('iron-rest-auto-start') !== 'false',
+  };
+}
+
+// ─── Rest timer hook ──────────────────────────────────────────────────────────
+function useRestTimer() {
+  const [selected, setSelected] = useState<number | null>(null);
+  const [remaining, setRemaining] = useState(0);
+  const [running, setRunning] = useState(false);
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const notify = useCallback(() => {
+    if (typeof navigator !== 'undefined' && navigator.vibrate) {
+      navigator.vibrate([200, 100, 200]);
+    }
+    if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+      new Notification('Rest complete!', { body: 'Time to get back to work!' });
+    }
+  }, []);
+
+  const start = useCallback((seconds: number) => {
+    clearInterval(intervalRef.current!);
+    setSelected(seconds);
+    setRemaining(seconds);
+    setRunning(true);
+  }, []);
+
+  const cancel = useCallback(() => {
+    clearInterval(intervalRef.current!);
+    setRunning(false);
+    setSelected(null);
+    setRemaining(0);
+  }, []);
+
+  const adjust = useCallback((delta: number) => {
+    setRemaining(r => Math.max(0, r + delta));
+  }, []);
+
+  useEffect(() => {
+    if (!running) return;
+    intervalRef.current = setInterval(() => {
+      setRemaining(r => {
+        if (r <= 1) {
+          clearInterval(intervalRef.current!);
+          setRunning(false);
+          setTimeout(notify, 0);
+          return 0;
+        }
+        return r - 1;
+      });
+    }, 1000);
+    return () => clearInterval(intervalRef.current!);
+  }, [running, notify]);
+
+  const progress = selected ? remaining / selected : 0;
+  return { selected, remaining, running, progress, start, cancel, adjust };
+}
+
 // ─── Elapsed timer ───────────────────────────────────────────────────────────
 function useElapsed(startTime: string | null) {
   const [elapsed, setElapsed] = useState(0);
@@ -148,46 +211,31 @@ function FinishWorkoutModal({
   );
 }
 
-// ─── Rest timer ──────────────────────────────────────────────────────────────
-const REST_PRESETS = [60, 90, 120, 150, 180];
+// ─── Rest timer sheet ─────────────────────────────────────────────────────────
+const REST_PRESETS = [60, 90, 120, 150, 180, 30];
 
-function RestTimerSheet({ onClose }: { onClose: () => void }) {
-  const [selected, setSelected] = useState<number | null>(null);
-  const [remaining, setRemaining] = useState(0);
-  const [running, setRunning] = useState(false);
-  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
-  const start = (seconds: number) => {
-    setSelected(seconds);
-    setRemaining(seconds);
-    setRunning(true);
-  };
-
-  useEffect(() => {
-    if (!running) return;
-    intervalRef.current = setInterval(() => {
-      setRemaining(r => {
-        if (r <= 1) {
-          clearInterval(intervalRef.current!);
-          setRunning(false);
-          return 0;
-        }
-        return r - 1;
-      });
-    }, 1000);
-    return () => clearInterval(intervalRef.current!);
-  }, [running]);
-
-  const cancel = () => {
-    clearInterval(intervalRef.current!);
-    setRunning(false);
-    setSelected(null);
-    setRemaining(0);
-  };
-
-  const progress = selected ? (remaining / selected) : 0;
+function RestTimerSheet({
+  selected,
+  remaining,
+  running,
+  progress,
+  onStart,
+  onCancel,
+  onAdjust,
+  onClose,
+}: {
+  selected: number | null;
+  remaining: number;
+  running: boolean;
+  progress: number;
+  onStart: (seconds: number) => void;
+  onCancel: () => void;
+  onAdjust: (delta: number) => void;
+  onClose: () => void;
+}) {
   const circumference = 2 * Math.PI * 100;
   const dashOffset = circumference * (1 - progress);
+  const expired = selected !== null && remaining === 0 && !running;
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-background">
@@ -199,25 +247,19 @@ function RestTimerSheet({ onClose }: { onClose: () => void }) {
       </div>
 
       <div className="flex-1 flex flex-col items-center justify-center gap-8 p-8">
-        {!running ? (
+        {!running && !expired ? (
           <>
             <p className="text-muted-foreground text-sm">Select a rest duration</p>
             <div className="grid grid-cols-3 gap-3 w-full max-w-xs">
               {REST_PRESETS.map(s => (
                 <button
                   key={s}
-                  onClick={() => start(s)}
+                  onClick={() => onStart(s)}
                   className="aspect-square rounded-full bg-secondary flex items-center justify-center text-base font-semibold"
                 >
                   {formatTime(s)}
                 </button>
               ))}
-              <button
-                onClick={() => start(30)}
-                className="aspect-square rounded-full bg-secondary flex items-center justify-center text-base font-semibold"
-              >
-                0:30
-              </button>
             </div>
           </>
         ) : (
@@ -228,43 +270,61 @@ function RestTimerSheet({ onClose }: { onClose: () => void }) {
                 <circle cx="120" cy="120" r="100" fill="none" stroke="hsl(var(--secondary))" strokeWidth="12" />
                 <circle
                   cx="120" cy="120" r="100" fill="none"
-                  stroke={remaining === 0 ? '#ef4444' : 'hsl(var(--primary))'}
+                  stroke={expired ? '#ef4444' : 'hsl(var(--primary))'}
                   strokeWidth="12"
                   strokeLinecap="round"
                   strokeDasharray={circumference}
                   strokeDashoffset={dashOffset}
-                  style={{ transition: 'stroke-dashoffset 1s linear' }}
+                  style={{ transition: running ? 'stroke-dashoffset 1s linear' : 'none' }}
                 />
               </svg>
               <div className="absolute inset-0 flex flex-col items-center justify-center">
-                <span className={`text-5xl font-light tabular-nums ${remaining === 0 ? 'text-red-500' : ''}`}>
+                <span className={`text-5xl font-light tabular-nums ${expired ? 'text-red-500' : ''}`}>
                   {formatTime(remaining)}
                 </span>
                 <span className="text-sm text-muted-foreground mt-1">{formatTime(selected ?? 0)}</span>
+                {expired && (
+                  <span className="text-sm text-red-400 font-medium mt-2">Rest over!</span>
+                )}
               </div>
             </div>
 
             {/* Controls */}
             <div className="flex gap-4">
               <button
-                onClick={() => setRemaining(r => Math.max(0, r - 10))}
+                onClick={() => onAdjust(-10)}
                 className="w-16 h-16 rounded-full bg-secondary flex items-center justify-center font-semibold text-sm"
               >
                 −10s
               </button>
               <button
-                onClick={() => setRemaining(r => r + 10)}
+                onClick={() => onAdjust(10)}
                 className="w-16 h-16 rounded-full bg-secondary flex items-center justify-center font-semibold text-sm"
               >
                 +10s
               </button>
               <button
-                onClick={cancel}
+                onClick={onCancel}
                 className="w-16 h-16 rounded-full bg-red-100 text-red-600 flex items-center justify-center font-semibold text-sm"
               >
                 Cancel
               </button>
             </div>
+
+            {/* Restart with presets when expired */}
+            {expired && (
+              <div className="flex gap-3">
+                {REST_PRESETS.slice(0, 4).map(s => (
+                  <button
+                    key={s}
+                    onClick={() => onStart(s)}
+                    className="px-3 py-2 rounded-xl bg-secondary text-sm font-semibold"
+                  >
+                    {formatTime(s)}
+                  </button>
+                ))}
+              </div>
+            )}
           </>
         )}
       </div>
@@ -533,7 +593,15 @@ export default function WorkoutPage() {
   const [plans, setPlans] = useState<PlanWithRoutines[]>([]);
   const [startingRoutine, setStartingRoutine] = useState<string | null>(null);
 
+  const restTimer = useRestTimer();
   const elapsed = useElapsed(workout?.start_time ?? null);
+
+  // Request notification permission once
+  useEffect(() => {
+    if (typeof Notification !== 'undefined' && Notification.permission === 'default') {
+      Notification.requestPermission();
+    }
+  }, []);
 
   const fetchCurrentWorkout = useCallback(async () => {
     const res = await fetch('/api/workouts?current=true');
@@ -597,6 +665,7 @@ export default function WorkoutPage() {
     });
     setShowFinishModal(false);
     setWorkout(null);
+    restTimer.cancel();
   };
 
   const handleAddExercise = async (exercise: Exercise) => {
@@ -617,6 +686,12 @@ export default function WorkoutPage() {
       body: JSON.stringify({ setUuid, weight, repetitions: reps, isCompleted: true }),
     });
     await fetchCurrentWorkout();
+
+    // Auto-start rest timer if enabled in settings
+    const { defaultRest, autoStart } = getRestSettings();
+    if (autoStart) {
+      restTimer.start(defaultRest);
+    }
   };
 
   const handleAddSet = async (workoutExerciseUuid: string) => {
@@ -700,6 +775,8 @@ export default function WorkoutPage() {
   }
 
   // ── Active workout ──
+  const timerActive = restTimer.running || (restTimer.selected !== null && restTimer.remaining === 0);
+
   return (
     <>
       <main className="tab-content bg-background overflow-x-hidden">
@@ -719,14 +796,23 @@ export default function WorkoutPage() {
         {/* Running summary panel */}
         <WorkoutSummaryBar elapsed={elapsed} exercises={workout.exercises} />
 
-        {/* Rest timer button */}
-        <div className="mx-4 mb-3 rounded-xl bg-secondary/60 flex items-center justify-end px-4 py-2.5">
+        {/* Rest timer bar */}
+        <div className="mx-4 mb-3 rounded-xl bg-secondary/60 flex items-center justify-between px-4 py-2.5">
+          {timerActive ? (
+            <span className={`text-sm font-mono font-semibold tabular-nums ${
+              restTimer.remaining === 0 ? 'text-red-500' : 'text-primary'
+            }`}>
+              {restTimer.remaining === 0 ? 'Rest over!' : formatTime(restTimer.remaining)}
+            </span>
+          ) : (
+            <span className="text-sm text-muted-foreground">Rest Timer</span>
+          )}
           <button
             onClick={() => setShowRestTimer(true)}
             className="flex items-center gap-2 text-sm font-medium text-primary min-h-[44px]"
           >
             <span>⏲</span>
-            Rest Timer
+            {timerActive ? 'Open' : 'Start'}
           </button>
         </div>
 
@@ -849,7 +935,16 @@ export default function WorkoutPage() {
         <AddExerciseSheet onAdd={handleAddExercise} onClose={() => setShowExercises(false)} />
       )}
       {showRestTimer && (
-        <RestTimerSheet onClose={() => setShowRestTimer(false)} />
+        <RestTimerSheet
+          selected={restTimer.selected}
+          remaining={restTimer.remaining}
+          running={restTimer.running}
+          progress={restTimer.progress}
+          onStart={restTimer.start}
+          onCancel={restTimer.cancel}
+          onAdjust={restTimer.adjust}
+          onClose={() => setShowRestTimer(false)}
+        />
       )}
       {showFinishModal && (
         <FinishWorkoutModal

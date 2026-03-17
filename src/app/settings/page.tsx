@@ -12,12 +12,40 @@ function formatTime(s: number) {
   return `${m}:${String(sec).padStart(2, '0')}`;
 }
 
+function readLS(key: string, fallback: string): string {
+  if (typeof window === 'undefined') return fallback;
+  return localStorage.getItem(key) ?? fallback;
+}
+
 export default function SettingsPage() {
   const [weightUnit, setWeightUnit] = useState<'kg' | 'lb'>('kg');
-  const [defaultRest, setDefaultRest] = useState(90);
-  const [defaultRestDumbbell, setDefaultRestDumbbell] = useState(60);
-  const [defaultRestBarbell, setDefaultRestBarbell] = useState(120);
-  const [keepRestRunning, setKeepRestRunning] = useState(false);
+  const [defaultRest, setDefaultRest] = useState(() =>
+    parseInt(readLS('iron-rest-default', '90'), 10)
+  );
+  const [autoStart, setAutoStart] = useState(() =>
+    readLS('iron-rest-auto-start', 'true') !== 'false'
+  );
+  const [keepRestRunning, setKeepRestRunning] = useState(() =>
+    readLS('iron-rest-keep-running', 'false') === 'true'
+  );
+
+  const updateDefaultRest = (v: number) => {
+    setDefaultRest(v);
+    localStorage.setItem('iron-rest-default', String(v));
+  };
+
+  const updateAutoStart = (v: boolean) => {
+    setAutoStart(v);
+    localStorage.setItem('iron-rest-auto-start', String(v));
+    if (v && typeof Notification !== 'undefined' && Notification.permission === 'default') {
+      Notification.requestPermission();
+    }
+  };
+
+  const updateKeepRestRunning = (v: boolean) => {
+    setKeepRestRunning(v);
+    localStorage.setItem('iron-rest-keep-running', String(v));
+  };
 
   return (
     <main className="tab-content bg-background">
@@ -61,31 +89,7 @@ export default function SettingsPage() {
               <span className="text-sm font-medium">Default Rest Time</span>
               <select
                 value={defaultRest}
-                onChange={e => setDefaultRest(Number(e.target.value))}
-                className="text-sm text-muted-foreground bg-transparent outline-none text-right"
-              >
-                {REST_TIMES.map(t => (
-                  <option key={t} value={t}>{formatTime(t)}</option>
-                ))}
-              </select>
-            </div>
-            <div className="ios-row justify-between">
-              <span className="text-sm font-medium">Default (Dumbbell)</span>
-              <select
-                value={defaultRestDumbbell}
-                onChange={e => setDefaultRestDumbbell(Number(e.target.value))}
-                className="text-sm text-muted-foreground bg-transparent outline-none text-right"
-              >
-                {REST_TIMES.map(t => (
-                  <option key={t} value={t}>{formatTime(t)}</option>
-                ))}
-              </select>
-            </div>
-            <div className="ios-row justify-between">
-              <span className="text-sm font-medium">Default (Barbell)</span>
-              <select
-                value={defaultRestBarbell}
-                onChange={e => setDefaultRestBarbell(Number(e.target.value))}
+                onChange={e => updateDefaultRest(Number(e.target.value))}
                 className="text-sm text-muted-foreground bg-transparent outline-none text-right"
               >
                 {REST_TIMES.map(t => (
@@ -95,13 +99,29 @@ export default function SettingsPage() {
             </div>
             <div className="ios-row justify-between">
               <div className="flex-1">
+                <span className="text-sm font-medium">Auto-start after Set</span>
+                <p className="text-xs text-muted-foreground mt-0.5 pr-4">
+                  Automatically starts the rest timer when you complete a set.
+                </p>
+              </div>
+              <button
+                onClick={() => updateAutoStart(!autoStart)}
+                className={`relative w-12 h-7 rounded-full transition-colors flex-shrink-0 ${autoStart ? 'bg-primary' : 'bg-secondary'}`}
+              >
+                <span
+                  className={`absolute top-0.5 w-6 h-6 rounded-full bg-white shadow transition-transform ${autoStart ? 'translate-x-5' : 'translate-x-0.5'}`}
+                />
+              </button>
+            </div>
+            <div className="ios-row justify-between">
+              <div className="flex-1">
                 <span className="text-sm font-medium">Keep Rest Timer Running</span>
                 <p className="text-xs text-muted-foreground mt-0.5 pr-4">
                   Shows a red countdown when the rest period has elapsed.
                 </p>
               </div>
               <button
-                onClick={() => setKeepRestRunning(r => !r)}
+                onClick={() => updateKeepRestRunning(!keepRestRunning)}
                 className={`relative w-12 h-7 rounded-full transition-colors flex-shrink-0 ${keepRestRunning ? 'bg-primary' : 'bg-secondary'}`}
               >
                 <span
