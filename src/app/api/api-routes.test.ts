@@ -15,6 +15,9 @@ vi.mock('@/db/queries', () => ({
   listWorkoutSets: vi.fn(),
   logSet: vi.fn(),
   updateSet: vi.fn(),
+  getWorkoutSet: vi.fn(),
+  getWorkoutExercise: vi.fn(),
+  getHistoricalBestsForExercise: vi.fn(),
 }));
 
 // ===== Mock @/db/db (used by stats route) =====
