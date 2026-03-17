@@ -120,6 +120,14 @@ function EmptyState() {
   );
 }
 
+type Range = '1m' | '3m' | '6m' | 'all';
+const RANGES: { label: string; value: Range }[] = [
+  { label: '1M', value: '1m' },
+  { label: '3M', value: '3m' },
+  { label: '6M', value: '6m' },
+  { label: 'All', value: 'all' },
+];
+
 // ── Main component ─────────────────────────────────────────────────────────
 
 export default function ExerciseDetail({
@@ -131,25 +139,30 @@ export default function ExerciseDetail({
 }) {
   const [progressData, setProgressData] = useState<ProgressData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [range, setRange] = useState<Range>('all');
 
   useEffect(() => {
     setLoading(true);
     setProgressData(null);
-    fetch(`/api/exercises/${exercise.uuid}/progress`)
+    fetch(`/api/exercises/${exercise.uuid}/history?range=${range}`)
       .then(r => r.json())
       .then((data: ProgressData) => {
         setProgressData(data);
         setLoading(false);
       })
       .catch(() => setLoading(false));
-  }, [exercise.uuid]);
+  }, [exercise.uuid, range]);
 
   const hasData = progressData && progressData.recentSets.length > 0;
 
+  const prDate = progressData?.prs.estimated1RM?.date;
+
   const chartData = progressData?.progress.map(p => ({
     date: formatDate(p.date),
+    rawDate: p.date,
     estimated1RM: Math.round(p.estimated1RM * 10) / 10,
     maxWeight: Math.round(p.maxWeight * 10) / 10,
+    isPR: prDate ? new Date(p.date).getTime() === new Date(prDate).getTime() : false,
   })) ?? [];
 
   const volumeData = progressData?.volumeTrend.map(v => ({
@@ -240,7 +253,24 @@ export default function ExerciseDetail({
             {/* Weight Progress Chart */}
             {chartData.length > 0 && (
               <div>
-                <p className="text-xs font-semibold text-primary uppercase tracking-wide mb-2 px-1">Weight Progress</p>
+                <div className="flex items-center justify-between mb-2 px-1">
+                  <p className="text-xs font-semibold text-primary uppercase tracking-wide">Weight Progress</p>
+                  <div className="flex gap-1">
+                    {RANGES.map(r => (
+                      <button
+                        key={r.value}
+                        onClick={() => setRange(r.value)}
+                        className={`px-2 py-0.5 rounded-full text-[11px] font-semibold transition-colors ${
+                          range === r.value
+                            ? 'bg-blue-600 text-white'
+                            : 'text-zinc-400 hover:text-zinc-200'
+                        }`}
+                      >
+                        {r.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
                 <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-3">
                   <ResponsiveContainer width="100%" height={200}>
                     <LineChart data={chartData} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
@@ -254,7 +284,16 @@ export default function ExerciseDetail({
                         name="Est. 1RM"
                         stroke="#3b82f6"
                         strokeWidth={2}
-                        dot={false}
+                        dot={(props: { cx?: number; cy?: number; payload?: { isPR?: boolean } }) => {
+                          const { cx, cy, payload } = props;
+                          if (!payload?.isPR || cx == null || cy == null) return <g key={`dot-${cx}`} />;
+                          return (
+                            <g key={`pr-dot-${cx}`}>
+                              <circle cx={cx} cy={cy} r={6} fill="#f59e0b" stroke="#18181b" strokeWidth={2} />
+                              <text x={cx} y={cy - 10} textAnchor="middle" fontSize={9} fill="#f59e0b" fontWeight="bold">PR</text>
+                            </g>
+                          );
+                        }}
                         activeDot={{ r: 4 }}
                       />
                       <Line
@@ -277,6 +316,10 @@ export default function ExerciseDetail({
                     <div className="flex items-center gap-1.5">
                       <div className="w-4 h-0.5 bg-emerald-500 rounded" />
                       <span className="text-[10px] text-zinc-500">Max Weight</span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <div className="w-2.5 h-2.5 rounded-full bg-amber-400" />
+                      <span className="text-[10px] text-zinc-500">PR</span>
                     </div>
                   </div>
                 </div>

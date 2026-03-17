@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
-import { ChevronRight, X, Search } from 'lucide-react';
+import { ChevronRight, X, Search, Download } from 'lucide-react';
 import type { Workout, Exercise } from '@/types';
 import WorkoutDetail from './WorkoutDetail';
 import {
@@ -86,20 +86,42 @@ export default function HistoryPage() {
       <div className="px-4 pt-14 pb-3 flex justify-between items-baseline">
         <h1 className="text-2xl font-bold">History</h1>
 
-        {/* Week / Month toggle */}
-        <div className="flex rounded-lg overflow-hidden border border-border text-xs font-medium">
-          <button
-            onClick={() => setGroupMode('week')}
-            className={`px-3 py-1.5 transition-colors ${groupMode === 'week' ? 'bg-blue-500 text-white' : 'text-muted-foreground'}`}
+        <div className="flex items-center gap-2">
+          {/* Export buttons */}
+          <a
+            href="/api/export?format=json"
+            download
+            className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground border border-border rounded px-2 py-1"
+            title="Export JSON"
           >
-            Week
-          </button>
-          <button
-            onClick={() => setGroupMode('month')}
-            className={`px-3 py-1.5 transition-colors ${groupMode === 'month' ? 'bg-blue-500 text-white' : 'text-muted-foreground'}`}
+            <Download className="h-3 w-3" />
+            JSON
+          </a>
+          <a
+            href="/api/export?format=csv"
+            download
+            className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground border border-border rounded px-2 py-1"
+            title="Export CSV"
           >
-            Month
-          </button>
+            <Download className="h-3 w-3" />
+            CSV
+          </a>
+
+          {/* Week / Month toggle */}
+          <div className="flex rounded-lg overflow-hidden border border-border text-xs font-medium">
+            <button
+              onClick={() => setGroupMode('week')}
+              className={`px-3 py-1.5 transition-colors ${groupMode === 'week' ? 'bg-blue-500 text-white' : 'text-muted-foreground'}`}
+            >
+              Week
+            </button>
+            <button
+              onClick={() => setGroupMode('month')}
+              className={`px-3 py-1.5 transition-colors ${groupMode === 'month' ? 'bg-blue-500 text-white' : 'text-muted-foreground'}`}
+            >
+              Month
+            </button>
+          </div>
         </div>
       </div>
 

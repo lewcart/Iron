@@ -1,7 +1,8 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { ChevronLeft } from 'lucide-react';
+import { ChevronLeft, RotateCcw } from 'lucide-react';
+import { useRouter } from 'next/navigation';
 import type { Workout, WorkoutExercise, WorkoutSet, Exercise } from '@/types';
 import { getMuscleColor } from '@/lib/muscle-colors';
 
@@ -33,8 +34,10 @@ function totalWeight(exercises: WorkoutWithExercises['exercises']) {
 }
 
 export default function WorkoutDetail({ workout, onBack }: { workout: Workout; onBack: () => void }) {
+  const router = useRouter();
   const [detail, setDetail] = useState<WorkoutWithExercises | null>(null);
   const [loading, setLoading] = useState(true);
+  const [repeating, setRepeating] = useState(false);
 
   useEffect(() => {
     const load = async () => {
@@ -65,16 +68,39 @@ export default function WorkoutDetail({ workout, onBack }: { workout: Workout; o
     load();
   }, [workout.uuid]);
 
+  const handleRepeat = async () => {
+    setRepeating(true);
+    try {
+      const res = await fetch(`/api/workouts/${workout.uuid}/repeat`, { method: 'POST' });
+      if (res.status === 409) {
+        alert('A workout is already in progress. Finish it before repeating.');
+        return;
+      }
+      if (!res.ok) throw new Error('Failed to repeat workout');
+      router.push('/workout');
+    } finally {
+      setRepeating(false);
+    }
+  };
+
   const allMuscles = detail?.exercises.flatMap(e => e.exercise?.primary_muscles ?? []) ?? [];
   const accentColor = getMuscleColor(allMuscles);
 
   return (
     <main className="tab-content bg-background">
       {/* Nav bar */}
-      <div className="flex items-center gap-3 px-4 pt-14 pb-3">
+      <div className="flex items-center justify-between px-4 pt-14 pb-3">
         <button onClick={onBack} className="flex items-center gap-1 text-primary font-medium text-base">
           <ChevronLeft className="h-5 w-5" />
           History
+        </button>
+        <button
+          onClick={handleRepeat}
+          disabled={repeating}
+          className="flex items-center gap-1.5 text-sm font-medium text-blue-400 hover:text-blue-300 disabled:opacity-50"
+        >
+          <RotateCcw className="h-4 w-4" />
+          {repeating ? 'Starting…' : 'Repeat'}
         </button>
       </div>
 
