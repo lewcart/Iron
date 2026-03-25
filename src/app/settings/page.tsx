@@ -261,12 +261,31 @@ export default function SettingsPage() {
           </div>
         </div>
 
+        {/* Data */}
+        <div>
+          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1 px-1">Data</p>
+          <div className="ios-section">
+            <Link href="/import" className="ios-row justify-between">
+              <span className="text-sm font-medium">Import Iron Data</span>
+              <ChevronRight className="h-4 w-4 text-muted-foreground" />
+            </Link>
+            <a href="/api/export?format=json" className="ios-row justify-between">
+              <span className="text-sm font-medium">Export Data (JSON)</span>
+              <ChevronRight className="h-4 w-4 text-muted-foreground" />
+            </a>
+            <a href="/api/export?format=csv" className="ios-row justify-between">
+              <span className="text-sm font-medium">Export Data (CSV)</span>
+              <ChevronRight className="h-4 w-4 text-muted-foreground" />
+            </a>
+          </div>
+        </div>
+
         {/* About */}
         <div>
           <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1 px-1">About</p>
           <div className="ios-section">
             <div className="ios-row justify-between">
-              <span className="text-sm font-medium">Iron</span>
+              <span className="text-sm font-medium">Rebirth</span>
               <span className="text-sm text-muted-foreground">v1.0</span>
             </div>
             <a

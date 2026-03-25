@@ -4,8 +4,8 @@ import { TabBar } from "@/components/TabBar";
 import { UnitProvider } from "@/context/UnitContext";
 
 export const metadata: Metadata = {
-  title: "Iron",
-  description: "Workout tracker",
+  title: "Rebirth",
+  description: "Personal fitness tracker",
 };
 
 export const viewport: Viewport = {

@@ -13,6 +13,7 @@
     "lint": "next lint",
     "db:migrate": "tsx src/db/migrate.ts",
     "db:seed": "tsx src/db/seed.ts",
+    "db:seed-routines": "tsx src/db/seed-routines.ts",
     "cli:build": "tsc src/cli.ts --outDir dist --module nodenext --moduleResolution nodenext --target es2022 --esModuleInterop --skipLibCheck",
     "cli": "tsx src/cli.ts",
     "test": "vitest run"
@@ -42,7 +43,7 @@
     "postcss": "^8.5.8",
     "tailwindcss": "^3.4.19",
     "tsx": "^4.19.2",
-    "typescript": "^5",
+    "typescript": "5.9.3",
     "vitest": "^4.1.0"
   }
 }
