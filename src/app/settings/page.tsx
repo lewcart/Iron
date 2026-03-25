@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { ChevronRight, Trash2 } from 'lucide-react';
+import Link from 'next/link';
 import { useUnit } from '@/context/UnitContext';
 import type { BodyweightLog } from '@/types';
 
@@ -114,6 +115,10 @@ export default function SettingsPage() {
         <div>
           <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1 px-1">General</p>
           <div className="ios-section">
+            <Link href="/body-spec" className="ios-row justify-between">
+              <span className="text-sm font-medium">Body Spec</span>
+              <ChevronRight className="h-4 w-4 text-muted-foreground" />
+            </Link>
             {/* Weight unit */}
             <div className="ios-row justify-between">
               <span className="text-sm font-medium">Weight Unit</span>
