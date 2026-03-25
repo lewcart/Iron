@@ -62,7 +62,7 @@ export default function NutritionPage() {
   const [viewDate, setViewDate] = useState(() => toDateStr(new Date()));
   const [templateMeals, setTemplateMeals] = useState<NutritionWeekMeal[]>([]);
   const [loggedMeals, setLoggedMeals] = useState<NutritionLog[]>([]);
-  const [dayNote, setDayNote] = useState<NutritionDayNote | null>(null);
+  const [_dayNote, setDayNote] = useState<NutritionDayNote | null>(null);
   const [loadingDay, setLoadingDay] = useState(true);
 
   // Add-meal form (unplanned)
