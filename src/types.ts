@@ -202,3 +202,14 @@ export interface WellbeingLog {
   stress: number | null;     // 1–10
   notes: string | null;
 }
+
+// Module 7: Progress photos
+export type ProgressPhotoPose = 'front' | 'side' | 'back';
+
+export interface ProgressPhoto {
+  uuid: string;
+  blob_url: string;
+  pose: ProgressPhotoPose;
+  notes: string | null;
+  taken_at: string;
+}

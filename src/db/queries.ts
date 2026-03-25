@@ -17,6 +17,7 @@ import type {
   NutritionDayNote,
   HrtLog,
   WellbeingLog,
+  ProgressPhoto,
 } from '../types';
 import { calculatePRs } from '../lib/pr';
 
@@ -1509,4 +1510,43 @@ export async function updateWellbeingLog(uuid: string, data: Partial<Omit<Wellbe
 
 export async function deleteWellbeingLog(uuid: string): Promise<void> {
   await query(`DELETE FROM wellbeing_logs WHERE uuid = $1`, [uuid]);
+}
+
+// ===== PROGRESS PHOTOS (Module 7) =====
+
+function parseProgressPhoto(row: DbRow): ProgressPhoto {
+  return {
+    uuid: row.uuid as string,
+    blob_url: row.blob_url as string,
+    pose: row.pose as ProgressPhoto['pose'],
+    notes: row.notes as string | null,
+    taken_at: row.taken_at as string,
+  };
+}
+
+export async function createProgressPhoto(data: {
+  blob_url: string;
+  pose: string;
+  notes?: string | null;
+  taken_at?: string;
+}): Promise<ProgressPhoto> {
+  const uuid = randomUUID();
+  const row = await queryOne(
+    `INSERT INTO progress_photos (uuid, blob_url, pose, notes, taken_at)
+     VALUES ($1, $2, $3, $4, COALESCE($5::TIMESTAMP, NOW())) RETURNING *`,
+    [uuid, data.blob_url, data.pose, data.notes ?? null, data.taken_at ?? null],
+  );
+  return parseProgressPhoto(row!);
+}
+
+export async function listProgressPhotos(limit = 50): Promise<ProgressPhoto[]> {
+  const rows = await query(
+    `SELECT * FROM progress_photos ORDER BY taken_at DESC LIMIT $1`,
+    [limit],
+  );
+  return rows.map(parseProgressPhoto);
+}
+
+export async function deleteProgressPhoto(uuid: string): Promise<void> {
+  await query(`DELETE FROM progress_photos WHERE uuid = $1`, [uuid]);
 }

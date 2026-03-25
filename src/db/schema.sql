@@ -231,3 +231,15 @@ CREATE TABLE IF NOT EXISTS wellbeing_logs (
 );
 
 CREATE INDEX IF NOT EXISTS idx_wellbeing_logs_logged_at ON wellbeing_logs(logged_at DESC);
+
+-- Module 7: Progress photos
+CREATE TABLE IF NOT EXISTS progress_photos (
+  uuid TEXT PRIMARY KEY,
+  blob_url TEXT NOT NULL,
+  pose TEXT NOT NULL CHECK(pose IN ('front', 'side', 'back')),
+  notes TEXT,
+  taken_at TIMESTAMP NOT NULL DEFAULT NOW(),
+  created_at TIMESTAMP DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_progress_photos_taken_at ON progress_photos(taken_at DESC);

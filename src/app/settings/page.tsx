@@ -119,6 +119,10 @@ export default function SettingsPage() {
               <span className="text-sm font-medium">Body Spec</span>
               <ChevronRight className="h-4 w-4 text-muted-foreground" />
             </Link>
+            <Link href="/measurements" className="ios-row justify-between">
+              <span className="text-sm font-medium">Measurements & Photos</span>
+              <ChevronRight className="h-4 w-4 text-muted-foreground" />
+            </Link>
             <Link href="/nutrition" className="ios-row justify-between">
               <span className="text-sm font-medium">Nutrition</span>
               <ChevronRight className="h-4 w-4 text-muted-foreground" />
