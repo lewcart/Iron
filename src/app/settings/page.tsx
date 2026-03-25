@@ -31,13 +31,13 @@ export default function SettingsPage() {
   const { unit, setUnit, toDisplay, fromInput, label } = useUnit();
 
   const [defaultRest, setDefaultRest] = useState(() =>
-    parseInt(readLS('iron-rest-default', '90'), 10)
+    parseInt(readLS('rebirth-rest-default', '90'), 10)
   );
   const [autoStart, setAutoStart] = useState(() =>
-    readLS('iron-rest-auto-start', 'true') !== 'false'
+    readLS('rebirth-rest-auto-start', 'true') !== 'false'
   );
   const [keepRestRunning, setKeepRestRunning] = useState(() =>
-    readLS('iron-rest-keep-running', 'false') === 'true'
+    readLS('rebirth-rest-keep-running', 'false') === 'true'
   );
 
   // Bodyweight state
@@ -59,12 +59,12 @@ export default function SettingsPage() {
 
   const updateDefaultRest = (v: number) => {
     setDefaultRest(v);
-    localStorage.setItem('iron-rest-default', String(v));
+    localStorage.setItem('rebirth-rest-default', String(v));
   };
 
   const updateAutoStart = (v: boolean) => {
     setAutoStart(v);
-    localStorage.setItem('iron-rest-auto-start', String(v));
+    localStorage.setItem('rebirth-rest-auto-start', String(v));
     if (v && typeof Notification !== 'undefined' && Notification.permission === 'default') {
       Notification.requestPermission();
     }
@@ -72,7 +72,7 @@ export default function SettingsPage() {
 
   const updateKeepRestRunning = (v: boolean) => {
     setKeepRestRunning(v);
-    localStorage.setItem('iron-rest-keep-running', String(v));
+    localStorage.setItem('rebirth-rest-keep-running', String(v));
   };
 
   const handleLogBodyweight = async () => {
@@ -257,7 +257,7 @@ export default function SettingsPage() {
           <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1 px-1">About</p>
           <div className="ios-section">
             <div className="ios-row justify-between">
-              <span className="text-sm font-medium">Iron</span>
+              <span className="text-sm font-medium">Rebirth</span>
               <span className="text-sm text-muted-foreground">v1.0</span>
             </div>
             <a

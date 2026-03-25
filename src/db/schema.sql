@@ -1,4 +1,4 @@
--- Iron workout tracker database schema
+-- Rebirth database schema
 
 -- Exercise library (built-in + custom)
 CREATE TABLE IF NOT EXISTS exercises (
@@ -125,3 +125,13 @@ CREATE TABLE IF NOT EXISTS workout_routine_sets (
 );
 
 CREATE INDEX IF NOT EXISTS idx_workout_routine_sets_exercise ON workout_routine_sets(workout_routine_exercise_uuid, order_index);
+
+-- Bodyweight logs
+CREATE TABLE IF NOT EXISTS bodyweight_logs (
+  uuid TEXT PRIMARY KEY,
+  weight_kg NUMERIC NOT NULL,
+  logged_at TIMESTAMP NOT NULL DEFAULT NOW(),
+  note TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_bodyweight_logs_logged_at ON bodyweight_logs(logged_at DESC);

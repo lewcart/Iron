@@ -1,4 +1,4 @@
-# Neon Database Setup for Iron
+# Neon Database Setup for Rebirth
 
 ## Quick Setup (5 minutes)
 
@@ -6,7 +6,7 @@
 
 1. Go to [Neon Console](https://console.neon.tech)
 2. Click **"Create Project"**
-3. Name it: `iron-workout-tracker`
+3. Name it: `rebirth`
 4. Select region: **US East (Ohio)** (or closest to you)
 5. Click **"Create Project"**
 
@@ -23,7 +23,7 @@ postgresql://[user]:[password]@[endpoint].neon.tech/[database]?sslmode=require
 ### 3. Configure Vercel Environment Variables
 
 1. Go to your [Vercel Dashboard](https://vercel.com/dashboard)
-2. Find the **Iron** project
+2. Find the **Rebirth** project
 3. Go to **Settings** → **Environment Variables**
 4. Add two variables:
    - **Name:** `POSTGRES_URL`
@@ -98,7 +98,7 @@ To run the app locally with Neon:
 After deployment and database setup:
 
 1. Visit your Vercel deployment URL
-2. You should see the Iron web UI
+2. You should see the Rebirth web UI
 3. Go to `/api/health` (if you add a health check endpoint) or just browse exercises
 
 To test the CLI:

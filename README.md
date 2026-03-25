@@ -1,10 +1,10 @@
-# Iron
+# Rebirth
 
-Personal workout tracking app - CLI-first architecture.
+Personal body & identity tracking app — training, nutrition, HRT, measurements, and wellbeing.
 
 ## Overview
 
-Iron is a personal-use web app for tracking workouts, exercises, and progress. Inspired by the iOS app [Iron Workout Tracker](https://github.com/karimknaebel/Iron).
+Rebirth is a holistic body transformation tracker covering workout logging, body measurements, nutrition, HRT, and identity/wellbeing goals. CLI-first architecture.
 
 ## Key Features
 
@@ -13,13 +13,14 @@ Iron is a personal-use web app for tracking workouts, exercises, and progress. I
 - **Workout Tracking**: Log sets, reps, weight, RPE
 - **Workout Plans**: Create reusable workout routines
 - **History & Stats**: Track progress, personal records, 1RM estimates
+- **Bodyweight Tracking**: Log weight over time with unit toggle (kg/lbs)
 
 ## Tech Stack
 
 - **Frontend**: Next.js 15 + React 19 + TypeScript
-- **Database**: SQLite (better-sqlite3)
+- **Database**: Neon PostgreSQL
 - **CLI**: Commander.js
-- **Deployment**: Vercel
+- **Deployment**: Vercel (post-MVP)
 
 ## Getting Started
 
@@ -50,22 +51,22 @@ npm run cli -- --help
 
 ```bash
 # Start a workout
-iron start-workout
+rebirth start-workout
 
 # Add exercise to current workout
-iron add-exercise <exercise-name>
+rebirth add-exercise <exercise-name>
 
 # Log a set
-iron log-set <weight> <reps>
+rebirth log-set <weight> <reps>
 
 # Finish workout
-iron finish-workout
+rebirth finish-workout
 
 # View history
-iron list-workouts
+rebirth list-workouts
 
 # List exercises
-iron list-exercises
+rebirth list-exercises
 ```
 
 ## Architecture
@@ -78,7 +79,7 @@ Every meaningful action is accessible via CLI:
 - Workout plans (create, manage routines)
 - History queries (workouts, stats, PRs)
 
-This enables automation tools (Zephyr, notion-daemon, Claude Code) to interact with Iron without touching the UI.
+This enables automation tools (Zephyr, notion-daemon, Claude Code) to interact with Rebirth without touching the UI.
 
 ### Data Model
 
@@ -88,6 +89,7 @@ This enables automation tools (Zephyr, notion-daemon, Claude Code) to interact w
 - **WorkoutSets**: Individual sets with weight, reps, RPE
 - **WorkoutPlans**: Templates for workout routines
 - **WorkoutRoutines**: Days/sessions within a plan
+- **BodyweightLogs**: Weight entries over time
 
 ## Development
 

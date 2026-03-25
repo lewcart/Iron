@@ -49,7 +49,7 @@ export async function GET(request: Request) {
     return new NextResponse(rows.join('\n'), {
       headers: {
         'Content-Type': 'text/csv',
-        'Content-Disposition': `attachment; filename="iron-workouts-${dateStamp()}.csv"`,
+        'Content-Disposition': `attachment; filename="rebirth-workouts-${dateStamp()}.csv"`,
       },
     });
   }
@@ -57,7 +57,7 @@ export async function GET(request: Request) {
   return new NextResponse(JSON.stringify(workouts, null, 2), {
     headers: {
       'Content-Type': 'application/json',
-      'Content-Disposition': `attachment; filename="iron-workouts-${dateStamp()}.json"`,
+      'Content-Disposition': `attachment; filename="rebirth-workouts-${dateStamp()}.json"`,
     },
   });
 }
