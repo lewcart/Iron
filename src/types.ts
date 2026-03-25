@@ -116,3 +116,66 @@ export interface BodyweightLog {
   logged_at: string;
   note: string | null;
 }
+
+// ===== REBIRTH MODULES 2–6 =====
+
+export interface BodySpecLog {
+  uuid: string;
+  height_cm: number | null;
+  weight_kg: number | null;
+  body_fat_pct: number | null;
+  lean_mass_kg: number | null;
+  notes: string | null;
+  measured_at: string;
+}
+
+export type MeasurementSite =
+  | 'chest' | 'waist' | 'hips' | 'neck'
+  | 'left_bicep' | 'right_bicep'
+  | 'left_forearm' | 'right_forearm'
+  | 'left_thigh' | 'right_thigh'
+  | 'left_calf' | 'right_calf'
+  | 'shoulders' | 'abdomen';
+
+export interface MeasurementLog {
+  uuid: string;
+  site: string;
+  value_cm: number;
+  notes: string | null;
+  measured_at: string;
+}
+
+export type MealType = 'breakfast' | 'lunch' | 'dinner' | 'snack' | 'other';
+
+export interface NutritionLog {
+  uuid: string;
+  logged_at: string;
+  meal_type: MealType | null;
+  calories: number | null;
+  protein_g: number | null;
+  carbs_g: number | null;
+  fat_g: number | null;
+  notes: string | null;
+}
+
+export type HrtRoute = 'injection' | 'topical' | 'oral' | 'patch' | 'other';
+
+export interface HrtLog {
+  uuid: string;
+  logged_at: string;
+  medication: string;
+  dose_mg: number | null;
+  route: HrtRoute | null;
+  notes: string | null;
+}
+
+export interface WellbeingLog {
+  uuid: string;
+  logged_at: string;
+  mood: number | null;       // 1–10
+  energy: number | null;     // 1–10
+  sleep_hours: number | null;
+  sleep_quality: number | null; // 1–10
+  stress: number | null;     // 1–10
+  notes: string | null;
+}

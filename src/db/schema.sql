@@ -125,3 +125,80 @@ CREATE TABLE IF NOT EXISTS workout_routine_sets (
 );
 
 CREATE INDEX IF NOT EXISTS idx_workout_routine_sets_exercise ON workout_routine_sets(workout_routine_exercise_uuid, order_index);
+
+-- Bodyweight logs (Module 1 — was missing from schema)
+CREATE TABLE IF NOT EXISTS bodyweight_logs (
+  uuid TEXT PRIMARY KEY,
+  weight_kg NUMERIC NOT NULL,
+  logged_at TIMESTAMP NOT NULL DEFAULT NOW(),
+  note TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_bodyweight_logs_logged_at ON bodyweight_logs(logged_at DESC);
+
+-- ===== REBIRTH MODULES 2–6 =====
+
+-- Module 2: Body spec logs (height, body fat %, lean mass, etc.)
+CREATE TABLE IF NOT EXISTS body_spec_logs (
+  uuid TEXT PRIMARY KEY,
+  height_cm NUMERIC,
+  weight_kg NUMERIC,
+  body_fat_pct NUMERIC,
+  lean_mass_kg NUMERIC,
+  notes TEXT,
+  measured_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_body_spec_logs_measured_at ON body_spec_logs(measured_at DESC);
+
+-- Module 3: Circumference measurements (chest, waist, hips, etc.)
+CREATE TABLE IF NOT EXISTS measurement_logs (
+  uuid TEXT PRIMARY KEY,
+  site TEXT NOT NULL,
+  value_cm NUMERIC NOT NULL,
+  notes TEXT,
+  measured_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_measurement_logs_measured_at ON measurement_logs(measured_at DESC);
+CREATE INDEX IF NOT EXISTS idx_measurement_logs_site ON measurement_logs(site, measured_at DESC);
+
+-- Module 4: Nutrition logs
+CREATE TABLE IF NOT EXISTS nutrition_logs (
+  uuid TEXT PRIMARY KEY,
+  logged_at TIMESTAMP NOT NULL DEFAULT NOW(),
+  meal_type TEXT CHECK(meal_type IS NULL OR meal_type IN ('breakfast', 'lunch', 'dinner', 'snack', 'other')),
+  calories NUMERIC,
+  protein_g NUMERIC,
+  carbs_g NUMERIC,
+  fat_g NUMERIC,
+  notes TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_nutrition_logs_logged_at ON nutrition_logs(logged_at DESC);
+
+-- Module 5: HRT logs
+CREATE TABLE IF NOT EXISTS hrt_logs (
+  uuid TEXT PRIMARY KEY,
+  logged_at TIMESTAMP NOT NULL DEFAULT NOW(),
+  medication TEXT NOT NULL,
+  dose_mg NUMERIC,
+  route TEXT CHECK(route IS NULL OR route IN ('injection', 'topical', 'oral', 'patch', 'other')),
+  notes TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_hrt_logs_logged_at ON hrt_logs(logged_at DESC);
+
+-- Module 6: Wellbeing logs
+CREATE TABLE IF NOT EXISTS wellbeing_logs (
+  uuid TEXT PRIMARY KEY,
+  logged_at TIMESTAMP NOT NULL DEFAULT NOW(),
+  mood INTEGER CHECK(mood IS NULL OR (mood BETWEEN 1 AND 10)),
+  energy INTEGER CHECK(energy IS NULL OR (energy BETWEEN 1 AND 10)),
+  sleep_hours NUMERIC,
+  sleep_quality INTEGER CHECK(sleep_quality IS NULL OR (sleep_quality BETWEEN 1 AND 10)),
+  stress INTEGER CHECK(stress IS NULL OR (stress BETWEEN 1 AND 10)),
+  notes TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_wellbeing_logs_logged_at ON wellbeing_logs(logged_at DESC);

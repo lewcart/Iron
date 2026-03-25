@@ -10,6 +10,11 @@ import type {
   WorkoutRoutineExercise,
   WorkoutRoutineSet,
   BodyweightLog,
+  BodySpecLog,
+  MeasurementLog,
+  NutritionLog,
+  HrtLog,
+  WellbeingLog,
 } from '../types';
 import { calculatePRs } from '../lib/pr';
 
@@ -1120,4 +1125,293 @@ export async function getLatestBodyweight(): Promise<BodyweightLog | null> {
 
 export async function deleteBodyweightLog(uuid: string): Promise<void> {
   await query(`DELETE FROM bodyweight_logs WHERE uuid = $1`, [uuid]);
+}
+
+// ===== BODY SPEC (Module 2) =====
+
+function parseBodySpecLog(row: DbRow): BodySpecLog {
+  return {
+    uuid: row.uuid as string,
+    height_cm: row.height_cm != null ? parseFloat(row.height_cm as string) : null,
+    weight_kg: row.weight_kg != null ? parseFloat(row.weight_kg as string) : null,
+    body_fat_pct: row.body_fat_pct != null ? parseFloat(row.body_fat_pct as string) : null,
+    lean_mass_kg: row.lean_mass_kg != null ? parseFloat(row.lean_mass_kg as string) : null,
+    notes: row.notes as string | null,
+    measured_at: row.measured_at as string,
+  };
+}
+
+export async function createBodySpecLog(data: Omit<BodySpecLog, 'uuid' | 'measured_at'> & { measured_at?: string }): Promise<BodySpecLog> {
+  const uuid = randomUUID();
+  const row = await queryOne(
+    `INSERT INTO body_spec_logs (uuid, height_cm, weight_kg, body_fat_pct, lean_mass_kg, notes, measured_at)
+     VALUES ($1, $2, $3, $4, $5, $6, COALESCE($7::TIMESTAMP, NOW())) RETURNING *`,
+    [uuid, data.height_cm ?? null, data.weight_kg ?? null, data.body_fat_pct ?? null, data.lean_mass_kg ?? null, data.notes ?? null, data.measured_at ?? null],
+  );
+  return parseBodySpecLog(row!);
+}
+
+export async function listBodySpecLogs(limit = 90): Promise<BodySpecLog[]> {
+  const rows = await query(`SELECT * FROM body_spec_logs ORDER BY measured_at DESC LIMIT $1`, [limit]);
+  return rows.map(parseBodySpecLog);
+}
+
+export async function getBodySpecLog(uuid: string): Promise<BodySpecLog | null> {
+  const row = await queryOne(`SELECT * FROM body_spec_logs WHERE uuid = $1`, [uuid]);
+  return row ? parseBodySpecLog(row) : null;
+}
+
+export async function updateBodySpecLog(uuid: string, data: Partial<Omit<BodySpecLog, 'uuid'>>): Promise<BodySpecLog | null> {
+  const fields: string[] = [];
+  const params: unknown[] = [];
+  let i = 1;
+  for (const [key, val] of Object.entries(data)) {
+    fields.push(`${key} = $${i++}`);
+    params.push(val);
+  }
+  if (fields.length === 0) return getBodySpecLog(uuid);
+  params.push(uuid);
+  const row = await queryOne(
+    `UPDATE body_spec_logs SET ${fields.join(', ')} WHERE uuid = $${i} RETURNING *`,
+    params,
+  );
+  return row ? parseBodySpecLog(row) : null;
+}
+
+export async function deleteBodySpecLog(uuid: string): Promise<void> {
+  await query(`DELETE FROM body_spec_logs WHERE uuid = $1`, [uuid]);
+}
+
+// ===== MEASUREMENTS (Module 3) =====
+
+function parseMeasurementLog(row: DbRow): MeasurementLog {
+  return {
+    uuid: row.uuid as string,
+    site: row.site as string,
+    value_cm: parseFloat(row.value_cm as string),
+    notes: row.notes as string | null,
+    measured_at: row.measured_at as string,
+  };
+}
+
+export async function createMeasurementLog(data: Omit<MeasurementLog, 'uuid' | 'measured_at'> & { measured_at?: string }): Promise<MeasurementLog> {
+  const uuid = randomUUID();
+  const row = await queryOne(
+    `INSERT INTO measurement_logs (uuid, site, value_cm, notes, measured_at)
+     VALUES ($1, $2, $3, $4, COALESCE($5::TIMESTAMP, NOW())) RETURNING *`,
+    [uuid, data.site, data.value_cm, data.notes ?? null, data.measured_at ?? null],
+  );
+  return parseMeasurementLog(row!);
+}
+
+export async function listMeasurementLogs(options: { limit?: number; site?: string } = {}): Promise<MeasurementLog[]> {
+  const { limit = 90, site } = options;
+  if (site) {
+    const rows = await query(
+      `SELECT * FROM measurement_logs WHERE site = $1 ORDER BY measured_at DESC LIMIT $2`,
+      [site, limit],
+    );
+    return rows.map(parseMeasurementLog);
+  }
+  const rows = await query(`SELECT * FROM measurement_logs ORDER BY measured_at DESC LIMIT $1`, [limit]);
+  return rows.map(parseMeasurementLog);
+}
+
+export async function getMeasurementLog(uuid: string): Promise<MeasurementLog | null> {
+  const row = await queryOne(`SELECT * FROM measurement_logs WHERE uuid = $1`, [uuid]);
+  return row ? parseMeasurementLog(row) : null;
+}
+
+export async function updateMeasurementLog(uuid: string, data: Partial<Omit<MeasurementLog, 'uuid'>>): Promise<MeasurementLog | null> {
+  const fields: string[] = [];
+  const params: unknown[] = [];
+  let i = 1;
+  for (const [key, val] of Object.entries(data)) {
+    fields.push(`${key} = $${i++}`);
+    params.push(val);
+  }
+  if (fields.length === 0) return getMeasurementLog(uuid);
+  params.push(uuid);
+  const row = await queryOne(
+    `UPDATE measurement_logs SET ${fields.join(', ')} WHERE uuid = $${i} RETURNING *`,
+    params,
+  );
+  return row ? parseMeasurementLog(row) : null;
+}
+
+export async function deleteMeasurementLog(uuid: string): Promise<void> {
+  await query(`DELETE FROM measurement_logs WHERE uuid = $1`, [uuid]);
+}
+
+// ===== NUTRITION (Module 4) =====
+
+function parseNutritionLog(row: DbRow): NutritionLog {
+  return {
+    uuid: row.uuid as string,
+    logged_at: row.logged_at as string,
+    meal_type: row.meal_type as NutritionLog['meal_type'],
+    calories: row.calories != null ? parseFloat(row.calories as string) : null,
+    protein_g: row.protein_g != null ? parseFloat(row.protein_g as string) : null,
+    carbs_g: row.carbs_g != null ? parseFloat(row.carbs_g as string) : null,
+    fat_g: row.fat_g != null ? parseFloat(row.fat_g as string) : null,
+    notes: row.notes as string | null,
+  };
+}
+
+export async function createNutritionLog(data: Omit<NutritionLog, 'uuid' | 'logged_at'> & { logged_at?: string }): Promise<NutritionLog> {
+  const uuid = randomUUID();
+  const row = await queryOne(
+    `INSERT INTO nutrition_logs (uuid, logged_at, meal_type, calories, protein_g, carbs_g, fat_g, notes)
+     VALUES ($1, COALESCE($2::TIMESTAMP, NOW()), $3, $4, $5, $6, $7, $8) RETURNING *`,
+    [uuid, data.logged_at ?? null, data.meal_type ?? null, data.calories ?? null, data.protein_g ?? null, data.carbs_g ?? null, data.fat_g ?? null, data.notes ?? null],
+  );
+  return parseNutritionLog(row!);
+}
+
+export async function listNutritionLogs(options: { limit?: number; from?: string; to?: string } = {}): Promise<NutritionLog[]> {
+  const { limit = 90, from, to } = options;
+  const params: unknown[] = [];
+  let sql = 'SELECT * FROM nutrition_logs WHERE 1=1';
+  if (from) { sql += ` AND logged_at >= $${params.length + 1}`; params.push(from); }
+  if (to) { sql += ` AND logged_at <= $${params.length + 1}`; params.push(to); }
+  sql += ` ORDER BY logged_at DESC LIMIT $${params.length + 1}`;
+  params.push(limit);
+  const rows = await query(sql, params);
+  return rows.map(parseNutritionLog);
+}
+
+export async function getNutritionLog(uuid: string): Promise<NutritionLog | null> {
+  const row = await queryOne(`SELECT * FROM nutrition_logs WHERE uuid = $1`, [uuid]);
+  return row ? parseNutritionLog(row) : null;
+}
+
+export async function updateNutritionLog(uuid: string, data: Partial<Omit<NutritionLog, 'uuid'>>): Promise<NutritionLog | null> {
+  const fields: string[] = [];
+  const params: unknown[] = [];
+  let i = 1;
+  for (const [key, val] of Object.entries(data)) {
+    fields.push(`${key} = $${i++}`);
+    params.push(val);
+  }
+  if (fields.length === 0) return getNutritionLog(uuid);
+  params.push(uuid);
+  const row = await queryOne(
+    `UPDATE nutrition_logs SET ${fields.join(', ')} WHERE uuid = $${i} RETURNING *`,
+    params,
+  );
+  return row ? parseNutritionLog(row) : null;
+}
+
+export async function deleteNutritionLog(uuid: string): Promise<void> {
+  await query(`DELETE FROM nutrition_logs WHERE uuid = $1`, [uuid]);
+}
+
+// ===== HRT (Module 5) =====
+
+function parseHrtLog(row: DbRow): HrtLog {
+  return {
+    uuid: row.uuid as string,
+    logged_at: row.logged_at as string,
+    medication: row.medication as string,
+    dose_mg: row.dose_mg != null ? parseFloat(row.dose_mg as string) : null,
+    route: row.route as HrtLog['route'],
+    notes: row.notes as string | null,
+  };
+}
+
+export async function createHrtLog(data: Omit<HrtLog, 'uuid' | 'logged_at'> & { logged_at?: string }): Promise<HrtLog> {
+  const uuid = randomUUID();
+  const row = await queryOne(
+    `INSERT INTO hrt_logs (uuid, logged_at, medication, dose_mg, route, notes)
+     VALUES ($1, COALESCE($2::TIMESTAMP, NOW()), $3, $4, $5, $6) RETURNING *`,
+    [uuid, data.logged_at ?? null, data.medication, data.dose_mg ?? null, data.route ?? null, data.notes ?? null],
+  );
+  return parseHrtLog(row!);
+}
+
+export async function listHrtLogs(limit = 90): Promise<HrtLog[]> {
+  const rows = await query(`SELECT * FROM hrt_logs ORDER BY logged_at DESC LIMIT $1`, [limit]);
+  return rows.map(parseHrtLog);
+}
+
+export async function getHrtLog(uuid: string): Promise<HrtLog | null> {
+  const row = await queryOne(`SELECT * FROM hrt_logs WHERE uuid = $1`, [uuid]);
+  return row ? parseHrtLog(row) : null;
+}
+
+export async function updateHrtLog(uuid: string, data: Partial<Omit<HrtLog, 'uuid'>>): Promise<HrtLog | null> {
+  const fields: string[] = [];
+  const params: unknown[] = [];
+  let i = 1;
+  for (const [key, val] of Object.entries(data)) {
+    fields.push(`${key} = $${i++}`);
+    params.push(val);
+  }
+  if (fields.length === 0) return getHrtLog(uuid);
+  params.push(uuid);
+  const row = await queryOne(
+    `UPDATE hrt_logs SET ${fields.join(', ')} WHERE uuid = $${i} RETURNING *`,
+    params,
+  );
+  return row ? parseHrtLog(row) : null;
+}
+
+export async function deleteHrtLog(uuid: string): Promise<void> {
+  await query(`DELETE FROM hrt_logs WHERE uuid = $1`, [uuid]);
+}
+
+// ===== WELLBEING (Module 6) =====
+
+function parseWellbeingLog(row: DbRow): WellbeingLog {
+  return {
+    uuid: row.uuid as string,
+    logged_at: row.logged_at as string,
+    mood: row.mood != null ? parseInt(row.mood as string, 10) : null,
+    energy: row.energy != null ? parseInt(row.energy as string, 10) : null,
+    sleep_hours: row.sleep_hours != null ? parseFloat(row.sleep_hours as string) : null,
+    sleep_quality: row.sleep_quality != null ? parseInt(row.sleep_quality as string, 10) : null,
+    stress: row.stress != null ? parseInt(row.stress as string, 10) : null,
+    notes: row.notes as string | null,
+  };
+}
+
+export async function createWellbeingLog(data: Omit<WellbeingLog, 'uuid' | 'logged_at'> & { logged_at?: string }): Promise<WellbeingLog> {
+  const uuid = randomUUID();
+  const row = await queryOne(
+    `INSERT INTO wellbeing_logs (uuid, logged_at, mood, energy, sleep_hours, sleep_quality, stress, notes)
+     VALUES ($1, COALESCE($2::TIMESTAMP, NOW()), $3, $4, $5, $6, $7, $8) RETURNING *`,
+    [uuid, data.logged_at ?? null, data.mood ?? null, data.energy ?? null, data.sleep_hours ?? null, data.sleep_quality ?? null, data.stress ?? null, data.notes ?? null],
+  );
+  return parseWellbeingLog(row!);
+}
+
+export async function listWellbeingLogs(limit = 90): Promise<WellbeingLog[]> {
+  const rows = await query(`SELECT * FROM wellbeing_logs ORDER BY logged_at DESC LIMIT $1`, [limit]);
+  return rows.map(parseWellbeingLog);
+}
+
+export async function getWellbeingLog(uuid: string): Promise<WellbeingLog | null> {
+  const row = await queryOne(`SELECT * FROM wellbeing_logs WHERE uuid = $1`, [uuid]);
+  return row ? parseWellbeingLog(row) : null;
+}
+
+export async function updateWellbeingLog(uuid: string, data: Partial<Omit<WellbeingLog, 'uuid'>>): Promise<WellbeingLog | null> {
+  const fields: string[] = [];
+  const params: unknown[] = [];
+  let i = 1;
+  for (const [key, val] of Object.entries(data)) {
+    fields.push(`${key} = $${i++}`);
+    params.push(val);
+  }
+  if (fields.length === 0) return getWellbeingLog(uuid);
+  params.push(uuid);
+  const row = await queryOne(
+    `UPDATE wellbeing_logs SET ${fields.join(', ')} WHERE uuid = $${i} RETURNING *`,
+    params,
+  );
+  return row ? parseWellbeingLog(row) : null;
+}
+
+export async function deleteWellbeingLog(uuid: string): Promise<void> {
+  await query(`DELETE FROM wellbeing_logs WHERE uuid = $1`, [uuid]);
 }
