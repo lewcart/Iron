@@ -146,6 +146,7 @@ export interface MeasurementLog {
 }
 
 export type MealType = 'breakfast' | 'lunch' | 'dinner' | 'snack' | 'other';
+export type NutritionLogStatus = 'planned' | 'deviation' | 'added';
 
 export interface NutritionLog {
   uuid: string;
@@ -156,6 +157,28 @@ export interface NutritionLog {
   carbs_g: number | null;
   fat_g: number | null;
   notes: string | null;
+  meal_name: string | null;
+  template_meal_id: string | null;
+  status: NutritionLogStatus | null;
+}
+
+export interface NutritionWeekMeal {
+  uuid: string;
+  day_of_week: number; // 0=Mon … 6=Sun
+  meal_slot: string;
+  meal_name: string;
+  protein_g: number | null;
+  calories: number | null;
+  quality_rating: number | null; // 1–5
+  sort_order: number;
+}
+
+export interface NutritionDayNote {
+  uuid: string;
+  date: string; // YYYY-MM-DD
+  hydration_ml: number | null;
+  notes: string | null;
+  updated_at: string;
 }
 
 export type HrtRoute = 'injection' | 'topical' | 'oral' | 'patch' | 'other';

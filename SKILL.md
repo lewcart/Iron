@@ -308,6 +308,14 @@ curl -X DELETE -H "Authorization: Bearer $REBIRTH_API_KEY" \
   "$REBIRTH_BASE/api/nutrition/<uuid>"
 ```
 
+### Additional fields (Standard Week)
+
+| field | type | notes |
+|---|---|---|
+| meal_name | text | optional — human name of the meal logged |
+| template_meal_id | text | optional — uuid of the `nutrition_week_meals` template |
+| status | text | optional — `planned`, `deviation`, or `added` |
+
 ### Daily totals (compute client-side)
 
 ```bash
@@ -320,6 +328,92 @@ curl -s -H "Authorization: Bearer $REBIRTH_API_KEY" \
       total_carbs_g: [.[].carbs_g // 0] | add,
       total_fat_g: [.[].fat_g // 0] | add
     }'
+```
+
+---
+
+## Module 4b — Nutrition: Standard Week
+
+Meal templates that auto-populate the daily Today view.
+
+`day_of_week`: 0=Mon, 1=Tue, 2=Wed, 3=Thu, 4=Fri, 5=Sat, 6=Sun
+
+### Schema — nutrition_week_meals
+
+| field | type | notes |
+|---|---|---|
+| uuid | text | auto |
+| day_of_week | integer | 0–6 (Mon–Sun) |
+| meal_slot | text | optional slot label, e.g. "breakfast" |
+| meal_name | text | required |
+| protein_g | numeric | optional |
+| calories | numeric | optional |
+| quality_rating | integer | optional, 1–5 |
+| sort_order | integer | display order within day |
+
+### Endpoints — week meals
+
+```bash
+# List all templates (all days)
+curl -H "Authorization: Bearer $REBIRTH_API_KEY" \
+  "$REBIRTH_BASE/api/nutrition/week"
+
+# List templates for one day (e.g. Monday = 0)
+curl -H "Authorization: Bearer $REBIRTH_API_KEY" \
+  "$REBIRTH_BASE/api/nutrition/week?day=0"
+
+# Create a template meal
+curl -X POST -H "Authorization: Bearer $REBIRTH_API_KEY" \
+  -H "Content-Type: application/json" \
+  "$REBIRTH_BASE/api/nutrition/week" \
+  -d '{
+    "day_of_week": 0,
+    "meal_slot": "breakfast",
+    "meal_name": "Oats + whey",
+    "protein_g": 45,
+    "calories": 550,
+    "quality_rating": 4
+  }'
+
+# Update a template meal
+curl -X PATCH -H "Authorization: Bearer $REBIRTH_API_KEY" \
+  -H "Content-Type: application/json" \
+  "$REBIRTH_BASE/api/nutrition/week/<uuid>" \
+  -d '{"protein_g":50,"quality_rating":5}'
+
+# Delete a template meal
+curl -X DELETE -H "Authorization: Bearer $REBIRTH_API_KEY" \
+  "$REBIRTH_BASE/api/nutrition/week/<uuid>"
+```
+
+---
+
+## Module 4c — Nutrition: Day Notes
+
+Per-day hydration tracking and notes.
+
+### Schema — nutrition_day_notes
+
+| field | type | notes |
+|---|---|---|
+| uuid | text | auto |
+| date | text | YYYY-MM-DD, unique per day |
+| hydration_ml | integer | optional |
+| notes | text | optional |
+| updated_at | timestamp | auto-updated on upsert |
+
+### Endpoints — day notes
+
+```bash
+# Get day note for a date
+curl -H "Authorization: Bearer $REBIRTH_API_KEY" \
+  "$REBIRTH_BASE/api/nutrition/day-notes?date=2026-03-26"
+
+# Upsert day note (creates or updates)
+curl -X POST -H "Authorization: Bearer $REBIRTH_API_KEY" \
+  -H "Content-Type: application/json" \
+  "$REBIRTH_BASE/api/nutrition/day-notes" \
+  -d '{"date":"2026-03-26","hydration_ml":2500,"notes":"solid day, hit protein"}'
 ```
 
 ---

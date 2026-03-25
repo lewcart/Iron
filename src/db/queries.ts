@@ -13,6 +13,8 @@ import type {
   BodySpecLog,
   MeasurementLog,
   NutritionLog,
+  NutritionWeekMeal,
+  NutritionDayNote,
   HrtLog,
   WellbeingLog,
 } from '../types';
@@ -1255,15 +1257,18 @@ function parseNutritionLog(row: DbRow): NutritionLog {
     carbs_g: row.carbs_g != null ? parseFloat(row.carbs_g as string) : null,
     fat_g: row.fat_g != null ? parseFloat(row.fat_g as string) : null,
     notes: row.notes as string | null,
+    meal_name: row.meal_name as string | null,
+    template_meal_id: row.template_meal_id as string | null,
+    status: row.status as NutritionLog['status'],
   };
 }
 
 export async function createNutritionLog(data: Omit<NutritionLog, 'uuid' | 'logged_at'> & { logged_at?: string }): Promise<NutritionLog> {
   const uuid = randomUUID();
   const row = await queryOne(
-    `INSERT INTO nutrition_logs (uuid, logged_at, meal_type, calories, protein_g, carbs_g, fat_g, notes)
-     VALUES ($1, COALESCE($2::TIMESTAMP, NOW()), $3, $4, $5, $6, $7, $8) RETURNING *`,
-    [uuid, data.logged_at ?? null, data.meal_type ?? null, data.calories ?? null, data.protein_g ?? null, data.carbs_g ?? null, data.fat_g ?? null, data.notes ?? null],
+    `INSERT INTO nutrition_logs (uuid, logged_at, meal_type, calories, protein_g, carbs_g, fat_g, notes, meal_name, template_meal_id, status)
+     VALUES ($1, COALESCE($2::TIMESTAMP, NOW()), $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING *`,
+    [uuid, data.logged_at ?? null, data.meal_type ?? null, data.calories ?? null, data.protein_g ?? null, data.carbs_g ?? null, data.fat_g ?? null, data.notes ?? null, data.meal_name ?? null, data.template_meal_id ?? null, data.status ?? null],
   );
   return parseNutritionLog(row!);
 }
@@ -1304,6 +1309,96 @@ export async function updateNutritionLog(uuid: string, data: Partial<Omit<Nutrit
 
 export async function deleteNutritionLog(uuid: string): Promise<void> {
   await query(`DELETE FROM nutrition_logs WHERE uuid = $1`, [uuid]);
+}
+
+// ===== NUTRITION WEEK MEALS =====
+
+function parseNutritionWeekMeal(row: DbRow): NutritionWeekMeal {
+  return {
+    uuid: row.uuid as string,
+    day_of_week: row.day_of_week as number,
+    meal_slot: row.meal_slot as string,
+    meal_name: row.meal_name as string,
+    protein_g: row.protein_g != null ? parseFloat(row.protein_g as string) : null,
+    calories: row.calories != null ? parseFloat(row.calories as string) : null,
+    quality_rating: row.quality_rating != null ? parseInt(row.quality_rating as string, 10) : null,
+    sort_order: row.sort_order as number,
+  };
+}
+
+export async function createNutritionWeekMeal(data: Omit<NutritionWeekMeal, 'uuid'>): Promise<NutritionWeekMeal> {
+  const uuid = randomUUID();
+  const row = await queryOne(
+    `INSERT INTO nutrition_week_meals (uuid, day_of_week, meal_slot, meal_name, protein_g, calories, quality_rating, sort_order)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
+    [uuid, data.day_of_week, data.meal_slot, data.meal_name, data.protein_g ?? null, data.calories ?? null, data.quality_rating ?? null, data.sort_order ?? 0],
+  );
+  return parseNutritionWeekMeal(row!);
+}
+
+export async function listNutritionWeekMeals(day_of_week?: number): Promise<NutritionWeekMeal[]> {
+  if (day_of_week != null) {
+    const rows = await query(`SELECT * FROM nutrition_week_meals WHERE day_of_week = $1 ORDER BY sort_order ASC, created_at ASC`, [day_of_week]);
+    return rows.map(parseNutritionWeekMeal);
+  }
+  const rows = await query(`SELECT * FROM nutrition_week_meals ORDER BY day_of_week ASC, sort_order ASC, created_at ASC`, []);
+  return rows.map(parseNutritionWeekMeal);
+}
+
+export async function updateNutritionWeekMeal(uuid: string, data: Partial<Omit<NutritionWeekMeal, 'uuid'>>): Promise<NutritionWeekMeal | null> {
+  const fields: string[] = [];
+  const params: unknown[] = [];
+  let i = 1;
+  for (const [key, val] of Object.entries(data)) {
+    fields.push(`${key} = $${i++}`);
+    params.push(val);
+  }
+  if (fields.length === 0) {
+    const row = await queryOne(`SELECT * FROM nutrition_week_meals WHERE uuid = $1`, [uuid]);
+    return row ? parseNutritionWeekMeal(row) : null;
+  }
+  params.push(uuid);
+  const row = await queryOne(
+    `UPDATE nutrition_week_meals SET ${fields.join(', ')} WHERE uuid = $${i} RETURNING *`,
+    params,
+  );
+  return row ? parseNutritionWeekMeal(row) : null;
+}
+
+export async function deleteNutritionWeekMeal(uuid: string): Promise<void> {
+  await query(`DELETE FROM nutrition_week_meals WHERE uuid = $1`, [uuid]);
+}
+
+// ===== NUTRITION DAY NOTES =====
+
+function parseNutritionDayNote(row: DbRow): NutritionDayNote {
+  return {
+    uuid: row.uuid as string,
+    date: row.date as string,
+    hydration_ml: row.hydration_ml != null ? parseInt(row.hydration_ml as string, 10) : null,
+    notes: row.notes as string | null,
+    updated_at: row.updated_at as string,
+  };
+}
+
+export async function getNutritionDayNote(date: string): Promise<NutritionDayNote | null> {
+  const row = await queryOne(`SELECT * FROM nutrition_day_notes WHERE date = $1`, [date]);
+  return row ? parseNutritionDayNote(row) : null;
+}
+
+export async function upsertNutritionDayNote(date: string, data: { hydration_ml?: number | null; notes?: string | null }): Promise<NutritionDayNote> {
+  const uuid = randomUUID();
+  const row = await queryOne(
+    `INSERT INTO nutrition_day_notes (uuid, date, hydration_ml, notes, updated_at)
+     VALUES ($1, $2, $3, $4, NOW())
+     ON CONFLICT (date) DO UPDATE SET
+       hydration_ml = COALESCE(EXCLUDED.hydration_ml, nutrition_day_notes.hydration_ml),
+       notes = COALESCE(EXCLUDED.notes, nutrition_day_notes.notes),
+       updated_at = NOW()
+     RETURNING *`,
+    [uuid, date, data.hydration_ml ?? null, data.notes ?? null],
+  );
+  return parseNutritionDayNote(row!);
 }
 
 // ===== HRT (Module 5) =====

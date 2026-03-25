@@ -27,6 +27,9 @@ export async function POST(request: NextRequest) {
     carbs_g: body.carbs_g != null ? parseFloat(body.carbs_g) : null,
     fat_g: body.fat_g != null ? parseFloat(body.fat_g) : null,
     notes: body.notes ?? null,
+    meal_name: body.meal_name ?? null,
+    template_meal_id: body.template_meal_id ?? null,
+    status: body.status ?? null,
   });
   return NextResponse.json(log, { status: 201 });
 }

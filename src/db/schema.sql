@@ -177,6 +177,35 @@ CREATE TABLE IF NOT EXISTS nutrition_logs (
 
 CREATE INDEX IF NOT EXISTS idx_nutrition_logs_logged_at ON nutrition_logs(logged_at DESC);
 
+-- Extend nutrition_logs for Standard Week tracking
+ALTER TABLE nutrition_logs ADD COLUMN IF NOT EXISTS meal_name TEXT;
+ALTER TABLE nutrition_logs ADD COLUMN IF NOT EXISTS template_meal_id TEXT;
+ALTER TABLE nutrition_logs ADD COLUMN IF NOT EXISTS status TEXT CHECK(status IS NULL OR status IN ('planned', 'deviation', 'added'));
+
+-- Standard Week meal templates
+CREATE TABLE IF NOT EXISTS nutrition_week_meals (
+  uuid TEXT PRIMARY KEY,
+  day_of_week INTEGER NOT NULL CHECK(day_of_week BETWEEN 0 AND 6),
+  meal_slot TEXT NOT NULL,
+  meal_name TEXT NOT NULL,
+  protein_g NUMERIC,
+  calories NUMERIC,
+  quality_rating INTEGER CHECK(quality_rating IS NULL OR quality_rating BETWEEN 1 AND 5),
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  created_at TIMESTAMP DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_nutrition_week_meals_day ON nutrition_week_meals(day_of_week, sort_order);
+
+-- Daily notes: hydration + summary per calendar day
+CREATE TABLE IF NOT EXISTS nutrition_day_notes (
+  uuid TEXT PRIMARY KEY,
+  date TEXT NOT NULL UNIQUE,
+  hydration_ml INTEGER,
+  notes TEXT,
+  updated_at TIMESTAMP DEFAULT NOW()
+);
+
 -- Module 5: HRT logs
 CREATE TABLE IF NOT EXISTS hrt_logs (
   uuid TEXT PRIMARY KEY,
