@@ -17,20 +17,47 @@ export function TabBar() {
   const pathname = usePathname();
 
   return (
-    <nav className="fixed bottom-0 left-0 right-0 z-50 bg-white/95 backdrop-blur-md border-t border-border" style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}>
+    <nav
+      className="fixed bottom-0 left-0 right-0 z-50 bg-white/95 backdrop-blur-md border-t border-border"
+      style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}
+    >
       <div className="flex items-stretch h-[49px] max-w-lg mx-auto">
         {tabs.map(({ href, label, icon: Icon }) => {
-          const active = pathname === href || (href === '/workout' && pathname.startsWith('/workout'));
+          const active =
+            pathname === href ||
+            (href === '/workout' && pathname.startsWith('/workout'));
           return (
             <Link
               key={href}
               href={href}
               className={`flex flex-col items-center justify-center flex-1 gap-0.5 text-[10px] font-medium transition-colors ${
-                active ? 'text-primary' : 'text-muted-foreground'
+                active ? 'text-trans-blue' : 'text-muted-foreground'
               }`}
             >
-              <Icon className={`h-5 w-5 ${href === '/workout' ? 'h-6 w-6' : ''}`} strokeWidth={active ? 2.5 : 1.75} />
-              {label}
+              {active && href === '/workout' ? (
+                /* Workout tab — gradient pill when active */
+                <div className="gradient-brand rounded-full p-1.5 -mt-0.5">
+                  <Icon className="h-5 w-5 text-white" strokeWidth={2.5} />
+                </div>
+              ) : (
+                <Icon
+                  className={`h-5 w-5 ${active ? 'text-trans-blue' : ''}`}
+                  strokeWidth={active ? 2.5 : 1.75}
+                  style={
+                    active
+                      ? {
+                          /* SVG gradient via filter trick — falls back to solid blue */
+                          filter: 'none',
+                        }
+                      : undefined
+                  }
+                />
+              )}
+              <span
+                className={active ? 'gradient-brand-text font-semibold' : ''}
+              >
+                {label}
+              </span>
             </Link>
           );
         })}

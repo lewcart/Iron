@@ -1,0 +1,18 @@
+{
+  "name": "Rebirth",
+  "short_name": "Rebirth",
+  "description": "Personal fitness tracker",
+  "start_url": "/workout",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#5BCEFA",
+  "theme_color": "#5BCEFA",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

@@ -6,12 +6,18 @@ import { UnitProvider } from "@/context/UnitContext";
 export const metadata: Metadata = {
   title: "Rebirth",
   description: "Personal fitness tracker",
+  manifest: "/manifest.json",
+  icons: {
+    icon: "/icon.svg",
+    apple: "/icon.svg",
+  },
 };
 
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
   viewportFit: "cover",
+  themeColor: "#5BCEFA",
 };
 
 export default function RootLayout({

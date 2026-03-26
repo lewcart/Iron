@@ -43,6 +43,15 @@ const config: Config = {
           DEFAULT: "hsl(var(--card))",
           foreground: "hsl(var(--card-foreground))",
         },
+        /* ── Brand palette ──────────────────────── */
+        "trans-blue": "#5BCEFA",
+        "trans-pink": "#F5A9B8",
+        "trans-white": "#FFFFFF",
+      },
+      backgroundImage: {
+        "brand-gradient": "linear-gradient(135deg, #5BCEFA 0%, #F5A9B8 100%)",
+        "brand-gradient-reverse": "linear-gradient(135deg, #F5A9B8 0%, #5BCEFA 100%)",
+        "brand-stripe": "linear-gradient(135deg, #5BCEFA 0%, #ffffff 50%, #F5A9B8 100%)",
       },
       borderRadius: {
         lg: "var(--radius)",

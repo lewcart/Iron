@@ -4,54 +4,56 @@
 
 @layer base {
   :root {
-    /* iOS system blue accent */
-    --ios-blue: 211 100% 50%;
+    /* ── Trans flag palette ─────────────────────── */
+    --trans-blue: 197 94% 67%;     /* #5BCEFA */
+    --trans-pink: 348 79% 81%;     /* #F5A9B8 */
 
-    --background: 220 14% 96%;        /* iOS systemGroupedBackground */
-    --foreground: 222.2 84% 4.9%;
-    --card: 0 0% 100%;                 /* White cards */
-    --card-foreground: 222.2 84% 4.9%;
+    /* ── Light mode tokens ──────────────────────── */
+    --background: 0 0% 98%;
+    --foreground: 222 20% 12%;
+    --card: 0 0% 100%;
+    --card-foreground: 222 20% 12%;
     --popover: 0 0% 100%;
-    --popover-foreground: 222.2 84% 4.9%;
-    --primary: 211 100% 50%;           /* iOS system blue */
-    --primary-foreground: 0 0% 100%;
-    --secondary: 210 40% 96.1%;
-    --secondary-foreground: 222.2 47.4% 11.2%;
-    --muted: 210 40% 96.1%;
-    --muted-foreground: 215.4 16.3% 46.9%;
-    --accent: 211 100% 50%;
-    --accent-foreground: 0 0% 100%;
-    --destructive: 0 84.2% 60.2%;
-    --destructive-foreground: 210 40% 98%;
-    --border: 214.3 31.8% 88%;
-    --input: 214.3 31.8% 91.4%;
-    --ring: 211 100% 50%;
-    --radius: 0.625rem;
+    --popover-foreground: 222 20% 12%;
+    --primary: 197 94% 67%;        /* trans blue */
+    --primary-foreground: 222 20% 12%;
+    --secondary: 210 20% 93%;
+    --secondary-foreground: 222 20% 12%;
+    --muted: 210 20% 93%;
+    --muted-foreground: 215 14% 46%;
+    --accent: 348 79% 81%;         /* trans pink */
+    --accent-foreground: 222 20% 12%;
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 214 20% 88%;
+    --input: 214 20% 91%;
+    --ring: 197 94% 67%;
+    --radius: 0.75rem;
 
-    /* Tab bar */
     --tab-bar-height: 83px;
   }
 
   .dark {
-    --background: 222.2 84% 4.9%;
-    --foreground: 210 40% 98%;
-    --card: 222.2 84% 4.9%;
-    --card-foreground: 210 40% 98%;
-    --popover: 222.2 84% 4.9%;
-    --popover-foreground: 210 40% 98%;
-    --primary: 211 100% 50%;
-    --primary-foreground: 0 0% 100%;
-    --secondary: 217.2 32.6% 17.5%;
-    --secondary-foreground: 210 40% 98%;
-    --muted: 217.2 32.6% 17.5%;
-    --muted-foreground: 215 20.2% 65.1%;
-    --accent: 211 100% 50%;
-    --accent-foreground: 0 0% 100%;
-    --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 210 40% 98%;
-    --border: 217.2 32.6% 17.5%;
-    --input: 217.2 32.6% 17.5%;
-    --ring: 211 100% 50%;
+    /* ── Dark mode — deep navy ───────────────────── */
+    --background: 240 28% 10%;     /* ~#1a1a2e */
+    --foreground: 210 40% 95%;
+    --card: 240 20% 15%;
+    --card-foreground: 210 40% 95%;
+    --popover: 240 20% 15%;
+    --popover-foreground: 210 40% 95%;
+    --primary: 197 94% 67%;
+    --primary-foreground: 240 28% 10%;
+    --secondary: 240 16% 22%;
+    --secondary-foreground: 210 40% 95%;
+    --muted: 240 16% 22%;
+    --muted-foreground: 215 20% 55%;
+    --accent: 348 79% 81%;
+    --accent-foreground: 240 28% 10%;
+    --destructive: 0 62% 40%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 240 16% 24%;
+    --input: 240 16% 24%;
+    --ring: 197 94% 67%;
   }
 }
 
@@ -61,12 +63,35 @@
   }
   body {
     @apply bg-background text-foreground;
-    /* Prevent iOS rubber-banding on the body */
     overscroll-behavior: none;
   }
 }
 
-/* Inset grouped list style — white rounded cards on gray bg */
+/* ── Brand gradients ─────────────────────────────────── */
+.gradient-brand {
+  background: linear-gradient(135deg, #5BCEFA 0%, #F5A9B8 100%);
+}
+
+.gradient-brand-reverse {
+  background: linear-gradient(135deg, #F5A9B8 0%, #5BCEFA 100%);
+}
+
+.gradient-brand-stripe {
+  background: linear-gradient(135deg, #5BCEFA 0%, #ffffff 50%, #F5A9B8 100%);
+}
+
+.gradient-brand-text {
+  background: linear-gradient(135deg, #5BCEFA 0%, #F5A9B8 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.gradient-brand-border {
+  border-image: linear-gradient(135deg, #5BCEFA, #F5A9B8) 1;
+}
+
+/* ── iOS inset grouped list ──────────────────────────── */
 .ios-section {
   @apply rounded-xl overflow-hidden bg-card shadow-sm;
 }
@@ -75,8 +100,29 @@
   @apply px-4 py-3 flex items-center border-b border-border last:border-0;
 }
 
-/* Scrollable main area that accounts for bottom tab bar */
+/* ── Scrollable main area (accounts for bottom tab bar) ─ */
 .tab-content {
   padding-bottom: calc(var(--tab-bar-height) + env(safe-area-inset-bottom, 0px));
   min-height: 100dvh;
+}
+
+/* ── Typography scale ────────────────────────────────── */
+.text-heading {
+  @apply text-2xl font-bold tracking-tight;
+}
+
+.text-subheading {
+  @apply text-lg font-semibold;
+}
+
+.text-body {
+  @apply text-sm;
+}
+
+.text-caption {
+  @apply text-xs text-muted-foreground;
+}
+
+.text-label-section {
+  @apply text-xs font-semibold uppercase tracking-wide text-muted-foreground;
 }
