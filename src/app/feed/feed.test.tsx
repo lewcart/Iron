@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 
 // ===== Streak calculation =====
 
@@ -188,5 +188,173 @@ describe('formatVolume', () => {
 
   it('formats large volumes correctly', () => {
     expect(formatVolume(100000)).toBe('100.0k kg');
+  });
+});
+
+// ===== isoDate =====
+
+function isoDate(date: Date): string {
+  return date.toISOString().slice(0, 10);
+}
+
+describe('isoDate', () => {
+  it('returns YYYY-MM-DD slice from a UTC date', () => {
+    expect(isoDate(new Date('2026-03-25T00:00:00.000Z'))).toBe('2026-03-25');
+  });
+
+  it('strips time portion', () => {
+    expect(isoDate(new Date('2026-01-01T23:59:59.999Z'))).toBe('2026-01-01');
+  });
+});
+
+// ===== formatDuration =====
+
+function formatDuration(start: string, end: string | null): string {
+  if (!end) return '—';
+  const diff = new Date(end).getTime() - new Date(start).getTime();
+  const mins = Math.round(diff / 60000);
+  if (mins >= 60) {
+    return `${Math.floor(mins / 60)}h ${mins % 60}m`;
+  }
+  return `${mins}m`;
+}
+
+describe('formatDuration', () => {
+  it('returns em-dash when end is null', () => {
+    expect(formatDuration('2026-03-25T10:00:00.000Z', null)).toBe('—');
+  });
+
+  it('formats durations under 60 minutes as Xm', () => {
+    expect(formatDuration('2026-03-25T10:00:00.000Z', '2026-03-25T10:45:00.000Z')).toBe('45m');
+  });
+
+  it('formats durations of exactly 60 minutes as 1h 0m', () => {
+    expect(formatDuration('2026-03-25T10:00:00.000Z', '2026-03-25T11:00:00.000Z')).toBe('1h 0m');
+  });
+
+  it('formats durations over 60 minutes as Xh Ym', () => {
+    expect(formatDuration('2026-03-25T10:00:00.000Z', '2026-03-25T11:30:00.000Z')).toBe('1h 30m');
+  });
+
+  it('rounds to nearest minute', () => {
+    // 44.5 minutes → rounds to 45
+    expect(formatDuration('2026-03-25T10:00:00.000Z', '2026-03-25T10:44:30.000Z')).toBe('45m');
+  });
+
+  it('returns 0m for zero duration', () => {
+    expect(formatDuration('2026-03-25T10:00:00.000Z', '2026-03-25T10:00:00.000Z')).toBe('0m');
+  });
+});
+
+// ===== formatTimeAgo =====
+
+function formatTimeAgo(iso: string): string {
+  const diff = Date.now() - new Date(iso).getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  if (days === 1) return 'Yesterday';
+  if (days < 7) return `${days}d ago`;
+  // Falls back to formatted date — tested by presence of a non-"ago" string
+  return new Date(iso).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+}
+
+describe('formatTimeAgo', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  const NOW = new Date('2026-03-25T12:00:00.000Z').getTime();
+
+  it('returns Xm ago for timestamps less than 60 minutes ago', () => {
+    vi.setSystemTime(NOW);
+    const ts = new Date(NOW - 30 * 60 * 1000).toISOString();
+    expect(formatTimeAgo(ts)).toBe('30m ago');
+  });
+
+  it('returns 0m ago for a timestamp equal to now', () => {
+    vi.setSystemTime(NOW);
+    expect(formatTimeAgo(new Date(NOW).toISOString())).toBe('0m ago');
+  });
+
+  it('returns Xh ago for timestamps between 1-23 hours ago', () => {
+    vi.setSystemTime(NOW);
+    const ts = new Date(NOW - 5 * 60 * 60 * 1000).toISOString();
+    expect(formatTimeAgo(ts)).toBe('5h ago');
+  });
+
+  it('returns Yesterday for timestamps 1 day ago', () => {
+    vi.setSystemTime(NOW);
+    const ts = new Date(NOW - 24 * 60 * 60 * 1000).toISOString();
+    expect(formatTimeAgo(ts)).toBe('Yesterday');
+  });
+
+  it('returns Xd ago for timestamps 2-6 days ago', () => {
+    vi.setSystemTime(NOW);
+    const ts = new Date(NOW - 3 * 24 * 60 * 60 * 1000).toISOString();
+    expect(formatTimeAgo(ts)).toBe('3d ago');
+  });
+
+  it('falls back to formatted date for timestamps 7+ days ago', () => {
+    vi.setSystemTime(NOW);
+    const ts = new Date(NOW - 10 * 24 * 60 * 60 * 1000).toISOString();
+    const result = formatTimeAgo(ts);
+    // Should not contain "ago" or "Yesterday" — is a formatted date string
+    expect(result).not.toContain('ago');
+    expect(result).not.toBe('Yesterday');
+  });
+});
+
+// ===== muscleHeatColor =====
+
+function muscleHeatColor(count: number): string {
+  if (count >= 3) return 'bg-blue-500';
+  if (count === 2) return 'bg-blue-700';
+  if (count === 1) return 'bg-blue-900';
+  return 'bg-zinc-800';
+}
+
+describe('muscleHeatColor', () => {
+  it('returns bg-zinc-800 for 0 count', () => {
+    expect(muscleHeatColor(0)).toBe('bg-zinc-800');
+  });
+
+  it('returns bg-blue-900 for count of 1', () => {
+    expect(muscleHeatColor(1)).toBe('bg-blue-900');
+  });
+
+  it('returns bg-blue-700 for count of 2', () => {
+    expect(muscleHeatColor(2)).toBe('bg-blue-700');
+  });
+
+  it('returns bg-blue-500 for count of 3', () => {
+    expect(muscleHeatColor(3)).toBe('bg-blue-500');
+  });
+
+  it('returns bg-blue-500 for count greater than 3', () => {
+    expect(muscleHeatColor(10)).toBe('bg-blue-500');
+  });
+});
+
+// ===== muscleTextColor =====
+
+function muscleTextColor(count: number): string {
+  if (count >= 1) return 'text-zinc-100';
+  return 'text-zinc-500';
+}
+
+describe('muscleTextColor', () => {
+  it('returns text-zinc-500 for count of 0', () => {
+    expect(muscleTextColor(0)).toBe('text-zinc-500');
+  });
+
+  it('returns text-zinc-100 for count of 1', () => {
+    expect(muscleTextColor(1)).toBe('text-zinc-100');
+  });
+
+  it('returns text-zinc-100 for count greater than 1', () => {
+    expect(muscleTextColor(5)).toBe('text-zinc-100');
   });
 });
