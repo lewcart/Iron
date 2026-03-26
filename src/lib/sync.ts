@@ -39,10 +39,10 @@ class SyncEngine {
     }
 
     const [workouts, workout_exercises, workout_sets, bodyweight_logs] = await Promise.all([
-      db.workouts.where('_synced').equals(0).toArray(),
-      db.workout_exercises.where('_synced').equals(0).toArray(),
-      db.workout_sets.where('_synced').equals(0).toArray(),
-      db.bodyweight_logs.where('_synced').equals(0).toArray(),
+      db.workouts.filter(r => !r._synced).toArray(),
+      db.workout_exercises.filter(r => !r._synced).toArray(),
+      db.workout_sets.filter(r => !r._synced).toArray(),
+      db.bodyweight_logs.filter(r => !r._synced).toArray(),
     ]);
 
     const hasChanges =

@@ -136,6 +136,10 @@ CREATE TABLE IF NOT EXISTS bodyweight_logs (
 
 CREATE INDEX IF NOT EXISTS idx_bodyweight_logs_logged_at ON bodyweight_logs(logged_at DESC);
 
+ALTER TABLE bodyweight_logs ADD COLUMN IF NOT EXISTS dedupe_key TEXT;
+-- Full unique index: PostgreSQL treats each NULL as distinct, so manual logs (dedupe_key NULL) are unaffected.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_bodyweight_logs_dedupe_key ON bodyweight_logs (dedupe_key);
+
 -- ===== REBIRTH MODULES 2–6 =====
 
 -- Module 2: Body spec logs (height, body fat %, lean mass, etc.)
@@ -205,6 +209,52 @@ CREATE TABLE IF NOT EXISTS nutrition_day_notes (
   notes TEXT,
   updated_at TIMESTAMP DEFAULT NOW()
 );
+
+-- Fitbee import batches (audit + FK from food entries)
+CREATE TABLE IF NOT EXISTS fitbee_import_batches (
+  uuid TEXT PRIMARY KEY,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  label TEXT,
+  file_hashes JSONB NOT NULL DEFAULT '{}'::jsonb
+);
+
+-- Per-food lines (full macro + micro detail in nutrients JSONB)
+CREATE TABLE IF NOT EXISTS nutrition_food_entries (
+  uuid TEXT PRIMARY KEY,
+  logged_at TIMESTAMPTZ NOT NULL,
+  day_local TEXT NOT NULL,
+  meal_type TEXT NOT NULL CHECK (meal_type IN ('breakfast', 'lunch', 'dinner', 'snack', 'other')),
+  food_name TEXT NOT NULL,
+  calories NUMERIC,
+  protein_g NUMERIC,
+  carbs_g NUMERIC,
+  fat_g NUMERIC,
+  nutrients JSONB NOT NULL DEFAULT '{}'::jsonb,
+  source TEXT NOT NULL DEFAULT 'fitbee',
+  import_batch_uuid TEXT,
+  dedupe_key TEXT NOT NULL UNIQUE,
+  FOREIGN KEY (import_batch_uuid) REFERENCES fitbee_import_batches(uuid) ON DELETE SET NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_nutrition_food_entries_logged_at ON nutrition_food_entries(logged_at DESC);
+CREATE INDEX IF NOT EXISTS idx_nutrition_food_entries_day_local ON nutrition_food_entries(day_local);
+CREATE INDEX IF NOT EXISTS idx_nutrition_food_entries_batch ON nutrition_food_entries(import_batch_uuid);
+
+-- Apple / Fitbee-style activity energy (not Iron workouts)
+CREATE TABLE IF NOT EXISTS activity_logs (
+  uuid TEXT PRIMARY KEY,
+  logged_at TIMESTAMPTZ NOT NULL,
+  activity_name TEXT NOT NULL,
+  calories_burned NUMERIC,
+  source TEXT NOT NULL DEFAULT 'fitbee',
+  dedupe_key TEXT NOT NULL UNIQUE
+);
+
+CREATE INDEX IF NOT EXISTS idx_activity_logs_logged_at ON activity_logs(logged_at DESC);
+
+-- Idempotent upserts for Fitbee meal aggregates on nutrition_logs
+ALTER TABLE nutrition_logs ADD COLUMN IF NOT EXISTS external_ref TEXT;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_nutrition_logs_external_ref ON nutrition_logs (external_ref);
 
 -- Module 5: HRT protocols (active medication plans)
 CREATE TABLE IF NOT EXISTS hrt_protocols (
@@ -286,3 +336,33 @@ CREATE TABLE IF NOT EXISTS progress_photos (
 );
 
 CREATE INDEX IF NOT EXISTS idx_progress_photos_taken_at ON progress_photos(taken_at DESC);
+
+-- ===== Sync: updated_at columns for incremental pull =====
+
+-- Generic trigger function to set updated_at on every row change
+CREATE OR REPLACE FUNCTION set_updated_at() RETURNS TRIGGER AS $$
+BEGIN
+  NEW.updated_at = NOW();
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+-- workouts
+ALTER TABLE workouts ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+DROP TRIGGER IF EXISTS trg_workouts_updated_at ON workouts;
+CREATE TRIGGER trg_workouts_updated_at BEFORE UPDATE ON workouts FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+-- workout_exercises
+ALTER TABLE workout_exercises ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+DROP TRIGGER IF EXISTS trg_workout_exercises_updated_at ON workout_exercises;
+CREATE TRIGGER trg_workout_exercises_updated_at BEFORE UPDATE ON workout_exercises FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+-- workout_sets
+ALTER TABLE workout_sets ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+DROP TRIGGER IF EXISTS trg_workout_sets_updated_at ON workout_sets;
+CREATE TRIGGER trg_workout_sets_updated_at BEFORE UPDATE ON workout_sets FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+-- bodyweight_logs
+ALTER TABLE bodyweight_logs ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+DROP TRIGGER IF EXISTS trg_bodyweight_logs_updated_at ON bodyweight_logs;
+CREATE TRIGGER trg_bodyweight_logs_updated_at BEFORE UPDATE ON bodyweight_logs FOR EACH ROW EXECUTE FUNCTION set_updated_at();

@@ -91,13 +91,21 @@ export class IronDB extends Dexie {
   constructor() {
     super('iron-db');
 
-    this.version(1).stores({
+    const stores = {
       exercises: 'uuid, title, is_custom, is_hidden',
       workouts: 'uuid, start_time, is_current, _synced, _updated_at',
       workout_exercises: 'uuid, workout_uuid, exercise_uuid, _synced, _updated_at',
       workout_sets: 'uuid, workout_exercise_uuid, _synced, _updated_at',
       bodyweight_logs: 'uuid, logged_at, _synced, _updated_at',
       _meta: 'key',
+    };
+
+    this.version(1).stores(stores);
+
+    // v2: re-hydrate exercises with lowercase UUIDs
+    this.version(2).stores(stores).upgrade(async tx => {
+      await tx.table('exercises').clear();
+      await tx.table('_meta').delete('exercises_hydrated_at');
     });
   }
 }

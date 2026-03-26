@@ -1,3 +1,4 @@
+import './load-env.js';
 import { query, closePool } from './db.js';
 import { readFileSync, readdirSync } from 'fs';
 import { join, dirname } from 'path';

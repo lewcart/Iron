@@ -2,8 +2,8 @@
 
 import { useEffect, useRef, useState, useCallback } from 'react';
 import Link from 'next/link';
-import { Check, ChevronRight, Plus, Search, X } from 'lucide-react';
-import type { WorkoutPlan, WorkoutRoutine, Exercise } from '@/types';
+import { Check, ChevronDown, ChevronRight, Plus, Search, X } from 'lucide-react';
+import type { WorkoutPlan, WorkoutRoutine, WorkoutRoutineExercise, WorkoutRoutineSet, Exercise } from '@/types';
 import { formatTime, calcCompletedSets, calcTotalVolume } from './workout-utils';
 import { useUnit } from '@/context/UnitContext';
 import { useCurrentWorkoutFull, useExercises } from '@/lib/useLocalDB';
@@ -16,6 +16,7 @@ import {
   addSet as mutAddSet,
   updateSet as mutUpdateSet,
 } from '@/lib/mutations';
+import { db } from '@/db/local';
 import { syncEngine } from '@/lib/sync';
 
 // ─── Settings (localStorage-backed) ──────────────────────────────────────────
@@ -108,42 +109,50 @@ function formatVolume(volumeKg: number, unit: string, toDisplay: (kg: number) =>
 function WorkoutSummaryBar({
   elapsed,
   exercises,
+  restTimer,
+  onOpenRestTimer,
 }: {
   elapsed: number;
   exercises: LocalWorkoutWithExercises['exercises'];
+  restTimer: ReturnType<typeof useRestTimer>;
+  onOpenRestTimer: () => void;
 }) {
   const { unit, toDisplay } = useUnit();
   const completedSets = calcCompletedSets(exercises);
   const totalVolume = calcTotalVolume(exercises);
-  const exerciseCount = exercises.length;
+  const timerActive = restTimer.running || (restTimer.selected !== null && restTimer.remaining === 0);
+  const expired = restTimer.selected !== null && restTimer.remaining === 0 && !restTimer.running;
 
   return (
-    <div className="sticky top-0 z-10 mx-4 mb-3 rounded-xl bg-zinc-900 border border-zinc-800 shadow-lg">
-      <div className="flex items-center justify-between px-4 py-2.5">
-        <div className="flex flex-col items-center">
-          <span className="text-xs text-zinc-400 font-medium">Time</span>
-          <span className="text-sm font-mono font-semibold text-zinc-100 tabular-nums">
-            {formatTime(elapsed)}
-          </span>
-        </div>
-        <div className="w-px h-8 bg-zinc-800" />
-        <div className="flex flex-col items-center">
-          <span className="text-xs text-zinc-400 font-medium">Exercises</span>
-          <span className="text-sm font-semibold text-zinc-100">{exerciseCount}</span>
-        </div>
-        <div className="w-px h-8 bg-zinc-800" />
-        <div className="flex flex-col items-center">
-          <span className="text-xs text-zinc-400 font-medium">Sets Done</span>
-          <span className="text-sm font-semibold text-zinc-100">{completedSets}</span>
-        </div>
-        <div className="w-px h-8 bg-zinc-800" />
-        <div className="flex flex-col items-center">
-          <span className="text-xs text-zinc-400 font-medium">Volume</span>
-          <span className="text-sm font-semibold text-zinc-100">
-            {formatVolume(totalVolume, unit, toDisplay)}
-          </span>
-        </div>
+    <div className="bg-background border-b border-border flex items-center justify-between px-3 py-2">
+      <div className="flex flex-col items-center min-w-0">
+        <span className="text-[10px] text-muted-foreground font-medium uppercase tracking-wide">Time</span>
+        <span className="text-sm font-mono font-semibold tabular-nums">{formatTime(elapsed)}</span>
       </div>
+      <div className="w-px h-7 bg-border" />
+      <div className="flex flex-col items-center min-w-0">
+        <span className="text-[10px] text-muted-foreground font-medium uppercase tracking-wide">Sets</span>
+        <span className="text-sm font-semibold">{completedSets}</span>
+      </div>
+      <div className="w-px h-7 bg-border" />
+      <div className="flex flex-col items-center min-w-0">
+        <span className="text-[10px] text-muted-foreground font-medium uppercase tracking-wide">Volume</span>
+        <span className="text-sm font-semibold">{formatVolume(totalVolume, unit, toDisplay)}</span>
+      </div>
+      <div className="w-px h-7 bg-border" />
+      {/* Rest timer column — always present, tappable */}
+      <button onClick={onOpenRestTimer} className="flex flex-col items-center min-w-0">
+        <span className={`text-[10px] font-medium uppercase tracking-wide ${
+          expired ? 'text-red-500' : timerActive ? 'text-primary' : 'text-muted-foreground'
+        }`}>
+          Rest
+        </span>
+        <span className={`text-sm font-mono font-semibold tabular-nums ${
+          expired ? 'text-red-500' : timerActive ? 'text-primary' : 'text-muted-foreground'
+        }`}>
+          {timerActive ? formatTime(restTimer.remaining) : '—'}
+        </span>
+      </button>
     </div>
   );
 }
@@ -592,8 +601,16 @@ function SetRow({
   );
 }
 
+interface RoutineExerciseWithSets extends WorkoutRoutineExercise {
+  sets: WorkoutRoutineSet[];
+}
+
+interface RoutineWithExercises extends WorkoutRoutine {
+  exercises: RoutineExerciseWithSets[];
+}
+
 interface PlanWithRoutines extends WorkoutPlan {
-  routines: WorkoutRoutine[];
+  routines: RoutineWithExercises[];
 }
 
 // ─── Main page ────────────────────────────────────────────────────────────────
@@ -604,9 +621,20 @@ export default function WorkoutPage() {
   const [showFinishModal, setShowFinishModal] = useState(false);
   const [plans, setPlans] = useState<PlanWithRoutines[]>([]);
   const [startingRoutine, setStartingRoutine] = useState<string | null>(null);
+  const [expandedExercises, setExpandedExercises] = useState<Set<string>>(new Set());
+  const headerRef = useRef<HTMLDivElement>(null);
+  const [headerHeight, setHeaderHeight] = useState(140);
 
   const restTimer = useRestTimer();
   const elapsed = useElapsed(workout?.start_time ?? null);
+
+  // Measure fixed header height
+  useEffect(() => {
+    if (!headerRef.current) return;
+    const obs = new ResizeObserver(([entry]) => setHeaderHeight(entry.contentRect.height));
+    obs.observe(headerRef.current);
+    return () => obs.disconnect();
+  }, []);
 
   // Request notification permission once
   useEffect(() => {
@@ -615,20 +643,151 @@ export default function WorkoutPage() {
     }
   }, []);
 
-  // Load plans (online-only, plans management requires network)
+  // Auto-expand first incomplete exercise when workout loads
   useEffect(() => {
-    fetch('/api/plans')
+    if (!workout || workout.exercises.length === 0) return;
+    if (expandedExercises.size > 0) return; // Already expanded something
+    const first = workout.exercises.find(e => e.sets.some(s => !s.is_completed)) ?? workout.exercises[0];
+    if (first) setExpandedExercises(new Set([first.uuid]));
+  }, [workout?.uuid]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const toggleExercise = useCallback((uuid: string) => {
+    setExpandedExercises(prev => {
+      const next = new Set(prev);
+      if (next.has(uuid)) next.delete(uuid);
+      else next.add(uuid);
+      return next;
+    });
+  }, []);
+
+  // Load plans with full routine details on mount (for instant local workout creation)
+  useEffect(() => {
+    fetch('/api/plans?full=1')
       .then(r => r.json())
       .then(data => setPlans(data.plans ?? []))
       .catch(() => {}); // Fail silently when offline
   }, []);
 
-  const startWorkoutFromRoutine = async (planUuid: string, routineUuid: string) => {
+  const startWorkoutFromRoutine = async (_planUuid: string, routineUuid: string) => {
     setStartingRoutine(routineUuid);
-    await fetch(`/api/plans/${planUuid}/routines/${routineUuid}/start`, { method: 'POST' });
-    // Pull new workout into local DB
-    await syncEngine.pull();
-    setStartingRoutine(null);
+    try {
+      // Find the routine in our cached plans data
+      const routine = plans.flatMap(p => p.routines).find(r => r.uuid === routineUuid);
+      if (!routine) throw new Error('Routine not found');
+
+      // End any locally active workout
+      const current = await db.workouts.filter(w => w.is_current === true).first();
+      if (current) {
+        await db.workouts.update(current.uuid, {
+          is_current: false,
+          end_time: new Date().toISOString(),
+          _synced: false,
+          _updated_at: Date.now(),
+          _deleted: false,
+        });
+      }
+
+      // Create workout entirely in local DB — instant
+      const workoutUuid = crypto.randomUUID();
+      const now = Date.now();
+      const syncMeta = { _synced: false, _updated_at: now, _deleted: false as const };
+
+      await db.workouts.add({
+        uuid: workoutUuid,
+        start_time: new Date().toISOString(),
+        end_time: null,
+        title: routine.title,
+        comment: null,
+        is_current: true,
+        workout_routine_uuid: routineUuid,
+        ...syncMeta,
+      });
+
+      const exercises = routine.exercises ?? [];
+      for (const routineExercise of exercises) {
+        const weUuid = crypto.randomUUID();
+        const exerciseUuid = routineExercise.exercise_uuid;
+        await db.workout_exercises.add({
+          uuid: weUuid,
+          workout_uuid: workoutUuid,
+          exercise_uuid: exerciseUuid,
+          comment: null,
+          order_index: routineExercise.order_index,
+          ...syncMeta,
+        });
+
+        // Look up last completed sets for this exercise to prefill weights
+        const prevWEs = await db.workout_exercises
+          .where('exercise_uuid')
+          .equals(exerciseUuid)
+          .filter(e => !e._deleted && e.workout_uuid !== workoutUuid)
+          .toArray();
+        let lastSets: typeof db.workout_sets extends import('dexie').Table<infer T> ? T[] : never[] = [];
+        if (prevWEs.length > 0) {
+          // Find the most recent workout exercise by checking the parent workout start_time
+          const weWithTime = await Promise.all(
+            prevWEs.map(async we => {
+              const w = await db.workouts.get(we.workout_uuid);
+              return { we, time: w?.start_time ?? '' };
+            }),
+          );
+          weWithTime.sort((a, b) => b.time.localeCompare(a.time));
+          const mostRecent = weWithTime[0];
+          if (mostRecent) {
+            lastSets = await db.workout_sets
+              .where('workout_exercise_uuid')
+              .equals(mostRecent.we.uuid)
+              .filter(s => !s._deleted && s.is_completed)
+              .sortBy('order_index');
+          }
+        }
+
+        const sets = routineExercise.sets ?? [];
+        const templateSets = sets.length > 0
+          ? sets.map(s => ({
+              min_target_reps: s.min_repetitions ?? null,
+              max_target_reps: s.max_repetitions ?? null,
+              tag: s.tag ?? null,
+              comment: s.comment ?? null,
+              order_index: s.order_index,
+            }))
+          : [0, 1, 2].map(i => ({
+              min_target_reps: null as number | null,
+              max_target_reps: null as number | null,
+              tag: null as string | null,
+              comment: null as string | null,
+              order_index: i,
+            }));
+
+        await db.workout_sets.bulkAdd(
+          templateSets.map((s, i) => {
+            const prev = lastSets[i];
+            return {
+              uuid: crypto.randomUUID(),
+              workout_exercise_uuid: weUuid,
+              weight: prev?.weight ?? null,
+              repetitions: prev?.repetitions ?? null,
+              min_target_reps: s.min_target_reps,
+              max_target_reps: s.max_target_reps,
+              rpe: null,
+              tag: s.tag as 'dropSet' | 'failure' | null,
+              comment: s.comment,
+              is_completed: false,
+              is_pr: false,
+              order_index: s.order_index,
+              ...syncMeta,
+            };
+          }),
+        );
+      }
+
+      // Push to server in background
+      syncEngine.schedulePush();
+    } catch (err) {
+      console.error('Failed to start workout from routine:', err);
+    } finally {
+      setStartingRoutine(null);
+    }
   };
 
   const startWorkout = async () => {
@@ -741,13 +900,25 @@ export default function WorkoutPage() {
   }
 
   // ── Active workout ──
-  const timerActive = restTimer.running || (restTimer.selected !== null && restTimer.remaining === 0);
 
   return (
     <>
+      {/* Fixed summary bar only */}
+      <div ref={headerRef} className="fixed top-0 left-0 right-0 z-20">
+        <WorkoutSummaryBar
+          elapsed={elapsed}
+          exercises={workout.exercises}
+          restTimer={restTimer}
+          onOpenRestTimer={() => setShowRestTimer(true)}
+        />
+      </div>
+
       <main className="tab-content bg-background overflow-x-hidden">
-        {/* Nav bar */}
-        <div className="flex items-center justify-between px-4 pt-14 pb-3">
+        {/* Spacer for fixed bar */}
+        <div style={{ height: headerHeight }} />
+
+        {/* Title + finish */}
+        <div className="flex items-center justify-between px-4 py-3">
           <h1 className="text-lg font-semibold truncate flex-1">
             {workout.title || workout.exercises.map(e => e.exercise?.title).filter(Boolean).slice(0, 2).join(', ') || 'Workout'}
           </h1>
@@ -759,117 +930,88 @@ export default function WorkoutPage() {
           </button>
         </div>
 
-        {/* Running summary panel */}
-        <WorkoutSummaryBar elapsed={elapsed} exercises={workout.exercises} />
-
-        {/* Rest timer bar */}
-        <div className="mx-4 mb-3 rounded-xl bg-secondary/60 flex items-center justify-between px-4 py-2.5">
-          {timerActive ? (
-            <span className={`text-sm font-mono font-semibold tabular-nums ${
-              restTimer.remaining === 0 ? 'text-red-500' : 'text-primary'
-            }`}>
-              {restTimer.remaining === 0 ? 'Rest over!' : formatTime(restTimer.remaining)}
-            </span>
-          ) : (
-            <span className="text-sm text-muted-foreground">Rest Timer</span>
-          )}
-          <button
-            onClick={() => setShowRestTimer(true)}
-            className="flex items-center gap-2 text-sm font-medium text-primary min-h-[44px]"
-          >
-            <span>⏲</span>
-            {timerActive ? 'Open' : 'Start'}
-          </button>
-        </div>
-
-        <div className="px-4 space-y-4 pb-safe-or-4">
-          {/* Title / comment fields */}
-          <div className="ios-section">
-            <input
-              type="text"
-              placeholder="Title"
-              defaultValue={workout.title ?? ''}
-              className="ios-row w-full text-sm font-medium bg-transparent outline-none min-h-[44px]"
-            />
-            <input
-              type="text"
-              placeholder="Comment"
-              defaultValue={workout.comment ?? ''}
-              className="ios-row w-full text-sm text-muted-foreground bg-transparent outline-none min-h-[44px]"
-            />
-          </div>
-
+        <div className="px-4 space-y-3 pb-safe-or-4">
           {/* Exercises */}
           {workout.exercises.length > 0 && (
-            <div>
-              <p className="text-xs font-semibold text-primary uppercase tracking-wide mb-1 px-1">Exercises</p>
-              <div className="space-y-3">
-                {workout.exercises.map((we) => {
-                  const completedSets = we.sets.filter(s => s.is_completed).length;
-                  const totalSets = we.sets.length;
-                  const allDone = totalSets > 0 && completedSets === totalSets;
+            <div className="space-y-2">
+              {workout.exercises.map((we) => {
+                const completedSets = we.sets.filter(s => s.is_completed).length;
+                const totalSets = we.sets.length;
+                const allDone = totalSets > 0 && completedSets === totalSets;
+                const isExpanded = expandedExercises.has(we.uuid);
 
-                  return (
-                    <div key={we.uuid} className="ios-section">
-                      {/* Exercise header */}
-                      <div className="flex items-center gap-3 px-4 py-3 border-b border-border">
-                        <div className="flex-1 min-w-0">
-                          <p className={`font-semibold text-sm ${allDone ? 'text-muted-foreground' : ''}`}>
-                            {we.exercise?.title ?? 'Unknown Exercise'}
+                return (
+                  <div key={we.uuid} className="ios-section">
+                    {/* Exercise header — tap to expand/collapse */}
+                    <button
+                      onClick={() => toggleExercise(we.uuid)}
+                      className="flex items-center gap-3 px-4 py-3 w-full text-left"
+                    >
+                      {isExpanded
+                        ? <ChevronDown className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                        : <ChevronRight className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                      }
+                      <div className="flex-1 min-w-0">
+                        <p className={`font-semibold text-sm ${allDone ? 'text-muted-foreground' : ''}`}>
+                          {we.exercise?.title ?? 'Unknown Exercise'}
+                        </p>
+                        <div className="flex items-center gap-2 mt-0.5">
+                          <p className="text-xs text-muted-foreground">
+                            {completedSets} / {totalSets} sets
                           </p>
-                          <div className="flex items-center gap-2 mt-0.5">
-                            <p className="text-xs text-muted-foreground">
-                              {completedSets} / {totalSets} sets
-                            </p>
-                            {we.exercise?.primary_muscles?.slice(0, 1).map(m => (
-                              <span
-                                key={m}
-                                className={`inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-semibold border capitalize ${getMuscleChipClass(m)}`}
-                              >
-                                {m}
-                              </span>
-                            ))}
-                          </div>
+                          {we.exercise?.primary_muscles?.slice(0, 1).map(m => (
+                            <span
+                              key={m}
+                              className={`inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-semibold border capitalize ${getMuscleChipClass(m)}`}
+                            >
+                              {m}
+                            </span>
+                          ))}
                         </div>
-                        {allDone && (
-                          <div className="w-6 h-6 rounded-full bg-green-500 flex items-center justify-center flex-shrink-0">
-                            <Check className="h-3.5 w-3.5 text-white" strokeWidth={3} />
-                          </div>
-                        )}
                       </div>
+                      {allDone && (
+                        <div className="w-6 h-6 rounded-full bg-green-500 flex items-center justify-center flex-shrink-0">
+                          <Check className="h-3.5 w-3.5 text-white" strokeWidth={3} />
+                        </div>
+                      )}
+                    </button>
 
-                      {/* Column headers */}
-                      <div className="flex items-center gap-3 px-4 py-1.5 border-b border-border bg-secondary/30">
-                        <div className="w-6 text-center text-[11px] font-medium text-muted-foreground">Set</div>
-                        <div className="flex-1 text-right text-[11px] font-medium text-muted-foreground">Weight</div>
-                        <div className="w-4" />
-                        <div className="flex-1 text-right text-[11px] font-medium text-muted-foreground">Reps</div>
-                        <div className="w-11" />
-                      </div>
+                    {/* Collapsible sets */}
+                    {isExpanded && (
+                      <>
+                        {/* Column headers */}
+                        <div className="flex items-center gap-3 px-4 py-1.5 border-t border-b border-border bg-secondary/30">
+                          <div className="w-6 text-center text-[11px] font-medium text-muted-foreground">Set</div>
+                          <div className="flex-1 text-right text-[11px] font-medium text-muted-foreground">Weight</div>
+                          <div className="w-4" />
+                          <div className="flex-1 text-right text-[11px] font-medium text-muted-foreground">Reps</div>
+                          <div className="w-11" />
+                        </div>
 
-                      {/* Sets */}
-                      {we.sets.map((set, idx) => (
-                        <SetRow
-                          key={set.uuid}
-                          setNumber={idx + 1}
-                          set={set}
-                          workoutExerciseUuid={we.uuid}
-                          onUpdate={updateSet}
-                        />
-                      ))}
+                        {/* Sets */}
+                        {we.sets.map((set, idx) => (
+                          <SetRow
+                            key={set.uuid}
+                            setNumber={idx + 1}
+                            set={set}
+                            workoutExerciseUuid={we.uuid}
+                            onUpdate={updateSet}
+                          />
+                        ))}
 
-                      {/* Add set */}
-                      <button
-                        onClick={() => handleAddSet(we)}
-                        className="flex items-center gap-2 px-4 py-3 text-primary text-sm font-medium w-full min-h-[44px]"
-                      >
-                        <Plus className="h-4 w-4" />
-                        Add Set
-                      </button>
-                    </div>
-                  );
-                })}
-              </div>
+                        {/* Add set */}
+                        <button
+                          onClick={() => handleAddSet(we)}
+                          className="flex items-center gap-2 px-4 py-2.5 text-primary text-sm font-medium w-full min-h-[44px] border-t border-border"
+                        >
+                          <Plus className="h-4 w-4" />
+                          Add Set
+                        </button>
+                      </>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           )}
 

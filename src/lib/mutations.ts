@@ -19,7 +19,7 @@ export async function startWorkout(opts: {
   workout_routine_uuid?: string;
 } = {}): Promise<string> {
   // End any currently active workout first
-  const current = await db.workouts.where('is_current').equals(1).first();
+  const current = await db.workouts.filter(w => w.is_current === true).first();
   if (current) {
     await db.workouts.update(current.uuid, {
       is_current: false,

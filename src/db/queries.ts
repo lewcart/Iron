@@ -23,6 +23,7 @@ import type {
   ProgressPhoto,
 } from '../types';
 import { calculatePRs } from '../lib/pr';
+import { muscleGroupSearchTerms } from '../lib/muscle-groups';
 
 export type DbRow = Record<string, unknown>;
 import { randomUUID } from 'crypto';
@@ -50,9 +51,20 @@ export async function listExercises(options: {
   }
 
   if (options.muscleGroup) {
-    sql += ` AND (primary_muscles::text ILIKE $${++paramCount} OR secondary_muscles::text ILIKE $${++paramCount})`;
-    const muscleTerm = `%${options.muscleGroup}%`;
-    params.push(muscleTerm, muscleTerm);
+    const terms = muscleGroupSearchTerms(options.muscleGroup);
+    if (terms.length > 0) {
+      const orChunks: string[] = [];
+      for (const t of terms) {
+        const p1 = ++paramCount;
+        const p2 = ++paramCount;
+        const v = `%${t}%`;
+        params.push(v, v);
+        orChunks.push(
+          `(primary_muscles::text ILIKE $${p1} OR secondary_muscles::text ILIKE $${p2})`
+        );
+      }
+      sql += ` AND (${orChunks.join(' OR ')})`;
+    }
   }
 
   if (options.equipment) {
@@ -108,6 +120,9 @@ export async function createCustomExercise(data: {
 export async function startWorkout(routineUuid?: string): Promise<Workout> {
   const uuid = randomUUID();
   const now = new Date().toISOString();
+
+  // End any currently active workout first (unique index enforces single active)
+  await query(`UPDATE workouts SET is_current = false, end_time = $1 WHERE is_current = true`, [now]);
 
   await query(`
     INSERT INTO workouts (uuid, start_time, is_current, workout_routine_uuid)
@@ -579,7 +594,7 @@ export async function getExerciseRecentSets(
 // ===== WORKOUT PLANS =====
 
 export async function listPlans(): Promise<WorkoutPlan[]> {
-  const rows = await query<DbRow>('SELECT * FROM workout_plans ORDER BY title ASC');
+  const rows = await query<DbRow>('SELECT * FROM workout_plans ORDER BY order_index ASC, created_at ASC');
   return rows.map(parsePlan);
 }
 
@@ -594,8 +609,18 @@ export async function createPlan(title: string): Promise<WorkoutPlan> {
   return (await getPlan(uuid))!;
 }
 
-export async function updatePlan(uuid: string, title: string): Promise<WorkoutPlan | undefined> {
-  await query('UPDATE workout_plans SET title = $1 WHERE uuid = $2', [title, uuid]);
+export async function updatePlan(uuid: string, data: { title?: string; orderIndex?: number }): Promise<WorkoutPlan | undefined> {
+  const fields: string[] = [];
+  const values: unknown[] = [];
+  let paramCount = 0;
+
+  if (data.title !== undefined) { fields.push(`title = $${++paramCount}`); values.push(data.title); }
+  if (data.orderIndex !== undefined) { fields.push(`order_index = $${++paramCount}`); values.push(data.orderIndex); }
+
+  if (fields.length > 0) {
+    values.push(uuid);
+    await query(`UPDATE workout_plans SET ${fields.join(', ')} WHERE uuid = $${++paramCount}`, values);
+  }
   return getPlan(uuid);
 }
 
@@ -669,7 +694,11 @@ export async function deleteRoutine(uuid: string): Promise<void> {
 
 export async function listRoutineExercises(routineUuid: string): Promise<WorkoutRoutineExercise[]> {
   const rows = await query<DbRow>(
-    'SELECT * FROM workout_routine_exercises WHERE workout_routine_uuid = $1 ORDER BY order_index ASC',
+    `SELECT wre.*, e.title AS exercise_title
+     FROM workout_routine_exercises wre
+     LEFT JOIN exercises e ON e.uuid = wre.exercise_uuid
+     WHERE wre.workout_routine_uuid = $1
+     ORDER BY wre.order_index ASC`,
     [routineUuid]
   );
   return rows.map(parseRoutineExercise);
@@ -854,9 +883,18 @@ export async function exportWorkouts(): Promise<Array<{
 
 // ===== START WORKOUT FROM ROUTINE =====
 
-export async function startWorkoutFromRoutine(routineUuid: string): Promise<Workout> {
+export interface StartWorkoutResult {
+  workout: Workout;
+  workout_exercises: WorkoutExercise[];
+  workout_sets: WorkoutSet[];
+}
+
+export async function startWorkoutFromRoutine(routineUuid: string): Promise<StartWorkoutResult> {
   // Create the workout linked to this routine
   const workout = await startWorkout(routineUuid);
+
+  const allExercises: WorkoutExercise[] = [];
+  const allSets: WorkoutSet[] = [];
 
   // Get all exercises in the routine
   const routineExercises = await listRoutineExercises(routineUuid);
@@ -867,38 +905,65 @@ export async function startWorkoutFromRoutine(routineUuid: string): Promise<Work
       'INSERT INTO workout_exercises (uuid, workout_uuid, exercise_uuid, order_index) VALUES ($1, $2, $3, $4)',
       [weUuid, workout.uuid, routineExercise.exercise_uuid, routineExercise.order_index]
     );
+    allExercises.push({
+      uuid: weUuid,
+      workout_uuid: workout.uuid,
+      exercise_uuid: routineExercise.exercise_uuid,
+      comment: null,
+      order_index: routineExercise.order_index,
+    });
 
     // Get sets defined for this routine exercise
     const routineSets = await listRoutineSets(routineExercise.uuid);
 
     if (routineSets.length > 0) {
-      // Create workout sets from routine sets
       for (const routineSet of routineSets) {
+        const setUuid = randomUUID();
         await query(
           'INSERT INTO workout_sets (uuid, workout_exercise_uuid, min_target_reps, max_target_reps, tag, comment, order_index, is_completed) VALUES ($1, $2, $3, $4, $5, $6, $7, false)',
-          [
-            randomUUID(),
-            weUuid,
-            routineSet.min_repetitions,
-            routineSet.max_repetitions,
-            routineSet.tag,
-            routineSet.comment,
-            routineSet.order_index,
-          ]
+          [setUuid, weUuid, routineSet.min_repetitions, routineSet.max_repetitions, routineSet.tag, routineSet.comment, routineSet.order_index]
         );
+        allSets.push({
+          uuid: setUuid,
+          workout_exercise_uuid: weUuid,
+          weight: null,
+          repetitions: null,
+          min_target_reps: routineSet.min_repetitions ?? null,
+          max_target_reps: routineSet.max_repetitions ?? null,
+          rpe: null,
+          tag: routineSet.tag ?? null,
+          comment: routineSet.comment ?? null,
+          is_completed: false,
+          is_pr: false,
+          order_index: routineSet.order_index,
+        });
       }
     } else {
-      // Default to 3 empty sets
       for (let i = 0; i < 3; i++) {
+        const setUuid = randomUUID();
         await query(
           'INSERT INTO workout_sets (uuid, workout_exercise_uuid, order_index, is_completed) VALUES ($1, $2, $3, false)',
-          [randomUUID(), weUuid, i]
+          [setUuid, weUuid, i]
         );
+        allSets.push({
+          uuid: setUuid,
+          workout_exercise_uuid: weUuid,
+          weight: null,
+          repetitions: null,
+          min_target_reps: null,
+          max_target_reps: null,
+          rpe: null,
+          tag: null,
+          comment: null,
+          is_completed: false,
+          is_pr: false,
+          order_index: i,
+        });
       }
     }
   }
 
-  return workout;
+  return { workout, workout_exercises: allExercises, workout_sets: allSets };
 }
 
 // ===== SUMMARY STATS =====
@@ -1001,7 +1066,7 @@ export async function getLastWorkoutsWithDetails(limit: number = 3): Promise<{
 
 export function parseExercise(row: DbRow): Exercise {
   return {
-    uuid: row.uuid as string,
+    uuid: (row.uuid as string).toLowerCase(),
     everkinetic_id: row.everkinetic_id as number,
     title: row.title as string,
     alias: Array.isArray(row.alias) ? row.alias as string[] : JSON.parse(row.alias as string || '[]'),
@@ -1058,6 +1123,7 @@ export function parsePlan(row: DbRow): WorkoutPlan {
   return {
     uuid: row.uuid as string,
     title: row.title as string | null,
+    order_index: (row.order_index as number) ?? 0,
   };
 }
 
@@ -1076,6 +1142,7 @@ export function parseRoutineExercise(row: DbRow): WorkoutRoutineExercise {
     uuid: row.uuid as string,
     workout_routine_uuid: row.workout_routine_uuid as string,
     exercise_uuid: row.exercise_uuid as string,
+    exercise_title: (row.exercise_title as string) ?? undefined,
     comment: row.comment as string | null,
     order_index: row.order_index as number,
   };
@@ -1101,16 +1168,27 @@ export function parseBodyweightLog(row: DbRow): BodyweightLog {
     weight_kg: parseFloat(row.weight_kg as string),
     logged_at: row.logged_at as string,
     note: row.note as string | null,
+    dedupe_key: (row.dedupe_key as string) ?? null,
   };
 }
 
-export async function logBodyweight(weight_kg: number, note?: string): Promise<BodyweightLog> {
+/** Manual log (no import dedupe). */
+export async function createBodyweightLog(data: {
+  weight_kg: number;
+  note?: string | null;
+  logged_at?: string;
+}): Promise<BodyweightLog> {
   const uuid = randomUUID();
   const row = await queryOne(
-    `INSERT INTO bodyweight_logs (uuid, weight_kg, note) VALUES ($1, $2, $3) RETURNING *`,
-    [uuid, weight_kg, note ?? null],
+    `INSERT INTO bodyweight_logs (uuid, weight_kg, note, logged_at)
+     VALUES ($1, $2, $3, COALESCE($4::timestamptz, NOW())) RETURNING *`,
+    [uuid, data.weight_kg, data.note ?? null, data.logged_at ?? null],
   );
   return parseBodyweightLog(row!);
+}
+
+export async function logBodyweight(weight_kg: number, note?: string): Promise<BodyweightLog> {
+  return createBodyweightLog({ weight_kg, note, logged_at: new Date().toISOString() });
 }
 
 export async function listBodyweightLogs(limit = 90): Promise<BodyweightLog[]> {
@@ -1264,15 +1342,31 @@ function parseNutritionLog(row: DbRow): NutritionLog {
     meal_name: row.meal_name as string | null,
     template_meal_id: row.template_meal_id as string | null,
     status: row.status as NutritionLog['status'],
+    external_ref: (row.external_ref as string) ?? null,
   };
 }
 
-export async function createNutritionLog(data: Omit<NutritionLog, 'uuid' | 'logged_at'> & { logged_at?: string }): Promise<NutritionLog> {
+export async function createNutritionLog(
+  data: Omit<NutritionLog, 'uuid' | 'logged_at'> & { logged_at?: string },
+): Promise<NutritionLog> {
   const uuid = randomUUID();
   const row = await queryOne(
-    `INSERT INTO nutrition_logs (uuid, logged_at, meal_type, calories, protein_g, carbs_g, fat_g, notes, meal_name, template_meal_id, status)
-     VALUES ($1, COALESCE($2::TIMESTAMP, NOW()), $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING *`,
-    [uuid, data.logged_at ?? null, data.meal_type ?? null, data.calories ?? null, data.protein_g ?? null, data.carbs_g ?? null, data.fat_g ?? null, data.notes ?? null, data.meal_name ?? null, data.template_meal_id ?? null, data.status ?? null],
+    `INSERT INTO nutrition_logs (uuid, logged_at, meal_type, calories, protein_g, carbs_g, fat_g, notes, meal_name, template_meal_id, status, external_ref)
+     VALUES ($1, COALESCE($2::TIMESTAMP, NOW()), $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING *`,
+    [
+      uuid,
+      data.logged_at ?? null,
+      data.meal_type ?? null,
+      data.calories ?? null,
+      data.protein_g ?? null,
+      data.carbs_g ?? null,
+      data.fat_g ?? null,
+      data.notes ?? null,
+      data.meal_name ?? null,
+      data.template_meal_id ?? null,
+      data.status ?? null,
+      data.external_ref ?? null,
+    ],
   );
   return parseNutritionLog(row!);
 }
@@ -1756,3 +1850,5 @@ export async function listProgressPhotos(limit = 50): Promise<ProgressPhoto[]> {
 export async function deleteProgressPhoto(uuid: string): Promise<void> {
   await query(`DELETE FROM progress_photos WHERE uuid = $1`, [uuid]);
 }
+
+export { importFitbeeExport } from './fitbee-import';

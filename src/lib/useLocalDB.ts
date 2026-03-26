@@ -19,9 +19,7 @@ export type LocalWorkoutWithExercises = LocalWorkout & {
 export function useCurrentWorkoutFull(): LocalWorkoutWithExercises | null | undefined {
   return useLiveQuery(async () => {
     const workout = await db.workouts
-      .where('is_current')
-      .equals(1)
-      .filter(w => !w._deleted)
+      .filter(w => w.is_current === true && !w._deleted)
       .first();
 
     if (!workout) return null;
@@ -57,8 +55,7 @@ export function useWorkouts(limit = 50): LocalWorkout[] {
   return useLiveQuery(
     () =>
       db.workouts
-        .where('_deleted')
-        .equals(0)
+        .filter(r => !r._deleted)
         .reverse()
         .sortBy('start_time')
         .then(rows => rows.slice(0, limit)),
@@ -70,7 +67,7 @@ export function useWorkouts(limit = 50): LocalWorkout[] {
 /** Returns the currently active workout (is_current = true). */
 export function useCurrentWorkout(): LocalWorkout | undefined {
   return useLiveQuery(
-    async () => db.workouts.where('is_current').equals(1).filter(w => !w._deleted).first(),
+    async () => db.workouts.filter(w => w.is_current === true && !w._deleted).first(),
     [],
   );
 }
@@ -276,8 +273,7 @@ export function useBodyweightLogs(limit = 30): LocalBodyweightLog[] {
   return useLiveQuery(
     () =>
       db.bodyweight_logs
-        .where('_deleted')
-        .equals(0)
+        .filter(r => !r._deleted)
         .reverse()
         .sortBy('logged_at')
         .then(rows => rows.slice(0, limit)),

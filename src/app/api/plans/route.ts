@@ -1,13 +1,28 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { listPlans, listRoutines, createPlan } from '@/db/queries';
+import { listPlans, listRoutines, listRoutineExercises, listRoutineSets, createPlan } from '@/db/queries';
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
+    const full = request.nextUrl.searchParams.get('full') === '1';
     const plans = await listPlans();
     const plansWithRoutines = await Promise.all(
       plans.map(async (plan) => {
         const routines = await listRoutines(plan.uuid);
-        return { ...plan, routines };
+        if (!full) return { ...plan, routines };
+        // Include exercises + sets for each routine (for local-first workout creation)
+        const routinesWithExercises = await Promise.all(
+          routines.map(async (routine) => {
+            const exercises = await listRoutineExercises(routine.uuid);
+            const exercisesWithSets = await Promise.all(
+              exercises.map(async (ex) => ({
+                ...ex,
+                sets: await listRoutineSets(ex.uuid),
+              }))
+            );
+            return { ...routine, exercises: exercisesWithSets };
+          })
+        );
+        return { ...plan, routines: routinesWithExercises };
       })
     );
     return NextResponse.json({ plans: plansWithRoutines });

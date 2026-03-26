@@ -7,9 +7,10 @@ export async function POST(
 ) {
   try {
     const { routineUuid } = await params;
-    const workout = await startWorkoutFromRoutine(routineUuid);
-    return NextResponse.json(workout, { status: 201 });
-  } catch {
+    const result = await startWorkoutFromRoutine(routineUuid);
+    return NextResponse.json(result, { status: 201 });
+  } catch (err) {
+    console.error('start-workout error:', err);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
