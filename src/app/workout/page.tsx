@@ -3,14 +3,20 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import Link from 'next/link';
 import { Check, ChevronRight, Plus, Search, X } from 'lucide-react';
-import type { Workout, WorkoutExercise, WorkoutSet, Exercise, WorkoutPlan, WorkoutRoutine } from '@/types';
+import type { WorkoutPlan, WorkoutRoutine, Exercise } from '@/types';
 import { formatTime, calcCompletedSets, calcTotalVolume } from './workout-utils';
-import type { WorkoutExerciseEntry } from './workout-utils';
 import { useUnit } from '@/context/UnitContext';
-
-interface WorkoutWithExercises extends Workout {
-  exercises: WorkoutExerciseEntry[];
-}
+import { useCurrentWorkoutFull, useExercises } from '@/lib/useLocalDB';
+import type { LocalWorkoutExerciseEntry, LocalWorkoutWithExercises } from '@/lib/useLocalDB';
+import type { LocalWorkoutSet } from '@/db/local';
+import {
+  startWorkout as mutStartWorkout,
+  finishWorkout as mutFinishWorkout,
+  addExerciseToWorkout,
+  addSet as mutAddSet,
+  updateSet as mutUpdateSet,
+} from '@/lib/mutations';
+import { syncEngine } from '@/lib/sync';
 
 // ─── Settings (localStorage-backed) ──────────────────────────────────────────
 function getRestSettings() {
@@ -104,7 +110,7 @@ function WorkoutSummaryBar({
   exercises,
 }: {
   elapsed: number;
-  exercises: WorkoutWithExercises['exercises'];
+  exercises: LocalWorkoutWithExercises['exercises'];
 }) {
   const { unit, toDisplay } = useUnit();
   const completedSets = calcCompletedSets(exercises);
@@ -150,7 +156,7 @@ function FinishWorkoutModal({
   onCancel,
 }: {
   elapsed: number;
-  exercises: WorkoutWithExercises['exercises'];
+  exercises: LocalWorkoutWithExercises['exercises'];
   onConfirm: () => void;
   onCancel: () => void;
 }) {
@@ -361,7 +367,7 @@ function getMuscleChipClass(muscle: string): string {
 
 const MUSCLE_GROUPS = ['chest', 'back', 'shoulders', 'arms', 'legs', 'abdominals'];
 
-// ─── Exercise selector sheet ─────────────────────────────────────────────────
+// ─── Exercise selector sheet (offline-first) ──────────────────────────────────
 function AddExerciseSheet({
   onAdd,
   onClose,
@@ -369,23 +375,17 @@ function AddExerciseSheet({
   onAdd: (exercise: Exercise) => void;
   onClose: () => void;
 }) {
-  const [exercises, setExercises] = useState<Exercise[]>([]);
   const [search, setSearch] = useState('');
-  const [loading, setLoading] = useState(false);
   const [selectedMuscle, setSelectedMuscle] = useState<string | null>(null);
 
-  useEffect(() => {
-    setLoading(true);
-    const params = new URLSearchParams();
-    if (search) params.set('search', search);
-    if (selectedMuscle) params.set('muscleGroup', selectedMuscle);
-    fetch(`/api/exercises?${params}`)
-      .then(r => r.json())
-      .then(data => { setExercises(data); setLoading(false); });
-  }, [search, selectedMuscle]);
+  // Reads from local IndexedDB — works fully offline
+  const exercises = useExercises({
+    search: search || undefined,
+    muscleGroup: selectedMuscle ?? undefined,
+  });
 
   // Group by primary muscle (only when no muscle filter active)
-  const grouped: Record<string, Exercise[]> = {};
+  const grouped: Record<string, typeof exercises> = {};
   for (const ex of exercises) {
     const muscle = ex.primary_muscles[0] ?? 'Other';
     if (!grouped[muscle]) grouped[muscle] = [];
@@ -456,9 +456,7 @@ function AddExerciseSheet({
 
       {/* Exercise list */}
       <div className="flex-1 overflow-y-auto px-4 py-2 space-y-4">
-        {loading ? (
-          <p className="text-center py-8 text-muted-foreground text-sm">Loading…</p>
-        ) : groups.length === 0 ? (
+        {groups.length === 0 ? (
           <p className="text-center py-8 text-muted-foreground text-sm">No exercises found</p>
         ) : (
           groups.map(([muscle, exs]) => (
@@ -468,7 +466,7 @@ function AddExerciseSheet({
                 {exs.map((ex) => (
                   <button
                     key={ex.uuid}
-                    onClick={() => onAdd(ex)}
+                    onClick={() => onAdd(ex as unknown as Exercise)}
                     className="ios-row w-full text-left min-h-[56px]"
                   >
                     <div className="flex-1 min-w-0">
@@ -512,7 +510,7 @@ function SetRow({
   onUpdate,
 }: {
   setNumber: number;
-  set: WorkoutSet;
+  set: LocalWorkoutSet;
   workoutExerciseUuid: string;
   onUpdate: (weUuid: string, setUuid: string, weight: number, reps: number) => Promise<void>;
 }) {
@@ -594,29 +592,18 @@ function SetRow({
   );
 }
 
-// ─── Add set button (within exercise) ────────────────────────────────────────
-async function addSet(workoutExerciseUuid: string) {
-  await fetch(`/api/workout-exercises/${workoutExerciseUuid}/sets`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ weight: null, repetitions: null }),
-  });
-}
-
 interface PlanWithRoutines extends WorkoutPlan {
   routines: WorkoutRoutine[];
 }
 
 // ─── Main page ────────────────────────────────────────────────────────────────
 export default function WorkoutPage() {
-  const [workout, setWorkout] = useState<WorkoutWithExercises | null>(null);
-  const [loading, setLoading] = useState(true);
+  const workout = useCurrentWorkoutFull(); // undefined = loading, null = no workout
   const [showExercises, setShowExercises] = useState(false);
   const [showRestTimer, setShowRestTimer] = useState(false);
   const [showFinishModal, setShowFinishModal] = useState(false);
   const [plans, setPlans] = useState<PlanWithRoutines[]>([]);
   const [startingRoutine, setStartingRoutine] = useState<string | null>(null);
-  const [prToast, setPrToast] = useState<string | null>(null);
 
   const restTimer = useRestTimer();
   const elapsed = useElapsed(workout?.start_time ?? null);
@@ -628,112 +615,58 @@ export default function WorkoutPage() {
     }
   }, []);
 
-  const fetchCurrentWorkout = useCallback(async () => {
-    const res = await fetch('/api/workouts?current=true');
-    const data = await res.json();
-
-    if (data) {
-      const detailRes = await fetch(`/api/workouts/${data.uuid}`);
-      const detailData = await detailRes.json();
-
-      const exercisesWithDetails = await Promise.all(
-        detailData.exercises.map(async (we: WorkoutExercise) => {
-          const [exerciseRes, setsRes] = await Promise.all([
-            fetch(`/api/exercises?search=${we.exercise_uuid}`),
-            fetch(`/api/workout-exercises/${we.uuid}/sets`),
-          ]);
-          const [exerciseData, setsData] = await Promise.all([
-            exerciseRes.json(),
-            setsRes.json(),
-          ]);
-          return {
-            ...we,
-            exercise: exerciseData.find((e: Exercise) => e.uuid === we.exercise_uuid),
-            sets: setsData,
-          };
-        })
-      );
-
-      setWorkout({ ...detailData, exercises: exercisesWithDetails });
-    } else {
-      setWorkout(null);
-    }
-    setLoading(false);
-  }, []);
-
-  useEffect(() => { fetchCurrentWorkout(); }, [fetchCurrentWorkout]);
-
+  // Load plans (online-only, plans management requires network)
   useEffect(() => {
     fetch('/api/plans')
       .then(r => r.json())
-      .then(data => setPlans(data.plans ?? []));
+      .then(data => setPlans(data.plans ?? []))
+      .catch(() => {}); // Fail silently when offline
   }, []);
 
   const startWorkoutFromRoutine = async (planUuid: string, routineUuid: string) => {
     setStartingRoutine(routineUuid);
     await fetch(`/api/plans/${planUuid}/routines/${routineUuid}/start`, { method: 'POST' });
-    await fetchCurrentWorkout();
+    // Pull new workout into local DB
+    await syncEngine.pull();
     setStartingRoutine(null);
   };
 
   const startWorkout = async () => {
-    await fetch('/api/workouts', { method: 'POST' });
-    await fetchCurrentWorkout();
+    await mutStartWorkout();
   };
 
   const finishWorkout = async () => {
     if (!workout) return;
-    await fetch(`/api/workouts/${workout.uuid}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'finish' }),
-    });
+    await mutFinishWorkout(workout.uuid);
     setShowFinishModal(false);
-    setWorkout(null);
     restTimer.cancel();
   };
 
   const handleAddExercise = async (exercise: Exercise) => {
     if (!workout) return;
-    await fetch(`/api/workouts/${workout.uuid}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'add-exercise', exerciseUuid: exercise.uuid }),
-    });
+    const orderIdx = workout.exercises.length;
+    await addExerciseToWorkout(workout.uuid, exercise.uuid, orderIdx);
     setShowExercises(false);
-    await fetchCurrentWorkout();
   };
 
   const updateSet = async (workoutExerciseUuid: string, setUuid: string, weight: number, reps: number) => {
-    const res = await fetch(`/api/workout-exercises/${workoutExerciseUuid}/sets`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ setUuid, weight, repetitions: reps, isCompleted: true }),
-    });
-    const savedSet = await res.json();
-    await fetchCurrentWorkout();
-
-    // Show PR toast if this set is a new personal record
-    if (savedSet?.is_pr) {
-      const exerciseName = workout?.exercises.find(e => e.uuid === workoutExerciseUuid)?.exercise?.title ?? 'Exercise';
-      setPrToast(exerciseName);
-      setTimeout(() => setPrToast(null), 3500);
-    }
+    await mutUpdateSet(setUuid, { weight, repetitions: reps, is_completed: true });
 
     // Auto-start rest timer if enabled in settings
     const { defaultRest, autoStart } = getRestSettings();
     if (autoStart) {
       restTimer.start(defaultRest);
     }
+    // Note: PR detection happens server-side after sync; is_pr updates via pull
   };
 
-  const handleAddSet = async (workoutExerciseUuid: string) => {
-    await addSet(workoutExerciseUuid);
-    await fetchCurrentWorkout();
+  const handleAddSet = async (we: LocalWorkoutExerciseEntry) => {
+    const orderIdx = we.sets.length;
+    await mutAddSet(we.uuid, {}, orderIdx);
   };
 
   // ── Loading ──
-  if (loading) {
+  if (workout === undefined) {
     return (
       <main className="tab-content bg-background flex items-center justify-center">
         <p className="text-muted-foreground text-sm">Loading…</p>
@@ -927,7 +860,7 @@ export default function WorkoutPage() {
 
                       {/* Add set */}
                       <button
-                        onClick={() => handleAddSet(we.uuid)}
+                        onClick={() => handleAddSet(we)}
                         className="flex items-center gap-2 px-4 py-3 text-primary text-sm font-medium w-full min-h-[44px]"
                       >
                         <Plus className="h-4 w-4" />
@@ -986,14 +919,6 @@ export default function WorkoutPage() {
           onConfirm={finishWorkout}
           onCancel={() => setShowFinishModal(false)}
         />
-      )}
-
-      {/* PR toast */}
-      {prToast && (
-        <div className="fixed bottom-24 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 bg-amber-400 text-zinc-900 font-semibold text-sm px-4 py-2.5 rounded-full shadow-lg animate-in fade-in slide-in-from-bottom-2">
-          <span>🏆</span>
-          <span>New PR — {prToast}!</span>
-        </div>
       )}
     </>
   );
