@@ -203,6 +203,25 @@ export interface WellbeingLog {
   notes: string | null;
 }
 
+// Module 10: Dysphoria/euphoria journal
+export interface DysphoriaLog {
+  uuid: string;
+  logged_at: string;
+  scale: number;      // 1–10 (1 = high dysphoria, 10 = high euphoria)
+  note: string | null;
+}
+
+// Module 10: Clothes test log
+export interface ClothesTestLog {
+  uuid: string;
+  logged_at: string;
+  outfit_description: string;
+  photo_url: string | null;
+  comfort_rating: number | null;   // 1–10
+  euphoria_rating: number | null;  // 1–10
+  notes: string | null;
+}
+
 // Module 7: Progress photos
 export type ProgressPhotoPose = 'front' | 'side' | 'back';
 

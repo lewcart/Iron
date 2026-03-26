@@ -17,6 +17,16 @@ vi.mock('@/db/queries', () => ({
   getMeasurementLog: vi.fn(),
   updateMeasurementLog: vi.fn(),
   deleteMeasurementLog: vi.fn(),
+  listDysphoriaLogs: vi.fn(),
+  createDysphoriaLog: vi.fn(),
+  getDysphoriaLog: vi.fn(),
+  updateDysphoriaLog: vi.fn(),
+  deleteDysphoriaLog: vi.fn(),
+  listClothesTestLogs: vi.fn(),
+  createClothesTestLog: vi.fn(),
+  getClothesTestLog: vi.fn(),
+  updateClothesTestLog: vi.fn(),
+  deleteClothesTestLog: vi.fn(),
 }));
 
 // ===== Fixtures =====
@@ -542,5 +552,354 @@ describe('DELETE /api/measurements/[uuid]', () => {
 
     expect(response.status).toBe(204);
     expect(queries.deleteMeasurementLog).toHaveBeenCalledWith('msr-uuid-1');
+  });
+});
+
+// ===== Dysphoria fixtures =====
+
+const mockDysphoriaLog = {
+  uuid: 'dys-uuid-1',
+  logged_at: '2026-03-20T09:00:00.000Z',
+  scale: 7,
+  note: 'Feeling pretty good today',
+};
+
+// ===== GET /api/dysphoria =====
+
+describe('GET /api/dysphoria', () => {
+  beforeEach(() => { vi.clearAllMocks(); });
+
+  it('returns dysphoria logs with default limit', async () => {
+    const queries = await import('@/db/queries');
+    vi.mocked(queries.listDysphoriaLogs).mockResolvedValue([mockDysphoriaLog]);
+
+    const { GET } = await import('./dysphoria/route');
+    const req = new NextRequest('http://localhost/api/dysphoria');
+    const response = await GET(req);
+    const data = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(data).toEqual([mockDysphoriaLog]);
+    expect(queries.listDysphoriaLogs).toHaveBeenCalledWith(90);
+  });
+
+  it('passes custom limit param', async () => {
+    const queries = await import('@/db/queries');
+    vi.mocked(queries.listDysphoriaLogs).mockResolvedValue([]);
+
+    const { GET } = await import('./dysphoria/route');
+    const req = new NextRequest('http://localhost/api/dysphoria?limit=14');
+    await GET(req);
+
+    expect(queries.listDysphoriaLogs).toHaveBeenCalledWith(14);
+  });
+});
+
+// ===== POST /api/dysphoria =====
+
+describe('POST /api/dysphoria', () => {
+  beforeEach(() => { vi.clearAllMocks(); });
+
+  it('creates and returns a new dysphoria log', async () => {
+    const queries = await import('@/db/queries');
+    vi.mocked(queries.createDysphoriaLog).mockResolvedValue(mockDysphoriaLog);
+
+    const { POST } = await import('./dysphoria/route');
+    const req = new NextRequest('http://localhost/api/dysphoria', {
+      method: 'POST',
+      body: JSON.stringify({ scale: '7', note: 'Feeling pretty good today' }),
+      headers: { 'Content-Type': 'application/json' },
+    });
+    const response = await POST(req);
+    const data = await response.json();
+
+    expect(response.status).toBe(201);
+    expect(data).toEqual(mockDysphoriaLog);
+    expect(queries.createDysphoriaLog).toHaveBeenCalledWith({
+      scale: 7,
+      note: 'Feeling pretty good today',
+      logged_at: undefined,
+    });
+  });
+
+  it('returns 400 when scale is missing', async () => {
+    const { POST } = await import('./dysphoria/route');
+    const req = new NextRequest('http://localhost/api/dysphoria', {
+      method: 'POST',
+      body: JSON.stringify({ note: 'no scale' }),
+      headers: { 'Content-Type': 'application/json' },
+    });
+    const response = await POST(req);
+    const data = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(data).toEqual({ error: 'scale is required' });
+  });
+});
+
+// ===== GET /api/dysphoria/[uuid] =====
+
+describe('GET /api/dysphoria/[uuid]', () => {
+  beforeEach(() => { vi.clearAllMocks(); });
+
+  it('returns a dysphoria log by uuid', async () => {
+    const queries = await import('@/db/queries');
+    vi.mocked(queries.getDysphoriaLog).mockResolvedValue(mockDysphoriaLog);
+
+    const { GET } = await import('./dysphoria/[uuid]/route');
+    const req = new NextRequest('http://localhost/api/dysphoria/dys-uuid-1');
+    const response = await GET(req, { params: Promise.resolve({ uuid: 'dys-uuid-1' }) });
+    const data = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(data).toEqual(mockDysphoriaLog);
+    expect(queries.getDysphoriaLog).toHaveBeenCalledWith('dys-uuid-1');
+  });
+
+  it('returns 404 when not found', async () => {
+    const queries = await import('@/db/queries');
+    vi.mocked(queries.getDysphoriaLog).mockResolvedValue(null);
+
+    const { GET } = await import('./dysphoria/[uuid]/route');
+    const req = new NextRequest('http://localhost/api/dysphoria/missing');
+    const response = await GET(req, { params: Promise.resolve({ uuid: 'missing' }) });
+    const data = await response.json();
+
+    expect(response.status).toBe(404);
+    expect(data).toEqual({ error: 'Not found' });
+  });
+});
+
+// ===== PATCH /api/dysphoria/[uuid] =====
+
+describe('PATCH /api/dysphoria/[uuid]', () => {
+  beforeEach(() => { vi.clearAllMocks(); });
+
+  it('updates and returns a dysphoria log', async () => {
+    const queries = await import('@/db/queries');
+    const updated = { ...mockDysphoriaLog, scale: 9 };
+    vi.mocked(queries.updateDysphoriaLog).mockResolvedValue(updated);
+
+    const { PATCH } = await import('./dysphoria/[uuid]/route');
+    const req = new NextRequest('http://localhost/api/dysphoria/dys-uuid-1', {
+      method: 'PATCH',
+      body: JSON.stringify({ scale: 9 }),
+      headers: { 'Content-Type': 'application/json' },
+    });
+    const response = await PATCH(req, { params: Promise.resolve({ uuid: 'dys-uuid-1' }) });
+    const data = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(data).toEqual(updated);
+    expect(queries.updateDysphoriaLog).toHaveBeenCalledWith('dys-uuid-1', { scale: 9 });
+  });
+
+  it('returns 404 when not found', async () => {
+    const queries = await import('@/db/queries');
+    vi.mocked(queries.updateDysphoriaLog).mockResolvedValue(null);
+
+    const { PATCH } = await import('./dysphoria/[uuid]/route');
+    const req = new NextRequest('http://localhost/api/dysphoria/missing', {
+      method: 'PATCH',
+      body: JSON.stringify({ scale: 9 }),
+      headers: { 'Content-Type': 'application/json' },
+    });
+    const response = await PATCH(req, { params: Promise.resolve({ uuid: 'missing' }) });
+    const data = await response.json();
+
+    expect(response.status).toBe(404);
+    expect(data).toEqual({ error: 'Not found' });
+  });
+});
+
+// ===== DELETE /api/dysphoria/[uuid] =====
+
+describe('DELETE /api/dysphoria/[uuid]', () => {
+  beforeEach(() => { vi.clearAllMocks(); });
+
+  it('deletes a dysphoria log and returns 204', async () => {
+    const queries = await import('@/db/queries');
+    vi.mocked(queries.deleteDysphoriaLog).mockResolvedValue(undefined);
+
+    const { DELETE } = await import('./dysphoria/[uuid]/route');
+    const req = new NextRequest('http://localhost/api/dysphoria/dys-uuid-1', { method: 'DELETE' });
+    const response = await DELETE(req, { params: Promise.resolve({ uuid: 'dys-uuid-1' }) });
+
+    expect(response.status).toBe(204);
+    expect(queries.deleteDysphoriaLog).toHaveBeenCalledWith('dys-uuid-1');
+  });
+});
+
+// ===== Clothes test fixtures =====
+
+const mockClothesTestLog = {
+  uuid: 'ct-uuid-1',
+  logged_at: '2026-03-20T09:00:00.000Z',
+  outfit_description: 'Floral sundress',
+  photo_url: null,
+  comfort_rating: 8,
+  euphoria_rating: 9,
+  notes: null,
+};
+
+// ===== GET /api/clothes-test =====
+
+describe('GET /api/clothes-test', () => {
+  beforeEach(() => { vi.clearAllMocks(); });
+
+  it('returns clothes test logs with default limit', async () => {
+    const queries = await import('@/db/queries');
+    vi.mocked(queries.listClothesTestLogs).mockResolvedValue([mockClothesTestLog]);
+
+    const { GET } = await import('./clothes-test/route');
+    const req = new NextRequest('http://localhost/api/clothes-test');
+    const response = await GET(req);
+    const data = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(data).toEqual([mockClothesTestLog]);
+    expect(queries.listClothesTestLogs).toHaveBeenCalledWith(50);
+  });
+});
+
+// ===== POST /api/clothes-test =====
+
+describe('POST /api/clothes-test', () => {
+  beforeEach(() => { vi.clearAllMocks(); });
+
+  it('creates and returns a new clothes test log', async () => {
+    const queries = await import('@/db/queries');
+    vi.mocked(queries.createClothesTestLog).mockResolvedValue(mockClothesTestLog);
+
+    const { POST } = await import('./clothes-test/route');
+    const req = new NextRequest('http://localhost/api/clothes-test', {
+      method: 'POST',
+      body: JSON.stringify({
+        outfit_description: 'Floral sundress',
+        comfort_rating: '8',
+        euphoria_rating: '9',
+      }),
+      headers: { 'Content-Type': 'application/json' },
+    });
+    const response = await POST(req);
+    const data = await response.json();
+
+    expect(response.status).toBe(201);
+    expect(data).toEqual(mockClothesTestLog);
+    expect(queries.createClothesTestLog).toHaveBeenCalledWith({
+      logged_at: undefined,
+      outfit_description: 'Floral sundress',
+      photo_url: null,
+      comfort_rating: 8,
+      euphoria_rating: 9,
+      notes: null,
+    });
+  });
+
+  it('returns 400 when outfit_description is missing', async () => {
+    const { POST } = await import('./clothes-test/route');
+    const req = new NextRequest('http://localhost/api/clothes-test', {
+      method: 'POST',
+      body: JSON.stringify({ comfort_rating: 8 }),
+      headers: { 'Content-Type': 'application/json' },
+    });
+    const response = await POST(req);
+    const data = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(data).toEqual({ error: 'outfit_description is required' });
+  });
+});
+
+// ===== GET /api/clothes-test/[uuid] =====
+
+describe('GET /api/clothes-test/[uuid]', () => {
+  beforeEach(() => { vi.clearAllMocks(); });
+
+  it('returns a clothes test log by uuid', async () => {
+    const queries = await import('@/db/queries');
+    vi.mocked(queries.getClothesTestLog).mockResolvedValue(mockClothesTestLog);
+
+    const { GET } = await import('./clothes-test/[uuid]/route');
+    const req = new NextRequest('http://localhost/api/clothes-test/ct-uuid-1');
+    const response = await GET(req, { params: Promise.resolve({ uuid: 'ct-uuid-1' }) });
+    const data = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(data).toEqual(mockClothesTestLog);
+    expect(queries.getClothesTestLog).toHaveBeenCalledWith('ct-uuid-1');
+  });
+
+  it('returns 404 when not found', async () => {
+    const queries = await import('@/db/queries');
+    vi.mocked(queries.getClothesTestLog).mockResolvedValue(null);
+
+    const { GET } = await import('./clothes-test/[uuid]/route');
+    const req = new NextRequest('http://localhost/api/clothes-test/missing');
+    const response = await GET(req, { params: Promise.resolve({ uuid: 'missing' }) });
+    const data = await response.json();
+
+    expect(response.status).toBe(404);
+    expect(data).toEqual({ error: 'Not found' });
+  });
+});
+
+// ===== PATCH /api/clothes-test/[uuid] =====
+
+describe('PATCH /api/clothes-test/[uuid]', () => {
+  beforeEach(() => { vi.clearAllMocks(); });
+
+  it('updates and returns a clothes test log', async () => {
+    const queries = await import('@/db/queries');
+    const updated = { ...mockClothesTestLog, euphoria_rating: 10 };
+    vi.mocked(queries.updateClothesTestLog).mockResolvedValue(updated);
+
+    const { PATCH } = await import('./clothes-test/[uuid]/route');
+    const req = new NextRequest('http://localhost/api/clothes-test/ct-uuid-1', {
+      method: 'PATCH',
+      body: JSON.stringify({ euphoria_rating: 10 }),
+      headers: { 'Content-Type': 'application/json' },
+    });
+    const response = await PATCH(req, { params: Promise.resolve({ uuid: 'ct-uuid-1' }) });
+    const data = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(data).toEqual(updated);
+    expect(queries.updateClothesTestLog).toHaveBeenCalledWith('ct-uuid-1', { euphoria_rating: 10 });
+  });
+
+  it('returns 404 when not found', async () => {
+    const queries = await import('@/db/queries');
+    vi.mocked(queries.updateClothesTestLog).mockResolvedValue(null);
+
+    const { PATCH } = await import('./clothes-test/[uuid]/route');
+    const req = new NextRequest('http://localhost/api/clothes-test/missing', {
+      method: 'PATCH',
+      body: JSON.stringify({ euphoria_rating: 10 }),
+      headers: { 'Content-Type': 'application/json' },
+    });
+    const response = await PATCH(req, { params: Promise.resolve({ uuid: 'missing' }) });
+    const data = await response.json();
+
+    expect(response.status).toBe(404);
+    expect(data).toEqual({ error: 'Not found' });
+  });
+});
+
+// ===== DELETE /api/clothes-test/[uuid] =====
+
+describe('DELETE /api/clothes-test/[uuid]', () => {
+  beforeEach(() => { vi.clearAllMocks(); });
+
+  it('deletes a clothes test log and returns 204', async () => {
+    const queries = await import('@/db/queries');
+    vi.mocked(queries.deleteClothesTestLog).mockResolvedValue(undefined);
+
+    const { DELETE } = await import('./clothes-test/[uuid]/route');
+    const req = new NextRequest('http://localhost/api/clothes-test/ct-uuid-1', { method: 'DELETE' });
+    const response = await DELETE(req, { params: Promise.resolve({ uuid: 'ct-uuid-1' }) });
+
+    expect(response.status).toBe(204);
+    expect(queries.deleteClothesTestLog).toHaveBeenCalledWith('ct-uuid-1');
   });
 });

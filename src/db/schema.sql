@@ -232,6 +232,29 @@ CREATE TABLE IF NOT EXISTS wellbeing_logs (
 
 CREATE INDEX IF NOT EXISTS idx_wellbeing_logs_logged_at ON wellbeing_logs(logged_at DESC);
 
+-- Module 10: Dysphoria/euphoria journal
+CREATE TABLE IF NOT EXISTS dysphoria_logs (
+  uuid TEXT PRIMARY KEY,
+  logged_at TIMESTAMP NOT NULL DEFAULT NOW(),
+  scale INTEGER NOT NULL CHECK(scale BETWEEN 1 AND 10),
+  note TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_dysphoria_logs_logged_at ON dysphoria_logs(logged_at DESC);
+
+-- Module 10: Clothes test log
+CREATE TABLE IF NOT EXISTS clothes_test_logs (
+  uuid TEXT PRIMARY KEY,
+  logged_at TIMESTAMP NOT NULL DEFAULT NOW(),
+  outfit_description TEXT NOT NULL,
+  photo_url TEXT,
+  comfort_rating INTEGER CHECK(comfort_rating IS NULL OR (comfort_rating BETWEEN 1 AND 10)),
+  euphoria_rating INTEGER CHECK(euphoria_rating IS NULL OR (euphoria_rating BETWEEN 1 AND 10)),
+  notes TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_clothes_test_logs_logged_at ON clothes_test_logs(logged_at DESC);
+
 -- Module 7: Progress photos
 CREATE TABLE IF NOT EXISTS progress_photos (
   uuid TEXT PRIMARY KEY,

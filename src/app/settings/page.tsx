@@ -127,6 +127,10 @@ export default function SettingsPage() {
               <span className="text-sm font-medium">Nutrition</span>
               <ChevronRight className="h-4 w-4 text-muted-foreground" />
             </Link>
+            <Link href="/wellbeing" className="ios-row justify-between">
+              <span className="text-sm font-medium">Wellbeing & Identity</span>
+              <ChevronRight className="h-4 w-4 text-muted-foreground" />
+            </Link>
             {/* Weight unit */}
             <div className="ios-row justify-between">
               <span className="text-sm font-medium">Weight Unit</span>

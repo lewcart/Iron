@@ -17,6 +17,8 @@ import type {
   NutritionDayNote,
   HrtLog,
   WellbeingLog,
+  DysphoriaLog,
+  ClothesTestLog,
   ProgressPhoto,
 } from '../types';
 import { calculatePRs } from '../lib/pr';
@@ -1510,6 +1512,149 @@ export async function updateWellbeingLog(uuid: string, data: Partial<Omit<Wellbe
 
 export async function deleteWellbeingLog(uuid: string): Promise<void> {
   await query(`DELETE FROM wellbeing_logs WHERE uuid = $1`, [uuid]);
+}
+
+// ===== MOTIVATION CORRELATION =====
+
+export interface MotivationCorrelation {
+  avg_mood: number | null;
+  avg_energy: number | null;
+  workout_count: number;
+  date_from: string;
+  date_to: string;
+}
+
+export async function getMotivationCorrelation(days = 30): Promise<MotivationCorrelation> {
+  const [wellbeingRow, workoutRow] = await Promise.all([
+    queryOne<DbRow>(
+      `SELECT AVG(mood) as avg_mood, AVG(energy) as avg_energy
+       FROM wellbeing_logs
+       WHERE logged_at >= NOW() - INTERVAL '${days} days'`,
+      [],
+    ),
+    queryOne<DbRow>(
+      `SELECT COUNT(*) as workout_count
+       FROM workouts
+       WHERE is_current = false AND start_time >= NOW() - INTERVAL '${days} days'`,
+      [],
+    ),
+  ]);
+  const dateFrom = new Date(Date.now() - days * 86400000).toISOString();
+  const dateTo = new Date().toISOString();
+  return {
+    avg_mood: wellbeingRow?.avg_mood != null ? parseFloat(wellbeingRow.avg_mood as string) : null,
+    avg_energy: wellbeingRow?.avg_energy != null ? parseFloat(wellbeingRow.avg_energy as string) : null,
+    workout_count: workoutRow?.workout_count != null ? parseInt(workoutRow.workout_count as string, 10) : 0,
+    date_from: dateFrom,
+    date_to: dateTo,
+  };
+}
+
+// ===== DYSPHORIA JOURNAL (Module 10) =====
+
+function parseDysphoriaLog(row: DbRow): DysphoriaLog {
+  return {
+    uuid: row.uuid as string,
+    logged_at: row.logged_at as string,
+    scale: parseInt(row.scale as string, 10),
+    note: row.note as string | null,
+  };
+}
+
+export async function createDysphoriaLog(data: Omit<DysphoriaLog, 'uuid' | 'logged_at'> & { logged_at?: string }): Promise<DysphoriaLog> {
+  const uuid = randomUUID();
+  const row = await queryOne(
+    `INSERT INTO dysphoria_logs (uuid, logged_at, scale, note)
+     VALUES ($1, COALESCE($2::TIMESTAMP, NOW()), $3, $4) RETURNING *`,
+    [uuid, data.logged_at ?? null, data.scale, data.note ?? null],
+  );
+  return parseDysphoriaLog(row!);
+}
+
+export async function listDysphoriaLogs(limit = 90): Promise<DysphoriaLog[]> {
+  const rows = await query(`SELECT * FROM dysphoria_logs ORDER BY logged_at DESC LIMIT $1`, [limit]);
+  return rows.map(parseDysphoriaLog);
+}
+
+export async function getDysphoriaLog(uuid: string): Promise<DysphoriaLog | null> {
+  const row = await queryOne(`SELECT * FROM dysphoria_logs WHERE uuid = $1`, [uuid]);
+  return row ? parseDysphoriaLog(row) : null;
+}
+
+export async function updateDysphoriaLog(uuid: string, data: Partial<Omit<DysphoriaLog, 'uuid'>>): Promise<DysphoriaLog | null> {
+  const fields: string[] = [];
+  const params: unknown[] = [];
+  let i = 1;
+  for (const [key, val] of Object.entries(data)) {
+    fields.push(`${key} = $${i++}`);
+    params.push(val);
+  }
+  if (fields.length === 0) return getDysphoriaLog(uuid);
+  params.push(uuid);
+  const row = await queryOne(
+    `UPDATE dysphoria_logs SET ${fields.join(', ')} WHERE uuid = $${i} RETURNING *`,
+    params,
+  );
+  return row ? parseDysphoriaLog(row) : null;
+}
+
+export async function deleteDysphoriaLog(uuid: string): Promise<void> {
+  await query(`DELETE FROM dysphoria_logs WHERE uuid = $1`, [uuid]);
+}
+
+// ===== CLOTHES TEST LOG (Module 10) =====
+
+function parseClothesTestLog(row: DbRow): ClothesTestLog {
+  return {
+    uuid: row.uuid as string,
+    logged_at: row.logged_at as string,
+    outfit_description: row.outfit_description as string,
+    photo_url: row.photo_url as string | null,
+    comfort_rating: row.comfort_rating != null ? parseInt(row.comfort_rating as string, 10) : null,
+    euphoria_rating: row.euphoria_rating != null ? parseInt(row.euphoria_rating as string, 10) : null,
+    notes: row.notes as string | null,
+  };
+}
+
+export async function createClothesTestLog(data: Omit<ClothesTestLog, 'uuid' | 'logged_at'> & { logged_at?: string }): Promise<ClothesTestLog> {
+  const uuid = randomUUID();
+  const row = await queryOne(
+    `INSERT INTO clothes_test_logs (uuid, logged_at, outfit_description, photo_url, comfort_rating, euphoria_rating, notes)
+     VALUES ($1, COALESCE($2::TIMESTAMP, NOW()), $3, $4, $5, $6, $7) RETURNING *`,
+    [uuid, data.logged_at ?? null, data.outfit_description, data.photo_url ?? null, data.comfort_rating ?? null, data.euphoria_rating ?? null, data.notes ?? null],
+  );
+  return parseClothesTestLog(row!);
+}
+
+export async function listClothesTestLogs(limit = 50): Promise<ClothesTestLog[]> {
+  const rows = await query(`SELECT * FROM clothes_test_logs ORDER BY logged_at DESC LIMIT $1`, [limit]);
+  return rows.map(parseClothesTestLog);
+}
+
+export async function getClothesTestLog(uuid: string): Promise<ClothesTestLog | null> {
+  const row = await queryOne(`SELECT * FROM clothes_test_logs WHERE uuid = $1`, [uuid]);
+  return row ? parseClothesTestLog(row) : null;
+}
+
+export async function updateClothesTestLog(uuid: string, data: Partial<Omit<ClothesTestLog, 'uuid'>>): Promise<ClothesTestLog | null> {
+  const fields: string[] = [];
+  const params: unknown[] = [];
+  let i = 1;
+  for (const [key, val] of Object.entries(data)) {
+    fields.push(`${key} = $${i++}`);
+    params.push(val);
+  }
+  if (fields.length === 0) return getClothesTestLog(uuid);
+  params.push(uuid);
+  const row = await queryOne(
+    `UPDATE clothes_test_logs SET ${fields.join(', ')} WHERE uuid = $${i} RETURNING *`,
+    params,
+  );
+  return row ? parseClothesTestLog(row) : null;
+}
+
+export async function deleteClothesTestLog(uuid: string): Promise<void> {
+  await query(`DELETE FROM clothes_test_logs WHERE uuid = $1`, [uuid]);
 }
 
 // ===== PROGRESS PHOTOS (Module 7) =====
