@@ -1,28 +1,14 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import type { TimelineEntry, TimelineModule } from '../api/timeline/route';
-
-interface StatsData {
-  activeDays: string[];
-  weeklyData: { week: string; count: number }[];
-}
-
-interface SummaryData {
-  weekWorkouts: number;
-  weekVolume: number;
-  currentStreak: number;
-  lastWorkouts: {
-    uuid: string;
-    start_time: string;
-    end_time: string | null;
-    title: string | null;
-    exercises: string[];
-    volume: number;
-  }[];
-  muscleFrequency: Record<string, number>;
-}
+import { Settings } from 'lucide-react';
+import type { TimelineEntry, TimelineModule, StatsData, SummaryData } from '@/lib/api/feed-types';
+import { FEED_QUERY_DEFAULTS, fetchFeedBundle, type FeedBundle } from '@/lib/api/feed';
+import { queryKeys } from '@/lib/api/query-keys';
+import { fetchJson } from '@/lib/api/client';
+import type { Workout } from '@/types';
 
 function isoDate(date: Date) {
   return date.toISOString().slice(0, 10);
@@ -75,28 +61,64 @@ const MUSCLE_GROUPS = [
 ];
 
 function muscleHeatColor(count: number): string {
-  if (count >= 3) return 'bg-blue-500';
-  if (count === 2) return 'bg-blue-700';
-  if (count === 1) return 'bg-blue-900';
-  return 'bg-zinc-800';
+  if (count >= 3) return 'bg-primary';
+  if (count === 2) return 'bg-primary/70';
+  if (count === 1) return 'bg-primary/35';
+  return 'bg-muted';
 }
 
 function muscleTextColor(count: number): string {
-  if (count >= 1) return 'text-zinc-100';
-  return 'text-zinc-500';
+  if (count >= 1) return 'text-primary-foreground';
+  return 'text-muted-foreground';
 }
 
-// Module chip styling
+// Module chip styling (light + dark)
 const MODULE_STYLES: Record<TimelineModule, { bg: string; text: string; label: string }> = {
-  workout:     { bg: 'bg-blue-900',   text: 'text-blue-300',   label: 'Workout' },
-  nutrition:   { bg: 'bg-green-900',  text: 'text-green-300',  label: 'Nutrition' },
-  hrt:         { bg: 'bg-purple-900', text: 'text-purple-300', label: 'HRT' },
-  measurement: { bg: 'bg-orange-900', text: 'text-orange-300', label: 'Measure' },
-  wellbeing:   { bg: 'bg-pink-900',   text: 'text-pink-300',   label: 'Wellbeing' },
-  photo:       { bg: 'bg-yellow-900', text: 'text-yellow-300', label: 'Photo' },
-  bodyweight:  { bg: 'bg-cyan-900',   text: 'text-cyan-300',   label: 'Weight' },
-  body_spec:   { bg: 'bg-teal-900',   text: 'text-teal-300',   label: 'Body Scan' },
-  dysphoria:   { bg: 'bg-rose-900',   text: 'text-rose-300',   label: 'Dysphoria' },
+  workout: {
+    bg: 'bg-sky-100 dark:bg-sky-950/80',
+    text: 'text-sky-800 dark:text-sky-200',
+    label: 'Workout',
+  },
+  nutrition: {
+    bg: 'bg-emerald-100 dark:bg-emerald-950/80',
+    text: 'text-emerald-800 dark:text-emerald-200',
+    label: 'Nutrition',
+  },
+  hrt: {
+    bg: 'bg-violet-100 dark:bg-violet-950/80',
+    text: 'text-violet-800 dark:text-violet-200',
+    label: 'HRT',
+  },
+  measurement: {
+    bg: 'bg-orange-100 dark:bg-orange-950/80',
+    text: 'text-orange-900 dark:text-orange-200',
+    label: 'Measure',
+  },
+  wellbeing: {
+    bg: 'bg-pink-100 dark:bg-pink-950/80',
+    text: 'text-pink-800 dark:text-pink-200',
+    label: 'Wellbeing',
+  },
+  photo: {
+    bg: 'bg-amber-100 dark:bg-amber-950/80',
+    text: 'text-amber-900 dark:text-amber-200',
+    label: 'Photo',
+  },
+  bodyweight: {
+    bg: 'bg-cyan-100 dark:bg-cyan-950/80',
+    text: 'text-cyan-900 dark:text-cyan-200',
+    label: 'Weight',
+  },
+  body_spec: {
+    bg: 'bg-teal-100 dark:bg-teal-950/80',
+    text: 'text-teal-900 dark:text-teal-200',
+    label: 'Body Scan',
+  },
+  dysphoria: {
+    bg: 'bg-rose-100 dark:bg-rose-950/80',
+    text: 'text-rose-800 dark:text-rose-200',
+    label: 'Dysphoria',
+  },
 };
 
 // Secondary modules with quick-link destinations
@@ -108,18 +130,84 @@ const SECONDARY_MODULES = [
   { label: 'Photos', href: '/body-spec', emoji: '📸' },
 ];
 
+function FeedPageSkeleton() {
+  return (
+    <div className="px-4 space-y-4 pb-4 animate-pulse" aria-hidden>
+      <div className="rounded-xl bg-muted/60 border border-border h-24" />
+      <div className="rounded-xl bg-muted/60 border border-border h-28" />
+      <div className="flex gap-3">
+        <div className="flex-1 h-12 rounded-xl bg-muted/60" />
+        <div className="flex-1 h-12 rounded-xl bg-muted/60" />
+      </div>
+      <div className="rounded-xl bg-muted/60 border border-border h-36" />
+      <div className="rounded-xl bg-muted/60 border border-border h-48" />
+    </div>
+  );
+}
+
 export default function FeedPage() {
   const router = useRouter();
-  const [stats, setStats] = useState<StatsData | null>(null);
-  const [summary, setSummary] = useState<SummaryData | null>(null);
-  const [timeline, setTimeline] = useState<TimelineEntry[] | null>(null);
-  const [startingWorkout, setStartingWorkout] = useState(false);
+  const queryClient = useQueryClient();
+  const feedQueryKey = queryKeys.feed(FEED_QUERY_DEFAULTS.days, FEED_QUERY_DEFAULTS.timelineLimit);
 
-  useEffect(() => {
-    fetch('/api/stats').then(r => r.json()).then(setStats);
-    fetch('/api/stats/summary').then(r => r.json()).then(setSummary);
-    fetch('/api/timeline?days=30&limit=20').then(r => r.json()).then(setTimeline);
-  }, []);
+  const { data, isPending } = useQuery({
+    queryKey: feedQueryKey,
+    queryFn: () =>
+      fetchFeedBundle(FEED_QUERY_DEFAULTS.days, FEED_QUERY_DEFAULTS.timelineLimit),
+    staleTime: 45_000,
+    placeholderData: (previousData) => previousData,
+  });
+
+  const stats: StatsData | undefined = data?.stats;
+  const summary: SummaryData | undefined = data?.summary;
+  const timeline: TimelineEntry[] | undefined = data?.timeline;
+
+  const quickStart = useMutation({
+    mutationFn: () =>
+      fetchJson<Workout>('/api/workouts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      }),
+    onSuccess: (workout) => {
+      queryClient.invalidateQueries({ queryKey: feedQueryKey });
+      router.push(`/workout/${workout.uuid}`);
+    },
+  });
+
+  const repeatLast = useMutation({
+    mutationFn: async () => {
+      const snap = queryClient.getQueryData<FeedBundle>(feedQueryKey);
+      const lastWorkout = snap?.summary?.lastWorkouts?.[0];
+      if (!lastWorkout) throw new Error('No last workout');
+
+      const newWorkout = await fetchJson<Workout>('/api/workouts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      });
+
+      const exRes = await fetch(`/api/workout-exercises?workout_uuid=${lastWorkout.uuid}`);
+      if (exRes.ok) {
+        const exercises: { exercise_uuid: string }[] = await exRes.json();
+        for (const ex of exercises) {
+          await fetch('/api/workout-exercises', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ workout_uuid: newWorkout.uuid, exercise_uuid: ex.exercise_uuid }),
+          });
+        }
+      }
+      return newWorkout;
+    },
+    onSuccess: (newWorkout) => {
+      queryClient.invalidateQueries({ queryKey: feedQueryKey });
+      router.push(`/workout/${newWorkout.uuid}`);
+    },
+  });
+
+  const startingWorkout = quickStart.isPending || repeatLast.isPending;
+  const showSkeleton = isPending && !data;
 
   // Build 28-day grid (4 weeks × 7 days), starting from 27 days ago
   const today = new Date();
@@ -165,60 +253,28 @@ export default function FeedPage() {
     { key: 'measurement', label: 'Measure', emoji: '📏' },
   ];
 
-  async function handleQuickStart() {
-    setStartingWorkout(true);
-    try {
-      const res = await fetch('/api/workouts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) });
-      if (res.ok) {
-        const workout = await res.json();
-        router.push(`/workout/${workout.uuid}`);
-      }
-    } finally {
-      setStartingWorkout(false);
-    }
-  }
-
-  async function handleRepeatLast() {
-    if (!summary?.lastWorkouts?.[0]) return;
-    setStartingWorkout(true);
-    try {
-      const lastWorkout = summary.lastWorkouts[0];
-      // Start a new workout
-      const res = await fetch('/api/workouts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) });
-      if (!res.ok) return;
-      const newWorkout = await res.json();
-
-      // Fetch exercises from the last workout to replicate
-      const exRes = await fetch(`/api/workout-exercises?workout_uuid=${lastWorkout.uuid}`);
-      if (exRes.ok) {
-        const exercises = await exRes.json();
-        for (const ex of exercises) {
-          await fetch('/api/workout-exercises', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ workout_uuid: newWorkout.uuid, exercise_uuid: ex.exercise_uuid }),
-          });
-        }
-      }
-
-      router.push(`/workout/${newWorkout.uuid}`);
-    } finally {
-      setStartingWorkout(false);
-    }
-  }
-
   const hasLastWorkout = (summary?.lastWorkouts?.length ?? 0) > 0;
 
   return (
     <main className="tab-content bg-background">
-      <div className="px-4 pt-14 pb-4">
-        <h1 className="text-2xl font-bold">Feed</h1>
+      <div className="px-4 pt-14 pb-4 flex items-center justify-between gap-3">
+        <h1 className="text-2xl font-bold text-foreground">Feed</h1>
+        <Link
+          href="/settings"
+          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-muted-foreground transition-colors hover:bg-muted hover:text-foreground active:scale-95"
+          aria-label="Settings"
+        >
+          <Settings className="h-6 w-6" strokeWidth={1.75} />
+        </Link>
       </div>
 
       <div className="px-4 space-y-4 pb-4">
-
+        {showSkeleton ? (
+          <FeedPageSkeleton />
+        ) : (
+          <>
         {/* Today at a Glance */}
-        <div className="rounded-xl bg-zinc-900 border border-zinc-800 p-4">
+        <div className="rounded-xl bg-card border border-border p-4 shadow-sm">
           <span className="text-xs font-semibold text-primary uppercase tracking-wide">Today at a Glance</span>
           <div className="flex gap-2 mt-3 flex-wrap">
             {glanceItems.map(({ key, label, emoji }) => {
@@ -228,13 +284,13 @@ export default function FeedPage() {
                   key={key}
                   className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${
                     done
-                      ? 'bg-primary text-white'
-                      : 'bg-zinc-800 text-zinc-500 border border-zinc-700'
+                      ? 'bg-primary text-primary-foreground'
+                      : 'bg-muted text-muted-foreground border border-border'
                   }`}
                 >
                   <span>{emoji}</span>
                   <span>{label}</span>
-                  {done && <span className="text-white/80">✓</span>}
+                  {done && <span className="opacity-80">✓</span>}
                 </div>
               );
             })}
@@ -242,24 +298,24 @@ export default function FeedPage() {
         </div>
 
         {/* Weekly Summary Card */}
-        <div className="rounded-xl bg-zinc-900 border border-zinc-800 p-4">
+        <div className="rounded-xl bg-card border border-border p-4 shadow-sm">
           <span className="text-xs font-semibold text-primary uppercase tracking-wide">This Week</span>
           <div className="grid grid-cols-3 gap-4 mt-3">
             <div className="flex flex-col gap-1">
-              <span className="text-3xl font-bold text-zinc-100">{summary?.weekWorkouts ?? '—'}</span>
-              <span className="text-sm text-zinc-400">Workouts</span>
+              <span className="text-3xl font-bold text-card-foreground">{summary?.weekWorkouts ?? '—'}</span>
+              <span className="text-sm text-muted-foreground">Workouts</span>
             </div>
             <div className="flex flex-col gap-1">
-              <span className="text-3xl font-bold text-zinc-100">
+              <span className="text-3xl font-bold text-card-foreground">
                 {summary ? formatVolume(summary.weekVolume) : '—'}
               </span>
-              <span className="text-sm text-zinc-400">Volume</span>
+              <span className="text-sm text-muted-foreground">Volume</span>
             </div>
             <div className="flex flex-col gap-1">
-              <span className="text-3xl font-bold text-zinc-100">
+              <span className="text-3xl font-bold text-card-foreground">
                 {summary?.currentStreak ?? '—'}
               </span>
-              <span className="text-sm text-zinc-400">Wk Streak</span>
+              <span className="text-sm text-muted-foreground">Wk Streak</span>
             </div>
           </div>
         </div>
@@ -267,17 +323,17 @@ export default function FeedPage() {
         {/* Quick Start Buttons */}
         <div className="flex gap-3">
           <button
-            onClick={handleQuickStart}
+            onClick={() => quickStart.mutate()}
             disabled={startingWorkout}
-            className="flex-1 bg-primary text-white font-semibold py-3 rounded-xl text-base disabled:opacity-50"
+            className="flex-1 bg-primary text-primary-foreground font-semibold py-3 rounded-xl text-base disabled:opacity-50"
           >
             {startingWorkout ? 'Starting…' : 'Quick Start'}
           </button>
           {hasLastWorkout && (
             <button
-              onClick={handleRepeatLast}
+              onClick={() => repeatLast.mutate()}
               disabled={startingWorkout}
-              className="flex-1 bg-zinc-800 border border-zinc-700 text-zinc-100 font-semibold py-3 rounded-xl text-base disabled:opacity-50"
+              className="flex-1 bg-secondary border border-border text-secondary-foreground font-semibold py-3 rounded-xl text-base disabled:opacity-50"
             >
               Repeat Last
             </button>
@@ -285,17 +341,17 @@ export default function FeedPage() {
         </div>
 
         {/* Secondary Module Quick-Links */}
-        <div className="rounded-xl bg-zinc-900 border border-zinc-800 p-4">
+        <div className="rounded-xl bg-card border border-border p-4 shadow-sm">
           <span className="text-xs font-semibold text-primary uppercase tracking-wide">Modules</span>
           <div className="grid grid-cols-5 gap-2 mt-3">
             {SECONDARY_MODULES.map(({ label, href, emoji }) => (
               <button
                 key={href}
                 onClick={() => router.push(href)}
-                className="flex flex-col items-center gap-1.5 py-3 rounded-xl bg-zinc-800 border border-zinc-700 hover:bg-zinc-700 active:scale-95 transition-all"
+                className="flex flex-col items-center gap-1.5 py-3 rounded-xl bg-muted/80 border border-border hover:bg-muted active:scale-95 transition-all"
               >
                 <span className="text-xl">{emoji}</span>
-                <span className="text-[10px] font-medium text-zinc-400">{label}</span>
+                <span className="text-[10px] font-medium text-muted-foreground">{label}</span>
               </button>
             ))}
           </div>
@@ -303,28 +359,33 @@ export default function FeedPage() {
 
         {/* Last 3 Workouts */}
         {(summary?.lastWorkouts?.length ?? 0) > 0 && (
-          <div className="rounded-xl bg-zinc-900 border border-zinc-800 p-4">
+          <div className="rounded-xl bg-card border border-border p-4 shadow-sm">
             <span className="text-xs font-semibold text-primary uppercase tracking-wide">Recent Workouts</span>
             <div className="mt-3 space-y-3">
               {summary!.lastWorkouts.map((w) => (
                 <button
                   key={w.uuid}
                   onClick={() => router.push('/history')}
-                  className="w-full text-left rounded-lg bg-zinc-800 border border-zinc-700 p-3"
+                  className="w-full text-left rounded-lg bg-muted/60 border border-border p-3 hover:bg-muted transition-colors"
                 >
                   <div className="flex justify-between items-start mb-1">
-                    <span className="text-sm font-semibold text-zinc-100">
+                    <span className="text-sm font-semibold text-card-foreground">
                       {w.title ?? formatDate(w.start_time)}
                     </span>
-                    <span className="text-xs text-zinc-400">{formatDuration(w.start_time, w.end_time)}</span>
+                    <span className="text-xs text-muted-foreground">
+                      {formatDuration(w.start_time, w.end_time)}
+                    </span>
                   </div>
                   {!w.title && (
-                    <div className="text-xs text-zinc-500 mb-1">{formatDate(w.start_time)}</div>
+                    <div className="text-xs text-muted-foreground mb-1">{formatDate(w.start_time)}</div>
                   )}
-                  <div className="text-xs text-zinc-400 truncate">
-                    {w.exercises.length > 0 ? w.exercises.slice(0, 3).join(', ') + (w.exercises.length > 3 ? ` +${w.exercises.length - 3}` : '') : 'No exercises'}
+                  <div className="text-xs text-muted-foreground truncate">
+                    {w.exercises.length > 0
+                      ? w.exercises.slice(0, 3).join(', ') +
+                        (w.exercises.length > 3 ? ` +${w.exercises.length - 3}` : '')
+                      : 'No exercises'}
                   </div>
-                  <div className="text-xs text-zinc-500 mt-1">{formatVolume(w.volume)}</div>
+                  <div className="text-xs text-muted-foreground mt-1">{formatVolume(w.volume)}</div>
                 </button>
               ))}
             </div>
@@ -332,26 +393,30 @@ export default function FeedPage() {
         )}
 
         {/* Cross-module Timeline */}
-        <div className="rounded-xl bg-zinc-900 border border-zinc-800 p-4">
+        <div className="rounded-xl bg-card border border-border p-4 shadow-sm">
           <span className="text-xs font-semibold text-primary uppercase tracking-wide">Timeline</span>
           <div className="mt-3 space-y-2">
-            {timeline === null ? (
-              <div className="text-center py-6 text-zinc-600 text-sm">Loading…</div>
+            {!timeline ? (
+              <div className="text-center py-6 text-muted-foreground text-sm">Loading…</div>
             ) : timeline.length === 0 ? (
-              <div className="text-center py-6 text-zinc-600 text-sm">No activity in the last 30 days</div>
+              <div className="text-center py-6 text-muted-foreground text-sm">
+                No activity in the last 30 days
+              </div>
             ) : (
               timeline.map((entry) => {
                 const style = MODULE_STYLES[entry.module];
                 return (
                   <div key={`${entry.module}-${entry.id}`} className="flex items-start gap-3">
                     <div className="flex-shrink-0 mt-0.5">
-                      <span className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-semibold ${style.bg} ${style.text}`}>
+                      <span
+                        className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-semibold ${style.bg} ${style.text}`}
+                      >
                         {style.label}
                       </span>
                     </div>
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm text-zinc-200 truncate">{entry.summary}</p>
-                      <p className="text-[11px] text-zinc-500">{formatTimeAgo(entry.timestamp)}</p>
+                      <p className="text-sm text-foreground truncate">{entry.summary}</p>
+                      <p className="text-[11px] text-muted-foreground">{formatTimeAgo(entry.timestamp)}</p>
                     </div>
                   </div>
                 );
@@ -362,7 +427,7 @@ export default function FeedPage() {
 
         {/* Muscle Group Heatmap */}
         {summary && (
-          <div className="rounded-xl bg-zinc-900 border border-zinc-800 p-4">
+          <div className="rounded-xl bg-card border border-border p-4 shadow-sm">
             <span className="text-xs font-semibold text-primary uppercase tracking-wide">Muscles This Week</span>
             <div className="grid grid-cols-3 gap-2 mt-3">
               {MUSCLE_GROUPS.map(({ key, label }) => {
@@ -373,9 +438,7 @@ export default function FeedPage() {
                     className={`rounded-lg p-2 flex flex-col items-center gap-1 ${muscleHeatColor(count)}`}
                   >
                     <span className={`text-xs font-medium ${muscleTextColor(count)}`}>{label}</span>
-                    {count > 0 && (
-                      <span className="text-[10px] text-zinc-300">{count}x</span>
-                    )}
+                    {count > 0 && <span className="text-[10px] font-medium text-foreground/90">{count}x</span>}
                   </div>
                 );
               })}
@@ -465,6 +528,8 @@ export default function FeedPage() {
           )}
         </div>
 
+          </>
+        )}
       </div>
     </main>
   );

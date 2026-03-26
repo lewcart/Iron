@@ -1,17 +1,12 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useMutation } from '@tanstack/react-query';
 import { Trash2, ChevronLeft } from 'lucide-react';
 import Link from 'next/link';
 import { useUnit } from '@/context/UnitContext';
 import type { BodySpecLog } from '@/types';
-
-function apiHeaders(): HeadersInit {
-  const key = process.env.NEXT_PUBLIC_REBIRTH_API_KEY;
-  return key
-    ? { 'Content-Type': 'application/json', 'X-Api-Key': key }
-    : { 'Content-Type': 'application/json' };
-}
+import { rebirthJsonHeaders } from '@/lib/api/headers';
 
 function formatDate(isoStr: string) {
   return new Date(isoStr).toLocaleDateString('en-GB', {
@@ -41,8 +36,23 @@ export default function BodySpecPage() {
   const [notes, setNotes] = useState('');
   const [measuredAt, setMeasuredAt] = useState(() => toDateInputValue());
 
+  const deleteBodySpecMut = useMutation({
+    mutationFn: (uuid: string) =>
+      fetch(`/api/body-spec/${uuid}`, { method: 'DELETE', headers: rebirthJsonHeaders() }).then((r) => {
+        if (!r.ok) throw new Error('Delete failed');
+      }),
+    onMutate: (uuid) => {
+      const prev = logs;
+      setLogs((l) => l.filter((x) => x.uuid !== uuid));
+      return { prev };
+    },
+    onError: (_e, _u, ctx) => {
+      if (ctx?.prev) setLogs(ctx.prev);
+    },
+  });
+
   useEffect(() => {
-    const headers = apiHeaders();
+    const headers = rebirthJsonHeaders();
     fetch('/api/body-spec?limit=30', { headers })
       .then(r => r.json())
       .then((data: BodySpecLog[]) => {
@@ -68,7 +78,7 @@ export default function BodySpecPage() {
 
       const res = await fetch('/api/body-spec', {
         method: 'POST',
-        headers: apiHeaders(),
+        headers: rebirthJsonHeaders(),
         body: JSON.stringify(payload),
       });
       if (res.ok) {
@@ -84,14 +94,6 @@ export default function BodySpecPage() {
     } finally {
       setSaving(false);
     }
-  };
-
-  const handleDelete = async (uuid: string) => {
-    await fetch(`/api/body-spec/${uuid}`, {
-      method: 'DELETE',
-      headers: apiHeaders(),
-    });
-    setLogs(prev => prev.filter(l => l.uuid !== uuid));
   };
 
   const hasInput = !!(heightInput || weightInput || bodyFatInput || leanMassInput || notes);
@@ -197,7 +199,7 @@ export default function BodySpecPage() {
                         )}
                       </div>
                       <button
-                        onClick={() => handleDelete(log.uuid)}
+                        onClick={() => deleteBodySpecMut.mutate(log.uuid)}
                         className="text-red-500 p-1 min-h-[44px] min-w-[44px] flex items-center justify-center"
                       >
                         <Trash2 className="h-4 w-4" />

@@ -1,18 +1,13 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useMutation } from '@tanstack/react-query';
 import { ChevronLeft, Trash2 } from 'lucide-react';
 import Link from 'next/link';
 import type { WellbeingLog, DysphoriaLog, ClothesTestLog } from '@/types';
+import { rebirthJsonHeaders } from '@/lib/api/headers';
 
 type Tab = 'daily' | 'journal' | 'clothes';
-
-function apiHeaders(): HeadersInit {
-  const key = process.env.NEXT_PUBLIC_REBIRTH_API_KEY;
-  return key
-    ? { 'Content-Type': 'application/json', 'X-Api-Key': key }
-    : { 'Content-Type': 'application/json' };
-}
 
 function formatDate(isoStr: string) {
   return new Date(isoStr).toLocaleDateString('en-GB', {
@@ -75,13 +70,28 @@ function DailyTab() {
     workout_count: number;
   } | null>(null);
 
+  const deleteWellbeingMut = useMutation({
+    mutationFn: (uuid: string) =>
+      fetch(`/api/wellbeing/${uuid}`, { method: 'DELETE', headers: rebirthJsonHeaders() }).then((r) => {
+        if (!r.ok) throw new Error('Delete failed');
+      }),
+    onMutate: (uuid) => {
+      const prev = logs;
+      setLogs((l) => l.filter((x) => x.uuid !== uuid));
+      return { prev };
+    },
+    onError: (_e, _u, ctx) => {
+      if (ctx?.prev) setLogs(ctx.prev);
+    },
+  });
+
   useEffect(() => {
-    fetch('/api/wellbeing?limit=30', { headers: apiHeaders() })
+    fetch('/api/wellbeing?limit=30', { headers: rebirthJsonHeaders() })
       .then(r => r.json())
       .then((data: WellbeingLog[]) => { setLogs(data); setLoading(false); })
       .catch(() => setLoading(false));
 
-    fetch('/api/wellbeing/correlation', { headers: apiHeaders() })
+    fetch('/api/wellbeing/correlation', { headers: rebirthJsonHeaders() })
       .then(r => r.ok ? r.json() : null)
       .then(data => { if (data) setCorrelation(data); })
       .catch(() => null);
@@ -93,7 +103,7 @@ function DailyTab() {
     try {
       const res = await fetch('/api/wellbeing', {
         method: 'POST',
-        headers: apiHeaders(),
+        headers: rebirthJsonHeaders(),
         body: JSON.stringify({
           mood: mood ?? undefined,
           energy: energy ?? undefined,
@@ -112,11 +122,6 @@ function DailyTab() {
     } finally {
       setSaving(false);
     }
-  };
-
-  const handleDelete = async (uuid: string) => {
-    await fetch(`/api/wellbeing/${uuid}`, { method: 'DELETE', headers: apiHeaders() });
-    setLogs(prev => prev.filter(l => l.uuid !== uuid));
   };
 
   return (
@@ -212,7 +217,7 @@ function DailyTab() {
                 </div>
                 <span className="text-xs text-muted-foreground mr-3 shrink-0">{formatDate(log.logged_at)}</span>
                 <button
-                  onClick={() => handleDelete(log.uuid)}
+                  onClick={() => deleteWellbeingMut.mutate(log.uuid)}
                   className="text-red-500 p-1 min-h-[44px] min-w-[44px] flex items-center justify-center shrink-0"
                 >
                   <Trash2 className="h-4 w-4" />
@@ -238,8 +243,23 @@ function JournalTab() {
   const [note, setNote] = useState('');
   const [saving, setSaving] = useState(false);
 
+  const deleteDysphoriaMut = useMutation({
+    mutationFn: (uuid: string) =>
+      fetch(`/api/dysphoria/${uuid}`, { method: 'DELETE', headers: rebirthJsonHeaders() }).then((r) => {
+        if (!r.ok) throw new Error('Delete failed');
+      }),
+    onMutate: (uuid) => {
+      const prev = logs;
+      setLogs((l) => l.filter((x) => x.uuid !== uuid));
+      return { prev };
+    },
+    onError: (_e, _u, ctx) => {
+      if (ctx?.prev) setLogs(ctx.prev);
+    },
+  });
+
   useEffect(() => {
-    fetch('/api/dysphoria?limit=60', { headers: apiHeaders() })
+    fetch('/api/dysphoria?limit=60', { headers: rebirthJsonHeaders() })
       .then(r => r.json())
       .then((data: DysphoriaLog[]) => { setLogs(data); setLoading(false); })
       .catch(() => setLoading(false));
@@ -251,7 +271,7 @@ function JournalTab() {
     try {
       const res = await fetch('/api/dysphoria', {
         method: 'POST',
-        headers: apiHeaders(),
+        headers: rebirthJsonHeaders(),
         body: JSON.stringify({ scale, note: note || undefined }),
       });
       if (res.ok) {
@@ -263,11 +283,6 @@ function JournalTab() {
     } finally {
       setSaving(false);
     }
-  };
-
-  const handleDelete = async (uuid: string) => {
-    await fetch(`/api/dysphoria/${uuid}`, { method: 'DELETE', headers: apiHeaders() });
-    setLogs(prev => prev.filter(l => l.uuid !== uuid));
   };
 
   return (
@@ -318,7 +333,7 @@ function JournalTab() {
                 </div>
                 <span className="text-xs text-muted-foreground mr-3 shrink-0">{formatDate(log.logged_at)}</span>
                 <button
-                  onClick={() => handleDelete(log.uuid)}
+                  onClick={() => deleteDysphoriaMut.mutate(log.uuid)}
                   className="text-red-500 p-1 min-h-[44px] min-w-[44px] flex items-center justify-center shrink-0"
                 >
                   <Trash2 className="h-4 w-4" />
@@ -346,8 +361,23 @@ function ClothesTestTab() {
   const [notes, setNotes] = useState('');
   const [saving, setSaving] = useState(false);
 
+  const deleteClothesMut = useMutation({
+    mutationFn: (uuid: string) =>
+      fetch(`/api/clothes-test/${uuid}`, { method: 'DELETE', headers: rebirthJsonHeaders() }).then((r) => {
+        if (!r.ok) throw new Error('Delete failed');
+      }),
+    onMutate: (uuid) => {
+      const prev = logs;
+      setLogs((l) => l.filter((x) => x.uuid !== uuid));
+      return { prev };
+    },
+    onError: (_e, _u, ctx) => {
+      if (ctx?.prev) setLogs(ctx.prev);
+    },
+  });
+
   useEffect(() => {
-    fetch('/api/clothes-test?limit=50', { headers: apiHeaders() })
+    fetch('/api/clothes-test?limit=50', { headers: rebirthJsonHeaders() })
       .then(r => r.json())
       .then((data: ClothesTestLog[]) => { setLogs(data); setLoading(false); })
       .catch(() => setLoading(false));
@@ -359,7 +389,7 @@ function ClothesTestTab() {
     try {
       const res = await fetch('/api/clothes-test', {
         method: 'POST',
-        headers: apiHeaders(),
+        headers: rebirthJsonHeaders(),
         body: JSON.stringify({
           outfit_description: outfit.trim(),
           comfort_rating: comfort ?? undefined,
@@ -378,11 +408,6 @@ function ClothesTestTab() {
     } finally {
       setSaving(false);
     }
-  };
-
-  const handleDelete = async (uuid: string) => {
-    await fetch(`/api/clothes-test/${uuid}`, { method: 'DELETE', headers: apiHeaders() });
-    setLogs(prev => prev.filter(l => l.uuid !== uuid));
   };
 
   return (
@@ -448,7 +473,7 @@ function ClothesTestTab() {
                 </div>
                 <span className="text-xs text-muted-foreground mr-3 shrink-0">{formatDate(log.logged_at)}</span>
                 <button
-                  onClick={() => handleDelete(log.uuid)}
+                  onClick={() => deleteClothesMut.mutate(log.uuid)}
                   className="text-red-500 p-1 min-h-[44px] min-w-[44px] flex items-center justify-center shrink-0"
                 >
                   <Trash2 className="h-4 w-4" />

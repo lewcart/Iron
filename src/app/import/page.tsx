@@ -3,8 +3,15 @@
 import { useState, useRef, useCallback } from 'react';
 import { Upload, CheckCircle2, AlertCircle, ArrowLeft } from 'lucide-react';
 import Link from 'next/link';
+import type { FitbeeImportSummary } from '@/types';
+
+function fitbeeApiHeaders(): HeadersInit {
+  const key = process.env.NEXT_PUBLIC_REBIRTH_API_KEY;
+  return key ? { 'X-Api-Key': key } : {};
+}
 
 type Phase = 'idle' | 'preview' | 'importing' | 'done' | 'error';
+type FitbeePhase = 'idle' | 'importing' | 'done' | 'error';
 
 interface WorkoutPreview {
   uuid: string;
@@ -30,7 +37,7 @@ function parseWorkouts(raw: unknown): WorkoutPreview[] {
     const workout = w as Record<string, unknown>;
     return {
       uuid: String(workout.uuid ?? ''),
-      start_time: String(workout.start_time ?? ''),
+      start_time: String(workout.start_time ?? workout.start ?? ''),
       title: workout.title ? String(workout.title) : null,
       exerciseCount: Array.isArray(workout.exercises) ? workout.exercises.length : 0,
     };
@@ -55,6 +62,12 @@ export default function ImportPage() {
   const [errorMsg, setErrorMsg] = useState('');
   const fileRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  const [fitbeePhase, setFitbeePhase] = useState<FitbeePhase>('idle');
+  const [fitbeeError, setFitbeeError] = useState('');
+  const [fitbeeResult, setFitbeeResult] = useState<FitbeeImportSummary | null>(null);
+  const fitbeeZipRef = useRef<HTMLInputElement>(null);
+  const fitbeeCsvRef = useRef<HTMLInputElement>(null);
 
   const handleParse = useCallback((text: string) => {
     try {
@@ -118,6 +131,78 @@ export default function ImportPage() {
     if (textareaRef.current) textareaRef.current.value = '';
   };
 
+  const resetFitbee = () => {
+    setFitbeePhase('idle');
+    setFitbeeError('');
+    setFitbeeResult(null);
+    if (fitbeeZipRef.current) fitbeeZipRef.current.value = '';
+    if (fitbeeCsvRef.current) fitbeeCsvRef.current.value = '';
+  };
+
+  const uploadFitbeeZip = useCallback(async (file: File) => {
+    setFitbeePhase('importing');
+    setFitbeeError('');
+    setFitbeeResult(null);
+    const fd = new FormData();
+    fd.append('archive', file);
+    try {
+      const res = await fetch('/api/import/fitbee', {
+        method: 'POST',
+        headers: fitbeeApiHeaders(),
+        body: fd,
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error((data as { error?: string }).error ?? 'Fitbee import failed');
+      }
+      setFitbeeResult(data as FitbeeImportSummary);
+      setFitbeePhase('done');
+    } catch (e) {
+      setFitbeeError(e instanceof Error ? e.message : 'Fitbee import failed');
+      setFitbeePhase('error');
+    }
+  }, []);
+
+  const uploadFitbeeCsvs = useCallback(async (files: FileList | null) => {
+    if (!files?.length) return;
+    setFitbeePhase('importing');
+    setFitbeeError('');
+    setFitbeeResult(null);
+    const fd = new FormData();
+    const map: Record<string, string> = {
+      'food_entries.csv': 'food_entries',
+      'water.csv': 'water',
+      'weight_entries.csv': 'weight_entries',
+      'workouts.csv': 'workouts',
+    };
+    for (let i = 0; i < files.length; i++) {
+      const f = files[i]!;
+      const field = map[f.name.toLowerCase()];
+      if (field) fd.append(field, f);
+    }
+    if ([...fd.keys()].length === 0) {
+      setFitbeeError('No recognised CSV names (food_entries.csv, water.csv, weight_entries.csv, workouts.csv).');
+      setFitbeePhase('error');
+      return;
+    }
+    try {
+      const res = await fetch('/api/import/fitbee', {
+        method: 'POST',
+        headers: fitbeeApiHeaders(),
+        body: fd,
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error((data as { error?: string }).error ?? 'Fitbee import failed');
+      }
+      setFitbeeResult(data as FitbeeImportSummary);
+      setFitbeePhase('done');
+    } catch (e) {
+      setFitbeeError(e instanceof Error ? e.message : 'Fitbee import failed');
+      setFitbeePhase('error');
+    }
+  }, []);
+
   return (
     <main className="min-h-screen bg-background pb-24">
       <div className="sticky top-0 z-10 bg-background border-b border-border">
@@ -125,7 +210,7 @@ export default function ImportPage() {
           <Link href="/settings" className="text-primary p-1 -ml-1">
             <ArrowLeft className="h-5 w-5" />
           </Link>
-          <h1 className="text-base font-semibold">Import Iron Data</h1>
+          <h1 className="text-base font-semibold">Import Data</h1>
         </div>
       </div>
 
@@ -270,6 +355,73 @@ export default function ImportPage() {
             </div>
           </>
         )}
+
+        <div className="ios-section">
+          <div className="px-4 py-3 space-y-3">
+            <p className="text-sm font-medium">Fitbee export</p>
+            <p className="text-xs text-muted-foreground">
+              Upload the ZIP from Fitbee, or select the CSV files (food_entries.csv, water.csv,
+              weight_entries.csv, workouts.csv). Re-importing skips duplicate rows.
+            </p>
+            {fitbeePhase === 'idle' || fitbeePhase === 'error' ? (
+              <>
+                <input
+                  ref={fitbeeZipRef}
+                  type="file"
+                  accept=".zip,application/zip"
+                  onChange={(e) => {
+                    const f = e.target.files?.[0];
+                    if (f) void uploadFitbeeZip(f);
+                  }}
+                  className="block w-full text-sm text-muted-foreground file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:bg-primary file:text-white file:text-xs file:font-medium"
+                />
+                <p className="text-xs text-muted-foreground text-center">or</p>
+                <input
+                  ref={fitbeeCsvRef}
+                  type="file"
+                  accept=".csv,text/csv"
+                  multiple
+                  onChange={(e) => void uploadFitbeeCsvs(e.target.files)}
+                  className="block w-full text-sm text-muted-foreground file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:bg-secondary file:text-xs file:font-medium"
+                />
+              </>
+            ) : null}
+            {fitbeePhase === 'importing' && (
+              <div className="flex items-center gap-2 py-2">
+                <div className="h-5 w-5 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+                <span className="text-sm text-muted-foreground">Importing Fitbee data…</span>
+              </div>
+            )}
+            {fitbeePhase === 'error' && fitbeeError && (
+              <div className="flex items-start gap-2 p-2 bg-red-50 dark:bg-red-950/20 rounded-lg border border-red-200 dark:border-red-800">
+                <AlertCircle className="h-4 w-4 text-red-500 flex-shrink-0 mt-0.5" />
+                <p className="text-xs text-red-700 dark:text-red-400">{fitbeeError}</p>
+              </div>
+            )}
+            {fitbeePhase === 'done' && fitbeeResult && (
+              <div className="rounded-lg border border-border bg-secondary/40 p-3 space-y-1 text-xs">
+                <p className="font-medium text-sm text-foreground">Fitbee import complete</p>
+                <p>Food lines: {fitbeeResult.food_entries_inserted} new · {fitbeeResult.food_entries_skipped_duplicates} skipped</p>
+                <p>Meal aggregates updated: {fitbeeResult.nutrition_aggregates_upserted}</p>
+                <p>Water days: {fitbeeResult.water_days_updated}</p>
+                <p>Weights: {fitbeeResult.weights_inserted} new · {fitbeeResult.weights_skipped_duplicates} skipped</p>
+                <p>Activities: {fitbeeResult.activities_inserted} new · {fitbeeResult.activities_skipped_duplicates} skipped</p>
+                {fitbeeResult.warnings.length > 0 && (
+                  <p className="text-amber-700 dark:text-amber-400 pt-1">
+                    {fitbeeResult.warnings.length} parser warning(s) — check Nutrition for totals.
+                  </p>
+                )}
+                <button
+                  type="button"
+                  onClick={resetFitbee}
+                  className="mt-2 w-full py-2 border border-border rounded-lg text-sm font-medium"
+                >
+                  Import another export
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
       </div>
     </main>
   );

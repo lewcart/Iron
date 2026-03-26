@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   ChevronRight,
   Trash2,
@@ -13,30 +13,15 @@ import {
   Download,
   Upload,
   Info,
-  Code2,
   Camera,
+  Dumbbell,
 } from 'lucide-react';
 import Link from 'next/link';
 import { useUnit } from '@/context/UnitContext';
-import { useBodyweightLogs } from '@/lib/useLocalDB';
-import { logBodyweight as mutLogBodyweight, deleteBodyweightLog as mutDeleteBodyweightLog } from '@/lib/mutations';
+import { REBIRTH_EQUIPMENT_LS_KEY } from '@/lib/available-equipment';
+import type { BodyweightLog } from '@/types';
 
 const REST_TIMES = [30, 60, 90, 120, 150, 180, 210, 240, 300];
-
-const EQUIPMENT_OPTIONS = [
-  { id: 'barbell', label: 'Barbell & Rack' },
-  { id: 'dumbbells', label: 'Dumbbells' },
-  { id: 'cables', label: 'Cable Machine' },
-  { id: 'machines', label: 'Weight Machines' },
-  { id: 'kettlebells', label: 'Kettlebells' },
-  { id: 'bands', label: 'Resistance Bands' },
-  { id: 'pullup', label: 'Pull-up Bar' },
-  { id: 'bench', label: 'Bench' },
-  { id: 'treadmill', label: 'Treadmill' },
-  { id: 'rowing', label: 'Rowing Machine' },
-  { id: 'bike', label: 'Exercise Bike' },
-  { id: 'bodyweight', label: 'Bodyweight Only' },
-];
 
 function formatTime(s: number) {
   const m = Math.floor(s / 60);
@@ -45,9 +30,20 @@ function formatTime(s: number) {
   return `${m}:${String(sec).padStart(2, '0')}`;
 }
 
+const LS_PROFILE_NAME = 'rebirth-profile-name';
+const LS_PROFILE_PRONOUNS = 'rebirth-profile-pronouns';
+
 function readLS(key: string, fallback: string): string {
   if (typeof window === 'undefined') return fallback;
   return localStorage.getItem(key) ?? fallback;
+}
+
+function writeLS(key: string, value: string) {
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    /* quota / private mode */
+  }
 }
 
 function formatLogDate(isoStr: string) {
@@ -107,28 +103,51 @@ export default function SettingsPage() {
   const [editingProfile, setEditingProfile] = useState(false);
   const [profileNameDraft, setProfileNameDraft] = useState('');
   const [profilePronounsDraft, setProfilePronounsDraft] = useState('');
+  const profileSnapshotRef = useRef({ name: '', pronouns: '' });
 
-  // Equipment
-  const [equipment, setEquipment] = useState<Set<string>>(new Set());
+  const [equipmentSelectedCount, setEquipmentSelectedCount] = useState(0);
 
   // Bodyweight
   const [bwInput, setBwInput] = useState('');
   const [bwNote, setBwNote] = useState('');
+  const [bwLogs, setBwLogs] = useState<BodyweightLog[]>([]);
+  const [bwLoading, setBwLoading] = useState(true);
   const [bwSaving, setBwSaving] = useState(false);
-  const bwLogs = useBodyweightLogs(30);
 
   // Load persisted values
   useEffect(() => {
-    const name = readLS('rebirth-profile-name', '');
-    const pronouns = readLS('rebirth-profile-pronouns', '');
+    const name = readLS(LS_PROFILE_NAME, '');
+    const pronouns = readLS(LS_PROFILE_PRONOUNS, '');
     setProfileName(name);
     setProfilePronouns(pronouns);
 
-    const eq = readLS('rebirth-equipment', '');
+    const eq = readLS(REBIRTH_EQUIPMENT_LS_KEY, '');
     if (eq) {
-      try { setEquipment(new Set(JSON.parse(eq))); } catch { /* ignore */ }
+      try {
+        const arr = JSON.parse(eq);
+        setEquipmentSelectedCount(Array.isArray(arr) ? arr.length : 0);
+      } catch {
+        setEquipmentSelectedCount(0);
+      }
     }
+
+    fetch('/api/bodyweight?limit=30')
+      .then(r => r.json())
+      .then((data: BodyweightLog[]) => {
+        setBwLogs(data);
+        setBwLoading(false);
+      })
+      .catch(() => setBwLoading(false));
   }, []);
+
+  // While editing profile, keep header + localStorage in sync on every change
+  useEffect(() => {
+    if (!editingProfile) return;
+    setProfileName(profileNameDraft);
+    setProfilePronouns(profilePronounsDraft);
+    writeLS(LS_PROFILE_NAME, profileNameDraft);
+    writeLS(LS_PROFILE_PRONOUNS, profilePronounsDraft);
+  }, [editingProfile, profileNameDraft, profilePronounsDraft]);
 
   // ── Handlers ──────────────────────────────────────────
 
@@ -151,26 +170,31 @@ export default function SettingsPage() {
   };
 
   const openProfileEdit = () => {
-    setProfileNameDraft(profileName);
-    setProfilePronounsDraft(profilePronouns);
+    const name = readLS(LS_PROFILE_NAME, profileName);
+    const pronouns = readLS(LS_PROFILE_PRONOUNS, profilePronouns);
+    profileSnapshotRef.current = { name, pronouns };
+    setProfileName(name);
+    setProfilePronouns(pronouns);
+    setProfileNameDraft(name);
+    setProfilePronounsDraft(pronouns);
     setEditingProfile(true);
   };
 
   const saveProfile = () => {
-    setProfileName(profileNameDraft);
-    setProfilePronouns(profilePronounsDraft);
-    localStorage.setItem('rebirth-profile-name', profileNameDraft);
-    localStorage.setItem('rebirth-profile-pronouns', profilePronounsDraft);
+    writeLS(LS_PROFILE_NAME, profileNameDraft);
+    writeLS(LS_PROFILE_PRONOUNS, profilePronounsDraft);
     setEditingProfile(false);
   };
 
-  const toggleEquipment = (id: string) => {
-    setEquipment(prev => {
-      const next = new Set(prev);
-      if (next.has(id)) { next.delete(id); } else { next.add(id); }
-      localStorage.setItem('rebirth-equipment', JSON.stringify([...next]));
-      return next;
-    });
+  const cancelProfileEdit = () => {
+    const { name, pronouns } = profileSnapshotRef.current;
+    setProfileNameDraft(name);
+    setProfilePronounsDraft(pronouns);
+    setProfileName(name);
+    setProfilePronouns(pronouns);
+    writeLS(LS_PROFILE_NAME, name);
+    writeLS(LS_PROFILE_PRONOUNS, pronouns);
+    setEditingProfile(false);
   };
 
   const handleLogBodyweight = async () => {
@@ -179,16 +203,25 @@ export default function SettingsPage() {
     setBwSaving(true);
     try {
       const weight_kg = fromInput(val);
-      await mutLogBodyweight(weight_kg, bwNote || undefined);
-      setBwInput('');
-      setBwNote('');
+      const res = await fetch('/api/bodyweight', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ weight_kg, note: bwNote || undefined }),
+      });
+      if (res.ok) {
+        const log: BodyweightLog = await res.json();
+        setBwLogs(prev => [log, ...prev]);
+        setBwInput('');
+        setBwNote('');
+      }
     } finally {
       setBwSaving(false);
     }
   };
 
   const handleDeleteBw = async (uuid: string) => {
-    await mutDeleteBodyweightLog(uuid);
+    await fetch(`/api/bodyweight/${uuid}`, { method: 'DELETE' });
+    setBwLogs(prev => prev.filter(l => l.uuid !== uuid));
   };
 
   // ── Derived ───────────────────────────────────────────
@@ -268,16 +301,18 @@ export default function SettingsPage() {
               </div>
               <div className="ios-row gap-2 justify-end">
                 <button
-                  onClick={() => setEditingProfile(false)}
+                  type="button"
+                  onClick={cancelProfileEdit}
                   className="px-4 py-1.5 text-sm text-muted-foreground"
                 >
                   Cancel
                 </button>
                 <button
+                  type="button"
                   onClick={saveProfile}
                   className="px-4 py-1.5 gradient-brand text-white text-sm font-semibold rounded-lg"
                 >
-                  Save
+                  Done
                 </button>
               </div>
             </div>
@@ -316,17 +351,24 @@ export default function SettingsPage() {
 
         {/* ── Equipment ───────────────────────────────── */}
         <div>
-          <p className="text-label-section mb-1 px-1">Available Equipment</p>
+          <p className="text-label-section mb-1 px-1">Equipment</p>
           <div className="ios-section">
-            {EQUIPMENT_OPTIONS.map(opt => (
-              <div key={opt.id} className="ios-row justify-between">
-                <span className="text-sm font-medium">{opt.label}</span>
-                <Toggle
-                  on={equipment.has(opt.id)}
-                  onToggle={() => toggleEquipment(opt.id)}
-                />
+            <Link href="/settings/equipment" className="ios-row justify-between">
+              <div className="flex items-center gap-3">
+                <IconBadge bg="bg-slate-600">
+                  <Dumbbell className="w-4 h-4 text-white" />
+                </IconBadge>
+                <div className="min-w-0">
+                  <span className="text-sm font-medium">Available Equipment</span>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    {equipmentSelectedCount === 0
+                      ? 'Nothing selected yet'
+                      : `${equipmentSelectedCount} selected`}
+                  </p>
+                </div>
               </div>
-            ))}
+              <ChevronRight className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+            </Link>
           </div>
         </div>
 
@@ -412,7 +454,7 @@ export default function SettingsPage() {
             </div>
           </div>
 
-          {bwLogs.length > 0 && (
+          {!bwLoading && bwLogs.length > 0 && (
             <div className="ios-section mt-2">
               {bwLogs.map(log => (
                 <div key={log.uuid} className="ios-row justify-between">
@@ -437,7 +479,7 @@ export default function SettingsPage() {
               ))}
             </div>
           )}
-          {bwLogs.length === 0 && (
+          {!bwLoading && bwLogs.length === 0 && (
             <p className="text-caption px-1 mt-2">No bodyweight entries yet.</p>
           )}
         </div>
@@ -531,20 +573,6 @@ export default function SettingsPage() {
               </div>
               <span className="text-sm text-muted-foreground">v1.0</span>
             </div>
-            <a
-              href="https://github.com/lewcart/Rebirth"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="ios-row justify-between"
-            >
-              <div className="flex items-center gap-3">
-                <IconBadge bg="bg-gray-700">
-                  <Code2 className="w-4 h-4 text-white" />
-                </IconBadge>
-                <span className="text-sm font-medium">Source Code</span>
-              </div>
-              <ChevronRight className="h-4 w-4 text-muted-foreground" />
-            </a>
           </div>
         </div>
 

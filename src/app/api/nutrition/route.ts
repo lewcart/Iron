@@ -30,6 +30,7 @@ export async function POST(request: NextRequest) {
     meal_name: body.meal_name ?? null,
     template_meal_id: body.template_meal_id ?? null,
     status: body.status ?? null,
+    external_ref: body.external_ref ?? null,
   });
   return NextResponse.json(log, { status: 201 });
 }

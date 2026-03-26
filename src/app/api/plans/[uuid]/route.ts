@@ -35,11 +35,15 @@ export async function PUT(
     const { uuid } = await params;
     const body = await request.json();
 
-    if (!body.title) {
-      return NextResponse.json({ error: 'title is required' }, { status: 400 });
+    const data: { title?: string; orderIndex?: number } = {};
+    if (body.title !== undefined) data.title = body.title;
+    if (body.orderIndex !== undefined) data.orderIndex = body.orderIndex;
+
+    if (!data.title && data.orderIndex === undefined) {
+      return NextResponse.json({ error: 'title or orderIndex is required' }, { status: 400 });
     }
 
-    const plan = await updatePlan(uuid, body.title);
+    const plan = await updatePlan(uuid, data);
     if (!plan) {
       return NextResponse.json({ error: 'Plan not found' }, { status: 404 });
     }

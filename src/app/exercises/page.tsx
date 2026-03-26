@@ -1,12 +1,14 @@
 'use client';
 
 import { useMemo, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { ChevronRight, Search, X } from 'lucide-react';
-import { useExercises } from '@/lib/useLocalDB';
-import type { LocalExercise } from '@/db/local';
+import type { Exercise } from '@/types';
+import { exerciseMatchesMuscleGroup } from '@/lib/muscle-groups';
+import { queryKeys } from '@/lib/api/query-keys';
+import { fetchExerciseCatalog } from '@/lib/api/exercises';
 import ExerciseDetail from './ExerciseDetail';
 
-// Known muscle groups with display info
 const MUSCLE_GROUPS = [
   { key: 'chest', label: 'Chest', emoji: '💪' },
   { key: 'back', label: 'Back', emoji: '🔙' },
@@ -27,36 +29,80 @@ const EQUIPMENT_FILTERS = [
   { key: 'pull-up bar', label: 'Pull-up Bar' },
 ];
 
+function exerciseMatchesSearch(e: Exercise, q: string): boolean {
+  const lower = q.toLowerCase();
+  if (e.title.toLowerCase().includes(lower)) return true;
+  return e.alias.some((a) => a.toLowerCase().includes(lower));
+}
+
+function ExercisesIndexSkeleton() {
+  return (
+    <div className="px-4 space-y-4 pb-4 animate-pulse" aria-hidden>
+      <div className="h-10 bg-muted/70 rounded-lg" />
+      <div className="ios-section h-14 bg-muted/50 rounded-xl" />
+      <div className="ios-section space-y-2">
+        {[1, 2, 3, 4, 5].map((i) => (
+          <div key={i} className="h-12 bg-muted/40 rounded-lg mx-2" />
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export default function ExercisesPage() {
+  const { data: allExercises = [], isPending, isPlaceholderData } = useQuery({
+    queryKey: queryKeys.exercises.catalog(),
+    queryFn: fetchExerciseCatalog,
+    staleTime: 15 * 60 * 1000,
+    gcTime: 60 * 60 * 1000,
+    placeholderData: (previousData) => previousData,
+  });
+
   const [search, setSearch] = useState('');
-  const [selectedExercise, setSelectedExercise] = useState<LocalExercise | null>(null);
+  const [selectedExercise, setSelectedExercise] = useState<Exercise | null>(null);
   const [selectedMuscle, setSelectedMuscle] = useState<string | null>(null);
+  const [muscleExercises, setMuscleExercises] = useState<Exercise[]>([]);
   const [selectedEquipment, setSelectedEquipment] = useState<string | null>(null);
+  const [equipmentExercises, setEquipmentExercises] = useState<Exercise[]>([]);
 
-  // All exercises from local DB (reactive)
-  const allExercises = useExercises();
-  const searchedExercises = useExercises({ search: search || undefined });
+  const searchResults = useMemo(() => {
+    if (!search.trim()) return [];
+    const q = search.trim();
+    return allExercises.filter((e) => exerciseMatchesSearch(e, q));
+  }, [allExercises, search]);
 
-  // Derived drill-down lists (computed from allExercises in memory — fast)
-  const muscleExercises = useMemo(() => {
-    if (!selectedMuscle) return [];
-    if (selectedMuscle === 'all') return allExercises;
-    if (selectedMuscle === 'Custom') return allExercises.filter(e => e.is_custom);
-    return allExercises.filter(e => e.primary_muscles.includes(selectedMuscle));
-  }, [allExercises, selectedMuscle]);
+  const handleMuscleSelect = (muscle: string) => {
+    setSelectedMuscle(muscle);
+    setMuscleExercises(
+      muscle === 'all'
+        ? allExercises
+        : allExercises.filter((e) =>
+            exerciseMatchesMuscleGroup(e.primary_muscles, e.secondary_muscles, muscle)
+          )
+    );
+  };
 
-  const equipmentExercises = useMemo(() => {
-    if (!selectedEquipment) return [];
-    return allExercises.filter(e => e.equipment.includes(selectedEquipment));
-  }, [allExercises, selectedEquipment]);
+  const handleEquipmentSelect = (equipment: string) => {
+    setSelectedEquipment(equipment);
+    setEquipmentExercises(
+      allExercises.filter((e) =>
+        e.equipment.some((eq) => eq.toLowerCase().includes(equipment))
+      )
+    );
+  };
 
   const countForMuscle = (muscle: string) =>
-    allExercises.filter(e => e.primary_muscles.some(m => m.toLowerCase().includes(muscle))).length;
+    allExercises.filter((e) =>
+      exerciseMatchesMuscleGroup(e.primary_muscles, e.secondary_muscles, muscle)
+    ).length;
 
   const countForEquipment = (equipment: string) =>
-    allExercises.filter(e => e.equipment.some(eq => eq.toLowerCase().includes(equipment))).length;
+    allExercises.filter((e) =>
+      e.equipment.some((eq) => eq.toLowerCase().includes(equipment))
+    ).length;
 
-  // ── Exercise detail ──
+  const loading = isPending && allExercises.length === 0;
+
   if (selectedExercise) {
     return (
       <ExerciseDetail
@@ -66,9 +112,8 @@ export default function ExercisesPage() {
     );
   }
 
-  // ── Equipment drill-down ──
   if (selectedEquipment) {
-    const equipLabel = EQUIPMENT_FILTERS.find(e => e.key === selectedEquipment)?.label ?? selectedEquipment;
+    const equipLabel = EQUIPMENT_FILTERS.find((e) => e.key === selectedEquipment)?.label ?? selectedEquipment;
     return (
       <main className="tab-content bg-background">
         <div className="flex items-center gap-3 px-4 pt-14 pb-3">
@@ -102,9 +147,8 @@ export default function ExercisesPage() {
     );
   }
 
-  // ── Muscle group drill-down ──
   if (selectedMuscle) {
-    const groupLabel = MUSCLE_GROUPS.find(g => g.key === selectedMuscle)?.label ?? selectedMuscle;
+    const groupLabel = MUSCLE_GROUPS.find((g) => g.key === selectedMuscle)?.label ?? selectedMuscle;
     return (
       <main className="tab-content bg-background">
         <div className="flex items-center gap-3 px-4 pt-14 pb-3">
@@ -143,14 +187,13 @@ export default function ExercisesPage() {
       <div className="px-4 pt-14 pb-3">
         <h1 className="text-2xl font-bold mb-3">Exercises</h1>
 
-        {/* Search bar */}
         <div className="relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <input
             type="text"
             placeholder="Search exercises"
             value={search}
-            onChange={e => setSearch(e.target.value)}
+            onChange={(e) => setSearch(e.target.value)}
             className="w-full pl-9 pr-8 py-2 bg-secondary rounded-lg text-sm outline-none"
           />
           {search && (
@@ -162,84 +205,95 @@ export default function ExercisesPage() {
       </div>
 
       <div className="px-4 space-y-4 pb-4">
-        {search ? (
-          /* Search results */
+        {loading ? (
+          <ExercisesIndexSkeleton />
+        ) : (
           <>
-            {searchedExercises.length === 0 ? (
-              <p className="text-center py-8 text-muted-foreground text-sm">No results for &ldquo;{search}&rdquo;</p>
+            {isPlaceholderData && allExercises.length > 0 ? (
+              <p className="text-[11px] text-muted-foreground text-center -mt-1">Cached list · refreshing in background</p>
+            ) : null}
+            {search ? (
+              <>
+                {searchResults.length === 0 ? (
+                  <p className="text-center py-8 text-muted-foreground text-sm">No results for &ldquo;{search}&rdquo;</p>
+                ) : (
+                  <div className="ios-section">
+                    {searchResults.map((ex) => (
+                      <button
+                        key={ex.uuid}
+                        onClick={() => setSelectedExercise(ex)}
+                        className="ios-row w-full text-left"
+                      >
+                        <div className="flex-1">
+                          <p className="text-sm font-medium">{ex.title}</p>
+                          <p className="text-xs text-muted-foreground capitalize">{ex.primary_muscles.join(', ')}</p>
+                        </div>
+                        <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </>
             ) : (
-              <div className="ios-section">
-                {searchedExercises.map((ex) => (
+              <>
+                <div className="ios-section">
                   <button
-                    key={ex.uuid}
-                    onClick={() => setSelectedExercise(ex)}
+                    onClick={() => handleMuscleSelect('all')}
                     className="ios-row w-full text-left"
                   >
-                    <div className="flex-1">
-                      <p className="text-sm font-medium">{ex.title}</p>
-                      <p className="text-xs text-muted-foreground capitalize">{ex.primary_muscles.join(', ')}</p>
-                    </div>
+                    <span className="flex-1 font-medium text-sm">All</span>
+                    <span className="text-sm text-muted-foreground mr-2">{allExercises.length}</span>
                     <ChevronRight className="h-4 w-4 text-muted-foreground" />
                   </button>
-                ))}
-              </div>
-            )}
-          </>
-        ) : (
-          /* Default: All + muscle group list */
-          <>
-            <div className="ios-section">
-              <button
-                onClick={() => setSelectedMuscle('all')}
-                className="ios-row w-full text-left"
-              >
-                <span className="flex-1 font-medium text-sm">All</span>
-                <span className="text-sm text-muted-foreground mr-2">{allExercises.length}</span>
-                <ChevronRight className="h-4 w-4 text-muted-foreground" />
-              </button>
-            </div>
+                </div>
 
-            <div className="ios-section">
-              {MUSCLE_GROUPS.map(({ key, label }) => (
-                <button
-                  key={key}
-                  onClick={() => setSelectedMuscle(key)}
-                  className="ios-row w-full text-left"
-                >
-                  <span className="flex-1 font-medium text-sm capitalize">{label}</span>
-                  <span className="text-sm text-muted-foreground mr-2">({countForMuscle(key)})</span>
-                  <ChevronRight className="h-4 w-4 text-muted-foreground" />
-                </button>
-              ))}
-            </div>
+                <div className="ios-section">
+                  {MUSCLE_GROUPS.map(({ key, label }) => (
+                    <button
+                      key={key}
+                      onClick={() => handleMuscleSelect(key)}
+                      className="ios-row w-full text-left"
+                    >
+                      <span className="flex-1 font-medium text-sm capitalize">{label}</span>
+                      <span className="text-sm text-muted-foreground mr-2">({countForMuscle(key)})</span>
+                      <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                    </button>
+                  ))}
+                </div>
 
-            <div>
-              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide px-1 mb-2">By Equipment</p>
-              <div className="flex flex-wrap gap-2">
-                {EQUIPMENT_FILTERS.map(({ key, label }) => (
+                <div>
+                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide px-1 mb-2">By Equipment</p>
+                  <div className="flex flex-wrap gap-2">
+                    {EQUIPMENT_FILTERS.map(({ key, label }) => (
+                      <button
+                        key={key}
+                        onClick={() => handleEquipmentSelect(key)}
+                        className="px-3 py-1.5 rounded-full bg-secondary text-sm font-medium hover:bg-secondary/80 transition-colors"
+                      >
+                        {label}
+                        <span className="ml-1.5 text-xs text-muted-foreground">({countForEquipment(key)})</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="ios-section">
                   <button
-                    key={key}
-                    onClick={() => setSelectedEquipment(key)}
-                    className="px-3 py-1.5 rounded-full bg-secondary text-sm font-medium hover:bg-secondary/80 transition-colors"
+                    onClick={() => {
+                      const custom = allExercises.filter((e) => e.is_custom);
+                      setSelectedMuscle('Custom');
+                      setMuscleExercises(custom);
+                    }}
+                    className="ios-row w-full text-left"
                   >
-                    {label}
-                    <span className="ml-1.5 text-xs text-muted-foreground">({countForEquipment(key)})</span>
+                    <span className="flex-1 font-medium text-sm">Custom</span>
+                    <span className="text-sm text-muted-foreground mr-2">
+                      {allExercises.filter((e) => e.is_custom).length}
+                    </span>
+                    <ChevronRight className="h-4 w-4 text-muted-foreground" />
                   </button>
-                ))}
-              </div>
-            </div>
-
-            {allExercises.some(e => e.is_custom) && (
-              <div className="ios-section">
-                <button
-                  onClick={() => setSelectedMuscle('Custom')}
-                  className="ios-row w-full text-left"
-                >
-                  <span className="flex-1 font-medium text-sm">Custom</span>
-                  <span className="text-sm text-muted-foreground mr-2">{allExercises.filter(e => e.is_custom).length}</span>
-                  <ChevronRight className="h-4 w-4 text-muted-foreground" />
-                </button>
-              </div>
+                </div>
+              </>
             )}
           </>
         )}

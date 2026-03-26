@@ -5,13 +5,13 @@ import { describe, it, expect } from 'vitest';
 // available in the node test environment. We test the static tabs configuration
 // and the active-state logic in isolation.
 
+/** Main dock tabs (settings is a separate control above the row in TabBar.tsx). */
 const tabs = [
   { href: '/feed', label: 'Feed' },
   { href: '/history', label: 'History' },
   { href: '/workout', label: 'Workout' },
   { href: '/exercises', label: 'Exercises' },
   { href: '/plans', label: 'Plans' },
-  { href: '/settings', label: 'Settings' },
 ];
 
 /** Mirrors the active-state logic from TabBar.tsx */
@@ -25,8 +25,8 @@ function isActive(tabHref: string, pathname: string): boolean {
 // ===== tabs configuration =====
 
 describe('tabs configuration', () => {
-  it('defines exactly 6 tabs', () => {
-    expect(tabs).toHaveLength(6);
+  it('defines exactly 5 dock tabs', () => {
+    expect(tabs).toHaveLength(5);
   });
 
   it('includes all required top-level routes', () => {
@@ -36,7 +36,6 @@ describe('tabs configuration', () => {
     expect(hrefs).toContain('/workout');
     expect(hrefs).toContain('/exercises');
     expect(hrefs).toContain('/plans');
-    expect(hrefs).toContain('/settings');
   });
 
   it('has a non-empty label for every tab', () => {

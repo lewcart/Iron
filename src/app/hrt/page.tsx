@@ -1,18 +1,13 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useMutation } from '@tanstack/react-query';
 import { ChevronLeft, Trash2, Check, X } from 'lucide-react';
 import Link from 'next/link';
 import type { HrtLog, HrtProtocol } from '@/types';
+import { rebirthJsonHeaders } from '@/lib/api/headers';
 
 type Tab = 'today' | 'protocols' | 'history';
-
-function apiHeaders(): HeadersInit {
-  const key = process.env.NEXT_PUBLIC_REBIRTH_API_KEY;
-  return key
-    ? { 'Content-Type': 'application/json', 'X-Api-Key': key }
-    : { 'Content-Type': 'application/json' };
-}
 
 function formatDate(isoStr: string) {
   return new Date(isoStr).toLocaleDateString('en-GB', {
@@ -32,10 +27,25 @@ function TodayTab() {
 
   const activeProtocol = protocols.find(p => !p.ended_at) ?? null;
 
+  const deleteLogMut = useMutation({
+    mutationFn: (uuid: string) =>
+      fetch(`/api/hrt/${uuid}`, { method: 'DELETE', headers: rebirthJsonHeaders() }).then((r) => {
+        if (!r.ok) throw new Error('Delete failed');
+      }),
+    onMutate: (uuid) => {
+      const prev = logs;
+      setLogs((l) => l.filter((x) => x.uuid !== uuid));
+      return { prev };
+    },
+    onError: (_e, _u, ctx) => {
+      if (ctx?.prev) setLogs(ctx.prev);
+    },
+  });
+
   useEffect(() => {
     Promise.all([
-      fetch('/api/hrt?limit=30', { headers: apiHeaders() }).then(r => r.json()),
-      fetch('/api/hrt/protocols', { headers: apiHeaders() }).then(r => r.json()),
+      fetch('/api/hrt?limit=30', { headers: rebirthJsonHeaders() }).then(r => r.json()),
+      fetch('/api/hrt/protocols', { headers: rebirthJsonHeaders() }).then(r => r.json()),
     ])
       .then(([logsData, protocolsData]: [HrtLog[], HrtProtocol[]]) => {
         setLogs(logsData);
@@ -57,7 +67,7 @@ function TodayTab() {
 
       const res = await fetch('/api/hrt', {
         method: 'POST',
-        headers: apiHeaders(),
+        headers: rebirthJsonHeaders(),
         body: JSON.stringify(body),
       });
       if (res.ok) {
@@ -69,11 +79,6 @@ function TodayTab() {
     } finally {
       setSaving(false);
     }
-  };
-
-  const handleDelete = async (uuid: string) => {
-    await fetch(`/api/hrt/${uuid}`, { method: 'DELETE', headers: apiHeaders() });
-    setLogs(prev => prev.filter(l => l.uuid !== uuid));
   };
 
   if (loading) return <p className="text-sm text-muted-foreground py-4">Loading…</p>;
@@ -153,7 +158,7 @@ function TodayTab() {
                 </div>
                 <span className="text-xs text-muted-foreground mr-3 shrink-0">{formatDate(log.logged_at)}</span>
                 <button
-                  onClick={() => handleDelete(log.uuid)}
+                  onClick={() => deleteLogMut.mutate(log.uuid)}
                   className="text-red-500 p-1 min-h-[44px] min-w-[44px] flex items-center justify-center shrink-0"
                 >
                   <Trash2 className="h-4 w-4" />
@@ -187,8 +192,23 @@ function ProtocolsTab() {
   const [blockerName, setBlockerName] = useState('');
   const [notes, setNotes] = useState('');
 
+  const deleteProtocolMut = useMutation({
+    mutationFn: (uuid: string) =>
+      fetch(`/api/hrt/protocols/${uuid}`, { method: 'DELETE', headers: rebirthJsonHeaders() }).then((r) => {
+        if (!r.ok) throw new Error('Delete failed');
+      }),
+    onMutate: (uuid) => {
+      const prev = protocols;
+      setProtocols((p) => p.filter((x) => x.uuid !== uuid));
+      return { prev };
+    },
+    onError: (_e, _u, ctx) => {
+      if (ctx?.prev) setProtocols(ctx.prev);
+    },
+  });
+
   useEffect(() => {
-    fetch('/api/hrt/protocols', { headers: apiHeaders() })
+    fetch('/api/hrt/protocols', { headers: rebirthJsonHeaders() })
       .then(r => r.json())
       .then((data: HrtProtocol[]) => { setProtocols(data); setLoading(false); })
       .catch(() => setLoading(false));
@@ -212,7 +232,7 @@ function ProtocolsTab() {
     try {
       const res = await fetch('/api/hrt/protocols', {
         method: 'POST',
-        headers: apiHeaders(),
+        headers: rebirthJsonHeaders(),
         body: JSON.stringify({
           medication,
           dose_description: doseDescription,
@@ -238,18 +258,13 @@ function ProtocolsTab() {
     const today = new Date().toISOString().split('T')[0];
     const res = await fetch(`/api/hrt/protocols/${protocol.uuid}`, {
       method: 'PATCH',
-      headers: apiHeaders(),
+      headers: rebirthJsonHeaders(),
       body: JSON.stringify({ ended_at: today }),
     });
     if (res.ok) {
       const updated: HrtProtocol = await res.json();
       setProtocols(prev => prev.map(p => p.uuid === updated.uuid ? updated : p));
     }
-  };
-
-  const handleDelete = async (uuid: string) => {
-    await fetch(`/api/hrt/protocols/${uuid}`, { method: 'DELETE', headers: apiHeaders() });
-    setProtocols(prev => prev.filter(p => p.uuid !== uuid));
   };
 
   if (loading) return <p className="text-sm text-muted-foreground py-4">Loading…</p>;
@@ -285,7 +300,7 @@ function ProtocolsTab() {
                     End
                   </button>
                   <button
-                    onClick={() => handleDelete(p.uuid)}
+                    onClick={() => deleteProtocolMut.mutate(p.uuid)}
                     className="text-red-500 p-1 min-h-[44px] min-w-[44px] flex items-center justify-center"
                   >
                     <Trash2 className="h-4 w-4" />
@@ -424,7 +439,7 @@ function ProtocolsTab() {
                   </p>
                 </div>
                 <button
-                  onClick={() => handleDelete(p.uuid)}
+                  onClick={() => deleteProtocolMut.mutate(p.uuid)}
                   className="text-red-500 p-1 min-h-[44px] min-w-[44px] flex items-center justify-center shrink-0"
                 >
                   <Trash2 className="h-4 w-4" />
@@ -448,17 +463,27 @@ function HistoryTab() {
   const [logs, setLogs] = useState<HrtLog[]>([]);
   const [loading, setLoading] = useState(true);
 
+  const deleteHistoryLogMut = useMutation({
+    mutationFn: (uuid: string) =>
+      fetch(`/api/hrt/${uuid}`, { method: 'DELETE', headers: rebirthJsonHeaders() }).then((r) => {
+        if (!r.ok) throw new Error('Delete failed');
+      }),
+    onMutate: (uuid) => {
+      const prev = logs;
+      setLogs((l) => l.filter((x) => x.uuid !== uuid));
+      return { prev };
+    },
+    onError: (_e, _u, ctx) => {
+      if (ctx?.prev) setLogs(ctx.prev);
+    },
+  });
+
   useEffect(() => {
-    fetch('/api/hrt?limit=90', { headers: apiHeaders() })
+    fetch('/api/hrt?limit=90', { headers: rebirthJsonHeaders() })
       .then(r => r.json())
       .then((data: HrtLog[]) => { setLogs(data); setLoading(false); })
       .catch(() => setLoading(false));
   }, []);
-
-  const handleDelete = async (uuid: string) => {
-    await fetch(`/api/hrt/${uuid}`, { method: 'DELETE', headers: apiHeaders() });
-    setLogs(prev => prev.filter(l => l.uuid !== uuid));
-  };
 
   if (loading) return <p className="text-sm text-muted-foreground py-4">Loading…</p>;
 
@@ -486,7 +511,7 @@ function HistoryTab() {
           </div>
           <span className="text-xs text-muted-foreground mr-3 shrink-0">{formatDate(log.logged_at)}</span>
           <button
-            onClick={() => handleDelete(log.uuid)}
+            onClick={() => deleteHistoryLogMut.mutate(log.uuid)}
             className="text-red-500 p-1 min-h-[44px] min-w-[44px] flex items-center justify-center shrink-0"
           >
             <Trash2 className="h-4 w-4" />

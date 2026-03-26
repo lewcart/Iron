@@ -50,6 +50,7 @@ export interface WorkoutSet {
 export interface WorkoutPlan {
   uuid: string;
   title: string | null;
+  order_index: number;
 }
 
 export interface WorkoutRoutine {
@@ -66,6 +67,8 @@ export interface WorkoutRoutineExercise {
   exercise_uuid: string;
   comment: string | null;
   order_index: number;
+  /** Present when joined from exercises table (plans UI, exports). */
+  exercise_title?: string | null;
 }
 
 export interface WorkoutRoutineSet {
@@ -115,6 +118,8 @@ export interface BodyweightLog {
   weight_kg: number;
   logged_at: string;
   note: string | null;
+  /** Set by importers for idempotent re-import */
+  dedupe_key: string | null;
 }
 
 // ===== REBIRTH MODULES 2–6 =====
@@ -160,6 +165,51 @@ export interface NutritionLog {
   meal_name: string | null;
   template_meal_id: string | null;
   status: NutritionLogStatus | null;
+  /** Stable key for idempotent imports (e.g. Fitbee meal aggregates) */
+  external_ref: string | null;
+}
+
+/** One row from a Fitbee-style food CSV (before DB insert). */
+export interface FitbeeFoodRowParsed {
+  logged_at_iso: string;
+  day_local: string;
+  meal_type: MealType;
+  food_name: string;
+  calories: number | null;
+  protein_g: number | null;
+  carbs_g: number | null;
+  fat_g: number | null;
+  nutrients: Record<string, number | string | null>;
+}
+
+export interface FitbeeWaterRowParsed {
+  date: string;
+  ml: number;
+}
+
+export interface FitbeeWeightRowParsed {
+  logged_at_iso: string;
+  weight_kg: number;
+  note: string | null;
+}
+
+export interface FitbeeActivityRowParsed {
+  logged_at_iso: string;
+  activity_name: string;
+  calories_burned: number | null;
+}
+
+export interface FitbeeImportSummary {
+  batch_uuid: string;
+  food_entries_inserted: number;
+  food_entries_skipped_duplicates: number;
+  nutrition_aggregates_upserted: number;
+  water_days_updated: number;
+  weights_inserted: number;
+  weights_skipped_duplicates: number;
+  activities_inserted: number;
+  activities_skipped_duplicates: number;
+  warnings: string[];
 }
 
 export interface NutritionWeekMeal {

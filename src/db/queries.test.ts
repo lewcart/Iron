@@ -276,6 +276,8 @@ describe('listExercises', () => {
     await listExercises({ muscleGroup: 'chest' });
     const [sql, params] = vi.mocked(db.query).mock.calls[0];
     expect(sql).toContain('primary_muscles');
+    expect(sql).toContain('secondary_muscles');
+    expect(params).toContain('%pectoralis%');
     expect(params).toContain('%chest%');
   });
 

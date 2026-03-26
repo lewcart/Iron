@@ -1,18 +1,21 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ChevronLeft, ChevronRight, Plus, Trash2, Check, Pencil, X } from 'lucide-react';
 import Link from 'next/link';
-import type { NutritionLog, NutritionWeekMeal, NutritionDayNote } from '@/types';
+import type { NutritionLog, NutritionWeekMeal } from '@/types';
+import { rebirthJsonHeaders } from '@/lib/api/headers';
+import { FEED_QUERY_DEFAULTS } from '@/lib/api/feed';
+import { queryKeys } from '@/lib/api/query-keys';
+import {
+  dateToDayOfWeek,
+  fetchNutritionDayBundle,
+  fetchNutritionWeekAll,
+  type NutritionDayBundle,
+} from '@/lib/api/nutrition';
 
 // ── helpers ────────────────────────────────────────────────────────────────
-
-function apiHeaders(): HeadersInit {
-  const key = process.env.NEXT_PUBLIC_REBIRTH_API_KEY;
-  return key
-    ? { 'Content-Type': 'application/json', 'X-Api-Key': key }
-    : { 'Content-Type': 'application/json' };
-}
 
 function toDateStr(d: Date): string {
   return d.toISOString().slice(0, 10);
@@ -34,12 +37,6 @@ function formatDateLabel(dateStr: string): string {
   });
 }
 
-/** Convert YYYY-MM-DD date string to day_of_week (0=Mon … 6=Sun) */
-function dateToDayOfWeek(dateStr: string): number {
-  const jsDay = new Date(dateStr + 'T12:00:00').getDay(); // 0=Sun
-  return jsDay === 0 ? 6 : jsDay - 1;
-}
-
 const DAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
 // ── types ──────────────────────────────────────────────────────────────────
@@ -56,14 +53,13 @@ const EMPTY_FORM: AddMealForm = { meal_name: '', protein_g: '', calories: '', no
 // ── component ──────────────────────────────────────────────────────────────
 
 export default function NutritionPage() {
+  const queryClient = useQueryClient();
+  const feedQueryKey = queryKeys.feed(FEED_QUERY_DEFAULTS.days, FEED_QUERY_DEFAULTS.timelineLimit);
+
   const [activeTab, setActiveTab] = useState<'today' | 'week'>('today');
 
   // ── Today tab state ──────────────────────────────────────────────────────
   const [viewDate, setViewDate] = useState(() => toDateStr(new Date()));
-  const [templateMeals, setTemplateMeals] = useState<NutritionWeekMeal[]>([]);
-  const [loggedMeals, setLoggedMeals] = useState<NutritionLog[]>([]);
-  const [_dayNote, setDayNote] = useState<NutritionDayNote | null>(null);
-  const [loadingDay, setLoadingDay] = useState(true);
 
   // Add-meal form (unplanned)
   const [showAddForm, setShowAddForm] = useState(false);
@@ -84,8 +80,6 @@ export default function NutritionPage() {
 
   // ── Standard Week tab state ───────────────────────────────────────────────
   const [weekDay, setWeekDay] = useState(() => dateToDayOfWeek(toDateStr(new Date())));
-  const [allWeekMeals, setAllWeekMeals] = useState<NutritionWeekMeal[]>([]);
-  const [loadingWeek, setLoadingWeek] = useState(true);
 
   // Add template meal form
   const [showWeekAddForm, setShowWeekAddForm] = useState(false);
@@ -102,36 +96,51 @@ export default function NutritionPage() {
     if (saved) setProteinTarget(parseInt(saved, 10));
   }, []);
 
-  // ── load today tab data ───────────────────────────────────────────────────
-  const loadDayData = useCallback(async (date: string) => {
-    setLoadingDay(true);
-    const h = apiHeaders();
-    const dow = dateToDayOfWeek(date);
-    const [tmRes, logRes, noteRes] = await Promise.all([
-      fetch(`/api/nutrition/week?day=${dow}`, { headers: h }),
-      fetch(`/api/nutrition?from=${date}&to=${date}&limit=100`, { headers: h }),
-      fetch(`/api/nutrition/day-notes?date=${date}`, { headers: h }),
-    ]);
-    if (tmRes.ok) setTemplateMeals(await tmRes.json());
-    if (logRes.ok) setLoggedMeals(await logRes.json());
-    const noteData = noteRes.ok ? await noteRes.json() : null;
-    setDayNote(noteData);
+  const { data: dayBundle, isPending: loadingDay } = useQuery({
+    queryKey: queryKeys.nutrition.dayBundle(viewDate),
+    queryFn: () => fetchNutritionDayBundle(viewDate),
+    staleTime: 20_000,
+    placeholderData: (previousData) => previousData,
+  });
+
+  const templateMeals = dayBundle?.templateMeals ?? [];
+  const loggedMeals = dayBundle?.loggedMeals ?? [];
+
+  useEffect(() => {
+    const noteData = dayBundle?.dayNote;
     setHydrationInput(noteData?.hydration_ml != null ? String(noteData.hydration_ml) : '');
     setDayNoteInput(noteData?.notes ?? '');
-    setLoadingDay(false);
-  }, []);
+  }, [dayBundle?.dayNote, viewDate]);
 
-  useEffect(() => { loadDayData(viewDate); }, [viewDate, loadDayData]);
+  const { data: allWeekMeals = [], isPending: loadingWeek } = useQuery({
+    queryKey: queryKeys.nutrition.weekAll(),
+    queryFn: fetchNutritionWeekAll,
+    staleTime: 60_000,
+    placeholderData: (previousData) => previousData,
+  });
 
-  // ── load week tab data ────────────────────────────────────────────────────
-  const loadWeekMeals = useCallback(async () => {
-    setLoadingWeek(true);
-    const res = await fetch('/api/nutrition/week', { headers: apiHeaders() });
-    if (res.ok) setAllWeekMeals(await res.json());
-    setLoadingWeek(false);
-  }, []);
-
-  useEffect(() => { loadWeekMeals(); }, [loadWeekMeals]);
+  const removeLogMut = useMutation({
+    mutationFn: (uuid: string) =>
+      fetch(`/api/nutrition/${uuid}`, { method: 'DELETE', headers: rebirthJsonHeaders() }),
+    onMutate: async (uuid) => {
+      const key = queryKeys.nutrition.dayBundle(viewDate);
+      await queryClient.cancelQueries({ queryKey: key });
+      const prev = queryClient.getQueryData<NutritionDayBundle>(key);
+      queryClient.setQueryData<NutritionDayBundle | undefined>(key, (old) =>
+        old ? { ...old, loggedMeals: old.loggedMeals.filter((l) => l.uuid !== uuid) } : old
+      );
+      return { prev };
+    },
+    onError: (_err, _uuid, ctx) => {
+      if (ctx?.prev) {
+        queryClient.setQueryData(queryKeys.nutrition.dayBundle(viewDate), ctx.prev);
+      }
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.nutrition.dayBundle(viewDate) });
+      queryClient.invalidateQueries({ queryKey: feedQueryKey });
+    },
+  });
 
   // ── derived ───────────────────────────────────────────────────────────────
   const dayMeals = allWeekMeals.filter(m => m.day_of_week === weekDay);
@@ -155,7 +164,7 @@ export default function NutritionPage() {
       : viewDate + 'T12:00:00.000Z';
     const res = await fetch('/api/nutrition', {
       method: 'POST',
-      headers: apiHeaders(),
+      headers: rebirthJsonHeaders(),
       body: JSON.stringify({
         logged_at: loggedAt,
         meal_name: meal.meal_name,
@@ -166,8 +175,8 @@ export default function NutritionPage() {
       }),
     });
     if (res.ok) {
-      const log: NutritionLog = await res.json();
-      setLoggedMeals(prev => [...prev, log]);
+      await queryClient.invalidateQueries({ queryKey: queryKeys.nutrition.dayBundle(viewDate) });
+      queryClient.invalidateQueries({ queryKey: feedQueryKey });
     }
   }
 
@@ -179,7 +188,7 @@ export default function NutritionPage() {
       : viewDate + 'T12:00:00.000Z';
     const res = await fetch('/api/nutrition', {
       method: 'POST',
-      headers: apiHeaders(),
+      headers: rebirthJsonHeaders(),
       body: JSON.stringify({
         logged_at: loggedAt,
         meal_name: deviationForm.meal_name || meal.meal_name,
@@ -191,16 +200,15 @@ export default function NutritionPage() {
       }),
     });
     if (res.ok) {
-      const log: NutritionLog = await res.json();
-      setLoggedMeals(prev => [...prev, log]);
       setEditingTemplate(null);
       setDeviationForm(EMPTY_FORM);
+      await queryClient.invalidateQueries({ queryKey: queryKeys.nutrition.dayBundle(viewDate) });
+      queryClient.invalidateQueries({ queryKey: feedQueryKey });
     }
   }
 
-  async function removeLog(uuid: string) {
-    await fetch(`/api/nutrition/${uuid}`, { method: 'DELETE', headers: apiHeaders() });
-    setLoggedMeals(prev => prev.filter(l => l.uuid !== uuid));
+  function removeLog(uuid: string) {
+    removeLogMut.mutate(uuid);
   }
 
   async function saveAddForm() {
@@ -213,7 +221,7 @@ export default function NutritionPage() {
     try {
       const res = await fetch('/api/nutrition', {
         method: 'POST',
-        headers: apiHeaders(),
+        headers: rebirthJsonHeaders(),
         body: JSON.stringify({
           logged_at: loggedAt,
           meal_name: addForm.meal_name,
@@ -224,10 +232,10 @@ export default function NutritionPage() {
         }),
       });
       if (res.ok) {
-        const log: NutritionLog = await res.json();
-        setLoggedMeals(prev => [...prev, log]);
         setAddForm(EMPTY_FORM);
         setShowAddForm(false);
+        await queryClient.invalidateQueries({ queryKey: queryKeys.nutrition.dayBundle(viewDate) });
+        queryClient.invalidateQueries({ queryKey: feedQueryKey });
       }
     } finally {
       setAddingSave(false);
@@ -239,14 +247,16 @@ export default function NutritionPage() {
     try {
       const res = await fetch('/api/nutrition/day-notes', {
         method: 'POST',
-        headers: apiHeaders(),
+        headers: rebirthJsonHeaders(),
         body: JSON.stringify({
           date: viewDate,
           hydration_ml: hydrationInput ? parseInt(hydrationInput, 10) : null,
           notes: dayNoteInput || null,
         }),
       });
-      if (res.ok) setDayNote(await res.json());
+      if (res.ok) {
+        await queryClient.invalidateQueries({ queryKey: queryKeys.nutrition.dayBundle(viewDate) });
+      }
     } finally {
       setSavingNote(false);
     }
@@ -260,7 +270,7 @@ export default function NutritionPage() {
     try {
       const res = await fetch('/api/nutrition/week', {
         method: 'POST',
-        headers: apiHeaders(),
+        headers: rebirthJsonHeaders(),
         body: JSON.stringify({
           day_of_week: weekDay,
           meal_slot: weekAddForm.meal_slot || '',
@@ -272,10 +282,10 @@ export default function NutritionPage() {
         }),
       });
       if (res.ok) {
-        const meal: NutritionWeekMeal = await res.json();
-        setAllWeekMeals(prev => [...prev, meal]);
         setWeekAddForm({ meal_name: '', protein_g: '', calories: '', quality_rating: '', meal_slot: '' });
         setShowWeekAddForm(false);
+        await queryClient.invalidateQueries({ queryKey: queryKeys.nutrition.weekAll() });
+        await queryClient.invalidateQueries({ queryKey: queryKeys.nutrition.dayBundle(viewDate) });
       }
     } finally {
       setWeekAddSaving(false);
@@ -285,7 +295,7 @@ export default function NutritionPage() {
   async function saveWeekEdit(uuid: string) {
     const res = await fetch(`/api/nutrition/week/${uuid}`, {
       method: 'PATCH',
-      headers: apiHeaders(),
+      headers: rebirthJsonHeaders(),
       body: JSON.stringify({
         meal_name: weekEditForm.meal_name,
         meal_slot: weekEditForm.meal_slot,
@@ -295,15 +305,16 @@ export default function NutritionPage() {
       }),
     });
     if (res.ok) {
-      const updated: NutritionWeekMeal = await res.json();
-      setAllWeekMeals(prev => prev.map(m => m.uuid === uuid ? updated : m));
       setEditingWeekMeal(null);
+      await queryClient.invalidateQueries({ queryKey: queryKeys.nutrition.weekAll() });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.nutrition.dayBundle(viewDate) });
     }
   }
 
   async function deleteWeekMeal(uuid: string) {
-    await fetch(`/api/nutrition/week/${uuid}`, { method: 'DELETE', headers: apiHeaders() });
-    setAllWeekMeals(prev => prev.filter(m => m.uuid !== uuid));
+    await fetch(`/api/nutrition/week/${uuid}`, { method: 'DELETE', headers: rebirthJsonHeaders() });
+    await queryClient.invalidateQueries({ queryKey: queryKeys.nutrition.weekAll() });
+    await queryClient.invalidateQueries({ queryKey: queryKeys.nutrition.dayBundle(viewDate) });
   }
 
   // ── render ─────────────────────────────────────────────────────────────────

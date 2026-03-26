@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { NextRequest } from 'next/server';
+import type { NutritionLog } from '@/types';
 
 // ===== Mock @/db/queries =====
 
@@ -16,7 +17,7 @@ vi.mock('@/db/queries', () => ({
 
 // ===== Fixtures =====
 
-const mockNutritionLog = {
+const mockNutritionLog: NutritionLog = {
   uuid: 'nl-uuid-1',
   logged_at: '2026-03-26T08:00:00.000Z',
   meal_type: 'breakfast',
@@ -27,7 +28,8 @@ const mockNutritionLog = {
   fat_g: 8.0,
   notes: null,
   template_meal_id: null,
-  status: 'logged',
+  status: 'added',
+  external_ref: null,
 };
 
 const mockDayNote = {
@@ -103,7 +105,7 @@ describe('POST /api/nutrition', () => {
         protein_g: '20',
         carbs_g: '55',
         fat_g: '8',
-        status: 'logged',
+        status: 'added',
       }),
       headers: { 'Content-Type': 'application/json' },
     });
@@ -122,7 +124,8 @@ describe('POST /api/nutrition', () => {
       notes: null,
       meal_name: 'Oats',
       template_meal_id: null,
-      status: 'logged',
+      status: 'added',
+      external_ref: null,
     });
   });
 
@@ -139,7 +142,13 @@ describe('POST /api/nutrition', () => {
     await POST(req);
 
     expect(queries.createNutritionLog).toHaveBeenCalledWith(
-      expect.objectContaining({ calories: null, protein_g: null, carbs_g: null, fat_g: null }),
+      expect.objectContaining({
+        calories: null,
+        protein_g: null,
+        carbs_g: null,
+        fat_g: null,
+        external_ref: null,
+      }),
     );
   });
 });

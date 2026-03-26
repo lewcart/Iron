@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import { TabBar } from "@/components/TabBar";
+import { AppProviders } from "@/app/providers";
 import { UnitProvider } from "@/context/UnitContext";
 import { NetworkProvider } from "@/context/NetworkContext";
 import { SyncStatus } from "@/components/SyncStatus";
@@ -37,12 +38,14 @@ export default function RootLayout({
     <html lang="en">
       <body className="bg-background">
         <NetworkProvider>
-          <UnitProvider>
-            {children}
-            <TabBar />
-            <SyncStatus />
-            <InstallPrompt />
-          </UnitProvider>
+          <AppProviders>
+            <UnitProvider>
+              {children}
+              <TabBar />
+              <SyncStatus />
+              <InstallPrompt />
+            </UnitProvider>
+          </AppProviders>
         </NetworkProvider>
       </body>
     </html>

@@ -623,7 +623,7 @@ export default function WorkoutPage() {
   const [startingRoutine, setStartingRoutine] = useState<string | null>(null);
   const [expandedExercises, setExpandedExercises] = useState<Set<string>>(new Set());
   const headerRef = useRef<HTMLDivElement>(null);
-  const [headerHeight, setHeaderHeight] = useState(140);
+  const [headerHeight, setHeaderHeight] = useState(48);
 
   const restTimer = useRestTimer();
   const elapsed = useElapsed(workout?.start_time ?? null);
@@ -631,7 +631,11 @@ export default function WorkoutPage() {
   // Measure fixed header height
   useEffect(() => {
     if (!headerRef.current) return;
-    const obs = new ResizeObserver(([entry]) => setHeaderHeight(entry.contentRect.height));
+    const measure = () => {
+      if (headerRef.current) setHeaderHeight(headerRef.current.getBoundingClientRect().height);
+    };
+    measure();
+    const obs = new ResizeObserver(measure);
     obs.observe(headerRef.current);
     return () => obs.disconnect();
   }, []);

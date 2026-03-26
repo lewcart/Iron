@@ -14,6 +14,7 @@
     "db:migrate": "tsx src/db/migrate.ts",
     "db:seed": "tsx src/db/seed.ts",
     "db:seed-routines": "tsx src/db/seed-routines.ts",
+    "db:dedupe-exercises": "tsx src/db/deduplicate-exercises.ts",
     "cli:build": "tsc src/cli.ts --outDir dist --module nodenext --moduleResolution nodenext --target es2022 --esModuleInterop --skipLibCheck",
     "cli": "tsx src/cli.ts",
     "test": "vitest run"
@@ -21,12 +22,14 @@
   "dependencies": {
     "@ducanh2912/next-pwa": "^10.2.9",
     "@neondatabase/serverless": "^0.10.4",
+    "@tanstack/react-query": "^5.95.2",
     "@vercel/blob": "^0.27.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "commander": "^12.1.0",
     "dexie": "^4.3.0",
     "dexie-react-hooks": "^4.2.0",
+    "fflate": "^0.8.2",
     "lucide-react": "^0.577.0",
     "next": "^15.5.12",
     "react": "^19.0.0",
@@ -37,6 +40,7 @@
     "zod": "^3.24.1"
   },
   "devDependencies": {
+    "@tanstack/react-query-devtools": "^5.95.2",
     "@types/node": "^22",
     "@types/react": "^19",
     "@types/react-dom": "^19",

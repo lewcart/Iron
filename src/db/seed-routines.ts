@@ -32,49 +32,52 @@ const ROUTINES: RoutineDef[] = [
       { search: 'overhead press',     sets: [{ min: 8, max: 12 }, { min: 8, max: 12 }, { min: 8, max: 12 }] },
       { search: 'lateral raise',      sets: [{ min: 12, max: 15 }, { min: 12, max: 15 }, { min: 12, max: 15 }, { min: 12, max: 15 }] },
       { search: 'front raise',        sets: [{ min: 12, max: 15 }, { min: 12, max: 15 }, { min: 12, max: 15 }] },
-      { search: 'rear lateral raise', sets: [{ min: 12, max: 15 }, { min: 12, max: 15 }, { min: 12, max: 15 }] },
+      { search: 'rear deltoid raise (bent over)', sets: [{ min: 12, max: 15 }, { min: 12, max: 15 }, { min: 12, max: 15 }] },
       { search: 'face pull',          sets: [{ min: 15, max: 20 }, { min: 15, max: 20 }, { min: 15, max: 20 }] },
-      { search: 'upright row',        sets: [{ min: 10, max: 12 }, { min: 10, max: 12 }, { min: 10, max: 12 }] },
+      { search: 'shrugs: cable',      sets: [{ min: 10, max: 12 }, { min: 10, max: 12 }, { min: 10, max: 12 }] },
     ],
   },
   {
     title: 'Back + delts + arms',
     exercises: [
-      { search: 'lat pulldown',        sets: [{ min: 8, max: 12 }, { min: 8, max: 12 }, { min: 8, max: 12 }, { min: 8, max: 12 }] },
-      { search: 'seated cable row',    sets: [{ min: 8, max: 12 }, { min: 8, max: 12 }, { min: 8, max: 12 }] },
-      { search: 'bent over barbell row', sets: [{ min: 8, max: 10 }, { min: 8, max: 10 }, { min: 8, max: 10 }] },
+      { search: 'pulldown (wide grip)', sets: [{ min: 8, max: 12 }, { min: 8, max: 12 }, { min: 8, max: 12 }, { min: 8, max: 12 }] },
+      { search: 'row: cable (seated)', sets: [{ min: 8, max: 12 }, { min: 8, max: 12 }, { min: 8, max: 12 }] },
+      { search: 'row: barbell (bent over)', sets: [{ min: 8, max: 10 }, { min: 8, max: 10 }, { min: 8, max: 10 }] },
       { search: 'lateral raise',       sets: [{ min: 12, max: 15 }, { min: 12, max: 15 }, { min: 12, max: 15 }] },
-      { search: 'barbell curl',        sets: [{ min: 10, max: 12 }, { min: 10, max: 12 }, { min: 10, max: 12 }] },
-      { search: 'tricep pushdown',     sets: [{ min: 12, max: 15 }, { min: 12, max: 15 }, { min: 12, max: 15 }] },
+      { search: 'biceps curl: ez curl bar', sets: [{ min: 10, max: 12 }, { min: 10, max: 12 }, { min: 10, max: 12 }] },
+      { search: 'triceps pushdown: cable', sets: [{ min: 12, max: 15 }, { min: 12, max: 15 }, { min: 12, max: 15 }] },
     ],
   },
   {
     title: 'Quads + glute shape',
     exercises: [
-      { search: 'back squat',          sets: [{ min: 6, max: 10 }, { min: 6, max: 10 }, { min: 6, max: 10 }, { min: 6, max: 10 }] },
+      { search: 'squat: barbell',      sets: [{ min: 6, max: 10 }, { min: 6, max: 10 }, { min: 6, max: 10 }, { min: 6, max: 10 }] },
       { search: 'leg press',           sets: [{ min: 10, max: 15 }, { min: 10, max: 15 }, { min: 10, max: 15 }] },
       { search: 'lunge',               sets: [{ min: 10, max: 12 }, { min: 10, max: 12 }, { min: 10, max: 12 }] },
       { search: 'leg extension',       sets: [{ min: 12, max: 15 }, { min: 12, max: 15 }, { min: 12, max: 15 }] },
-      { search: 'hip thrust',          sets: [{ min: 10, max: 15 }, { min: 10, max: 15 }, { min: 10, max: 15 }] },
-      { search: 'bulgarian split squat', sets: [{ min: 8, max: 12 }, { min: 8, max: 12 }, { min: 8, max: 12 }] },
+      { search: 'bridge',              sets: [{ min: 10, max: 15 }, { min: 10, max: 15 }, { min: 10, max: 15 }] },
+      { search: 'lunges: dumbbell',    sets: [{ min: 8, max: 12 }, { min: 8, max: 12 }, { min: 8, max: 12 }] },
     ],
   },
   {
     title: 'Glutes/Hams bias (and waist)',
     exercises: [
       { search: 'romanian deadlift',   sets: [{ min: 8, max: 12 }, { min: 8, max: 12 }, { min: 8, max: 12 }, { min: 8, max: 12 }] },
-      { search: 'hip thrust',          sets: [{ min: 10, max: 15 }, { min: 10, max: 15 }, { min: 10, max: 15 }] },
+      { search: 'bridge',              sets: [{ min: 10, max: 15 }, { min: 10, max: 15 }, { min: 10, max: 15 }] },
       { search: 'leg curl',            sets: [{ min: 10, max: 15 }, { min: 10, max: 15 }, { min: 10, max: 15 }] },
       { search: 'deadlift',            sets: [{ min: 5, max: 8 }, { min: 5, max: 8 }, { min: 5, max: 8 }] },
       { search: 'hyperextension',      sets: [{ min: 12, max: 15 }, { min: 12, max: 15 }, { min: 12, max: 15 }] },
-      { search: 'cable crunch',        sets: [{ min: 15, max: 20 }, { min: 15, max: 20 }, { min: 15, max: 20 }] },
+      { search: 'crunch: cable',       sets: [{ min: 15, max: 20 }, { min: 15, max: 20 }, { min: 15, max: 20 }] },
     ],
   },
 ];
 
 async function findExerciseUuid(search: string): Promise<string | null> {
   const row = await queryOne<{ uuid: string }>(
-    'SELECT uuid FROM exercises WHERE title ILIKE $1 AND is_hidden = false ORDER BY is_custom ASC LIMIT 1',
+    `SELECT uuid FROM exercises
+     WHERE title ILIKE $1 AND is_hidden = false
+     ORDER BY is_custom ASC, LENGTH(title) ASC
+     LIMIT 1`,
     [`%${search}%`]
   );
   return row?.uuid ?? null;

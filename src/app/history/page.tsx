@@ -1,38 +1,66 @@
 'use client';
 
 import { useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { ChevronRight, X, Search, Download } from 'lucide-react';
-import { useWorkoutSummaries, useExercises, type LocalWorkoutSummary } from '@/lib/useLocalDB';
-import type { LocalExercise } from '@/db/local';
+import type { Workout, Exercise } from '@/types';
 import WorkoutDetail from './WorkoutDetail';
 import {
   formatDuration,
   formatDate,
   groupWorkouts,
+  type WorkoutSummary,
   type GroupMode,
 } from './utils';
+import { queryKeys } from '@/lib/api/query-keys';
+import { fetchWorkoutsList } from '@/lib/api/workouts-list';
+import { fetchExercisesFiltered } from '@/lib/api/exercises';
+
+function HistoryListSkeleton() {
+  return (
+    <div className="px-4 space-y-4 animate-pulse" aria-hidden>
+      <div className="h-4 w-24 bg-muted/60 rounded mb-2" />
+      <div className="ios-section space-y-0">
+        {[1, 2, 3, 4].map((i) => (
+          <div key={i} className="h-16 border-b border-border last:border-0 mx-3 my-2 bg-muted/40 rounded" />
+        ))}
+      </div>
+    </div>
+  );
+}
 
 export default function HistoryPage() {
-  const [selected, setSelected] = useState<LocalWorkoutSummary | null>(null);
+  const [selected, setSelected] = useState<Workout | null>(null);
 
-  // Filters
   const [groupMode, setGroupMode] = useState<GroupMode>('week');
   const [fromDate, setFromDate] = useState('');
   const [toDate, setToDate] = useState('');
   const [exerciseSearch, setExerciseSearch] = useState('');
-  const [selectedExercise, setSelectedExercise] = useState<LocalExercise | null>(null);
+  const [selectedExercise, setSelectedExercise] = useState<Exercise | null>(null);
   const [showSuggestions, setShowSuggestions] = useState(false);
 
-  // Local DB queries — reactive, no loading state needed
-  const workouts = useWorkoutSummaries({
-    fromDate: fromDate || undefined,
-    toDate: toDate || undefined,
-    exerciseUuid: selectedExercise?.uuid ?? null,
+  const workoutParams = {
+    limit: '50',
+    from: fromDate || undefined,
+    to: toDate || undefined,
+    exerciseUuid: selectedExercise?.uuid,
+  };
+
+  const { data: workouts = [], isPending, isPlaceholderData } = useQuery({
+    queryKey: queryKeys.workouts(workoutParams),
+    queryFn: () => fetchWorkoutsList(workoutParams),
+    staleTime: 30_000,
+    placeholderData: (previousData) => previousData,
   });
 
-  const exerciseSuggestions = useExercises({
-    search: exerciseSearch.length >= 2 ? exerciseSearch : undefined,
+  const { data: exerciseSuggestionsRaw = [] } = useQuery({
+    queryKey: queryKeys.exercises.list({ search: exerciseSearch }),
+    queryFn: () => fetchExercisesFiltered({ search: exerciseSearch }),
+    enabled: exerciseSearch.length >= 2,
+    staleTime: 60_000,
   });
+
+  const exerciseSuggestions = exerciseSuggestionsRaw.slice(0, 6);
 
   const clearFilters = () => {
     setFromDate('');
@@ -46,18 +74,18 @@ export default function HistoryPage() {
 
   const grouped = groupWorkouts(workouts, groupMode);
 
+  const loading = isPending && workouts.length === 0;
+
   if (selected) {
     return <WorkoutDetail workout={selected} onBack={() => setSelected(null)} />;
   }
 
   return (
     <main className="tab-content bg-background">
-      {/* Header */}
       <div className="px-4 pt-14 pb-3 flex justify-between items-baseline">
         <h1 className="text-2xl font-bold">History</h1>
 
         <div className="flex items-center gap-2">
-          {/* Export buttons */}
           <a
             href="/api/export?format=json"
             download
@@ -77,7 +105,6 @@ export default function HistoryPage() {
             CSV
           </a>
 
-          {/* Week / Month toggle */}
           <div className="flex rounded-lg overflow-hidden border border-border text-xs font-medium">
             <button
               onClick={() => setGroupMode('week')}
@@ -95,16 +122,14 @@ export default function HistoryPage() {
         </div>
       </div>
 
-      {/* Filters */}
       <div className="px-4 pb-3 space-y-2">
-        {/* Date range */}
         <div className="flex gap-2">
           <div className="flex-1">
             <label className="text-xs text-muted-foreground mb-1 block">From</label>
             <input
               type="date"
               value={fromDate}
-              onChange={e => setFromDate(e.target.value)}
+              onChange={(e) => setFromDate(e.target.value)}
               className="w-full h-9 rounded-md border border-input bg-background px-3 py-1 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             />
           </div>
@@ -113,13 +138,12 @@ export default function HistoryPage() {
             <input
               type="date"
               value={toDate}
-              onChange={e => setToDate(e.target.value)}
+              onChange={(e) => setToDate(e.target.value)}
               className="w-full h-9 rounded-md border border-input bg-background px-3 py-1 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             />
           </div>
         </div>
 
-        {/* Exercise filter */}
         <div className="relative">
           <label className="text-xs text-muted-foreground mb-1 block">Filter by exercise</label>
           <div className="relative">
@@ -129,17 +153,22 @@ export default function HistoryPage() {
               value={selectedExercise ? selectedExercise.title : exerciseSearch}
               placeholder="Search exercises…"
               readOnly={!!selectedExercise}
-              onChange={e => {
+              onChange={(e) => {
                 setExerciseSearch(e.target.value);
                 setSelectedExercise(null);
               }}
-              onFocus={() => { if (exerciseSuggestions.length > 0) setShowSuggestions(true); }}
+              onFocus={() => {
+                if (exerciseSuggestions.length > 0) setShowSuggestions(true);
+              }}
               onBlur={() => setTimeout(() => setShowSuggestions(false), 150)}
               className="w-full h-9 rounded-md border border-input bg-background pl-8 pr-8 py-1 text-sm text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             />
             {selectedExercise && (
               <button
-                onClick={() => { setSelectedExercise(null); setExerciseSearch(''); }}
+                onClick={() => {
+                  setSelectedExercise(null);
+                  setExerciseSearch('');
+                }}
                 className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
               >
                 <X className="h-3.5 w-3.5" />
@@ -148,7 +177,7 @@ export default function HistoryPage() {
           </div>
           {showSuggestions && exerciseSuggestions.length > 0 && (
             <div className="absolute z-10 mt-1 w-full rounded-md border border-border bg-zinc-900 shadow-lg">
-              {exerciseSuggestions.slice(0, 6).map(ex => (
+              {exerciseSuggestions.map((ex) => (
                 <button
                   key={ex.uuid}
                   onMouseDown={() => {
@@ -165,7 +194,6 @@ export default function HistoryPage() {
           )}
         </div>
 
-        {/* Clear filters */}
         {hasFilters && (
           <button
             onClick={clearFilters}
@@ -177,8 +205,9 @@ export default function HistoryPage() {
         )}
       </div>
 
-      {/* List */}
-      {workouts.length === 0 ? (
+      {loading ? (
+        <HistoryListSkeleton />
+      ) : workouts.length === 0 ? (
         <div className="px-4">
           <div className="ios-section">
             <p className="text-center py-12 text-muted-foreground text-sm">
@@ -188,22 +217,21 @@ export default function HistoryPage() {
         </div>
       ) : (
         <div className="px-4 space-y-4">
-          {grouped.map(group => (
+          {isPlaceholderData && workouts.length > 0 ? (
+            <p className="text-[11px] text-muted-foreground text-center">Showing cached results…</p>
+          ) : null}
+          {grouped.map((group) => (
             <div key={group.label}>
-              <p className="text-xs font-semibold text-blue-400 uppercase tracking-wide mb-1 px-1">
-                {group.label}
-              </p>
+              <p className="text-xs font-semibold text-blue-400 uppercase tracking-wide mb-1 px-1">{group.label}</p>
               <div className="ios-section">
-                {group.workouts.map((w, i) => (
+                {group.workouts.map((w: WorkoutSummary, i: number) => (
                   <button
                     key={w.uuid}
                     onClick={() => setSelected(w)}
                     className={`ios-row w-full text-left ${i === group.workouts.length - 1 ? 'border-0' : ''}`}
                   >
                     <div className="flex-1 min-w-0">
-                      <p className="font-semibold text-sm truncate">
-                        {w.title || formatDate(w.start_time)}
-                      </p>
+                      <p className="font-semibold text-sm truncate">{w.title || formatDate(w.start_time)}</p>
                       {!w.title && (
                         <p className="text-xs text-muted-foreground mt-0.5">
                           {new Date(w.start_time).toLocaleDateString('en-US', { weekday: 'long' })}
@@ -223,7 +251,6 @@ export default function HistoryPage() {
                           &ldquo;{w.comment}&rdquo;
                         </p>
                       )}
-                      {/* Per-workout stats */}
                       <div className="flex items-center gap-2 mt-1">
                         <span className="text-xs text-muted-foreground">
                           {w.exercise_count} {w.exercise_count === 1 ? 'exercise' : 'exercises'}

@@ -21,21 +21,13 @@ export default withPWA({
           expiration: { maxEntries: 200, maxAgeSeconds: 30 * 24 * 60 * 60 },
         },
       },
+      /* Catalog only — user-specific API responses are cached in TanStack Query, not Workbox. */
       {
         urlPattern: /\/api\/exercises/,
-        handler: "NetworkFirst",
+        handler: "StaleWhileRevalidate",
         options: {
           cacheName: "exercises-api",
-          networkTimeoutSeconds: 5,
-          expiration: { maxEntries: 10, maxAgeSeconds: 7 * 24 * 60 * 60 },
-        },
-      },
-      {
-        urlPattern: /\/api\//,
-        handler: "NetworkFirst",
-        options: {
-          cacheName: "api-cache",
-          networkTimeoutSeconds: 5,
+          expiration: { maxEntries: 20, maxAgeSeconds: 24 * 60 * 60 },
         },
       },
       {

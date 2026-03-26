@@ -217,7 +217,7 @@ describe('plan query functions', () => {
   describe('updatePlan', () => {
     it('updates title in workout_plans', async () => {
       db.queryOne.mockResolvedValueOnce({ uuid: 'plan-1', title: 'Updated' });
-      await updatePlan('plan-1', 'Updated');
+      await updatePlan('plan-1', { title: 'Updated' });
       const [sql, params] = db.query.mock.calls[0];
       expect(sql).toContain('UPDATE');
       expect(sql).toContain('workout_plans');
@@ -227,7 +227,7 @@ describe('plan query functions', () => {
 
     it('returns undefined when plan not found', async () => {
       db.queryOne.mockResolvedValueOnce(null);
-      const result = await updatePlan('missing', 'Title');
+      const result = await updatePlan('missing', { title: 'Title' });
       expect(result).toBeUndefined();
     });
   });
