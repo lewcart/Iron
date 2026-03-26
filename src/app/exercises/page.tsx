@@ -1,8 +1,9 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { ChevronRight, Search, X } from 'lucide-react';
-import type { Exercise } from '@/types';
+import { useExercises } from '@/lib/useLocalDB';
+import type { LocalExercise } from '@/db/local';
 import ExerciseDetail from './ExerciseDetail';
 
 // Known muscle groups with display info
@@ -27,49 +28,27 @@ const EQUIPMENT_FILTERS = [
 ];
 
 export default function ExercisesPage() {
-  const [allExercises, setAllExercises] = useState<Exercise[]>([]);
-  const [searchResults, setSearchResults] = useState<Exercise[]>([]);
   const [search, setSearch] = useState('');
-  const [searching, setSearching] = useState(false);
-  const [loading, setLoading] = useState(true);
-  const [selectedExercise, setSelectedExercise] = useState<Exercise | null>(null);
+  const [selectedExercise, setSelectedExercise] = useState<LocalExercise | null>(null);
   const [selectedMuscle, setSelectedMuscle] = useState<string | null>(null);
-  const [muscleExercises, setMuscleExercises] = useState<Exercise[]>([]);
   const [selectedEquipment, setSelectedEquipment] = useState<string | null>(null);
-  const [equipmentExercises, setEquipmentExercises] = useState<Exercise[]>([]);
 
-  // Load all exercises once for counts
-  useEffect(() => {
-    fetch('/api/exercises')
-      .then(r => r.json())
-      .then(data => { setAllExercises(data); setLoading(false); });
-  }, []);
+  // All exercises from local DB (reactive)
+  const allExercises = useExercises();
+  const searchedExercises = useExercises({ search: search || undefined });
 
-  // Search
-  useEffect(() => {
-    if (!search) { setSearchResults([]); setSearching(false); return; }
-    setSearching(true);
-    const params = new URLSearchParams({ search });
-    fetch(`/api/exercises?${params}`)
-      .then(r => r.json())
-      .then(data => { setSearchResults(data); setSearching(false); });
-  }, [search]);
+  // Derived drill-down lists (computed from allExercises in memory — fast)
+  const muscleExercises = useMemo(() => {
+    if (!selectedMuscle) return [];
+    if (selectedMuscle === 'all') return allExercises;
+    if (selectedMuscle === 'Custom') return allExercises.filter(e => e.is_custom);
+    return allExercises.filter(e => e.primary_muscles.includes(selectedMuscle));
+  }, [allExercises, selectedMuscle]);
 
-  // Muscle group filter
-  const handleMuscleSelect = async (muscle: string) => {
-    setSelectedMuscle(muscle);
-    const params = new URLSearchParams({ muscleGroup: muscle });
-    const data = await fetch(`/api/exercises?${params}`).then(r => r.json());
-    setMuscleExercises(data);
-  };
-
-  // Equipment filter
-  const handleEquipmentSelect = async (equipment: string) => {
-    setSelectedEquipment(equipment);
-    const params = new URLSearchParams({ equipment });
-    const data = await fetch(`/api/exercises?${params}`).then(r => r.json());
-    setEquipmentExercises(data);
-  };
+  const equipmentExercises = useMemo(() => {
+    if (!selectedEquipment) return [];
+    return allExercises.filter(e => e.equipment.includes(selectedEquipment));
+  }, [allExercises, selectedEquipment]);
 
   const countForMuscle = (muscle: string) =>
     allExercises.filter(e => e.primary_muscles.some(m => m.toLowerCase().includes(muscle))).length;
@@ -186,13 +165,11 @@ export default function ExercisesPage() {
         {search ? (
           /* Search results */
           <>
-            {searching ? (
-              <p className="text-center py-8 text-muted-foreground text-sm">Searching…</p>
-            ) : searchResults.length === 0 ? (
+            {searchedExercises.length === 0 ? (
               <p className="text-center py-8 text-muted-foreground text-sm">No results for &ldquo;{search}&rdquo;</p>
             ) : (
               <div className="ios-section">
-                {searchResults.map((ex) => (
+                {searchedExercises.map((ex) => (
                   <button
                     key={ex.uuid}
                     onClick={() => setSelectedExercise(ex)}
@@ -213,7 +190,7 @@ export default function ExercisesPage() {
           <>
             <div className="ios-section">
               <button
-                onClick={() => { setSelectedMuscle('all'); setMuscleExercises(allExercises); }}
+                onClick={() => setSelectedMuscle('all')}
                 className="ios-row w-full text-left"
               >
                 <span className="flex-1 font-medium text-sm">All</span>
@@ -226,7 +203,7 @@ export default function ExercisesPage() {
               {MUSCLE_GROUPS.map(({ key, label }) => (
                 <button
                   key={key}
-                  onClick={() => handleMuscleSelect(key)}
+                  onClick={() => setSelectedMuscle(key)}
                   className="ios-row w-full text-left"
                 >
                   <span className="flex-1 font-medium text-sm capitalize">{label}</span>
@@ -242,7 +219,7 @@ export default function ExercisesPage() {
                 {EQUIPMENT_FILTERS.map(({ key, label }) => (
                   <button
                     key={key}
-                    onClick={() => handleEquipmentSelect(key)}
+                    onClick={() => setSelectedEquipment(key)}
                     className="px-3 py-1.5 rounded-full bg-secondary text-sm font-medium hover:bg-secondary/80 transition-colors"
                   >
                     {label}
@@ -252,14 +229,10 @@ export default function ExercisesPage() {
               </div>
             </div>
 
-            {!loading && (
+            {allExercises.some(e => e.is_custom) && (
               <div className="ios-section">
                 <button
-                  onClick={() => {
-                    const custom = allExercises.filter(e => e.is_custom);
-                    setSelectedMuscle('Custom');
-                    setMuscleExercises(custom);
-                  }}
+                  onClick={() => setSelectedMuscle('Custom')}
                   className="ios-row w-full text-left"
                 >
                   <span className="flex-1 font-medium text-sm">Custom</span>

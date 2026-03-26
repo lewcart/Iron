@@ -157,6 +157,118 @@ export function useExercise(uuid: string | null): LocalExercise | undefined {
   );
 }
 
+// ─── Workout summaries (for history list) ──────────────────────────────────────
+
+export type LocalWorkoutSummary = LocalWorkout & {
+  exercise_count: number;
+  total_volume: number;
+};
+
+/**
+ * Returns finished workouts with computed exercise_count and total_volume,
+ * most recent first. Supports optional date-range and exercise-UUID filtering.
+ */
+export function useWorkoutSummaries(opts: {
+  limit?: number;
+  fromDate?: string;
+  toDate?: string;
+  exerciseUuid?: string | null;
+} = {}): LocalWorkoutSummary[] {
+  const { limit = 200, fromDate, toDate, exerciseUuid } = opts;
+
+  return useLiveQuery(
+    async () => {
+      // Three bulk queries — much faster than N per-workout queries
+      const [allWorkouts, allExercises, allSets] = await Promise.all([
+        db.workouts.filter(w => !w._deleted && !w.is_current).toArray(),
+        db.workout_exercises.filter(e => !e._deleted).toArray(),
+        db.workout_sets.filter(s => !s._deleted && s.is_completed).toArray(),
+      ]);
+
+      // Build lookup maps
+      const exercisesByWorkout = new Map<string, LocalWorkoutExercise[]>();
+      for (const e of allExercises) {
+        if (!exercisesByWorkout.has(e.workout_uuid)) exercisesByWorkout.set(e.workout_uuid, []);
+        exercisesByWorkout.get(e.workout_uuid)!.push(e);
+      }
+
+      const setsByExercise = new Map<string, LocalWorkoutSet[]>();
+      for (const s of allSets) {
+        if (!setsByExercise.has(s.workout_exercise_uuid)) setsByExercise.set(s.workout_exercise_uuid, []);
+        setsByExercise.get(s.workout_exercise_uuid)!.push(s);
+      }
+
+      // Resolve exercise filter
+      let exerciseWorkoutUuids: Set<string> | null = null;
+      if (exerciseUuid) {
+        exerciseWorkoutUuids = new Set(
+          allExercises
+            .filter(e => e.exercise_uuid === exerciseUuid)
+            .map(e => e.workout_uuid),
+        );
+      }
+
+      // Filter and sort
+      const filtered = allWorkouts
+        .filter(w => {
+          if (fromDate && w.start_time < fromDate) return false;
+          if (toDate && w.start_time > toDate + 'T23:59:59') return false;
+          if (exerciseWorkoutUuids && !exerciseWorkoutUuids.has(w.uuid)) return false;
+          return true;
+        })
+        .sort((a, b) => b.start_time.localeCompare(a.start_time))
+        .slice(0, limit);
+
+      return filtered.map(w => {
+        const exercises = exercisesByWorkout.get(w.uuid) ?? [];
+        let total_volume = 0;
+        for (const e of exercises) {
+          for (const s of setsByExercise.get(e.uuid) ?? []) {
+            total_volume += (s.weight ?? 0) * (s.repetitions ?? 0);
+          }
+        }
+        return { ...w, exercise_count: exercises.length, total_volume };
+      });
+    },
+    [fromDate, toDate, exerciseUuid, limit],
+    [],
+  );
+}
+
+/** Returns a full workout detail (exercises + sets + exercise metadata) from local DB. */
+export function useWorkoutFull(uuid: string | null): LocalWorkoutWithExercises | null | undefined {
+  return useLiveQuery(
+    async () => {
+      if (!uuid) return null;
+      const workout = await db.workouts.get(uuid);
+      if (!workout || workout._deleted) return null;
+
+      const wes = await db.workout_exercises
+        .where('workout_uuid')
+        .equals(uuid)
+        .filter(e => !e._deleted)
+        .sortBy('order_index');
+
+      const exercises = await Promise.all(
+        wes.map(async we => {
+          const [exercise, sets] = await Promise.all([
+            db.exercises.get(we.exercise_uuid),
+            db.workout_sets
+              .where('workout_exercise_uuid')
+              .equals(we.uuid)
+              .filter(s => !s._deleted)
+              .sortBy('order_index'),
+          ]);
+          return { ...we, exercise: exercise!, sets };
+        }),
+      );
+
+      return { ...workout, exercises };
+    },
+    [uuid],
+  );
+}
+
 // ─── Bodyweight logs ───────────────────────────────────────────────────────────
 
 /** Returns bodyweight logs, most recent first. */

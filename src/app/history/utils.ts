@@ -31,9 +31,9 @@ export function formatDate(iso: string): string {
 
 export type GroupMode = 'week' | 'month';
 
-export interface WorkoutGroup {
+export interface WorkoutGroup<T extends WorkoutSummary = WorkoutSummary> {
   label: string;
-  workouts: WorkoutSummary[];
+  workouts: T[];
 }
 
 /**
@@ -87,12 +87,12 @@ export function monthLabel(monthIso: string): string {
   return d.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
 }
 
-export function groupWorkouts(
-  workouts: WorkoutSummary[],
+export function groupWorkouts<T extends WorkoutSummary>(
+  workouts: T[],
   mode: GroupMode,
   today: Date = new Date(),
-): WorkoutGroup[] {
-  const buckets = new Map<string, WorkoutSummary[]>();
+): WorkoutGroup<T>[] {
+  const buckets = new Map<string, T[]>();
 
   for (const w of workouts) {
     const d = new Date(w.start_time);
@@ -101,7 +101,7 @@ export function groupWorkouts(
     buckets.get(key)!.push(w);
   }
 
-  const groups: WorkoutGroup[] = [];
+  const groups: WorkoutGroup<T>[] = [];
   for (const [key, ws] of buckets) {
     const label = mode === 'week' ? weekLabel(key, today) : monthLabel(key);
     groups.push({ label, workouts: ws });

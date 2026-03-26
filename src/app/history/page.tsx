@@ -1,74 +1,44 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useState } from 'react';
 import { ChevronRight, X, Search, Download } from 'lucide-react';
-import type { Workout, Exercise } from '@/types';
+import { useWorkoutSummaries, useExercises, type LocalWorkoutSummary } from '@/lib/useLocalDB';
+import type { LocalExercise } from '@/db/local';
 import WorkoutDetail from './WorkoutDetail';
 import {
   formatDuration,
   formatDate,
   groupWorkouts,
-  type WorkoutSummary,
   type GroupMode,
 } from './utils';
 
 export default function HistoryPage() {
-  const [workouts, setWorkouts] = useState<WorkoutSummary[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [selected, setSelected] = useState<Workout | null>(null);
+  const [selected, setSelected] = useState<LocalWorkoutSummary | null>(null);
 
   // Filters
   const [groupMode, setGroupMode] = useState<GroupMode>('week');
   const [fromDate, setFromDate] = useState('');
   const [toDate, setToDate] = useState('');
   const [exerciseSearch, setExerciseSearch] = useState('');
-  const [exerciseSuggestions, setExerciseSuggestions] = useState<Exercise[]>([]);
-  const [selectedExercise, setSelectedExercise] = useState<Exercise | null>(null);
+  const [selectedExercise, setSelectedExercise] = useState<LocalExercise | null>(null);
   const [showSuggestions, setShowSuggestions] = useState(false);
 
-  const fetchWorkouts = useCallback(() => {
-    setLoading(true);
-    const params = new URLSearchParams({ limit: '50' });
-    if (fromDate) params.set('from', fromDate);
-    if (toDate) params.set('to', toDate);
-    if (selectedExercise) params.set('exerciseUuid', selectedExercise.uuid);
+  // Local DB queries — reactive, no loading state needed
+  const workouts = useWorkoutSummaries({
+    fromDate: fromDate || undefined,
+    toDate: toDate || undefined,
+    exerciseUuid: selectedExercise?.uuid ?? null,
+  });
 
-    fetch(`/api/workouts?${params}`)
-      .then(r => r.json())
-      .then(data => {
-        setWorkouts(data);
-        setLoading(false);
-      });
-  }, [fromDate, toDate, selectedExercise]);
-
-  useEffect(() => {
-    fetchWorkouts();
-  }, [fetchWorkouts]);
-
-  // Exercise search debounce
-  useEffect(() => {
-    if (!exerciseSearch || exerciseSearch.length < 2) {
-      setExerciseSuggestions([]);
-      setShowSuggestions(false);
-      return;
-    }
-    const timer = setTimeout(() => {
-      fetch(`/api/exercises?search=${encodeURIComponent(exerciseSearch)}`)
-        .then(r => r.json())
-        .then((data: Exercise[]) => {
-          setExerciseSuggestions(data.slice(0, 6));
-          setShowSuggestions(true);
-        });
-    }, 300);
-    return () => clearTimeout(timer);
-  }, [exerciseSearch]);
+  const exerciseSuggestions = useExercises({
+    search: exerciseSearch.length >= 2 ? exerciseSearch : undefined,
+  });
 
   const clearFilters = () => {
     setFromDate('');
     setToDate('');
     setExerciseSearch('');
     setSelectedExercise(null);
-    setExerciseSuggestions([]);
     setShowSuggestions(false);
   };
 
@@ -178,7 +148,7 @@ export default function HistoryPage() {
           </div>
           {showSuggestions && exerciseSuggestions.length > 0 && (
             <div className="absolute z-10 mt-1 w-full rounded-md border border-border bg-zinc-900 shadow-lg">
-              {exerciseSuggestions.map(ex => (
+              {exerciseSuggestions.slice(0, 6).map(ex => (
                 <button
                   key={ex.uuid}
                   onMouseDown={() => {
@@ -208,9 +178,7 @@ export default function HistoryPage() {
       </div>
 
       {/* List */}
-      {loading ? (
-        <p className="text-center py-12 text-muted-foreground text-sm">Loading…</p>
-      ) : workouts.length === 0 ? (
+      {workouts.length === 0 ? (
         <div className="px-4">
           <div className="ios-section">
             <p className="text-center py-12 text-muted-foreground text-sm">

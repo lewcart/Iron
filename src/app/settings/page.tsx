@@ -18,7 +18,8 @@ import {
 } from 'lucide-react';
 import Link from 'next/link';
 import { useUnit } from '@/context/UnitContext';
-import type { BodyweightLog } from '@/types';
+import { useBodyweightLogs } from '@/lib/useLocalDB';
+import { logBodyweight as mutLogBodyweight, deleteBodyweightLog as mutDeleteBodyweightLog } from '@/lib/mutations';
 
 const REST_TIMES = [30, 60, 90, 120, 150, 180, 210, 240, 300];
 
@@ -113,9 +114,8 @@ export default function SettingsPage() {
   // Bodyweight
   const [bwInput, setBwInput] = useState('');
   const [bwNote, setBwNote] = useState('');
-  const [bwLogs, setBwLogs] = useState<BodyweightLog[]>([]);
-  const [bwLoading, setBwLoading] = useState(true);
   const [bwSaving, setBwSaving] = useState(false);
+  const bwLogs = useBodyweightLogs(30);
 
   // Load persisted values
   useEffect(() => {
@@ -128,14 +128,6 @@ export default function SettingsPage() {
     if (eq) {
       try { setEquipment(new Set(JSON.parse(eq))); } catch { /* ignore */ }
     }
-
-    fetch('/api/bodyweight?limit=30')
-      .then(r => r.json())
-      .then((data: BodyweightLog[]) => {
-        setBwLogs(data);
-        setBwLoading(false);
-      })
-      .catch(() => setBwLoading(false));
   }, []);
 
   // ── Handlers ──────────────────────────────────────────
@@ -187,25 +179,16 @@ export default function SettingsPage() {
     setBwSaving(true);
     try {
       const weight_kg = fromInput(val);
-      const res = await fetch('/api/bodyweight', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ weight_kg, note: bwNote || undefined }),
-      });
-      if (res.ok) {
-        const log: BodyweightLog = await res.json();
-        setBwLogs(prev => [log, ...prev]);
-        setBwInput('');
-        setBwNote('');
-      }
+      await mutLogBodyweight(weight_kg, bwNote || undefined);
+      setBwInput('');
+      setBwNote('');
     } finally {
       setBwSaving(false);
     }
   };
 
   const handleDeleteBw = async (uuid: string) => {
-    await fetch(`/api/bodyweight/${uuid}`, { method: 'DELETE' });
-    setBwLogs(prev => prev.filter(l => l.uuid !== uuid));
+    await mutDeleteBodyweightLog(uuid);
   };
 
   // ── Derived ───────────────────────────────────────────
@@ -429,7 +412,7 @@ export default function SettingsPage() {
             </div>
           </div>
 
-          {!bwLoading && bwLogs.length > 0 && (
+          {bwLogs.length > 0 && (
             <div className="ios-section mt-2">
               {bwLogs.map(log => (
                 <div key={log.uuid} className="ios-row justify-between">
@@ -454,7 +437,7 @@ export default function SettingsPage() {
               ))}
             </div>
           )}
-          {!bwLoading && bwLogs.length === 0 && (
+          {bwLogs.length === 0 && (
             <p className="text-caption px-1 mt-2">No bodyweight entries yet.</p>
           )}
         </div>

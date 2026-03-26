@@ -1,18 +1,12 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { ChevronLeft, RotateCcw } from 'lucide-react';
 import { useRouter } from 'next/navigation';
-import type { Workout, WorkoutExercise, WorkoutSet, Exercise } from '@/types';
 import { getMuscleColor } from '@/lib/muscle-colors';
 import { useUnit } from '@/context/UnitContext';
-
-interface WorkoutWithExercises extends Workout {
-  exercises: (WorkoutExercise & {
-    exercise: Exercise;
-    sets: WorkoutSet[];
-  })[];
-}
+import { useWorkoutFull } from '@/lib/useLocalDB';
+import type { LocalWorkoutSummary } from '@/lib/useLocalDB';
 
 function formatDuration(start: string, end: string | null) {
   if (!end) return '—';
@@ -24,55 +18,12 @@ function formatDuration(start: string, end: string | null) {
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`;
 }
 
-function totalSets(exercises: WorkoutWithExercises['exercises']) {
-  return exercises.reduce((sum, e) => sum + e.sets.filter(s => s.is_completed).length, 0);
-}
-
-function totalWeight(exercises: WorkoutWithExercises['exercises']) {
-  return exercises.reduce((sum, e) =>
-    sum + e.sets.filter(s => s.is_completed).reduce((s2, set) =>
-      s2 + (set.weight ?? 0) * (set.repetitions ?? 0), 0), 0);
-}
-
-function totalPRs(exercises: WorkoutWithExercises['exercises']) {
-  return exercises.reduce((sum, e) => sum + e.sets.filter(s => s.is_pr).length, 0);
-}
-
-export default function WorkoutDetail({ workout, onBack }: { workout: Workout; onBack: () => void }) {
+export default function WorkoutDetail({ workout, onBack }: { workout: LocalWorkoutSummary; onBack: () => void }) {
   const router = useRouter();
   const { toDisplay, label } = useUnit();
-  const [detail, setDetail] = useState<WorkoutWithExercises | null>(null);
-  const [loading, setLoading] = useState(true);
   const [repeating, setRepeating] = useState(false);
 
-  useEffect(() => {
-    const load = async () => {
-      const detailRes = await fetch(`/api/workouts/${workout.uuid}`);
-      const detailData = await detailRes.json();
-
-      const exercisesWithDetails = await Promise.all(
-        detailData.exercises.map(async (we: WorkoutExercise) => {
-          const [exerciseRes, setsRes] = await Promise.all([
-            fetch(`/api/exercises?search=${we.exercise_uuid}`),
-            fetch(`/api/workout-exercises/${we.uuid}/sets`),
-          ]);
-          const [exerciseData, setsData] = await Promise.all([
-            exerciseRes.json(),
-            setsRes.json(),
-          ]);
-          return {
-            ...we,
-            exercise: exerciseData.find((e: Exercise) => e.uuid === we.exercise_uuid),
-            sets: setsData,
-          };
-        })
-      );
-
-      setDetail({ ...detailData, exercises: exercisesWithDetails });
-      setLoading(false);
-    };
-    load();
-  }, [workout.uuid]);
+  const detail = useWorkoutFull(workout.uuid);
 
   const handleRepeat = async () => {
     setRepeating(true);
@@ -92,6 +43,12 @@ export default function WorkoutDetail({ workout, onBack }: { workout: Workout; o
   const allMuscles = detail?.exercises.flatMap(e => e.exercise?.primary_muscles ?? []) ?? [];
   const accentColor = getMuscleColor(allMuscles);
 
+  const totalSets = detail?.exercises.reduce((sum, e) => sum + e.sets.filter(s => s.is_completed).length, 0) ?? 0;
+  const totalWeight = detail?.exercises.reduce((sum, e) =>
+    sum + e.sets.filter(s => s.is_completed).reduce((s2, set) =>
+      s2 + (set.weight ?? 0) * (set.repetitions ?? 0), 0), 0) ?? 0;
+  const totalPRs = detail?.exercises.reduce((sum, e) => sum + e.sets.filter(s => s.is_pr).length, 0) ?? 0;
+
   return (
     <main className="tab-content bg-background">
       {/* Nav bar */}
@@ -110,9 +67,11 @@ export default function WorkoutDetail({ workout, onBack }: { workout: Workout; o
         </button>
       </div>
 
-      {loading ? (
+      {detail === undefined ? (
         <p className="text-center py-12 text-muted-foreground text-sm">Loading…</p>
-      ) : detail ? (
+      ) : detail === null ? (
+        <p className="text-center py-12 text-muted-foreground text-sm">Workout not found</p>
+      ) : (
         <div className="px-4 space-y-4">
           {/* Colored stats banner */}
           <div
@@ -125,18 +84,18 @@ export default function WorkoutDetail({ workout, onBack }: { workout: Workout; o
                 <p className="text-xs mt-0.5 opacity-80">Duration</p>
               </div>
               <div>
-                <p className="text-2xl font-bold">{totalSets(detail.exercises)}</p>
+                <p className="text-2xl font-bold">{totalSets}</p>
                 <p className="text-xs mt-0.5 opacity-80">Sets</p>
               </div>
               <div>
-                <p className="text-2xl font-bold">{toDisplay(totalWeight(detail.exercises)).toLocaleString()}</p>
+                <p className="text-2xl font-bold">{toDisplay(totalWeight).toLocaleString()}</p>
                 <p className="text-xs mt-0.5 opacity-80">Total {label}</p>
               </div>
             </div>
-            {totalPRs(detail.exercises) > 0 && (
+            {totalPRs > 0 && (
               <div className="mt-3 pt-3 border-t border-white/20 text-center">
                 <span className="inline-flex items-center gap-1.5 bg-amber-400/20 border border-amber-400/40 text-amber-200 text-xs font-semibold px-3 py-1 rounded-full">
-                  🏆 {totalPRs(detail.exercises)} Personal Record{totalPRs(detail.exercises) > 1 ? 's' : ''}
+                  🏆 {totalPRs} Personal Record{totalPRs > 1 ? 's' : ''}
                 </span>
               </div>
             )}
@@ -206,8 +165,6 @@ export default function WorkoutDetail({ workout, onBack }: { workout: Workout; o
             </div>
           )}
         </div>
-      ) : (
-        <p className="text-center py-12 text-muted-foreground text-sm">Workout not found</p>
       )}
     </main>
   );
