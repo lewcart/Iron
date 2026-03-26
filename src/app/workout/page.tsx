@@ -118,9 +118,7 @@ function WorkoutSummaryBar({
   restTimer: ReturnType<typeof useRestTimer>;
   onOpenRestTimer: () => void;
 }) {
-  const { unit, toDisplay } = useUnit();
   const completedSets = calcCompletedSets(exercises);
-  const totalVolume = calcTotalVolume(exercises);
   const timerActive = restTimer.running || (restTimer.selected !== null && restTimer.remaining === 0);
   const expired = restTimer.selected !== null && restTimer.remaining === 0 && !restTimer.running;
 
