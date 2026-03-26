@@ -43,7 +43,15 @@ export function InstallPrompt() {
   }
 
   return (
-    <div className="fixed bottom-[83px] left-0 right-0 z-40 px-4 pb-2 safe-area-bottom">
+    <div
+      className="fixed left-0 right-0 z-40 pb-2"
+      style={{
+        bottom:
+          'calc(var(--tab-bar-inner-height) + env(safe-area-inset-bottom, 0px))',
+        paddingLeft: 'max(1rem, env(safe-area-inset-left, 0px))',
+        paddingRight: 'max(1rem, env(safe-area-inset-right, 0px))',
+      }}
+    >
       <div className="flex items-center gap-3 px-4 py-3 rounded-2xl bg-zinc-900 border border-zinc-800 shadow-xl">
         <div className="w-9 h-9 rounded-xl bg-[#007AFF] flex items-center justify-center flex-shrink-0">
           <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">

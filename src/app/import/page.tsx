@@ -204,7 +204,7 @@ export default function ImportPage() {
   }, []);
 
   return (
-    <main className="min-h-screen bg-background pb-24">
+    <main className="tab-content bg-background">
       <div className="sticky top-0 z-10 bg-background border-b border-border">
         <div className="flex items-center gap-3 px-4 py-3">
           <Link href="/settings" className="text-primary p-1 -ml-1">

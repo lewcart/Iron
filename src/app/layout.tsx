@@ -27,6 +27,8 @@ export const viewport: Viewport = {
   initialScale: 1,
   viewportFit: "cover",
   themeColor: "#5BCEFA",
+  /** Reduces resize jank when mobile keyboards open (supported browsers). */
+  interactiveWidget: "resizes-content",
 };
 
 export default function RootLayout({

@@ -20,6 +20,7 @@ const viewport = {
   initialScale: 1,
   viewportFit: 'cover',
   themeColor: '#5BCEFA',
+  interactiveWidget: 'resizes-content',
 };
 
 // ===== metadata =====
@@ -62,5 +63,9 @@ describe('layout viewport', () => {
   it('uses the trans-blue brand colour as the theme colour', () => {
     // Must match the trans-blue token defined in tailwind.config.ts
     expect(viewport.themeColor).toBe('#5BCEFA');
+  });
+
+  it('uses resizes-content for mobile keyboard / widget sizing', () => {
+    expect(viewport.interactiveWidget).toBe('resizes-content');
   });
 });

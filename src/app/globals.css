@@ -30,7 +30,8 @@
     --ring: 197 94% 67%;
     --radius: 0.75rem;
 
-    --tab-bar-height: 83px;
+    /* Must match TabBar inner row height (icon row only; safe area is separate). */
+    --tab-bar-inner-height: 49px;
   }
 
   .dark {
@@ -64,6 +65,16 @@
   body {
     @apply bg-background text-foreground;
     overscroll-behavior: none;
+    touch-action: manipulation;
+  }
+
+  /* iOS Safari: avoid auto zoom on focus when font-size would be < 16px */
+  @media (max-width: 640px) {
+    input,
+    textarea,
+    select {
+      font-size: max(1rem, 100%);
+    }
   }
 }
 
@@ -102,8 +113,11 @@
 
 /* ── Scrollable main area (accounts for bottom tab bar) ─ */
 .tab-content {
-  padding-bottom: calc(var(--tab-bar-height) + env(safe-area-inset-bottom, 0px));
-  min-height: 100dvh;
+  /* Tab bar = inner row + safe-area padding on <nav>; count each once only */
+  padding-bottom: calc(var(--tab-bar-inner-height) + env(safe-area-inset-bottom, 0px));
+  /* svh avoids most toolbar-induced jumps vs vh/dvh when the URL bar shows or hides */
+  min-height: 100vh;
+  min-height: 100svh;
 }
 
 /* ── Typography scale ────────────────────────────────── */
