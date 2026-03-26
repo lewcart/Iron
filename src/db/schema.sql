@@ -206,6 +206,22 @@ CREATE TABLE IF NOT EXISTS nutrition_day_notes (
   updated_at TIMESTAMP DEFAULT NOW()
 );
 
+-- Module 5: HRT protocols (active medication plans)
+CREATE TABLE IF NOT EXISTS hrt_protocols (
+  uuid TEXT PRIMARY KEY,
+  medication TEXT NOT NULL,
+  dose_description TEXT NOT NULL,
+  form TEXT NOT NULL CHECK(form IN ('gel', 'patch', 'injection', 'oral', 'other')),
+  started_at DATE NOT NULL,
+  ended_at DATE,
+  includes_blocker BOOLEAN NOT NULL DEFAULT false,
+  blocker_name TEXT,
+  notes TEXT,
+  created_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_hrt_protocols_started_at ON hrt_protocols(started_at DESC);
+
 -- Module 5: HRT logs
 CREATE TABLE IF NOT EXISTS hrt_logs (
   uuid TEXT PRIMARY KEY,
@@ -217,6 +233,10 @@ CREATE TABLE IF NOT EXISTS hrt_logs (
 );
 
 CREATE INDEX IF NOT EXISTS idx_hrt_logs_logged_at ON hrt_logs(logged_at DESC);
+
+-- RB-09: extend hrt_logs with taken flag and protocol reference
+ALTER TABLE hrt_logs ADD COLUMN IF NOT EXISTS taken BOOLEAN DEFAULT false;
+ALTER TABLE hrt_logs ADD COLUMN IF NOT EXISTS protocol_uuid TEXT REFERENCES hrt_protocols(uuid) ON DELETE SET NULL;
 
 -- Module 6: Wellbeing logs
 CREATE TABLE IF NOT EXISTS wellbeing_logs (

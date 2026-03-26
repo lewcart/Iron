@@ -182,6 +182,20 @@ export interface NutritionDayNote {
 }
 
 export type HrtRoute = 'injection' | 'topical' | 'oral' | 'patch' | 'other';
+export type HrtForm = 'gel' | 'patch' | 'injection' | 'oral' | 'other';
+
+export interface HrtProtocol {
+  uuid: string;
+  medication: string;
+  dose_description: string;
+  form: HrtForm;
+  started_at: string;   // DATE as ISO string
+  ended_at: string | null;
+  includes_blocker: boolean;
+  blocker_name: string | null;
+  notes: string | null;
+  created_at: string;
+}
 
 export interface HrtLog {
   uuid: string;
@@ -190,6 +204,8 @@ export interface HrtLog {
   dose_mg: number | null;
   route: HrtRoute | null;
   notes: string | null;
+  taken: boolean;
+  protocol_uuid: string | null;
 }
 
 export interface WellbeingLog {

@@ -48,6 +48,8 @@ const mockHrtLog = {
   dose_mg: 100.0,
   route: 'IM',
   notes: null,
+  taken: false,
+  protocol_uuid: null,
 };
 
 const mockMeasurementLog = {
@@ -318,6 +320,8 @@ describe('POST /api/hrt', () => {
       dose_mg: 100.0,
       route: 'IM',
       notes: null,
+      taken: false,
+      protocol_uuid: null,
     });
   });
 
@@ -353,6 +357,8 @@ describe('POST /api/hrt', () => {
       dose_mg: null,
       route: null,
       notes: null,
+      taken: false,
+      protocol_uuid: null,
     });
   });
 });

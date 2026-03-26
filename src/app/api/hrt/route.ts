@@ -26,6 +26,8 @@ export async function POST(request: NextRequest) {
     dose_mg: body.dose_mg != null ? parseFloat(body.dose_mg) : null,
     route: body.route ?? null,
     notes: body.notes ?? null,
+    taken: body.taken ?? false,
+    protocol_uuid: body.protocol_uuid ?? null,
   });
   return NextResponse.json(log, { status: 201 });
 }
