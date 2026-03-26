@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import type { TimelineEntry, TimelineModule } from '../api/timeline/route';
 
 interface StatsData {
   activeDays: string[];
@@ -49,6 +50,18 @@ function formatDate(iso: string): string {
   return d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
 }
 
+function formatTimeAgo(iso: string): string {
+  const diff = Date.now() - new Date(iso).getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  if (days === 1) return 'Yesterday';
+  if (days < 7) return `${days}d ago`;
+  return formatDate(iso);
+}
+
 const MUSCLE_GROUPS = [
   { key: 'chest', label: 'Chest' },
   { key: 'back', label: 'Back' },
@@ -73,15 +86,39 @@ function muscleTextColor(count: number): string {
   return 'text-zinc-500';
 }
 
+// Module chip styling
+const MODULE_STYLES: Record<TimelineModule, { bg: string; text: string; label: string }> = {
+  workout:     { bg: 'bg-blue-900',   text: 'text-blue-300',   label: 'Workout' },
+  nutrition:   { bg: 'bg-green-900',  text: 'text-green-300',  label: 'Nutrition' },
+  hrt:         { bg: 'bg-purple-900', text: 'text-purple-300', label: 'HRT' },
+  measurement: { bg: 'bg-orange-900', text: 'text-orange-300', label: 'Measure' },
+  wellbeing:   { bg: 'bg-pink-900',   text: 'text-pink-300',   label: 'Wellbeing' },
+  photo:       { bg: 'bg-yellow-900', text: 'text-yellow-300', label: 'Photo' },
+  bodyweight:  { bg: 'bg-cyan-900',   text: 'text-cyan-300',   label: 'Weight' },
+  body_spec:   { bg: 'bg-teal-900',   text: 'text-teal-300',   label: 'Body Scan' },
+  dysphoria:   { bg: 'bg-rose-900',   text: 'text-rose-300',   label: 'Dysphoria' },
+};
+
+// Secondary modules with quick-link destinations
+const SECONDARY_MODULES = [
+  { label: 'HRT', href: '/hrt', emoji: '💊' },
+  { label: 'Wellbeing', href: '/wellbeing', emoji: '🫀' },
+  { label: 'Nutrition', href: '/nutrition', emoji: '🥗' },
+  { label: 'Measures', href: '/measurements', emoji: '📏' },
+  { label: 'Photos', href: '/body-spec', emoji: '📸' },
+];
+
 export default function FeedPage() {
   const router = useRouter();
   const [stats, setStats] = useState<StatsData | null>(null);
   const [summary, setSummary] = useState<SummaryData | null>(null);
+  const [timeline, setTimeline] = useState<TimelineEntry[] | null>(null);
   const [startingWorkout, setStartingWorkout] = useState(false);
 
   useEffect(() => {
     fetch('/api/stats').then(r => r.json()).then(setStats);
     fetch('/api/stats/summary').then(r => r.json()).then(setSummary);
+    fetch('/api/timeline?days=30&limit=20').then(r => r.json()).then(setTimeline);
   }, []);
 
   // Build 28-day grid (4 weeks × 7 days), starting from 27 days ago
@@ -106,6 +143,27 @@ export default function FeedPage() {
 
   // Day-of-week headers (Sun–Sat)
   const dayHeaders = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
+
+  // Today at a Glance: which modules have an entry today
+  const todayIso = isoDate(today);
+  const todayModules = new Set<string>();
+  if (timeline) {
+    for (const entry of timeline) {
+      if (entry.timestamp.startsWith(todayIso)) {
+        todayModules.add(entry.module);
+      }
+    }
+  }
+  // Check workouts separately from stats activeDays
+  if (activeDaySet.has(todayIso)) todayModules.add('workout');
+
+  const glanceItems = [
+    { key: 'workout',   label: 'Train',    emoji: '🏋️' },
+    { key: 'wellbeing', label: 'Wellbeing', emoji: '🫀' },
+    { key: 'hrt',       label: 'HRT',      emoji: '💊' },
+    { key: 'nutrition', label: 'Food',     emoji: '🥗' },
+    { key: 'measurement', label: 'Measure', emoji: '📏' },
+  ];
 
   async function handleQuickStart() {
     setStartingWorkout(true);
@@ -159,6 +217,30 @@ export default function FeedPage() {
 
       <div className="px-4 space-y-4 pb-4">
 
+        {/* Today at a Glance */}
+        <div className="rounded-xl bg-zinc-900 border border-zinc-800 p-4">
+          <span className="text-xs font-semibold text-primary uppercase tracking-wide">Today at a Glance</span>
+          <div className="flex gap-2 mt-3 flex-wrap">
+            {glanceItems.map(({ key, label, emoji }) => {
+              const done = todayModules.has(key);
+              return (
+                <div
+                  key={key}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${
+                    done
+                      ? 'bg-primary text-white'
+                      : 'bg-zinc-800 text-zinc-500 border border-zinc-700'
+                  }`}
+                >
+                  <span>{emoji}</span>
+                  <span>{label}</span>
+                  {done && <span className="text-white/80">✓</span>}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
         {/* Weekly Summary Card */}
         <div className="rounded-xl bg-zinc-900 border border-zinc-800 p-4">
           <span className="text-xs font-semibold text-primary uppercase tracking-wide">This Week</span>
@@ -202,6 +284,23 @@ export default function FeedPage() {
           )}
         </div>
 
+        {/* Secondary Module Quick-Links */}
+        <div className="rounded-xl bg-zinc-900 border border-zinc-800 p-4">
+          <span className="text-xs font-semibold text-primary uppercase tracking-wide">Modules</span>
+          <div className="grid grid-cols-5 gap-2 mt-3">
+            {SECONDARY_MODULES.map(({ label, href, emoji }) => (
+              <button
+                key={href}
+                onClick={() => router.push(href)}
+                className="flex flex-col items-center gap-1.5 py-3 rounded-xl bg-zinc-800 border border-zinc-700 hover:bg-zinc-700 active:scale-95 transition-all"
+              >
+                <span className="text-xl">{emoji}</span>
+                <span className="text-[10px] font-medium text-zinc-400">{label}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+
         {/* Last 3 Workouts */}
         {(summary?.lastWorkouts?.length ?? 0) > 0 && (
           <div className="rounded-xl bg-zinc-900 border border-zinc-800 p-4">
@@ -231,6 +330,35 @@ export default function FeedPage() {
             </div>
           </div>
         )}
+
+        {/* Cross-module Timeline */}
+        <div className="rounded-xl bg-zinc-900 border border-zinc-800 p-4">
+          <span className="text-xs font-semibold text-primary uppercase tracking-wide">Timeline</span>
+          <div className="mt-3 space-y-2">
+            {timeline === null ? (
+              <div className="text-center py-6 text-zinc-600 text-sm">Loading…</div>
+            ) : timeline.length === 0 ? (
+              <div className="text-center py-6 text-zinc-600 text-sm">No activity in the last 30 days</div>
+            ) : (
+              timeline.map((entry) => {
+                const style = MODULE_STYLES[entry.module];
+                return (
+                  <div key={`${entry.module}-${entry.id}`} className="flex items-start gap-3">
+                    <div className="flex-shrink-0 mt-0.5">
+                      <span className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-semibold ${style.bg} ${style.text}`}>
+                        {style.label}
+                      </span>
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm text-zinc-200 truncate">{entry.summary}</p>
+                      <p className="text-[11px] text-zinc-500">{formatTimeAgo(entry.timestamp)}</p>
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </div>
 
         {/* Muscle Group Heatmap */}
         {summary && (

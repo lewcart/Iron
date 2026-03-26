@@ -1,0 +1,217 @@
+import { NextRequest, NextResponse } from 'next/server';
+import { query } from '@/db/db';
+
+export type TimelineModule =
+  | 'workout'
+  | 'nutrition'
+  | 'hrt'
+  | 'measurement'
+  | 'wellbeing'
+  | 'photo'
+  | 'bodyweight'
+  | 'body_spec'
+  | 'dysphoria';
+
+export interface TimelineEntry {
+  id: string;
+  module: TimelineModule;
+  icon: string;
+  timestamp: string;
+  summary: string;
+}
+
+export async function GET(req: NextRequest) {
+  const { searchParams } = new URL(req.url);
+  const days = Math.min(parseInt(searchParams.get('days') ?? '30'), 90);
+  const limit = Math.min(parseInt(searchParams.get('limit') ?? '50'), 200);
+
+  const since = new Date();
+  since.setDate(since.getDate() - days);
+  const sinceIso = since.toISOString();
+
+  const [
+    workoutRows,
+    nutritionRows,
+    hrtRows,
+    measurementRows,
+    wellbeingRows,
+    photoRows,
+    bodyweightRows,
+    bodySpecRows,
+    dysphoriaRows,
+  ] = await Promise.all([
+    // Workouts (completed only)
+    query<{ uuid: string; start_time: string; title: string | null; exercise_count: number }>(
+      `SELECT w.uuid, w.start_time, w.title,
+        COUNT(DISTINCT we.uuid)::int AS exercise_count
+       FROM workouts w
+       LEFT JOIN workout_exercises we ON we.workout_uuid = w.uuid
+       WHERE w.end_time IS NOT NULL AND w.is_current = false
+         AND w.start_time >= $1
+       GROUP BY w.uuid
+       ORDER BY w.start_time DESC`,
+      [sinceIso]
+    ),
+    // Nutrition logs
+    query<{ uuid: string; logged_at: string; meal_name: string | null; meal_type: string | null; calories: number | null; protein_g: number | null }>(
+      `SELECT uuid, logged_at, meal_name, meal_type, calories, protein_g
+       FROM nutrition_logs WHERE logged_at >= $1 ORDER BY logged_at DESC`,
+      [sinceIso]
+    ),
+    // HRT logs
+    query<{ uuid: string; logged_at: string; medication: string; dose_mg: number | null; taken: boolean }>(
+      `SELECT uuid, logged_at, medication, dose_mg, taken
+       FROM hrt_logs WHERE logged_at >= $1 ORDER BY logged_at DESC`,
+      [sinceIso]
+    ),
+    // Measurement logs
+    query<{ uuid: string; measured_at: string; site: string; value_cm: number }>(
+      `SELECT uuid, measured_at, site, value_cm
+       FROM measurement_logs WHERE measured_at >= $1 ORDER BY measured_at DESC`,
+      [sinceIso]
+    ),
+    // Wellbeing logs
+    query<{ uuid: string; logged_at: string; mood: number | null; energy: number | null; sleep_hours: number | null }>(
+      `SELECT uuid, logged_at, mood, energy, sleep_hours
+       FROM wellbeing_logs WHERE logged_at >= $1 ORDER BY logged_at DESC`,
+      [sinceIso]
+    ),
+    // Progress photos
+    query<{ uuid: string; taken_at: string; pose: string }>(
+      `SELECT uuid, taken_at, pose
+       FROM progress_photos WHERE taken_at >= $1 ORDER BY taken_at DESC`,
+      [sinceIso]
+    ),
+    // Bodyweight logs
+    query<{ uuid: string; logged_at: string; weight_kg: number }>(
+      `SELECT uuid, logged_at, weight_kg
+       FROM bodyweight_logs WHERE logged_at >= $1 ORDER BY logged_at DESC`,
+      [sinceIso]
+    ),
+    // Body spec logs
+    query<{ uuid: string; measured_at: string; weight_kg: number | null; body_fat_pct: number | null }>(
+      `SELECT uuid, measured_at, weight_kg, body_fat_pct
+       FROM body_spec_logs WHERE measured_at >= $1 ORDER BY measured_at DESC`,
+      [sinceIso]
+    ),
+    // Dysphoria logs
+    query<{ uuid: string; logged_at: string; scale: number }>(
+      `SELECT uuid, logged_at, scale
+       FROM dysphoria_logs WHERE logged_at >= $1 ORDER BY logged_at DESC`,
+      [sinceIso]
+    ),
+  ]);
+
+  const entries: TimelineEntry[] = [];
+
+  for (const w of workoutRows) {
+    const ex = w.exercise_count;
+    entries.push({
+      id: w.uuid,
+      module: 'workout',
+      icon: 'dumbbell',
+      timestamp: w.start_time,
+      summary: w.title
+        ? `${w.title} · ${ex} exercise${ex !== 1 ? 's' : ''}`
+        : `Workout · ${ex} exercise${ex !== 1 ? 's' : ''}`,
+    });
+  }
+
+  for (const n of nutritionRows) {
+    const name = n.meal_name ?? n.meal_type ?? 'Meal';
+    const parts = [];
+    if (n.calories) parts.push(`${Math.round(n.calories)} kcal`);
+    if (n.protein_g) parts.push(`${Math.round(n.protein_g)}g protein`);
+    entries.push({
+      id: n.uuid,
+      module: 'nutrition',
+      icon: 'utensils',
+      timestamp: n.logged_at,
+      summary: parts.length ? `${name} · ${parts.join(', ')}` : name,
+    });
+  }
+
+  for (const h of hrtRows) {
+    const dose = h.dose_mg ? ` ${h.dose_mg}mg` : '';
+    entries.push({
+      id: h.uuid,
+      module: 'hrt',
+      icon: 'pill',
+      timestamp: h.logged_at,
+      summary: `${h.medication}${dose} · ${h.taken ? 'taken' : 'skipped'}`,
+    });
+  }
+
+  for (const m of measurementRows) {
+    entries.push({
+      id: m.uuid,
+      module: 'measurement',
+      icon: 'ruler',
+      timestamp: m.measured_at,
+      summary: `${m.site.replace(/_/g, ' ')} · ${m.value_cm} cm`,
+    });
+  }
+
+  for (const wb of wellbeingRows) {
+    const parts = [];
+    if (wb.mood != null) parts.push(`mood ${wb.mood}/10`);
+    if (wb.energy != null) parts.push(`energy ${wb.energy}/10`);
+    if (wb.sleep_hours != null) parts.push(`${wb.sleep_hours}h sleep`);
+    entries.push({
+      id: wb.uuid,
+      module: 'wellbeing',
+      icon: 'heart',
+      timestamp: wb.logged_at,
+      summary: parts.length ? `Wellbeing · ${parts.join(', ')}` : 'Wellbeing check-in',
+    });
+  }
+
+  for (const p of photoRows) {
+    entries.push({
+      id: p.uuid,
+      module: 'photo',
+      icon: 'camera',
+      timestamp: p.taken_at,
+      summary: `Progress photo · ${p.pose}`,
+    });
+  }
+
+  for (const bw of bodyweightRows) {
+    entries.push({
+      id: bw.uuid,
+      module: 'bodyweight',
+      icon: 'scale',
+      timestamp: bw.logged_at,
+      summary: `Bodyweight · ${bw.weight_kg} kg`,
+    });
+  }
+
+  for (const bs of bodySpecRows) {
+    const parts = [];
+    if (bs.weight_kg != null) parts.push(`${bs.weight_kg} kg`);
+    if (bs.body_fat_pct != null) parts.push(`${bs.body_fat_pct}% body fat`);
+    entries.push({
+      id: bs.uuid,
+      module: 'body_spec',
+      icon: 'activity',
+      timestamp: bs.measured_at,
+      summary: parts.length ? `Body scan · ${parts.join(', ')}` : 'Body scan',
+    });
+  }
+
+  for (const d of dysphoriaRows) {
+    const label = d.scale >= 7 ? 'euphoric' : d.scale <= 3 ? 'dysphoric' : 'neutral';
+    entries.push({
+      id: d.uuid,
+      module: 'dysphoria',
+      icon: 'sparkles',
+      timestamp: d.logged_at,
+      summary: `Dysphoria check · ${d.scale}/10 (${label})`,
+    });
+  }
+
+  // Merge-sort all entries chronologically descending
+  entries.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+
+  return NextResponse.json(entries.slice(0, limit));
+}
