@@ -26,6 +26,12 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Pull Vercel environment
+        run: npx vercel pull --yes --environment=production --token=${{ secrets.VERCEL_TOKEN }}
+        env:
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: prj_ssiDG57csoJeEAm52p9n4vE96umo
+
       - name: Build
         run: npx vercel build --prod --token=${{ secrets.VERCEL_TOKEN }}
         env:
