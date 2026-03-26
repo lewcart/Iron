@@ -6,8 +6,6 @@ import { useRouter } from 'next/navigation';
 import { getMuscleColor } from '@/lib/muscle-colors';
 import { useUnit } from '@/context/UnitContext';
 import { useWorkoutFull } from '@/lib/useLocalDB';
-import type { LocalWorkoutSummary } from '@/lib/useLocalDB';
-
 function formatDuration(start: string, end: string | null) {
   if (!end) return '—';
   const ms = new Date(end).getTime() - new Date(start).getTime();
@@ -18,7 +16,7 @@ function formatDuration(start: string, end: string | null) {
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`;
 }
 
-export default function WorkoutDetail({ workout, onBack }: { workout: LocalWorkoutSummary; onBack: () => void }) {
+export default function WorkoutDetail({ workout, onBack }: { workout: { uuid: string; start_time: string; end_time?: string | null; title?: string | null }; onBack: () => void }) {
   const router = useRouter();
   const { toDisplay, label } = useUnit();
   const [repeating, setRepeating] = useState(false);
