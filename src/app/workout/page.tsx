@@ -27,8 +27,10 @@ import {
   finishWorkout as mutFinishWorkout,
   deleteWorkout as mutDeleteWorkout,
   addExerciseToWorkout,
+  removeExerciseFromWorkout,
   addSet as mutAddSet,
   updateSet as mutUpdateSet,
+  deleteSet as mutDeleteSet,
 } from '@/lib/mutations';
 import { db } from '@/db/local';
 import { syncEngine } from '@/lib/sync';
@@ -640,11 +642,13 @@ function SetRow({
   set,
   workoutExerciseUuid,
   onUpdate,
+  onDelete,
 }: {
   setNumber: number;
   set: LocalWorkoutSet;
   workoutExerciseUuid: string;
   onUpdate: (weUuid: string, setUuid: string, weight: number, reps: number) => Promise<void>;
+  onDelete: (setUuid: string) => Promise<void>;
 }) {
   const { toDisplay, fromInput, label } = useUnit();
   const [weight, setWeight] = useState(
@@ -719,6 +723,15 @@ function SetRow({
         }`}
       >
         <Check className="h-3.5 w-3.5" />
+      </button>
+
+      {/* Delete set button */}
+      <button
+        onClick={() => onDelete(set.uuid)}
+        className="w-8 h-11 flex items-center justify-center flex-shrink-0 text-zinc-600 hover:text-red-500 transition-colors"
+        aria-label="Delete set"
+      >
+        <Trash2 className="h-3.5 w-3.5" />
       </button>
     </div>
   );
@@ -1023,6 +1036,14 @@ export default function WorkoutPage() {
       weight: lastCompleted?.weight ?? null,
       repetitions: lastCompleted?.repetitions ?? null,
     }, orderIdx);
+  };
+
+  const handleDeleteSet = async (setUuid: string) => {
+    await mutDeleteSet(setUuid);
+  };
+
+  const handleRemoveExercise = async (workoutExerciseUuid: string) => {
+    await removeExerciseFromWorkout(workoutExerciseUuid);
   };
 
   // ── Loading ──

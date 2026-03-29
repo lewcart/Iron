@@ -120,6 +120,17 @@
   min-height: 100svh;
 }
 
+/* ── Safe area inset utilities ───────────────────────────── */
+/* Use .pt-safe on page header divs instead of pt-14            */
+/* Use .top-safe on sticky elements instead of top-0            */
+.pt-safe {
+  padding-top: env(safe-area-inset-top, 3.5rem);
+}
+
+.top-safe {
+  top: env(safe-area-inset-top, 0px);
+}
+
 /* ── Typography scale ────────────────────────────────── */
 .text-heading {
   @apply text-2xl font-bold tracking-tight;

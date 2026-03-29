@@ -50,7 +50,7 @@ export default function WorkoutDetail({ workout, onBack }: { workout: { uuid: st
   return (
     <main className="tab-content bg-background">
       {/* Nav bar */}
-      <div className="flex items-center justify-between px-4 pt-14 pb-3">
+      <div className="flex items-center justify-between px-4 pt-safe pb-3">
         <button onClick={onBack} className="flex items-center gap-1 text-primary font-medium text-base">
           <ChevronLeft className="h-5 w-5" />
           History

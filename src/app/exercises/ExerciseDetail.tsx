@@ -186,7 +186,7 @@ export default function ExerciseDetail({
   return (
     <main className="tab-content bg-background">
       {/* Nav bar */}
-      <div className="flex items-center gap-2 px-4 pt-14 pb-3 border-b border-border">
+      <div className="flex items-center gap-2 px-4 pt-safe pb-3 border-b border-border">
         <button onClick={onBack} className="flex items-center gap-1 text-primary font-medium text-base">
           <ChevronLeft className="h-5 w-5" />
           Back

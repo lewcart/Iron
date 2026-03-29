@@ -52,7 +52,7 @@ function ExerciseSelectorSheet({
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-background">
-      <div className="flex items-center justify-between px-4 pt-14 pb-3 border-b border-border">
+      <div className="flex items-center justify-between px-4 pt-safe pb-3 border-b border-border">
         <button onClick={onClose} className="text-primary font-medium text-base">Cancel</button>
         <h2 className="font-semibold text-foreground">Add Exercise</h2>
         <div className="w-14" />
@@ -611,7 +611,7 @@ export default function PlansPage() {
 
   return (
     <main className="tab-content bg-background">
-      <div className="px-4 pt-14 pb-4">
+      <div className="px-4 pt-safe pb-4">
         <div className="flex items-center justify-between mb-4">
           <h1 className="text-2xl font-bold">Plans</h1>
           <button

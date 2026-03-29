@@ -116,7 +116,7 @@ export default function ExercisesPage() {
     const equipLabel = EQUIPMENT_FILTERS.find((e) => e.key === selectedEquipment)?.label ?? selectedEquipment;
     return (
       <main className="tab-content bg-background">
-        <div className="flex items-center gap-3 px-4 pt-14 pb-3">
+        <div className="flex items-center gap-3 px-4 pt-safe pb-3">
           <button
             onClick={() => setSelectedEquipment(null)}
             className="flex items-center gap-1 text-primary font-medium text-base"
@@ -151,7 +151,7 @@ export default function ExercisesPage() {
     const groupLabel = MUSCLE_GROUPS.find((g) => g.key === selectedMuscle)?.label ?? selectedMuscle;
     return (
       <main className="tab-content bg-background">
-        <div className="flex items-center gap-3 px-4 pt-14 pb-3">
+        <div className="flex items-center gap-3 px-4 pt-safe pb-3">
           <button
             onClick={() => setSelectedMuscle(null)}
             className="flex items-center gap-1 text-primary font-medium text-base"
@@ -184,7 +184,7 @@ export default function ExercisesPage() {
 
   return (
     <main className="tab-content bg-background">
-      <div className="px-4 pt-14 pb-3">
+      <div className="px-4 pt-safe pb-3">
         <h1 className="text-2xl font-bold mb-3">Exercises</h1>
 
         <div className="relative">

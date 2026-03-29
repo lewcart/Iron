@@ -257,7 +257,7 @@ export default function FeedPage() {
 
   return (
     <main className="tab-content bg-background">
-      <div className="px-4 pt-14 pb-4 flex items-center justify-between gap-3">
+      <div className="px-4 pt-safe pb-4 flex items-center justify-between gap-3">
         <h1 className="text-2xl font-bold text-foreground">Feed</h1>
         <Link
           href="/settings"

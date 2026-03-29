@@ -82,7 +82,7 @@ export default function HistoryPage() {
 
   return (
     <main className="tab-content bg-background">
-      <div className="px-4 pt-14 pb-3 flex justify-between items-baseline">
+      <div className="px-4 pt-safe pb-3 flex justify-between items-baseline">
         <h1 className="text-2xl font-bold">History</h1>
 
         <div className="flex items-center gap-2">

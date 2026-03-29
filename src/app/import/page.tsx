@@ -205,7 +205,7 @@ export default function ImportPage() {
 
   return (
     <main className="tab-content bg-background">
-      <div className="sticky top-0 z-10 bg-background border-b border-border">
+      <div className="sticky top-safe z-10 bg-background border-b border-border">
         <div className="flex items-center gap-3 px-4 py-3">
           <Link href="/settings" className="text-primary p-1 -ml-1">
             <ArrowLeft className="h-5 w-5" />

@@ -234,7 +234,7 @@ export default function SettingsPage() {
     <main className="tab-content bg-background">
 
       {/* ── Gradient header ─────────────────────────────── */}
-      <div className="gradient-brand pt-14 pb-6 px-4 relative">
+      <div className="gradient-brand pt-safe pb-6 px-4 relative">
         <div className="flex items-end gap-4">
           {/* Avatar */}
           <button

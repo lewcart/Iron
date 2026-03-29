@@ -503,7 +503,7 @@ export default function WellbeingPage() {
 
   return (
     <main className="tab-content bg-background">
-      <div className="px-4 pt-14 pb-2 flex items-center gap-3">
+      <div className="px-4 pt-safe pb-2 flex items-center gap-3">
         <Link href="/settings" className="text-muted-foreground">
           <ChevronLeft className="h-5 w-5" />
         </Link>
