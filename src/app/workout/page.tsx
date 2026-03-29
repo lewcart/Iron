@@ -1,10 +1,23 @@
 'use client';
 
 import { useEffect, useRef, useState, useCallback } from 'react';
+import { App } from '@capacitor/app';
+import {
+  persistTimer as _persistTimer,
+  clearPersistedTimer as _clearPersistedTimer,
+  readPersistedTimer as _readPersistedTimer,
+  computeRemaining,
+} from './rest-timer-utils';
+import {
+  requestNotificationPermission,
+  scheduleRestNotification,
+  cancelRestNotification,
+} from '@/lib/rest-notifications';
 import Link from 'next/link';
 import { Check, ChevronDown, ChevronRight, Plus, Search, X } from 'lucide-react';
 import type { WorkoutPlan, WorkoutRoutine, WorkoutRoutineExercise, WorkoutRoutineSet, Exercise } from '@/types';
 import { formatTime, calcCompletedSets, calcTotalVolume } from './workout-utils';
+import { uuid as genUUID } from '@/lib/uuid';
 import { useUnit } from '@/context/UnitContext';
 import { useCurrentWorkoutFull, useExercises } from '@/lib/useLocalDB';
 import type { LocalWorkoutExerciseEntry, LocalWorkoutWithExercises } from '@/lib/useLocalDB';
@@ -29,55 +42,166 @@ function getRestSettings() {
   };
 }
 
-// ─── Rest timer hook ──────────────────────────────────────────────────────────
+// ─── Rest timer hook (background-safe) ───────────────────────────────────────
+// Uses absolute endTime rather than elapsed ticks so the countdown stays
+// accurate when the app is backgrounded or suspended by iOS.
+// State is persisted to localStorage so it survives JS suspension.
+
+const persistTimer = (endTime: number, duration: number) =>
+  _persistTimer(localStorage, endTime, duration);
+const clearPersistedTimer = () => _clearPersistedTimer(localStorage);
+const readPersistedTimer = () => _readPersistedTimer(localStorage);
+
 function useRestTimer() {
   const [selected, setSelected] = useState<number | null>(null);
   const [remaining, setRemaining] = useState(0);
   const [running, setRunning] = useState(false);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // Absolute epoch ms when the timer expires — the source of truth
+  const endTimeRef = useRef<number | null>(null);
 
   const notify = useCallback(() => {
+    // Vibrate (Android / Chrome — not supported on iOS)
     if (typeof navigator !== 'undefined' && navigator.vibrate) {
       navigator.vibrate([200, 100, 200]);
     }
+    // Audio beep — works on iOS PWA when the page is active
+    try {
+      const ctx = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
+      const playBeep = (startTime: number, freq: number) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.frequency.value = freq;
+        osc.type = 'sine';
+        gain.gain.setValueAtTime(0.3, startTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, startTime + 0.15);
+        osc.start(startTime);
+        osc.stop(startTime + 0.15);
+      };
+      playBeep(ctx.currentTime, 880);
+      playBeep(ctx.currentTime + 0.2, 880);
+      playBeep(ctx.currentTime + 0.4, 1100);
+    } catch { /* AudioContext unavailable */ }
+    // System notification (iOS 16.4+ PWA, Android, desktop)
     if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
       new Notification('Rest complete!', { body: 'Time to get back to work!' });
     }
   }, []);
 
+  const stopInterval = useCallback(() => {
+    if (intervalRef.current !== null) {
+      clearInterval(intervalRef.current);
+      intervalRef.current = null;
+    }
+  }, []);
+
+  const startInterval = useCallback(() => {
+    stopInterval();
+    intervalRef.current = setInterval(() => {
+      if (endTimeRef.current === null) return;
+      const rem = computeRemaining(endTimeRef.current, Date.now());
+      if (rem <= 0) {
+        stopInterval();
+        endTimeRef.current = null;
+        clearPersistedTimer();
+        setRunning(false);
+        setRemaining(0);
+        setTimeout(notify, 0);
+      } else {
+        setRemaining(rem);
+      }
+    }, 500); // 500ms poll so display never lags more than half a second
+  }, [notify, stopInterval]);
+
   const start = useCallback((seconds: number) => {
-    clearInterval(intervalRef.current!);
+    const endTime = Date.now() + seconds * 1000;
+    endTimeRef.current = endTime;
+    persistTimer(endTime, seconds);
+    scheduleRestNotification(endTime);
     setSelected(seconds);
     setRemaining(seconds);
     setRunning(true);
   }, []);
 
   const cancel = useCallback(() => {
-    clearInterval(intervalRef.current!);
+    stopInterval();
+    endTimeRef.current = null;
+    clearPersistedTimer();
+    cancelRestNotification();
     setRunning(false);
     setSelected(null);
     setRemaining(0);
-  }, []);
+  }, [stopInterval]);
 
   const adjust = useCallback((delta: number) => {
-    setRemaining(r => Math.max(0, r + delta));
+    if (endTimeRef.current === null) return;
+    endTimeRef.current = endTimeRef.current + delta * 1000;
+    setSelected(prev => (prev !== null ? prev + delta : prev));
+    const rem = computeRemaining(endTimeRef.current, Date.now());
+    if (rem <= 0) {
+      cancel();
+    } else {
+      setRemaining(rem);
+      // Re-persist with updated endTime (keep original duration as reference)
+      const saved = readPersistedTimer();
+      persistTimer(endTimeRef.current, saved?.duration ?? rem);
+      scheduleRestNotification(endTimeRef.current);
+    }
+  }, [cancel]);
+
+  // Start/stop the interval whenever `running` changes
+  useEffect(() => {
+    if (running) {
+      startInterval();
+    } else {
+      stopInterval();
+    }
+    return stopInterval;
+  }, [running, startInterval, stopInterval]);
+
+  // Request OS notification permission on first mount
+  useEffect(() => { requestNotificationPermission(); }, []);
+
+  // Restore timer state on mount (in case page reloaded mid-timer)
+  useEffect(() => {
+    const saved = readPersistedTimer();
+    if (!saved) return;
+    const rem = Math.ceil((saved.endTime - Date.now()) / 1000);
+    if (rem > 0) {
+      endTimeRef.current = saved.endTime;
+      setSelected(saved.duration);
+      setRemaining(rem);
+      setRunning(true);
+    } else {
+      clearPersistedTimer();
+    }
   }, []);
 
+  // Re-sync timer when the app returns to the foreground (Capacitor native)
   useEffect(() => {
-    if (!running) return;
-    intervalRef.current = setInterval(() => {
-      setRemaining(r => {
-        if (r <= 1) {
-          clearInterval(intervalRef.current!);
-          setRunning(false);
-          setTimeout(notify, 0);
-          return 0;
-        }
-        return r - 1;
-      });
-    }, 1000);
-    return () => clearInterval(intervalRef.current!);
-  }, [running, notify]);
+    let cleanup: (() => void) | undefined;
+    App.addListener('appStateChange', ({ isActive }) => {
+      if (!isActive || endTimeRef.current === null) return;
+      const rem = computeRemaining(endTimeRef.current, Date.now());
+      if (rem <= 0) {
+        // Timer expired while backgrounded — native notification already fired;
+        // cancel it in case it's still pending, then play in-app alert.
+        endTimeRef.current = null;
+        clearPersistedTimer();
+        cancelRestNotification();
+        setRunning(false);
+        setRemaining(0);
+        notify();
+      } else {
+        setRemaining(rem);
+      }
+    }).then(handle => {
+      cleanup = () => handle.remove();
+    });
+    return () => cleanup?.();
+  }, [notify]);
 
   const progress = selected ? remaining / selected : 0;
   return { selected, remaining, running, progress, start, cancel, adjust };
@@ -263,7 +387,7 @@ function RestTimerSheet({
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-background">
       {/* Header */}
-      <div className="flex items-center justify-between px-4 pt-14 pb-3 border-b border-border">
+      <div className="flex items-center justify-between px-4 pt-safe-plus pb-3 border-b border-border">
         <button onClick={onClose} className="text-primary font-medium text-base">Close</button>
         <h2 className="font-semibold">Rest Timer</h2>
         <div className="w-14" />
@@ -404,7 +528,7 @@ function AddExerciseSheet({
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-background">
       {/* Header */}
-      <div className="flex items-center justify-between px-4 pt-14 pb-3 border-b border-border">
+      <div className="flex items-center justify-between px-4 pt-safe-plus pb-3 border-b border-border">
         <button onClick={onClose} className="text-primary font-medium text-base min-h-[44px] flex items-center">Cancel</button>
         <h2 className="font-semibold">Add Exercise</h2>
         <div className="w-14" />
@@ -692,7 +816,7 @@ export default function WorkoutPage() {
       }
 
       // Create workout entirely in local DB — instant
-      const workoutUuid = crypto.randomUUID();
+      const workoutUuid = genUUID();
       const now = Date.now();
       const syncMeta = { _synced: false, _updated_at: now, _deleted: false as const };
 
@@ -709,7 +833,7 @@ export default function WorkoutPage() {
 
       const exercises = routine.exercises ?? [];
       for (const routineExercise of exercises) {
-        const weUuid = crypto.randomUUID();
+        const weUuid = genUUID();
         const exerciseUuid = routineExercise.exercise_uuid;
         await db.workout_exercises.add({
           uuid: weUuid,
@@ -721,28 +845,43 @@ export default function WorkoutPage() {
         });
 
         // Look up last completed sets for this exercise to prefill weights
-        const prevWEs = await db.workout_exercises
-          .where('exercise_uuid')
-          .equals(exerciseUuid)
-          .filter(e => !e._deleted && e.workout_uuid !== workoutUuid)
-          .toArray();
-        let lastSets: typeof db.workout_sets extends import('dexie').Table<infer T> ? T[] : never[] = [];
-        if (prevWEs.length > 0) {
-          // Find the most recent workout exercise by checking the parent workout start_time
-          const weWithTime = await Promise.all(
-            prevWEs.map(async we => {
-              const w = await db.workouts.get(we.workout_uuid);
-              return { we, time: w?.start_time ?? '' };
-            }),
-          );
-          weWithTime.sort((a, b) => b.time.localeCompare(a.time));
-          const mostRecent = weWithTime[0];
-          if (mostRecent) {
-            lastSets = await db.workout_sets
-              .where('workout_exercise_uuid')
-              .equals(mostRecent.we.uuid)
-              .filter(s => !s._deleted && s.is_completed)
-              .sortBy('order_index');
+        // Try server first (includes imported history), fall back to local IndexedDB
+        let lastSets: { weight: number | null; repetitions: number | null }[] = [];
+        try {
+          const res = await fetch(`/api/exercises/${exerciseUuid}/history`);
+          if (res.ok) {
+            const data = await res.json();
+            const recent: { weight: number; repetitions: number; workoutUuid: string }[] = data.recentSets ?? [];
+            if (recent.length > 0) {
+              const lastWid = recent[0].workoutUuid;
+              lastSets = recent.filter(s => s.workoutUuid === lastWid);
+            }
+          }
+        } catch { /* offline */ }
+
+        if (lastSets.length === 0) {
+          const prevWEs = await db.workout_exercises
+            .where('exercise_uuid')
+            .equals(exerciseUuid)
+            .filter(e => !e._deleted && e.workout_uuid !== workoutUuid)
+            .toArray();
+          if (prevWEs.length > 0) {
+            const weWithTime = await Promise.all(
+              prevWEs.map(async we => {
+                const w = await db.workouts.get(we.workout_uuid);
+                return { we, time: w?.start_time ?? '' };
+              }),
+            );
+            weWithTime.sort((a, b) => b.time.localeCompare(a.time));
+            const mostRecent = weWithTime[0];
+            if (mostRecent) {
+              const localSets = await db.workout_sets
+                .where('workout_exercise_uuid')
+                .equals(mostRecent.we.uuid)
+                .filter(s => !s._deleted && s.is_completed)
+                .sortBy('order_index');
+              lastSets = localSets.map(s => ({ weight: s.weight, repetitions: s.repetitions }));
+            }
           }
         }
 
@@ -767,7 +906,7 @@ export default function WorkoutPage() {
           templateSets.map((s, i) => {
             const prev = lastSets[i];
             return {
-              uuid: crypto.randomUUID(),
+              uuid: genUUID(),
               workout_exercise_uuid: weUuid,
               weight: prev?.weight ?? null,
               repetitions: prev?.repetitions ?? null,
@@ -808,7 +947,60 @@ export default function WorkoutPage() {
   const handleAddExercise = async (exercise: Exercise) => {
     if (!workout) return;
     const orderIdx = workout.exercises.length;
-    await addExerciseToWorkout(workout.uuid, exercise.uuid, orderIdx);
+    const weUuid = await addExerciseToWorkout(workout.uuid, exercise.uuid, orderIdx);
+
+    // Prefill sets from server history (includes imported data)
+    let prevSets: { weight: number; repetitions: number }[] = [];
+    try {
+      const res = await fetch(`/api/exercises/${exercise.uuid}/history`);
+      if (res.ok) {
+        const data = await res.json();
+        const recent: { weight: number; repetitions: number; workoutUuid: string }[] = data.recentSets ?? [];
+        // Take sets from the most recent workout only
+        if (recent.length > 0) {
+          const lastWorkoutUuid = recent[0].workoutUuid;
+          prevSets = recent.filter(s => s.workoutUuid === lastWorkoutUuid);
+        }
+      }
+    } catch { /* offline — fall through with no prefill */ }
+
+    // Fall back to local IndexedDB if server returned nothing
+    if (prevSets.length === 0) {
+      const localPrev = await db.workout_exercises
+        .where('exercise_uuid')
+        .equals(exercise.uuid)
+        .filter(e => !e._deleted && e.workout_uuid !== workout.uuid)
+        .toArray();
+      if (localPrev.length > 0) {
+        const withTime = await Promise.all(
+          localPrev.map(async we => {
+            const w = await db.workouts.get(we.workout_uuid);
+            return { we, time: w?.start_time ?? '' };
+          }),
+        );
+        withTime.sort((a, b) => b.time.localeCompare(a.time));
+        const mostRecent = withTime[0];
+        if (mostRecent) {
+          const sets = await db.workout_sets
+            .where('workout_exercise_uuid')
+            .equals(mostRecent.we.uuid)
+            .filter(s => !s._deleted && s.is_completed)
+            .sortBy('order_index');
+          prevSets = sets.map(s => ({ weight: s.weight ?? 0, repetitions: s.repetitions ?? 0 }));
+        }
+      }
+    }
+
+    // Create prefilled sets (default to 4 empty sets if no history)
+    const setCount = prevSets.length > 0 ? prevSets.length : 4;
+    for (let i = 0; i < setCount; i++) {
+      const prev = prevSets[i];
+      await mutAddSet(weUuid, {
+        weight: prev?.weight ?? null,
+        repetitions: prev?.repetitions ?? null,
+      }, i);
+    }
+
     setShowExercises(false);
   };
 
@@ -825,7 +1017,12 @@ export default function WorkoutPage() {
 
   const handleAddSet = async (we: LocalWorkoutExerciseEntry) => {
     const orderIdx = we.sets.length;
-    await mutAddSet(we.uuid, {}, orderIdx);
+    // Prefill from the last completed set in the same exercise
+    const lastCompleted = [...we.sets].reverse().find(s => s.is_completed);
+    await mutAddSet(we.uuid, {
+      weight: lastCompleted?.weight ?? null,
+      repetitions: lastCompleted?.repetitions ?? null,
+    }, orderIdx);
   };
 
   // ── Loading ──
@@ -842,7 +1039,7 @@ export default function WorkoutPage() {
     const routinesExist = plans.some(p => p.routines.length > 0);
     return (
       <main className="tab-content bg-background overflow-y-auto">
-        <div className="px-4 pt-14 pb-4">
+        <div className="px-4 pt-safe-plus pb-4">
           <h1 className="text-2xl font-bold">Workout</h1>
         </div>
         <div className="px-4 space-y-4">
@@ -908,7 +1105,7 @@ export default function WorkoutPage() {
   return (
     <>
       {/* Fixed summary bar only */}
-      <div ref={headerRef} className="fixed top-0 left-0 right-0 z-20">
+      <div ref={headerRef} className="fixed top-0 left-0 right-0 z-20 bg-background pt-safe">
         <WorkoutSummaryBar
           elapsed={elapsed}
           exercises={workout.exercises}
