@@ -1,20 +1,17 @@
 'use client';
 
 import { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
 import { ChevronRight, X, Search, Download } from 'lucide-react';
-import type { Workout, Exercise } from '@/types';
+import type { LocalExercise } from '@/db/local';
+import type { LocalWorkoutSummary } from '@/lib/useLocalDB';
+import { useWorkoutSummaries, useExercises } from '@/lib/useLocalDB';
 import WorkoutDetail from './WorkoutDetail';
 import {
   formatDuration,
   formatDate,
   groupWorkouts,
-  type WorkoutSummary,
   type GroupMode,
 } from './utils';
-import { queryKeys } from '@/lib/api/query-keys';
-import { fetchWorkoutsList } from '@/lib/api/workouts-list';
-import { fetchExercisesFiltered } from '@/lib/api/exercises';
 
 function HistoryListSkeleton() {
   return (
@@ -30,37 +27,24 @@ function HistoryListSkeleton() {
 }
 
 export default function HistoryPage() {
-  const [selected, setSelected] = useState<Workout | null>(null);
+  const [selected, setSelected] = useState<LocalWorkoutSummary | null>(null);
 
   const [groupMode, setGroupMode] = useState<GroupMode>('week');
   const [fromDate, setFromDate] = useState('');
   const [toDate, setToDate] = useState('');
   const [exerciseSearch, setExerciseSearch] = useState('');
-  const [selectedExercise, setSelectedExercise] = useState<Exercise | null>(null);
+  const [selectedExercise, setSelectedExercise] = useState<LocalExercise | null>(null);
   const [showSuggestions, setShowSuggestions] = useState(false);
 
-  const workoutParams = {
-    limit: '50',
-    from: fromDate || undefined,
-    to: toDate || undefined,
+  const workouts = useWorkoutSummaries({
+    limit: 200,
+    fromDate: fromDate || undefined,
+    toDate: toDate || undefined,
     exerciseUuid: selectedExercise?.uuid,
-  };
-
-  const { data: workouts = [], isPending, isPlaceholderData } = useQuery({
-    queryKey: queryKeys.workouts(workoutParams),
-    queryFn: () => fetchWorkoutsList(workoutParams),
-    staleTime: 30_000,
-    placeholderData: (previousData) => previousData,
   });
 
-  const { data: exerciseSuggestionsRaw = [] } = useQuery({
-    queryKey: queryKeys.exercises.list({ search: exerciseSearch }),
-    queryFn: () => fetchExercisesFiltered({ search: exerciseSearch }),
-    enabled: exerciseSearch.length >= 2,
-    staleTime: 60_000,
-  });
-
-  const exerciseSuggestions = exerciseSuggestionsRaw.slice(0, 6);
+  const allExercises = useExercises({ search: exerciseSearch.length >= 2 ? exerciseSearch : undefined });
+  const exerciseSuggestions = allExercises.slice(0, 6);
 
   const clearFilters = () => {
     setFromDate('');
@@ -74,7 +58,8 @@ export default function HistoryPage() {
 
   const grouped = groupWorkouts(workouts, groupMode);
 
-  const loading = isPending && workouts.length === 0;
+  // workouts is [] on first render (Dexie default), no async pending state needed
+  const loading = false;
 
   if (selected) {
     return <WorkoutDetail workout={selected} onBack={() => setSelected(null)} />;
@@ -217,14 +202,11 @@ export default function HistoryPage() {
         </div>
       ) : (
         <div className="px-4 space-y-4">
-          {isPlaceholderData && workouts.length > 0 ? (
-            <p className="text-[11px] text-muted-foreground text-center">Showing cached results…</p>
-          ) : null}
           {grouped.map((group) => (
             <div key={group.label}>
               <p className="text-xs font-semibold text-blue-400 uppercase tracking-wide mb-1 px-1">{group.label}</p>
               <div className="ios-section">
-                {group.workouts.map((w: WorkoutSummary, i: number) => (
+                {group.workouts.map((w, i) => (
                   <button
                     key={w.uuid}
                     onClick={() => setSelected(w)}
