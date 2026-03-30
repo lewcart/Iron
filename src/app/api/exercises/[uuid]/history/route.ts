@@ -31,7 +31,8 @@ export async function GET(
     ]);
 
     return NextResponse.json({ progress, prs, volumeTrend, recentSets });
-  } catch {
+  } catch (err) {
+    console.error('Exercise history error:', err);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }

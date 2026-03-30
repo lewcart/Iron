@@ -490,7 +490,8 @@ describe('startWorkoutFromRoutine', () => {
   });
 
   it('creates a workout linked to the routine', async () => {
-    // startWorkout -> INSERT workouts, then getWorkout
+    // startWorkout -> UPDATE (deactivate current), INSERT workouts, then getWorkout
+    db.query.mockResolvedValueOnce([]); // UPDATE
     db.queryOne.mockResolvedValueOnce({
       uuid: 'workout-1', start_time: '2026-03-16T10:00:00Z',
       end_time: null, title: null, comment: null, is_current: true,
@@ -498,17 +499,19 @@ describe('startWorkoutFromRoutine', () => {
     // listRoutineExercises -> returns empty array
     db.query.mockResolvedValueOnce([]);
 
-    const workout = await startWorkoutFromRoutine('routine-1');
-    expect(workout.uuid).toBe('workout-1');
+    const result = await startWorkoutFromRoutine('routine-1');
+    expect(result.workout.uuid).toBe('workout-1');
 
-    // Check that workouts INSERT was called with routine uuid
-    const insertCall = db.query.mock.calls[0];
+    // Check that workouts INSERT was called with routine uuid (calls[1] because calls[0] is UPDATE)
+    const insertCall = db.query.mock.calls[1];
     expect(insertCall[0]).toContain('INSERT');
     expect(insertCall[0]).toContain('workouts');
     expect(insertCall[1]).toContain('routine-1');
   });
 
   it('copies exercises and routine sets to the workout', async () => {
+    // startWorkout UPDATE (deactivate current)
+    db.query.mockResolvedValueOnce([]);
     // startWorkout INSERT
     db.query.mockResolvedValueOnce([]);
     // getWorkout
@@ -551,6 +554,8 @@ describe('startWorkoutFromRoutine', () => {
   });
 
   it('creates 3 default sets when routine has no sets defined', async () => {
+    // startWorkout UPDATE (deactivate current)
+    db.query.mockResolvedValueOnce([]);
     // startWorkout INSERT
     db.query.mockResolvedValueOnce([]);
     // getWorkout
@@ -579,6 +584,8 @@ describe('startWorkoutFromRoutine', () => {
   });
 
   it('handles routine with no exercises', async () => {
+    // startWorkout UPDATE (deactivate current)
+    db.query.mockResolvedValueOnce([]);
     // startWorkout INSERT
     db.query.mockResolvedValueOnce([]);
     // getWorkout
@@ -589,8 +596,8 @@ describe('startWorkoutFromRoutine', () => {
     // listRoutineExercises - empty
     db.query.mockResolvedValueOnce([]);
 
-    const workout = await startWorkoutFromRoutine('routine-1');
-    expect(workout.uuid).toBe('workout-1');
+    const result = await startWorkoutFromRoutine('routine-1');
+    expect(result.workout.uuid).toBe('workout-1');
 
     const setInserts = db.query.mock.calls.filter(
       ([sql]: [string]) => sql.includes('INSERT') && sql.includes('workout_sets')

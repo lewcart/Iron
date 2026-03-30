@@ -454,13 +454,14 @@ describe('startWorkout', () => {
       comment: null,
       is_current: true,
     };
-    // startWorkout calls query() for INSERT, then queryOne() for getWorkout
-    vi.mocked(db.query).mockResolvedValueOnce([]);
+    // startWorkout calls query() for UPDATE (deactivate current), then INSERT, then queryOne() for getWorkout
+    vi.mocked(db.query).mockResolvedValueOnce([]); // UPDATE
+    vi.mocked(db.query).mockResolvedValueOnce([]); // INSERT
     vi.mocked(db.queryOne).mockResolvedValueOnce(workoutRow);
 
     const result = await startWorkout();
 
-    const [insertSql, insertParams] = vi.mocked(db.query).mock.calls[0];
+    const [insertSql, insertParams] = vi.mocked(db.query).mock.calls[1];
     expect(insertSql).toContain('INSERT INTO workouts');
     expect(insertSql).toContain('is_current');
     // routineUuid defaults to null
@@ -479,12 +480,13 @@ describe('startWorkout', () => {
       comment: null,
       is_current: true,
     };
-    vi.mocked(db.query).mockResolvedValueOnce([]);
+    vi.mocked(db.query).mockResolvedValueOnce([]); // UPDATE
+    vi.mocked(db.query).mockResolvedValueOnce([]); // INSERT
     vi.mocked(db.queryOne).mockResolvedValueOnce(workoutRow);
 
     await startWorkout('routine-uuid-1');
 
-    const [, insertParams] = vi.mocked(db.query).mock.calls[0];
+    const [, insertParams] = vi.mocked(db.query).mock.calls[1];
     expect(insertParams).toContain('routine-uuid-1');
   });
 });

@@ -3,6 +3,7 @@
 import { db } from '@/db/local';
 import { syncEngine } from '@/lib/sync';
 import type { LocalWorkout, LocalWorkoutExercise, LocalWorkoutSet, LocalBodyweightLog } from '@/db/local';
+import { uuid as genUUID } from '@/lib/uuid';
 
 function now() {
   return Date.now();
@@ -28,9 +29,9 @@ export async function startWorkout(opts: {
     });
   }
 
-  const uuid = crypto.randomUUID();
+  const id = genUUID();
   const workout: LocalWorkout = {
-    uuid,
+    uuid: id,
     start_time: new Date().toISOString(),
     end_time: null,
     title: opts.title ?? null,
@@ -41,7 +42,7 @@ export async function startWorkout(opts: {
   };
   await db.workouts.add(workout);
   syncEngine.schedulePush();
-  return uuid;
+  return id;
 }
 
 export async function finishWorkout(uuid: string): Promise<void> {
@@ -82,9 +83,9 @@ export async function addExerciseToWorkout(
   exercise_uuid: string,
   order_index: number,
 ): Promise<string> {
-  const uuid = crypto.randomUUID();
+  const id = genUUID();
   const row: LocalWorkoutExercise = {
-    uuid,
+    uuid: id,
     workout_uuid,
     exercise_uuid,
     comment: null,
@@ -93,7 +94,7 @@ export async function addExerciseToWorkout(
   };
   await db.workout_exercises.add(row);
   syncEngine.schedulePush();
-  return uuid;
+  return id;
 }
 
 export async function removeExerciseFromWorkout(uuid: string): Promise<void> {
@@ -112,9 +113,9 @@ export async function addSet(
   data: Partial<Pick<LocalWorkoutSet, 'weight' | 'repetitions' | 'min_target_reps' | 'max_target_reps' | 'rpe' | 'tag'>>,
   order_index: number,
 ): Promise<string> {
-  const uuid = crypto.randomUUID();
+  const id = genUUID();
   const row: LocalWorkoutSet = {
-    uuid,
+    uuid: id,
     workout_exercise_uuid,
     weight: data.weight ?? null,
     repetitions: data.repetitions ?? null,
@@ -130,7 +131,7 @@ export async function addSet(
   };
   await db.workout_sets.add(row);
   syncEngine.schedulePush();
-  return uuid;
+  return id;
 }
 
 export async function updateSet(
@@ -149,9 +150,9 @@ export async function deleteSet(uuid: string): Promise<void> {
 // ─── Bodyweight logs ───────────────────────────────────────────────────────────
 
 export async function logBodyweight(weight_kg: number, note?: string): Promise<string> {
-  const uuid = crypto.randomUUID();
+  const id = genUUID();
   const row: LocalBodyweightLog = {
-    uuid,
+    uuid: id,
     weight_kg,
     logged_at: new Date().toISOString(),
     note: note ?? null,
@@ -159,7 +160,7 @@ export async function logBodyweight(weight_kg: number, note?: string): Promise<s
   };
   await db.bodyweight_logs.add(row);
   syncEngine.schedulePush();
-  return uuid;
+  return id;
 }
 
 export async function deleteBodyweightLog(uuid: string): Promise<void> {

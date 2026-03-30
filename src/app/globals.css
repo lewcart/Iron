@@ -111,6 +111,15 @@
   @apply px-4 py-3 flex items-center border-b border-border last:border-0;
 }
 
+/* ── Safe-area top padding for PWA standalone mode ───── */
+.pt-safe {
+  padding-top: env(safe-area-inset-top, 0px);
+}
+.pt-safe-plus {
+  /* safe-area + the original ~3.5rem (pt-14) spacing */
+  padding-top: calc(env(safe-area-inset-top, 0px) + 3.5rem);
+}
+
 /* ── Scrollable main area (accounts for bottom tab bar) ─ */
 .tab-content {
   /* Tab bar = inner row + safe-area padding on <nav>; count each once only */

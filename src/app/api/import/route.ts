@@ -187,15 +187,20 @@ export async function POST(request: NextRequest) {
       ? query<{ uuid: string }>(`SELECT uuid FROM exercises WHERE uuid = ANY($1)`, [refUuids])
       : Promise.resolve([]),
     refTitles.length > 0
-      ? query<{ uuid: string; title: string }>(
-          `SELECT uuid, title FROM exercises WHERE LOWER(title) = ANY($1) AND is_hidden = false`,
+      ? query<{ uuid: string; title: string; is_custom: boolean }>(
+          `SELECT uuid, title, is_custom FROM exercises WHERE LOWER(title) = ANY($1) AND is_hidden = false ORDER BY is_custom ASC`,
           [refTitles.map((t) => t.toLowerCase())],
         )
       : Promise.resolve([]),
   ]);
 
   const knownByUuid = new Set(byUuid.map((r) => r.uuid));
-  const titleToUuid = new Map(byTitle.map((r) => [r.title.toLowerCase(), r.uuid]));
+  // Build title→uuid map; catalog (is_custom=false) exercises come first so they win
+  const titleToUuid = new Map<string, string>();
+  for (const r of byTitle) {
+    const key = r.title.toLowerCase();
+    if (!titleToUuid.has(key)) titleToUuid.set(key, r.uuid);
+  }
 
   // Resolve each ref and collect exercises that need creation
   const newExercises: unknown[][] = [];
