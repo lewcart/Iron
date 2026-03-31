@@ -16,7 +16,7 @@ import {
 } from '@/lib/rest-notifications';
 import { consumeScheduleTap } from '@/lib/workout-schedule';
 import Link from 'next/link';
-import { Check, ChevronDown, ChevronRight, Plus, Search, Trash2, X } from 'lucide-react';
+import { Check, ChevronDown, ChevronRight, Plus, Search, X } from 'lucide-react';
 import type { WorkoutPlan, WorkoutRoutine, WorkoutRoutineExercise, WorkoutRoutineSet, Exercise } from '@/types';
 import { formatTime, calcCompletedSets, calcTotalVolume } from './workout-utils';
 import { uuid as genUUID } from '@/lib/uuid';
@@ -671,7 +671,7 @@ function SetRow({
   const completed = set.is_completed;
   const isPR = set.is_pr;
 
-  return (
+  const inner = (
     <div className={`flex items-center gap-2 py-1.5 px-3 border-b border-border last:border-0 ${completed && !isPR ? 'opacity-60' : ''} ${isPR ? 'bg-amber-500/5' : ''}`}>
       {/* Set number */}
       <div className="w-5 text-center text-xs font-semibold text-muted-foreground">{setNumber}</div>
@@ -727,16 +727,13 @@ function SetRow({
       >
         <Check className="h-3.5 w-3.5" />
       </button>
-
-      {/* Delete set button */}
-      <button
-        onClick={() => onDelete(set.uuid)}
-        className="w-8 h-11 flex items-center justify-center flex-shrink-0 text-zinc-600 hover:text-red-500 transition-colors"
-        aria-label="Delete set"
-      >
-        <Trash2 className="h-3.5 w-3.5" />
-      </button>
     </div>
+  );
+
+  return (
+    <SwipeToDelete onDelete={() => onDelete(set.uuid)}>
+      {inner}
+    </SwipeToDelete>
   );
 }
 
@@ -1186,29 +1183,31 @@ export default function WorkoutPage() {
                 const isExpanded = expandedExercises.has(we.uuid);
 
                 return (
-                  <SwipeToDelete key={we.uuid} onDelete={() => handleRemoveExercise(we.uuid)} className="ios-section rounded-xl">
-                    {/* Exercise header — tap to expand/collapse */}
-                    <button
-                      onClick={() => toggleExercise(we.uuid)}
-                      className="flex items-center gap-2 px-3 py-2.5 w-full text-left min-h-[44px]"
-                    >
-                      {isExpanded
-                        ? <ChevronDown className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
-                        : <ChevronRight className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
-                      }
-                      <span className={`flex-1 font-semibold text-sm truncate ${allDone ? 'text-muted-foreground' : ''}`}>
-                        {we.exercise?.title ?? 'Unknown Exercise'}
-                      </span>
-                      {allDone ? (
-                        <div className="w-5 h-5 rounded-full bg-green-500 flex items-center justify-center flex-shrink-0">
-                          <Check className="h-3 w-3 text-white" strokeWidth={3} />
-                        </div>
-                      ) : (
-                        <span className="text-xs text-muted-foreground flex-shrink-0">
-                          {completedSets}/{totalSets}
+                  <div key={we.uuid} className="ios-section">
+                    {/* Exercise header — swipe to delete */}
+                    <SwipeToDelete onDelete={() => handleRemoveExercise(we.uuid)}>
+                      <button
+                        onClick={() => toggleExercise(we.uuid)}
+                        className="flex items-center gap-2 px-3 py-2.5 w-full text-left min-h-[44px]"
+                      >
+                        {isExpanded
+                          ? <ChevronDown className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
+                          : <ChevronRight className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
+                        }
+                        <span className={`flex-1 font-semibold text-sm truncate ${allDone ? 'text-muted-foreground' : ''}`}>
+                          {we.exercise?.title ?? 'Unknown Exercise'}
                         </span>
-                      )}
-                    </button>
+                        {allDone ? (
+                          <div className="w-5 h-5 rounded-full bg-green-500 flex items-center justify-center flex-shrink-0">
+                            <Check className="h-3 w-3 text-white" strokeWidth={3} />
+                          </div>
+                        ) : (
+                          <span className="text-xs text-muted-foreground flex-shrink-0">
+                            {completedSets}/{totalSets}
+                          </span>
+                        )}
+                      </button>
+                    </SwipeToDelete>
 
                     {/* Collapsible sets */}
                     {isExpanded && (
@@ -1219,7 +1218,6 @@ export default function WorkoutPage() {
                           <div className="flex-1 text-right text-[10px] font-medium text-muted-foreground">Weight</div>
                           <div className="w-3" />
                           <div className="flex-1 text-right text-[10px] font-medium text-muted-foreground">Reps</div>
-                          <div className="w-8" />
                         </div>
 
                         {/* Sets */}
@@ -1244,7 +1242,7 @@ export default function WorkoutPage() {
                         </button>
                       </>
                     )}
-                  </SwipeToDelete>
+                  </div>
                 );
               })}
             </div>

@@ -16,6 +16,7 @@ import {
   Info,
   Camera,
   Dumbbell,
+  MapPin,
 } from 'lucide-react';
 import {
   loadScheduleConfig,
@@ -27,6 +28,17 @@ import { useUnit } from '@/context/UnitContext';
 import { REBIRTH_EQUIPMENT_LS_KEY } from '@/lib/available-equipment';
 import type { BodyweightLog } from '@/types';
 import { apiBase } from '@/lib/api/client';
+import {
+  setHomeLocation,
+  removeHomeLocation,
+  getGeofenceStatus,
+  saveHomeLocationToLS,
+  loadHomeLocationFromLS,
+  clearHomeLocationFromLS,
+  isGeofenceAvailable,
+  onHomeArrival,
+} from '@/lib/geofence';
+import { GeofenceOnboarding } from '@/components/GeofenceOnboarding';
 
 const REST_TIMES = [30, 60, 90, 120, 150, 180, 210, 240, 300];
 
@@ -117,12 +129,60 @@ export default function SettingsPage() {
 
   const [equipmentSelectedCount, setEquipmentSelectedCount] = useState(0);
 
+  // Geofence / auto-end at home
+  const [geofenceEnabled, setGeofenceEnabled] = useState(false);
+  const [geofenceRadius, setGeofenceRadius] = useState(175);
+  const [showGeofenceOnboarding, setShowGeofenceOnboarding] = useState(false);
+  const [geofenceAvailable] = useState(() => isGeofenceAvailable());
+
   // Bodyweight
   const [bwInput, setBwInput] = useState('');
   const [bwNote, setBwNote] = useState('');
   const [bwLogs, setBwLogs] = useState<BodyweightLog[]>([]);
   const [bwLoading, setBwLoading] = useState(true);
   const [bwSaving, setBwSaving] = useState(false);
+
+  // Geofence handlers
+  const handleGeofenceToggle = async () => {
+    if (geofenceEnabled) {
+      await removeHomeLocation();
+      clearHomeLocationFromLS();
+      setGeofenceEnabled(false);
+    } else {
+      // Show onboarding first; actual enable happens in onConfirm
+      setShowGeofenceOnboarding(true);
+    }
+  };
+
+  const handleGeofenceConfirm = async () => {
+    setShowGeofenceOnboarding(false);
+    // Use device GPS to capture home location
+    navigator.geolocation.getCurrentPosition(
+      async (pos) => {
+        const { latitude: lat, longitude: lon } = pos.coords;
+        try {
+          const status = await setHomeLocation({ lat, lon, radius: geofenceRadius });
+          if (status.monitoring) {
+            saveHomeLocationToLS(lat, lon, geofenceRadius);
+            setGeofenceEnabled(true);
+          }
+        } catch (err) {
+          console.error('[Geofence] setHomeLocation failed:', err);
+        }
+      },
+      (err) => console.error('[Geofence] getCurrentPosition failed:', err),
+      { enableHighAccuracy: true, timeout: 10000 }
+    );
+  };
+
+  const handleGeofenceRadiusChange = async (radius: number) => {
+    setGeofenceRadius(radius);
+    if (!geofenceEnabled) return;
+    const saved = loadHomeLocationFromLS();
+    if (!saved) return;
+    await setHomeLocation({ ...saved, radius });
+    saveHomeLocationToLS(saved.lat, saved.lon, radius);
+  };
 
   // Load persisted values
   useEffect(() => {
@@ -148,6 +208,24 @@ export default function SettingsPage() {
         setBwLoading(false);
       })
       .catch(() => setBwLoading(false));
+
+    // Sync geofence toggle state with native layer
+    if (isGeofenceAvailable()) {
+      getGeofenceStatus().then((status) => {
+        setGeofenceEnabled(status.monitoring);
+        if (status.radius) setGeofenceRadius(status.radius);
+      });
+    }
+
+    // Subscribe to home arrival events (e.g. show a toast / update UI)
+    const unsubGeofence = onHomeArrival((event) => {
+      console.info('[Settings] homeArrival event received at', event.timestamp);
+      // The native plugin has already posted the notification and messaged the Watch;
+      // no additional action needed from settings.
+    });
+    return () => {
+      unsubGeofence();
+    };
   }, []);
 
   // While editing profile, keep header + localStorage in sync on every change
@@ -254,6 +332,13 @@ export default function SettingsPage() {
     : null;
 
   return (
+    <>
+    {showGeofenceOnboarding && (
+      <GeofenceOnboarding
+        onConfirm={handleGeofenceConfirm}
+        onDismiss={() => setShowGeofenceOnboarding(false)}
+      />
+    )}
     <main className="tab-content bg-background">
 
       {/* ── Gradient header ─────────────────────────────── */}
@@ -636,6 +721,48 @@ export default function SettingsPage() {
           </div>
         </div>
 
+        {/* ── Automation (geofence) ───────────────────── */}
+        {geofenceAvailable && (
+          <div>
+            <p className="text-label-section mb-1 px-1">Automation</p>
+            <div className="ios-section">
+              <div className="ios-row justify-between">
+                <div className="flex items-center gap-3">
+                  <IconBadge bg="bg-green-600">
+                    <MapPin className="w-4 h-4 text-white" />
+                  </IconBadge>
+                  <div className="flex-1 min-w-0">
+                    <span className="text-sm font-medium">Auto-end at Home</span>
+                    <p className="text-xs text-muted-foreground mt-0.5 pr-4">
+                      Ends your workout when you arrive home. Requires &ldquo;Always&rdquo; location.
+                    </p>
+                  </div>
+                </div>
+                <Toggle on={geofenceEnabled} onToggle={handleGeofenceToggle} />
+              </div>
+              {geofenceEnabled && (
+                <div className="ios-row justify-between">
+                  <span className="text-sm font-medium">Geofence Radius</span>
+                  <select
+                    value={geofenceRadius}
+                    onChange={e => handleGeofenceRadiusChange(Number(e.target.value))}
+                    className="text-sm text-muted-foreground bg-transparent outline-none text-right"
+                  >
+                    {[100, 125, 150, 175, 200].map(r => (
+                      <option key={r} value={r}>{r} m</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+            </div>
+            {geofenceEnabled && (
+              <p className="text-xs text-muted-foreground px-1 mt-1">
+                30-second dwell required before workout ends to avoid false triggers.
+              </p>
+            )}
+          </div>
+        )}
+
         {/* ── Data ────────────────────────────────────── */}
         <div>
           <p className="text-label-section mb-1 px-1">Data</p>
@@ -688,5 +815,6 @@ export default function SettingsPage() {
 
       </div>
     </main>
+    </>
   );
 }

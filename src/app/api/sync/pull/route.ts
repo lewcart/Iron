@@ -71,7 +71,7 @@ function mapWorkoutExercise(r: Record<string, unknown>) {
   return {
     uuid: r.uuid,
     workout_uuid: r.workout_uuid,
-    exercise_uuid: r.exercise_uuid,
+    exercise_uuid: (r.exercise_uuid as string).toLowerCase(),
     comment: r.comment ?? null,
     order_index: Number(r.order_index),
     _synced: true,
