@@ -14,13 +14,14 @@ import {
   scheduleRestNotification,
   cancelRestNotification,
 } from '@/lib/rest-notifications';
+import { consumeScheduleTap } from '@/lib/workout-schedule';
 import Link from 'next/link';
 import { Check, ChevronDown, ChevronRight, Plus, Search, Trash2, X } from 'lucide-react';
 import type { WorkoutPlan, WorkoutRoutine, WorkoutRoutineExercise, WorkoutRoutineSet, Exercise } from '@/types';
 import { formatTime, calcCompletedSets, calcTotalVolume } from './workout-utils';
 import { uuid as genUUID } from '@/lib/uuid';
 import { useUnit } from '@/context/UnitContext';
-import { useCurrentWorkoutFull, useExercises } from '@/lib/useLocalDB';
+import { useCurrentWorkoutFull, useExercises, getAutoFillValues } from '@/lib/useLocalDB';
 import type { LocalWorkoutExerciseEntry, LocalWorkoutWithExercises } from '@/lib/useLocalDB';
 import type { LocalWorkoutSet } from '@/db/local';
 import {
@@ -763,6 +764,8 @@ export default function WorkoutPage() {
   const [expandedExercises, setExpandedExercises] = useState<Set<string>>(new Set());
   const headerRef = useRef<HTMLDivElement>(null);
   const [headerHeight, setHeaderHeight] = useState(48);
+  const [scheduleTapHighlight, setScheduleTapHighlight] = useState(false);
+  const startSectionRef = useRef<HTMLDivElement>(null);
 
   const restTimer = useRestTimer();
   const elapsed = useElapsed(workout?.start_time ?? null);
@@ -784,6 +787,17 @@ export default function WorkoutPage() {
     if (typeof Notification !== 'undefined' && Notification.permission === 'default') {
       Notification.requestPermission();
     }
+  }, []);
+
+  // When the user taps a workout-schedule notification, highlight the start section
+  useEffect(() => {
+    if (!consumeScheduleTap()) return;
+    setScheduleTapHighlight(true);
+    // Scroll to start section once plans have loaded (slight delay for render)
+    const id = setTimeout(() => {
+      startSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 300);
+    return () => clearTimeout(id);
   }, []);
 
   // Auto-expand first incomplete exercise when workout loads
@@ -1032,11 +1046,10 @@ export default function WorkoutPage() {
 
   const handleAddSet = async (we: LocalWorkoutExerciseEntry) => {
     const orderIdx = we.sets.length;
-    // Prefill from the last completed set in the same exercise
-    const lastCompleted = [...we.sets].reverse().find(s => s.is_completed);
+    const prefill = await getAutoFillValues(we.exercise_uuid, we.sets);
     await mutAddSet(we.uuid, {
-      weight: lastCompleted?.weight ?? null,
-      repetitions: lastCompleted?.repetitions ?? null,
+      ...(prefill.weight != null && { weight: prefill.weight }),
+      ...(prefill.repetitions != null && { repetitions: prefill.repetitions }),
     }, orderIdx);
   };
 
@@ -1068,7 +1081,10 @@ export default function WorkoutPage() {
           <h1 className="text-2xl font-bold">Workout</h1>
         </div>
         <div className="px-4 space-y-4">
-          <div className="ios-section">
+          <div
+            ref={startSectionRef}
+            className={`ios-section transition-all ${scheduleTapHighlight ? 'ring-2 ring-primary ring-offset-2 ring-offset-background rounded-xl' : ''}`}
+          >
             <button
               onClick={startWorkout}
               className="w-full py-3.5 text-center text-primary font-semibold text-base min-h-[44px]"

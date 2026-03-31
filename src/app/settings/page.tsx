@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import {
+  Bell,
   ChevronRight,
   Trash2,
   User,
@@ -16,6 +17,11 @@ import {
   Camera,
   Dumbbell,
 } from 'lucide-react';
+import {
+  loadScheduleConfig,
+  updateWorkoutSchedule,
+  type WorkoutScheduleConfig,
+} from '@/lib/workout-schedule';
 import Link from 'next/link';
 import { useUnit } from '@/context/UnitContext';
 import { REBIRTH_EQUIPMENT_LS_KEY } from '@/lib/available-equipment';
@@ -97,6 +103,9 @@ export default function SettingsPage() {
   const [keepRestRunning, setKeepRestRunning] = useState(() =>
     readLS('iron-rest-keep-running', 'false') === 'true'
   );
+
+  // Workout schedule
+  const [schedule, setSchedule] = useState<WorkoutScheduleConfig>(() => loadScheduleConfig());
 
   // Profile
   const [profileName, setProfileName] = useState('');
@@ -223,6 +232,19 @@ export default function SettingsPage() {
   const handleDeleteBw = async (uuid: string) => {
     await fetch(`${apiBase()}/api/bodyweight/${uuid}`, { method: 'DELETE' });
     setBwLogs(prev => prev.filter(l => l.uuid !== uuid));
+  };
+
+  const handleScheduleChange = (patch: Partial<WorkoutScheduleConfig>) => {
+    const next = { ...schedule, ...patch };
+    setSchedule(next);
+    updateWorkoutSchedule(next);
+  };
+
+  const toggleScheduleDay = (weekday: number) => {
+    const days = schedule.days.includes(weekday)
+      ? schedule.days.filter(d => d !== weekday)
+      : [...schedule.days, weekday].sort((a, b) => a - b);
+    handleScheduleChange({ days });
   };
 
   // ── Derived ───────────────────────────────────────────
@@ -524,6 +546,93 @@ export default function SettingsPage() {
               </div>
               <Toggle on={keepRestRunning} onToggle={() => updateKeepRestRunning(!keepRestRunning)} />
             </div>
+          </div>
+        </div>
+
+        {/* ── Workout Schedule ────────────────────────── */}
+        <div>
+          <p className="text-label-section mb-1 px-1">Workout Schedule</p>
+          <div className="ios-section">
+            {/* Enable toggle */}
+            <div className="ios-row justify-between">
+              <div className="flex items-center gap-3">
+                <IconBadge bg="bg-indigo-500">
+                  <Bell className="w-4 h-4 text-white" />
+                </IconBadge>
+                <div>
+                  <span className="text-sm font-medium">Daily Reminder</span>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    &ldquo;Your gym flow starts in 5 min&rdquo;
+                  </p>
+                </div>
+              </div>
+              <Toggle
+                on={schedule.enabled}
+                onToggle={() => handleScheduleChange({ enabled: !schedule.enabled })}
+              />
+            </div>
+
+            {schedule.enabled && (
+              <>
+                {/* Time picker */}
+                <div className="ios-row justify-between">
+                  <span className="text-sm font-medium">Time</span>
+                  <div className="flex items-center gap-1">
+                    <select
+                      value={schedule.hour}
+                      onChange={e => handleScheduleChange({ hour: Number(e.target.value) })}
+                      className="text-sm text-muted-foreground bg-transparent outline-none text-right"
+                    >
+                      {Array.from({ length: 24 }, (_, i) => (
+                        <option key={i} value={i}>{String(i).padStart(2, '0')}</option>
+                      ))}
+                    </select>
+                    <span className="text-sm text-muted-foreground">:</span>
+                    <select
+                      value={schedule.minute}
+                      onChange={e => handleScheduleChange({ minute: Number(e.target.value) })}
+                      className="text-sm text-muted-foreground bg-transparent outline-none text-right"
+                    >
+                      {[0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55].map(m => (
+                        <option key={m} value={m}>{String(m).padStart(2, '0')}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                {/* Days of week */}
+                <div className="ios-row flex-col items-start gap-2 py-3">
+                  <span className="text-sm font-medium">Days</span>
+                  <div className="flex gap-1.5 flex-wrap">
+                    {/* iOS weekday: 1=Sun, 2=Mon, …, 7=Sat */}
+                    {[
+                      { n: 2, label: 'Mon' },
+                      { n: 3, label: 'Tue' },
+                      { n: 4, label: 'Wed' },
+                      { n: 5, label: 'Thu' },
+                      { n: 6, label: 'Fri' },
+                      { n: 7, label: 'Sat' },
+                      { n: 1, label: 'Sun' },
+                    ].map(({ n, label }) => {
+                      const active = schedule.days.includes(n);
+                      return (
+                        <button
+                          key={n}
+                          onClick={() => toggleScheduleDay(n)}
+                          className={`w-10 h-10 rounded-full text-xs font-semibold transition-colors ${
+                            active
+                              ? 'gradient-brand text-white'
+                              : 'bg-secondary text-muted-foreground'
+                          }`}
+                        >
+                          {label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              </>
+            )}
           </div>
         </div>
 
