@@ -28,7 +28,7 @@ export function SyncStatus() {
   if (status === 'idle') return null;
 
   return (
-    <div className="fixed top-0 left-0 right-0 z-50 flex items-center justify-center py-1 pointer-events-none">
+    <div className="fixed bottom-16 left-0 right-0 z-50 flex items-center justify-center py-1 pointer-events-none">
       <div className="flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium shadow-lg bg-zinc-900/90 backdrop-blur-sm border border-zinc-800">
         {status === 'syncing' && (
           <>

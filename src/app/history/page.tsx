@@ -1,6 +1,7 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { syncEngine, type SyncStatus } from '@/lib/sync';
 import { ChevronRight, X, Search, Download } from 'lucide-react';
 import type { LocalExercise } from '@/db/local';
 import type { LocalWorkoutSummary } from '@/lib/useLocalDB';
@@ -58,8 +59,10 @@ export default function HistoryPage() {
 
   const grouped = groupWorkouts(workouts, groupMode);
 
-  // workouts is [] on first render (Dexie default), no async pending state needed
-  const loading = false;
+  // Show skeleton while initial sync is in progress and no local data exists yet
+  const [syncStatus, setSyncStatus] = useState<SyncStatus>(syncEngine.status);
+  useEffect(() => syncEngine.subscribe(setSyncStatus), []);
+  const loading = workouts.length === 0 && syncStatus === 'syncing';
 
   if (selected) {
     return <WorkoutDetail workout={selected} onBack={() => setSelected(null)} />;

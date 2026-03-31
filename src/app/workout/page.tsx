@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { App } from '@capacitor/app';
+import { SwipeToDelete } from '@/components/SwipeToDelete';
 import {
   persistTimer as _persistTimer,
   clearPersistedTimer as _clearPersistedTimer,
@@ -757,7 +758,7 @@ export default function WorkoutPage() {
   const [showRestTimer, setShowRestTimer] = useState(false);
   const [showFinishModal, setShowFinishModal] = useState(false);
   const [showCancelModal, setShowCancelModal] = useState(false);
-  const [plans, setPlans] = useState<PlanWithRoutines[]>([]);
+  const [plans, setPlans] = useState<PlanWithRoutines[] | null>(null);
   const [startingRoutine, setStartingRoutine] = useState<string | null>(null);
   const [expandedExercises, setExpandedExercises] = useState<Set<string>>(new Set());
   const headerRef = useRef<HTMLDivElement>(null);
@@ -807,14 +808,14 @@ export default function WorkoutPage() {
     fetch(`${apiBase()}/api/plans?full=1`)
       .then(r => r.json())
       .then(data => setPlans(data.plans ?? []))
-      .catch(() => {}); // Fail silently when offline
+      .catch(() => setPlans([])); // Resolve to empty on failure
   }, []);
 
   const startWorkoutFromRoutine = async (_planUuid: string, routineUuid: string) => {
     setStartingRoutine(routineUuid);
     try {
       // Find the routine in our cached plans data
-      const routine = plans.flatMap(p => p.routines).find(r => r.uuid === routineUuid);
+      const routine = (plans ?? []).flatMap(p => p.routines).find(r => r.uuid === routineUuid);
       if (!routine) throw new Error('Routine not found');
 
       // End any locally active workout
@@ -848,7 +849,7 @@ export default function WorkoutPage() {
       const exercises = routine.exercises ?? [];
       for (const routineExercise of exercises) {
         const weUuid = genUUID();
-        const exerciseUuid = routineExercise.exercise_uuid;
+        const exerciseUuid = routineExercise.exercise_uuid.toLowerCase();
         await db.workout_exercises.add({
           uuid: weUuid,
           workout_uuid: workoutUuid,
@@ -1044,7 +1045,6 @@ export default function WorkoutPage() {
     await mutDeleteSet(setUuid);
   };
 
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const handleRemoveExercise = async (workoutExerciseUuid: string) => {
     await removeExerciseFromWorkout(workoutExerciseUuid);
   };
@@ -1060,7 +1060,8 @@ export default function WorkoutPage() {
 
   // ── No active workout ──
   if (!workout) {
-    const routinesExist = plans.some(p => p.routines.length > 0);
+    const plansLoaded = plans !== null;
+    const routinesExist = plansLoaded && plans.some(p => p.routines.length > 0);
     return (
       <main className="tab-content bg-background overflow-y-auto">
         <div className="px-4 pt-safe-plus pb-4">
@@ -1111,7 +1112,10 @@ export default function WorkoutPage() {
             </div>
           )}
 
-          {!routinesExist && (
+          {!plansLoaded && (
+            <p className="text-center text-muted-foreground text-sm py-4">Loading routines…</p>
+          )}
+          {plansLoaded && !routinesExist && (
             <p className="text-center text-muted-foreground text-sm">
               <Link href="/plans" className="text-primary">Create a routine</Link> to start a pre-planned session.
             </p>
@@ -1166,7 +1170,7 @@ export default function WorkoutPage() {
                 const isExpanded = expandedExercises.has(we.uuid);
 
                 return (
-                  <div key={we.uuid} className="ios-section">
+                  <SwipeToDelete key={we.uuid} onDelete={() => handleRemoveExercise(we.uuid)} className="ios-section rounded-xl">
                     {/* Exercise header — tap to expand/collapse */}
                     <button
                       onClick={() => toggleExercise(we.uuid)}
@@ -1224,7 +1228,7 @@ export default function WorkoutPage() {
                         </button>
                       </>
                     )}
-                  </div>
+                  </SwipeToDelete>
                 );
               })}
             </div>

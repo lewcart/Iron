@@ -33,7 +33,7 @@ export function useCurrentWorkoutFull(): LocalWorkoutWithExercises | null | unde
     const exercises = await Promise.all(
       wes.map(async we => {
         const [exercise, sets] = await Promise.all([
-          db.exercises.get(we.exercise_uuid),
+          db.exercises.get(we.exercise_uuid.toLowerCase()),
           db.workout_sets
             .where('workout_exercise_uuid')
             .equals(we.uuid)
