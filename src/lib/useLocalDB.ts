@@ -281,3 +281,39 @@ export function useBodyweightLogs(limit = 30): LocalBodyweightLog[] {
     [],
   );
 }
+
+// ─── Autofill helpers ─────────────────────────────────────────────────────────
+
+/** Returns weight/reps to prefill a new set from the current workout's existing sets,
+ *  or from the most recent previous workout for this exercise. */
+export async function getAutoFillValues(
+  exerciseUuid: string,
+  currentSets: LocalWorkoutSet[],
+): Promise<{ weight: number | null; repetitions: number | null }> {
+  // Prefer last completed set in the current workout
+  const lastCompleted = [...currentSets]
+    .reverse()
+    .find(s => s.is_completed && !s._deleted);
+  if (lastCompleted) {
+    return { weight: lastCompleted.weight, repetitions: lastCompleted.repetitions };
+  }
+
+  // Fall back to most recent set from a previous workout
+  const allWe = await db.workout_exercises
+    .filter(e => e.exercise_uuid.toLowerCase() === exerciseUuid.toLowerCase() && !e._deleted)
+    .toArray();
+
+  for (const we of allWe.reverse()) {
+    const sets = await db.workout_sets
+      .where('workout_exercise_uuid')
+      .equals(we.uuid)
+      .filter(s => s.is_completed && !s._deleted)
+      .sortBy('order_index');
+    if (sets.length > 0) {
+      const last = sets[sets.length - 1];
+      return { weight: last.weight, repetitions: last.repetitions };
+    }
+  }
+
+  return { weight: null, repetitions: null };
+}
