@@ -47,5 +47,9 @@
 	</array>
 	<key>UIViewControllerBasedStatusBarAppearance</key>
 	<true/>
+	<key>NSHealthShareUsageDescription</key>
+	<string>Iron uses HealthKit to read workout data for display in the app.</string>
+	<key>NSHealthUpdateUsageDescription</key>
+	<string>Iron saves your completed workouts to Health so they count toward your activity rings.</string>
 </dict>
 </plist>

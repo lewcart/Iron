@@ -4,6 +4,7 @@ import { db } from '@/db/local';
 import { syncEngine } from '@/lib/sync';
 import type { LocalWorkout, LocalWorkoutExercise, LocalWorkoutSet, LocalBodyweightLog } from '@/db/local';
 import { uuid as genUUID } from '@/lib/uuid';
+import { saveWorkoutToHealthKit } from '@/lib/healthkit';
 
 function now() {
   return Date.now();
@@ -46,12 +47,24 @@ export async function startWorkout(opts: {
 }
 
 export async function finishWorkout(uuid: string): Promise<void> {
+  const workout = await db.workouts.get(uuid);
+  const endTime = new Date().toISOString();
+
   await db.workouts.update(uuid, {
     is_current: false,
-    end_time: new Date().toISOString(),
+    end_time: endTime,
     ...syncMeta(),
   });
   syncEngine.schedulePush();
+
+  if (workout?.start_time) {
+    saveWorkoutToHealthKit({
+      uuid,
+      startTime: workout.start_time,
+      endTime,
+      title: workout.title,
+    });
+  }
 }
 
 export async function deleteWorkout(uuid: string): Promise<void> {
