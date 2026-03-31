@@ -47,9 +47,20 @@
 	</array>
 	<key>UIViewControllerBasedStatusBarAppearance</key>
 	<true/>
-	<key>NSHealthShareUsageDescription</key>
-	<string>Iron uses HealthKit to read workout data for display in the app.</string>
-	<key>NSHealthUpdateUsageDescription</key>
-	<string>Iron saves your completed workouts to Health so they count toward your activity rings.</string>
+
+	<!-- Location permissions — geofence monitoring requires Always authorization -->
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Rebirth uses your location to detect when you arrive home so it can automatically end your workout.</string>
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>Rebirth monitors your location in the background to detect when you arrive home and automatically end your active workout — even when the app is closed.</string>
+	<key>NSLocationAlwaysUsageDescription</key>
+	<string>Rebirth monitors your location in the background to detect when you arrive home and automatically end your active workout — even when the app is closed.</string>
+
+	<!-- Background modes required for CLRegion monitoring to survive app termination -->
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>location</string>
+		<string>fetch</string>
+	</array>
 </dict>
 </plist>

@@ -7,7 +7,9 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     var window: UIWindow?
 
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
-        // Override point for customization after application launch.
+        // When iOS relaunches the app in the background due to a CLRegion boundary crossing,
+        // GeofencePlugin.load() re-creates the CLLocationManager and re-registers the monitored
+        // region so the didDetermineState callback fires within the ~10 s background window.
         return true
     }
 
