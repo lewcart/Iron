@@ -2,7 +2,7 @@ import type { NextConfig } from "next";
 import withPWA from "@ducanh2912/next-pwa";
 
 const nextConfig: NextConfig = {
-  output: "export",
+  ...(process.env.CAPACITOR_BUILD === "1" ? { output: "export" } : {}),
 };
 
 export default withPWA({

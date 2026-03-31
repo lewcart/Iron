@@ -7,6 +7,7 @@ import Link from 'next/link';
 import { useUnit } from '@/context/UnitContext';
 import type { BodySpecLog } from '@/types';
 import { rebirthJsonHeaders } from '@/lib/api/headers';
+import { apiBase } from '@/lib/api/client';
 
 function formatDate(isoStr: string) {
   return new Date(isoStr).toLocaleDateString('en-GB', {
@@ -38,7 +39,7 @@ export default function BodySpecPage() {
 
   const deleteBodySpecMut = useMutation({
     mutationFn: (uuid: string) =>
-      fetch(`/api/body-spec/${uuid}`, { method: 'DELETE', headers: rebirthJsonHeaders() }).then((r) => {
+      fetch(`${apiBase()}/api/body-spec/${uuid}`, { method: 'DELETE', headers: rebirthJsonHeaders() }).then((r) => {
         if (!r.ok) throw new Error('Delete failed');
       }),
     onMutate: (uuid) => {
@@ -53,7 +54,7 @@ export default function BodySpecPage() {
 
   useEffect(() => {
     const headers = rebirthJsonHeaders();
-    fetch('/api/body-spec?limit=30', { headers })
+    fetch(`${apiBase()}/api/body-spec?limit=30`, { headers })
       .then(r => r.json())
       .then((data: BodySpecLog[]) => {
         setLogs(data);
@@ -76,7 +77,7 @@ export default function BodySpecPage() {
       if (bodyFatInput) payload.body_fat_pct = parseFloat(bodyFatInput);
       if (leanMassInput) payload.lean_mass_kg = fromInput(parseFloat(leanMassInput));
 
-      const res = await fetch('/api/body-spec', {
+      const res = await fetch(`${apiBase()}/api/body-spec`, {
         method: 'POST',
         headers: rebirthJsonHeaders(),
         body: JSON.stringify(payload),

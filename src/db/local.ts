@@ -1,4 +1,5 @@
 import Dexie, { type Table } from 'dexie';
+import { apiBase } from '@/lib/api/client';
 
 // ─── Local table types ─────────────────────────────────────────────────────────
 
@@ -136,7 +137,7 @@ export async function hydrateExercises(): Promise<void> {
       return; // Fresh enough
     }
 
-    const res = await fetch('/api/exercises?limit=10000');
+    const res = await fetch(`${apiBase()}/api/exercises?limit=10000`);
     if (!res.ok) return;
 
     const exercises: LocalExercise[] = await res.json();

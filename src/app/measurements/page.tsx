@@ -8,6 +8,7 @@ import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
 } from 'recharts';
 import type { MeasurementLog, ProgressPhoto } from '@/types';
+import { apiBase } from '@/lib/api/client';
 
 const SITES = [
   { key: 'waist',     label: 'Waist' },
@@ -74,14 +75,14 @@ export default function MeasurementsPage() {
   const fileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    fetch('/api/measurements?limit=90', { headers: apiHeaders() })
+    fetch(`${apiBase()}/api/measurements?limit=90`, { headers: apiHeaders() })
       .then(r => r.json())
       .then((data: MeasurementLog[]) => { setLogs(data); setLoading(false); })
       .catch(() => setLoading(false));
   }, []);
 
   useEffect(() => {
-    fetch('/api/progress-photos?limit=50', { headers: apiHeaders() })
+    fetch(`${apiBase()}/api/progress-photos?limit=50`, { headers: apiHeaders() })
       .then(r => r.json())
       .then((data: ProgressPhoto[]) => { setPhotos(data); setPhotosLoading(false); })
       .catch(() => setPhotosLoading(false));
@@ -98,7 +99,7 @@ export default function MeasurementsPage() {
       for (const site of SITES) {
         const val = inputs[site.key];
         if (val) {
-          promises.push(fetch('/api/measurements', {
+          promises.push(fetch(`${apiBase()}/api/measurements`, {
             method: 'POST',
             headers: apiHeaders(),
             body: JSON.stringify({ site: site.key, value_cm: parseFloat(val), measured_at }),
@@ -107,7 +108,7 @@ export default function MeasurementsPage() {
       }
 
       if (weightInput) {
-        promises.push(fetch('/api/bodyweight', {
+        promises.push(fetch(`${apiBase()}/api/bodyweight`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ weight_kg: fromInput(parseFloat(weightInput)) }),
@@ -138,7 +139,7 @@ export default function MeasurementsPage() {
   };
 
   const handleDeleteMeasurement = async (uuid: string) => {
-    await fetch(`/api/measurements/${uuid}`, { method: 'DELETE', headers: apiHeaders() });
+    await fetch(`${apiBase()}/api/measurements/${uuid}`, { method: 'DELETE', headers: apiHeaders() });
     setLogs(prev => prev.filter(l => l.uuid !== uuid));
   };
 
@@ -149,7 +150,7 @@ export default function MeasurementsPage() {
       formData.append('file', file);
       formData.append('pose', selectedPose);
 
-      const uploadRes = await fetch('/api/progress-photos/upload', {
+      const uploadRes = await fetch(`${apiBase()}/api/progress-photos/upload`, {
         method: 'POST',
         headers: apiHeadersNoContentType(),
         body: formData,
@@ -157,7 +158,7 @@ export default function MeasurementsPage() {
       if (!uploadRes.ok) return;
       const { url } = await uploadRes.json();
 
-      const res = await fetch('/api/progress-photos', {
+      const res = await fetch(`${apiBase()}/api/progress-photos`, {
         method: 'POST',
         headers: apiHeaders(),
         body: JSON.stringify({ blob_url: url, pose: selectedPose, notes: photoNote || null }),
@@ -173,7 +174,7 @@ export default function MeasurementsPage() {
   };
 
   const handleDeletePhoto = async (uuid: string) => {
-    await fetch(`/api/progress-photos/${uuid}`, { method: 'DELETE', headers: apiHeaders() });
+    await fetch(`${apiBase()}/api/progress-photos/${uuid}`, { method: 'DELETE', headers: apiHeaders() });
     setPhotos(prev => prev.filter(p => p.uuid !== uuid));
   };
 

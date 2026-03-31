@@ -9,6 +9,7 @@ import { FEED_QUERY_DEFAULTS, fetchFeedBundle, type FeedBundle } from '@/lib/api
 import { queryKeys } from '@/lib/api/query-keys';
 import { fetchJson } from '@/lib/api/client';
 import type { Workout } from '@/types';
+import { apiBase } from '@/lib/api/client';
 
 function isoDate(date: Date) {
   return date.toISOString().slice(0, 10);
@@ -187,11 +188,11 @@ export default function FeedPage() {
         body: JSON.stringify({}),
       });
 
-      const exRes = await fetch(`/api/workout-exercises?workout_uuid=${lastWorkout.uuid}`);
+      const exRes = await fetch(`${apiBase()}/api/workout-exercises?workout_uuid=${lastWorkout.uuid}`);
       if (exRes.ok) {
         const exercises: { exercise_uuid: string }[] = await exRes.json();
         for (const ex of exercises) {
-          await fetch('/api/workout-exercises', {
+          await fetch(`${apiBase()}/api/workout-exercises`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ workout_uuid: newWorkout.uuid, exercise_uuid: ex.exercise_uuid }),

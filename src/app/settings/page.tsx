@@ -20,6 +20,7 @@ import Link from 'next/link';
 import { useUnit } from '@/context/UnitContext';
 import { REBIRTH_EQUIPMENT_LS_KEY } from '@/lib/available-equipment';
 import type { BodyweightLog } from '@/types';
+import { apiBase } from '@/lib/api/client';
 
 const REST_TIMES = [30, 60, 90, 120, 150, 180, 210, 240, 300];
 
@@ -131,7 +132,7 @@ export default function SettingsPage() {
       }
     }
 
-    fetch('/api/bodyweight?limit=30')
+    fetch(`${apiBase()}/api/bodyweight?limit=30`)
       .then(r => r.json())
       .then((data: BodyweightLog[]) => {
         setBwLogs(data);
@@ -203,7 +204,7 @@ export default function SettingsPage() {
     setBwSaving(true);
     try {
       const weight_kg = fromInput(val);
-      const res = await fetch('/api/bodyweight', {
+      const res = await fetch(`${apiBase()}/api/bodyweight`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ weight_kg, note: bwNote || undefined }),
@@ -220,7 +221,7 @@ export default function SettingsPage() {
   };
 
   const handleDeleteBw = async (uuid: string) => {
-    await fetch(`/api/bodyweight/${uuid}`, { method: 'DELETE' });
+    await fetch(`${apiBase()}/api/bodyweight/${uuid}`, { method: 'DELETE' });
     setBwLogs(prev => prev.filter(l => l.uuid !== uuid));
   };
 

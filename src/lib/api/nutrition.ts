@@ -1,5 +1,5 @@
 import type { NutritionDayNote, NutritionLog, NutritionWeekMeal } from '@/types';
-import { fetchJsonAuthed } from './client';
+import { apiBase, fetchJsonAuthed } from './client';
 import { rebirthJsonHeaders } from './headers';
 
 /** YYYY-MM-DD → day_of_week (0=Mon … 6=Sun) */
@@ -18,9 +18,9 @@ export async function fetchNutritionDayBundle(date: string): Promise<NutritionDa
   const h = rebirthJsonHeaders();
   const dow = dateToDayOfWeek(date);
   const [tmRes, logRes, noteRes] = await Promise.all([
-    fetch(`/api/nutrition/week?day=${dow}`, { headers: h }),
-    fetch(`/api/nutrition?from=${date}&to=${date}&limit=100`, { headers: h }),
-    fetch(`/api/nutrition/day-notes?date=${date}`, { headers: h }),
+    fetch(`${apiBase()}/api/nutrition/week?day=${dow}`, { headers: h }),
+    fetch(`${apiBase()}/api/nutrition?from=${date}&to=${date}&limit=100`, { headers: h }),
+    fetch(`${apiBase()}/api/nutrition/day-notes?date=${date}`, { headers: h }),
   ]);
   const templateMeals = tmRes.ok ? await tmRes.json() : [];
   const loggedMeals = logRes.ok ? await logRes.json() : [];

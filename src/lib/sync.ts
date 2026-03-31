@@ -1,6 +1,7 @@
 'use client';
 
 import { db, getMeta, setMeta } from '@/db/local';
+import { apiBase } from '@/lib/api/client';
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
@@ -51,7 +52,7 @@ class SyncEngine {
 
     this.setStatus('syncing');
     try {
-      const res = await fetch('/api/sync/push', {
+      const res = await fetch(`${apiBase()}/api/sync/push`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ workouts, workout_exercises, workout_sets, bodyweight_logs }),
@@ -83,7 +84,8 @@ class SyncEngine {
     }
 
     const since = await getMeta('last_pull_at');
-    const url = since ? `/api/sync/pull?since=${encodeURIComponent(String(since))}` : '/api/sync/pull';
+    const base = apiBase();
+    const url = since ? `${base}/api/sync/pull?since=${encodeURIComponent(String(since))}` : `${base}/api/sync/pull`;
 
     try {
       const res = await fetch(url);

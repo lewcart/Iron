@@ -14,7 +14,7 @@ import {
   cancelRestNotification,
 } from '@/lib/rest-notifications';
 import Link from 'next/link';
-import { Check, ChevronDown, ChevronRight, Plus, Search, X } from 'lucide-react';
+import { Check, ChevronDown, ChevronRight, Plus, Search, Trash2, X } from 'lucide-react';
 import type { WorkoutPlan, WorkoutRoutine, WorkoutRoutineExercise, WorkoutRoutineSet, Exercise } from '@/types';
 import { formatTime, calcCompletedSets, calcTotalVolume } from './workout-utils';
 import { uuid as genUUID } from '@/lib/uuid';
@@ -34,6 +34,7 @@ import {
 } from '@/lib/mutations';
 import { db } from '@/db/local';
 import { syncEngine } from '@/lib/sync';
+import { apiBase } from '@/lib/api/client';
 
 // ─── Settings (localStorage-backed) ──────────────────────────────────────────
 function getRestSettings() {
@@ -803,7 +804,7 @@ export default function WorkoutPage() {
 
   // Load plans with full routine details on mount (for instant local workout creation)
   useEffect(() => {
-    fetch('/api/plans?full=1')
+    fetch(`${apiBase()}/api/plans?full=1`)
       .then(r => r.json())
       .then(data => setPlans(data.plans ?? []))
       .catch(() => {}); // Fail silently when offline
@@ -861,7 +862,7 @@ export default function WorkoutPage() {
         // Try server first (includes imported history), fall back to local IndexedDB
         let lastSets: { weight: number | null; repetitions: number | null }[] = [];
         try {
-          const res = await fetch(`/api/exercises/${exerciseUuid}/history`);
+          const res = await fetch(`${apiBase()}/api/exercises/${exerciseUuid}/history`);
           if (res.ok) {
             const data = await res.json();
             const recent: { weight: number; repetitions: number; workoutUuid: string }[] = data.recentSets ?? [];
@@ -965,7 +966,7 @@ export default function WorkoutPage() {
     // Prefill sets from server history (includes imported data)
     let prevSets: { weight: number; repetitions: number }[] = [];
     try {
-      const res = await fetch(`/api/exercises/${exercise.uuid}/history`);
+      const res = await fetch(`${apiBase()}/api/exercises/${exercise.uuid}/history`);
       if (res.ok) {
         const data = await res.json();
         const recent: { weight: number; repetitions: number; workoutUuid: string }[] = data.recentSets ?? [];
@@ -1038,10 +1039,12 @@ export default function WorkoutPage() {
     }, orderIdx);
   };
 
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const handleDeleteSet = async (setUuid: string) => {
     await mutDeleteSet(setUuid);
   };
 
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const handleRemoveExercise = async (workoutExerciseUuid: string) => {
     await removeExerciseFromWorkout(workoutExerciseUuid);
   };
@@ -1207,6 +1210,7 @@ export default function WorkoutPage() {
                             set={set}
                             workoutExerciseUuid={we.uuid}
                             onUpdate={updateSet}
+                            onDelete={mutDeleteSet}
                           />
                         ))}
 

@@ -8,6 +8,7 @@ import { queryKeys } from '@/lib/api/query-keys';
 import { fetchPlansWithRoutines, type PlanWithRoutines } from '@/lib/api/plans';
 import { fetchExerciseCatalog } from '@/lib/api/exercises';
 import { fetchJson } from '@/lib/api/client';
+import { apiBase } from '@/lib/api/client';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -142,7 +143,7 @@ function RoutineCard({
   const [starting, setStarting] = useState(false);
 
   const loadExercises = useCallback(async () => {
-    const res = await fetch(`/api/plans/${planUuid}/routines/${initialRoutine.uuid}/exercises`);
+    const res = await fetch(`${apiBase()}/api/plans/${planUuid}/routines/${initialRoutine.uuid}/exercises`);
     const routineExercises = await res.json();
 
     setRoutine(prev => ({ ...prev, exercises: routineExercises, loaded: true }));
@@ -157,7 +158,7 @@ function RoutineCard({
   };
 
   const handleAddExercise = async (exercise: Exercise) => {
-    await fetch(`/api/plans/${planUuid}/routines/${initialRoutine.uuid}/exercises`, {
+    await fetch(`${apiBase()}/api/plans/${planUuid}/routines/${initialRoutine.uuid}/exercises`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ exerciseUuid: exercise.uuid }),
@@ -169,7 +170,7 @@ function RoutineCard({
 
   const handleRemoveExercise = async (exerciseUuid: string) => {
     if (!confirm('Remove this exercise from the routine?')) return;
-    await fetch(`/api/plans/${planUuid}/routines/${initialRoutine.uuid}/exercises/${exerciseUuid}`, {
+    await fetch(`${apiBase()}/api/plans/${planUuid}/routines/${initialRoutine.uuid}/exercises/${exerciseUuid}`, {
       method: 'DELETE',
     });
     await loadExercises();
@@ -178,7 +179,7 @@ function RoutineCard({
 
   const handleStartWorkout = async () => {
     setStarting(true);
-    const res = await fetch(`/api/plans/${planUuid}/routines/${initialRoutine.uuid}/start`, {
+    const res = await fetch(`${apiBase()}/api/plans/${planUuid}/routines/${initialRoutine.uuid}/start`, {
       method: 'POST',
     });
     await res.json();
@@ -319,7 +320,7 @@ function PlanCard({
 
   const saveTitle = async () => {
     if (!titleValue.trim()) { setEditingTitle(false); return; }
-    const res = await fetch(`/api/plans/${plan.uuid}`, {
+    const res = await fetch(`${apiBase()}/api/plans/${plan.uuid}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ title: titleValue.trim() }),
@@ -331,14 +332,14 @@ function PlanCard({
   };
 
   const refreshPlan = async () => {
-    const res = await fetch(`/api/plans/${plan.uuid}`);
+    const res = await fetch(`${apiBase()}/api/plans/${plan.uuid}`);
     const data = await res.json();
     setPlan(data);
   };
 
   const handleAddRoutine = async () => {
     if (!newRoutineTitle.trim()) return;
-    await fetch(`/api/plans/${plan.uuid}/routines`, {
+    await fetch(`${apiBase()}/api/plans/${plan.uuid}/routines`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ title: newRoutineTitle.trim() }),
@@ -350,7 +351,7 @@ function PlanCard({
   };
 
   const handleDeleteRoutine = async (routineUuid: string) => {
-    await fetch(`/api/plans/${plan.uuid}/routines/${routineUuid}`, { method: 'DELETE' });
+    await fetch(`${apiBase()}/api/plans/${plan.uuid}/routines/${routineUuid}`, { method: 'DELETE' });
     await refreshPlan();
     invalidatePlans();
   };
@@ -362,12 +363,12 @@ function PlanCard({
     const b = plan.routines[swapIndex];
     // Swap order_index values
     await Promise.all([
-      fetch(`/api/plans/${plan.uuid}/routines/${a.uuid}`, {
+      fetch(`${apiBase()}/api/plans/${plan.uuid}/routines/${a.uuid}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ orderIndex: b.order_index }),
       }),
-      fetch(`/api/plans/${plan.uuid}/routines/${b.uuid}`, {
+      fetch(`${apiBase()}/api/plans/${plan.uuid}/routines/${b.uuid}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ orderIndex: a.order_index }),
@@ -549,7 +550,7 @@ export default function PlansPage() {
   });
 
   const deletePlanMut = useMutation({
-    mutationFn: (uuid: string) => fetch(`/api/plans/${uuid}`, { method: 'DELETE' }).then((r) => {
+    mutationFn: (uuid: string) => fetch(`${apiBase()}/api/plans/${uuid}`, { method: 'DELETE' }).then((r) => {
       if (!r.ok) throw new Error('Delete failed');
     }),
     onMutate: async (uuid) => {
@@ -591,12 +592,12 @@ export default function PlansPage() {
     const a = plans[index];
     const b = plans[swapIndex];
     await Promise.all([
-      fetch(`/api/plans/${a.uuid}`, {
+      fetch(`${apiBase()}/api/plans/${a.uuid}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ orderIndex: b.order_index }),
       }),
-      fetch(`/api/plans/${b.uuid}`, {
+      fetch(`${apiBase()}/api/plans/${b.uuid}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ orderIndex: a.order_index }),

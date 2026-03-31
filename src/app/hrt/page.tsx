@@ -6,6 +6,7 @@ import { ChevronLeft, Trash2, Check, X } from 'lucide-react';
 import Link from 'next/link';
 import type { HrtLog, HrtProtocol } from '@/types';
 import { rebirthJsonHeaders } from '@/lib/api/headers';
+import { apiBase } from '@/lib/api/client';
 
 type Tab = 'today' | 'protocols' | 'history';
 
@@ -29,7 +30,7 @@ function TodayTab() {
 
   const deleteLogMut = useMutation({
     mutationFn: (uuid: string) =>
-      fetch(`/api/hrt/${uuid}`, { method: 'DELETE', headers: rebirthJsonHeaders() }).then((r) => {
+      fetch(`${apiBase()}/api/hrt/${uuid}`, { method: 'DELETE', headers: rebirthJsonHeaders() }).then((r) => {
         if (!r.ok) throw new Error('Delete failed');
       }),
     onMutate: (uuid) => {
@@ -44,8 +45,8 @@ function TodayTab() {
 
   useEffect(() => {
     Promise.all([
-      fetch('/api/hrt?limit=30', { headers: rebirthJsonHeaders() }).then(r => r.json()),
-      fetch('/api/hrt/protocols', { headers: rebirthJsonHeaders() }).then(r => r.json()),
+      fetch(`${apiBase()}/api/hrt?limit=30`, { headers: rebirthJsonHeaders() }).then(r => r.json()),
+      fetch(`${apiBase()}/api/hrt/protocols`, { headers: rebirthJsonHeaders() }).then(r => r.json()),
     ])
       .then(([logsData, protocolsData]: [HrtLog[], HrtProtocol[]]) => {
         setLogs(logsData);
@@ -65,7 +66,7 @@ function TodayTab() {
       };
       if (activeProtocol) body.protocol_uuid = activeProtocol.uuid;
 
-      const res = await fetch('/api/hrt', {
+      const res = await fetch(`${apiBase()}/api/hrt`, {
         method: 'POST',
         headers: rebirthJsonHeaders(),
         body: JSON.stringify(body),
@@ -194,7 +195,7 @@ function ProtocolsTab() {
 
   const deleteProtocolMut = useMutation({
     mutationFn: (uuid: string) =>
-      fetch(`/api/hrt/protocols/${uuid}`, { method: 'DELETE', headers: rebirthJsonHeaders() }).then((r) => {
+      fetch(`${apiBase()}/api/hrt/protocols/${uuid}`, { method: 'DELETE', headers: rebirthJsonHeaders() }).then((r) => {
         if (!r.ok) throw new Error('Delete failed');
       }),
     onMutate: (uuid) => {
@@ -208,7 +209,7 @@ function ProtocolsTab() {
   });
 
   useEffect(() => {
-    fetch('/api/hrt/protocols', { headers: rebirthJsonHeaders() })
+    fetch(`${apiBase()}/api/hrt/protocols`, { headers: rebirthJsonHeaders() })
       .then(r => r.json())
       .then((data: HrtProtocol[]) => { setProtocols(data); setLoading(false); })
       .catch(() => setLoading(false));
@@ -230,7 +231,7 @@ function ProtocolsTab() {
     if (!medication || !doseDescription || !startedAt) return;
     setSaving(true);
     try {
-      const res = await fetch('/api/hrt/protocols', {
+      const res = await fetch(`${apiBase()}/api/hrt/protocols`, {
         method: 'POST',
         headers: rebirthJsonHeaders(),
         body: JSON.stringify({
@@ -256,7 +257,7 @@ function ProtocolsTab() {
 
   const handleEndProtocol = async (protocol: HrtProtocol) => {
     const today = new Date().toISOString().split('T')[0];
-    const res = await fetch(`/api/hrt/protocols/${protocol.uuid}`, {
+    const res = await fetch(`${apiBase()}/api/hrt/protocols/${protocol.uuid}`, {
       method: 'PATCH',
       headers: rebirthJsonHeaders(),
       body: JSON.stringify({ ended_at: today }),
@@ -465,7 +466,7 @@ function HistoryTab() {
 
   const deleteHistoryLogMut = useMutation({
     mutationFn: (uuid: string) =>
-      fetch(`/api/hrt/${uuid}`, { method: 'DELETE', headers: rebirthJsonHeaders() }).then((r) => {
+      fetch(`${apiBase()}/api/hrt/${uuid}`, { method: 'DELETE', headers: rebirthJsonHeaders() }).then((r) => {
         if (!r.ok) throw new Error('Delete failed');
       }),
     onMutate: (uuid) => {
@@ -479,7 +480,7 @@ function HistoryTab() {
   });
 
   useEffect(() => {
-    fetch('/api/hrt?limit=90', { headers: rebirthJsonHeaders() })
+    fetch(`${apiBase()}/api/hrt?limit=90`, { headers: rebirthJsonHeaders() })
       .then(r => r.json())
       .then((data: HrtLog[]) => { setLogs(data); setLoading(false); })
       .catch(() => setLoading(false));

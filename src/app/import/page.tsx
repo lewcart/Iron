@@ -4,6 +4,7 @@ import { useState, useRef, useCallback } from 'react';
 import { Upload, CheckCircle2, AlertCircle, ArrowLeft } from 'lucide-react';
 import Link from 'next/link';
 import type { FitbeeImportSummary } from '@/types';
+import { apiBase } from '@/lib/api/client';
 
 function fitbeeApiHeaders(): HeadersInit {
   const key = process.env.NEXT_PUBLIC_REBIRTH_API_KEY;
@@ -103,7 +104,7 @@ export default function ImportPage() {
     if (!rawData) return;
     setPhase('importing');
     try {
-      const res = await fetch('/api/import', {
+      const res = await fetch(`${apiBase()}/api/import`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(rawData),
@@ -146,7 +147,7 @@ export default function ImportPage() {
     const fd = new FormData();
     fd.append('archive', file);
     try {
-      const res = await fetch('/api/import/fitbee', {
+      const res = await fetch(`${apiBase()}/api/import/fitbee`, {
         method: 'POST',
         headers: fitbeeApiHeaders(),
         body: fd,
@@ -186,7 +187,7 @@ export default function ImportPage() {
       return;
     }
     try {
-      const res = await fetch('/api/import/fitbee', {
+      const res = await fetch(`${apiBase()}/api/import/fitbee`, {
         method: 'POST',
         headers: fitbeeApiHeaders(),
         body: fd,

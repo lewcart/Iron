@@ -1,4 +1,10 @@
+import { Capacitor } from '@capacitor/core';
 import { rebirthJsonHeaders } from './headers';
+
+/** Returns the API origin — empty string on web (same-origin), production URL on native. */
+export function apiBase(): string {
+  return Capacitor.isNativePlatform() ? 'https://iron-swart.vercel.app' : '';
+}
 
 export class ApiError extends Error {
   constructor(
@@ -15,7 +21,8 @@ export async function fetchJson<T>(
   input: RequestInfo | URL,
   init?: RequestInit
 ): Promise<T> {
-  const res = await fetch(input, init);
+  const url = typeof input === 'string' && input.startsWith('/') ? `${apiBase()}${input}` : input;
+  const res = await fetch(url, init);
   if (!res.ok) {
     const text = await res.text();
     throw new ApiError(`HTTP ${res.status}`, res.status, text);

@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { ChevronLeft, Trophy, Medal, Award } from 'lucide-react';
 import type { Exercise } from '@/types';
 import { useUnit } from '@/context/UnitContext';
+import { apiBase } from '@/lib/api/client';
 import {
   LineChart,
   Line,
@@ -146,7 +147,7 @@ export default function ExerciseDetail({
   useEffect(() => {
     setLoading(true);
     setProgressData(null);
-    fetch(`/api/exercises/${exercise.uuid}/history?range=${range}`)
+    fetch(`${apiBase()}/api/exercises/${exercise.uuid}/history?range=${range}`)
       .then(r => r.json())
       .then((data: ProgressData) => {
         setProgressData(data);

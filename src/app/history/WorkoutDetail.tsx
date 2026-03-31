@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import { getMuscleColor } from '@/lib/muscle-colors';
 import { useUnit } from '@/context/UnitContext';
 import { useWorkoutFull } from '@/lib/useLocalDB';
+import { apiBase } from '@/lib/api/client';
 function formatDuration(start: string, end: string | null) {
   if (!end) return '—';
   const ms = new Date(end).getTime() - new Date(start).getTime();
@@ -26,7 +27,7 @@ export default function WorkoutDetail({ workout, onBack }: { workout: { uuid: st
   const handleRepeat = async () => {
     setRepeating(true);
     try {
-      const res = await fetch(`/api/workouts/${workout.uuid}/repeat`, { method: 'POST' });
+      const res = await fetch(`${apiBase()}/api/workouts/${workout.uuid}/repeat`, { method: 'POST' });
       if (res.status === 409) {
         alert('A workout is already in progress. Finish it before repeating.');
         return;

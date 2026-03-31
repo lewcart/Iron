@@ -8,6 +8,7 @@ import type { NutritionLog, NutritionWeekMeal } from '@/types';
 import { rebirthJsonHeaders } from '@/lib/api/headers';
 import { FEED_QUERY_DEFAULTS } from '@/lib/api/feed';
 import { queryKeys } from '@/lib/api/query-keys';
+import { apiBase } from '@/lib/api/client';
 import {
   dateToDayOfWeek,
   fetchNutritionDayBundle,
@@ -121,7 +122,7 @@ export default function NutritionPage() {
 
   const removeLogMut = useMutation({
     mutationFn: (uuid: string) =>
-      fetch(`/api/nutrition/${uuid}`, { method: 'DELETE', headers: rebirthJsonHeaders() }),
+      fetch(`${apiBase()}/api/nutrition/${uuid}`, { method: 'DELETE', headers: rebirthJsonHeaders() }),
     onMutate: async (uuid) => {
       const key = queryKeys.nutrition.dayBundle(viewDate);
       await queryClient.cancelQueries({ queryKey: key });
@@ -162,7 +163,7 @@ export default function NutritionPage() {
     const loggedAt = viewDate === today
       ? new Date().toISOString()
       : viewDate + 'T12:00:00.000Z';
-    const res = await fetch('/api/nutrition', {
+    const res = await fetch(`${apiBase()}/api/nutrition`, {
       method: 'POST',
       headers: rebirthJsonHeaders(),
       body: JSON.stringify({
@@ -186,7 +187,7 @@ export default function NutritionPage() {
     const loggedAt = viewDate === today
       ? new Date().toISOString()
       : viewDate + 'T12:00:00.000Z';
-    const res = await fetch('/api/nutrition', {
+    const res = await fetch(`${apiBase()}/api/nutrition`, {
       method: 'POST',
       headers: rebirthJsonHeaders(),
       body: JSON.stringify({
@@ -219,7 +220,7 @@ export default function NutritionPage() {
       ? new Date().toISOString()
       : viewDate + 'T12:00:00.000Z';
     try {
-      const res = await fetch('/api/nutrition', {
+      const res = await fetch(`${apiBase()}/api/nutrition`, {
         method: 'POST',
         headers: rebirthJsonHeaders(),
         body: JSON.stringify({
@@ -245,7 +246,7 @@ export default function NutritionPage() {
   async function saveDayNote() {
     setSavingNote(true);
     try {
-      const res = await fetch('/api/nutrition/day-notes', {
+      const res = await fetch(`${apiBase()}/api/nutrition/day-notes`, {
         method: 'POST',
         headers: rebirthJsonHeaders(),
         body: JSON.stringify({
@@ -268,7 +269,7 @@ export default function NutritionPage() {
     if (!weekAddForm.meal_name) return;
     setWeekAddSaving(true);
     try {
-      const res = await fetch('/api/nutrition/week', {
+      const res = await fetch(`${apiBase()}/api/nutrition/week`, {
         method: 'POST',
         headers: rebirthJsonHeaders(),
         body: JSON.stringify({
@@ -293,7 +294,7 @@ export default function NutritionPage() {
   }
 
   async function saveWeekEdit(uuid: string) {
-    const res = await fetch(`/api/nutrition/week/${uuid}`, {
+    const res = await fetch(`${apiBase()}/api/nutrition/week/${uuid}`, {
       method: 'PATCH',
       headers: rebirthJsonHeaders(),
       body: JSON.stringify({
@@ -312,7 +313,7 @@ export default function NutritionPage() {
   }
 
   async function deleteWeekMeal(uuid: string) {
-    await fetch(`/api/nutrition/week/${uuid}`, { method: 'DELETE', headers: rebirthJsonHeaders() });
+    await fetch(`${apiBase()}/api/nutrition/week/${uuid}`, { method: 'DELETE', headers: rebirthJsonHeaders() });
     await queryClient.invalidateQueries({ queryKey: queryKeys.nutrition.weekAll() });
     await queryClient.invalidateQueries({ queryKey: queryKeys.nutrition.dayBundle(viewDate) });
   }

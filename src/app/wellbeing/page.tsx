@@ -6,6 +6,7 @@ import { ChevronLeft, Trash2 } from 'lucide-react';
 import Link from 'next/link';
 import type { WellbeingLog, DysphoriaLog, ClothesTestLog } from '@/types';
 import { rebirthJsonHeaders } from '@/lib/api/headers';
+import { apiBase } from '@/lib/api/client';
 
 type Tab = 'daily' | 'journal' | 'clothes';
 
@@ -72,7 +73,7 @@ function DailyTab() {
 
   const deleteWellbeingMut = useMutation({
     mutationFn: (uuid: string) =>
-      fetch(`/api/wellbeing/${uuid}`, { method: 'DELETE', headers: rebirthJsonHeaders() }).then((r) => {
+      fetch(`${apiBase()}/api/wellbeing/${uuid}`, { method: 'DELETE', headers: rebirthJsonHeaders() }).then((r) => {
         if (!r.ok) throw new Error('Delete failed');
       }),
     onMutate: (uuid) => {
@@ -86,12 +87,12 @@ function DailyTab() {
   });
 
   useEffect(() => {
-    fetch('/api/wellbeing?limit=30', { headers: rebirthJsonHeaders() })
+    fetch(`${apiBase()}/api/wellbeing?limit=30`, { headers: rebirthJsonHeaders() })
       .then(r => r.json())
       .then((data: WellbeingLog[]) => { setLogs(data); setLoading(false); })
       .catch(() => setLoading(false));
 
-    fetch('/api/wellbeing/correlation', { headers: rebirthJsonHeaders() })
+    fetch(`${apiBase()}/api/wellbeing/correlation`, { headers: rebirthJsonHeaders() })
       .then(r => r.ok ? r.json() : null)
       .then(data => { if (data) setCorrelation(data); })
       .catch(() => null);
@@ -101,7 +102,7 @@ function DailyTab() {
     if (!mood && !energy) return;
     setSaving(true);
     try {
-      const res = await fetch('/api/wellbeing', {
+      const res = await fetch(`${apiBase()}/api/wellbeing`, {
         method: 'POST',
         headers: rebirthJsonHeaders(),
         body: JSON.stringify({
@@ -245,7 +246,7 @@ function JournalTab() {
 
   const deleteDysphoriaMut = useMutation({
     mutationFn: (uuid: string) =>
-      fetch(`/api/dysphoria/${uuid}`, { method: 'DELETE', headers: rebirthJsonHeaders() }).then((r) => {
+      fetch(`${apiBase()}/api/dysphoria/${uuid}`, { method: 'DELETE', headers: rebirthJsonHeaders() }).then((r) => {
         if (!r.ok) throw new Error('Delete failed');
       }),
     onMutate: (uuid) => {
@@ -259,7 +260,7 @@ function JournalTab() {
   });
 
   useEffect(() => {
-    fetch('/api/dysphoria?limit=60', { headers: rebirthJsonHeaders() })
+    fetch(`${apiBase()}/api/dysphoria?limit=60`, { headers: rebirthJsonHeaders() })
       .then(r => r.json())
       .then((data: DysphoriaLog[]) => { setLogs(data); setLoading(false); })
       .catch(() => setLoading(false));
@@ -269,7 +270,7 @@ function JournalTab() {
     if (!scale) return;
     setSaving(true);
     try {
-      const res = await fetch('/api/dysphoria', {
+      const res = await fetch(`${apiBase()}/api/dysphoria`, {
         method: 'POST',
         headers: rebirthJsonHeaders(),
         body: JSON.stringify({ scale, note: note || undefined }),
@@ -363,7 +364,7 @@ function ClothesTestTab() {
 
   const deleteClothesMut = useMutation({
     mutationFn: (uuid: string) =>
-      fetch(`/api/clothes-test/${uuid}`, { method: 'DELETE', headers: rebirthJsonHeaders() }).then((r) => {
+      fetch(`${apiBase()}/api/clothes-test/${uuid}`, { method: 'DELETE', headers: rebirthJsonHeaders() }).then((r) => {
         if (!r.ok) throw new Error('Delete failed');
       }),
     onMutate: (uuid) => {
@@ -377,7 +378,7 @@ function ClothesTestTab() {
   });
 
   useEffect(() => {
-    fetch('/api/clothes-test?limit=50', { headers: rebirthJsonHeaders() })
+    fetch(`${apiBase()}/api/clothes-test?limit=50`, { headers: rebirthJsonHeaders() })
       .then(r => r.json())
       .then((data: ClothesTestLog[]) => { setLogs(data); setLoading(false); })
       .catch(() => setLoading(false));
@@ -387,7 +388,7 @@ function ClothesTestTab() {
     if (!outfit.trim()) return;
     setSaving(true);
     try {
-      const res = await fetch('/api/clothes-test', {
+      const res = await fetch(`${apiBase()}/api/clothes-test`, {
         method: 'POST',
         headers: rebirthJsonHeaders(),
         body: JSON.stringify({
