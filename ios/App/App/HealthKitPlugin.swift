@@ -14,11 +14,11 @@ public class HealthKitPlugin: CAPPlugin, CAPBridgedPlugin {
 
     private let healthStore = HKHealthStore()
 
-    @objc func isAvailable(_ call: CAPPluginCall) {
+    @objc public func isAvailable(_ call: CAPPluginCall) {
         call.resolve(["available": HKHealthStore.isHealthDataAvailable()])
     }
 
-    @objc func requestPermissions(_ call: CAPPluginCall) {
+    @objc public override func requestPermissions(_ call: CAPPluginCall) {
         guard HKHealthStore.isHealthDataAvailable() else {
             call.resolve(["granted": false])
             return
@@ -45,7 +45,7 @@ public class HealthKitPlugin: CAPPlugin, CAPBridgedPlugin {
         }
     }
 
-    @objc func saveWorkout(_ call: CAPPluginCall) {
+    @objc public func saveWorkout(_ call: CAPPluginCall) {
         guard HKHealthStore.isHealthDataAvailable() else {
             call.reject("HealthKit not available on this device")
             return
