@@ -146,22 +146,34 @@ function setExercisesReady(ready: boolean) {
 export async function hydrateExercises(): Promise<void> {
   try {
     const count = await db.exercises.count();
+    console.log('[hydrate] exercises in IndexedDB:', count);
 
     // If empty, seed from bundled catalog immediately (no network needed)
     if (count === 0) {
       try {
         const bundledRes = await fetch('/exercises-catalog.json');
+        console.log('[hydrate] bundled catalog fetch:', bundledRes.status);
         if (bundledRes.ok) {
           const bundled: LocalExercise[] = await bundledRes.json();
-          await db.exercises.bulkPut(bundled);
+          console.log('[hydrate] seeding', bundled.length, 'exercises from bundled catalog');
+          // Use Dexie transaction to batch all puts in one IDB transaction
+          await db.transaction('rw', db.exercises, async () => {
+            for (const ex of bundled) {
+              await db.exercises.put(ex);
+            }
+          });
           await setMeta('exercises_hydrated_at', Date.now());
+          console.log('[hydrate] bundled seed complete');
         }
-      } catch { /* bundled file unavailable */ }
+      } catch (e) {
+        console.warn('[hydrate] bundled catalog failed:', e);
+      }
     }
 
     const freshCount = await db.exercises.count();
     if (freshCount > 0) {
       setExercisesReady(true);
+      console.log('[hydrate] exercises ready:', freshCount);
     }
 
     const lastHydrated = await getMeta('exercises_hydrated_at');
@@ -171,14 +183,22 @@ export async function hydrateExercises(): Promise<void> {
 
     // Try API for latest data (may include new custom exercises)
     const res = await fetch(`${apiBase()}/api/exercises?limit=10000`);
-    if (!res.ok) return;
+    if (!res.ok) {
+      console.warn('[hydrate] API fetch failed:', res.status);
+      return;
+    }
 
     const exercises: LocalExercise[] = await res.json();
-    await db.exercises.bulkPut(exercises);
+    console.log('[hydrate] API returned', exercises.length, 'exercises');
+    await db.transaction('rw', db.exercises, async () => {
+      for (const ex of exercises) {
+        await db.exercises.put(ex);
+      }
+    });
     await setMeta('exercises_hydrated_at', Date.now());
     setExercisesReady(true);
-  } catch {
-    // Network unavailable — mark ready if we have cached data
+  } catch (e) {
+    console.warn('[hydrate] error:', e);
     const count = await db.exercises.count();
     if (count > 0) setExercisesReady(true);
   }

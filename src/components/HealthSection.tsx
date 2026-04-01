@@ -51,7 +51,7 @@ export function HealthSection() {
   if (state.phase === 'loading') {
     return (
       <div>
-        <p className="text-xs font-semibold text-primary uppercase tracking-wide mb-1 px-1">Today's Health</p>
+        <p className="text-xs font-semibold text-primary uppercase tracking-wide mb-1 px-1">Today&apos;s Health</p>
         <div className="ios-section">
           <div className="flex gap-3 p-4">
             {[1, 2, 3].map(i => (
@@ -66,7 +66,7 @@ export function HealthSection() {
   if (state.phase === 'denied') {
     return (
       <div>
-        <p className="text-xs font-semibold text-primary uppercase tracking-wide mb-1 px-1">Today's Health</p>
+        <p className="text-xs font-semibold text-primary uppercase tracking-wide mb-1 px-1">Today&apos;s Health</p>
         <div className="ios-section">
           <div className="flex items-center justify-between px-4 py-4 gap-3">
             <div className="flex-1 min-w-0">
@@ -94,7 +94,7 @@ export function HealthSection() {
 
   return (
     <div>
-      <p className="text-xs font-semibold text-primary uppercase tracking-wide mb-1 px-1">Today's Health</p>
+      <p className="text-xs font-semibold text-primary uppercase tracking-wide mb-1 px-1">Today&apos;s Health</p>
 
       {/* Steps + Calories stat cards */}
       <div className="ios-section mb-2">

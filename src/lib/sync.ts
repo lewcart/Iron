@@ -101,12 +101,13 @@ class SyncEngine {
       };
 
       // Upsert — server wins for conflicts (single-user, server is authoritative)
-      await Promise.all([
-        data.workouts.length && db.workouts.bulkPut(data.workouts.map(r => ({ ...r, _synced: true }))),
-        data.workout_exercises.length && db.workout_exercises.bulkPut(data.workout_exercises.map(r => ({ ...r, _synced: true }))),
-        data.workout_sets.length && db.workout_sets.bulkPut(data.workout_sets.map(r => ({ ...r, _synced: true }))),
-        data.bodyweight_logs.length && db.bodyweight_logs.bulkPut(data.bodyweight_logs.map(r => ({ ...r, _synced: true }))),
-      ]);
+      // Use single Dexie transaction to avoid iOS WebKit IndexedDB limits
+      await db.transaction('rw', db.workouts, db.workout_exercises, db.workout_sets, db.bodyweight_logs, async () => {
+        if (data.workouts.length) await db.workouts.bulkPut(data.workouts.map(r => ({ ...r, _synced: true })));
+        if (data.workout_exercises.length) await db.workout_exercises.bulkPut(data.workout_exercises.map(r => ({ ...r, _synced: true })));
+        if (data.workout_sets.length) await db.workout_sets.bulkPut(data.workout_sets.map(r => ({ ...r, _synced: true })));
+        if (data.bodyweight_logs.length) await db.bodyweight_logs.bulkPut(data.bodyweight_logs.map(r => ({ ...r, _synced: true })));
+      });
 
       // Apply server-side deletes
       if (data.deleted) {
