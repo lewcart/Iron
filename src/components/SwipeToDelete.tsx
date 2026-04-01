@@ -66,7 +66,7 @@ export function SwipeToDelete({ onDelete, children, className }: SwipeToDeletePr
 
       {/* Foreground content */}
       <div
-        className="relative bg-background"
+        className="relative bg-card"
         style={{
           transform: `translateX(-${offset}px)`,
           transition: swiping ? 'none' : 'transform 0.2s ease-out',

@@ -448,21 +448,30 @@ export async function getExerciseProgress(exerciseUuid: string, since?: Date): P
     total_volume: string;
     max_reps_at_max_weight: number;
   }>(`
+    WITH per_workout AS (
+      SELECT
+        w.uuid AS workout_uuid,
+        w.start_time AS date,
+        ws.weight,
+        ws.repetitions,
+        MAX(ws.weight) OVER (PARTITION BY w.uuid) AS workout_max_weight
+      FROM workout_sets ws
+      JOIN workout_exercises we ON ws.workout_exercise_uuid = we.uuid
+      JOIN workouts w ON we.workout_uuid = w.uuid
+      WHERE we.exercise_uuid = $1
+        AND ws.is_completed = true
+        AND ws.weight IS NOT NULL
+        AND ws.repetitions IS NOT NULL
+        ${sinceClause}
+    )
     SELECT
-      w.start_time AS date,
-      MAX(ws.weight) AS max_weight,
-      SUM(ws.weight * ws.repetitions) AS total_volume,
-      MAX(ws.repetitions) FILTER (WHERE ws.weight = MAX(ws.weight) OVER (PARTITION BY w.uuid)) AS max_reps_at_max_weight
-    FROM workout_sets ws
-    JOIN workout_exercises we ON ws.workout_exercise_uuid = we.uuid
-    JOIN workouts w ON we.workout_uuid = w.uuid
-    WHERE we.exercise_uuid = $1
-      AND ws.is_completed = true
-      AND ws.weight IS NOT NULL
-      AND ws.repetitions IS NOT NULL
-      ${sinceClause}
-    GROUP BY w.uuid, w.start_time
-    ORDER BY w.start_time ASC
+      date,
+      MAX(weight) AS max_weight,
+      SUM(weight * repetitions) AS total_volume,
+      MAX(repetitions) FILTER (WHERE weight = workout_max_weight) AS max_reps_at_max_weight
+    FROM per_workout
+    GROUP BY workout_uuid, date
+    ORDER BY date ASC
   `, params);
 
   return rows.map((row) => {
