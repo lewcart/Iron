@@ -15,6 +15,21 @@ export interface HealthWorkout {
   durationMinutes: number;
   activeCalories: number;
   activityType: string;
+  distanceMeters?: number;
+}
+
+export interface WorkoutRecord {
+  activityType: string;
+  durationMinutes: number;
+  activeCalories: number;
+  distanceMeters: number;
+  startTime: number; // epoch ms
+  endTime: number;   // epoch ms
+}
+
+export interface HeartRateSample {
+  bpm: number;
+  timestamp: number; // epoch ms
 }
 
 export interface HealthSummary {
@@ -26,13 +41,16 @@ export interface HealthSummary {
 interface HealthKitPlugin {
   isAvailable(): Promise<{ available: boolean }>;
   requestPermissions(): Promise<{ granted: boolean }>;
+  checkPermissionStatus(): Promise<{ statuses: Record<string, string> }>;
   saveWorkout(options: SaveWorkoutOptions): Promise<{ saved: boolean }>;
   getSteps(options: { startTime: number; endTime: number }): Promise<{ value: number }>;
   getActiveCalories(options: { startTime: number; endTime: number }): Promise<{ value: number }>;
   getRecentWorkouts(options: { startTime: number }): Promise<{ workouts: HealthWorkout[] }>;
+  getWorkouts(options: { startTime: number; endTime: number }): Promise<{ workouts: WorkoutRecord[] }>;
+  getHeartRate(options: { startTime: number; endTime: number }): Promise<{ samples: HeartRateSample[] }>;
 }
 
-const HealthKit = registerPlugin<HealthKitPlugin>('HealthKit');
+export const HealthKit = registerPlugin<HealthKitPlugin>('HealthKit');
 
 /** Estimate active calories for a strength training session based on duration. */
 function estimateActiveKcal(durationMs: number): number {
