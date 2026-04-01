@@ -663,12 +663,14 @@ function SetRow({
   workoutExerciseUuid,
   onUpdate,
   onDelete,
+  pbWeight,
 }: {
   setNumber: number;
   set: LocalWorkoutSet;
   workoutExerciseUuid: string;
   onUpdate: (weUuid: string, setUuid: string, weight: number, reps: number) => Promise<void>;
   onDelete: (setUuid: string) => Promise<void>;
+  pbWeight?: number | null;
 }) {
   const { toDisplay, fromInput, label } = useUnit();
   const [weight, setWeight] = useState(
@@ -676,6 +678,12 @@ function SetRow({
   );
   const [reps, setReps] = useState(set.repetitions?.toString() ?? '');
   const [saving, setSaving] = useState(false);
+
+  // Live "NEW PB" detection — compare current input against stored PB
+  // pbWeight is the initial PB value captured at mount time
+  const pbWeightRef = useRef(pbWeight);
+  const currentWeightKg = fromInput(parseFloat(weight) || 0);
+  const isNewPB = !set.is_completed && pbWeightRef.current != null && pbWeightRef.current > 0 && currentWeightKg > pbWeightRef.current;
 
   const handleComplete = async () => {
     setSaving(true);
@@ -689,7 +697,7 @@ function SetRow({
   const isPR = set.is_pr;
 
   const inner = (
-    <div className={`flex items-center gap-2 py-1.5 px-3 border-b border-border last:border-0 ${completed && !isPR ? 'opacity-60' : ''} ${isPR ? 'bg-amber-500/5' : ''}`}>
+    <div className={`flex items-center gap-2 py-1.5 px-3 border-b border-border last:border-0 ${completed && !isPR ? 'opacity-60' : ''} ${isPR || isNewPB ? 'bg-amber-500/5' : ''}`}>
       {/* Set number */}
       <div className="w-5 text-center text-xs font-semibold text-muted-foreground">{setNumber}</div>
 
@@ -724,9 +732,13 @@ function SetRow({
       </div>
 
       {/* PR badge */}
-      {isPR && (
-        <span className="text-[9px] font-bold text-amber-400 bg-amber-400/15 border border-amber-400/30 px-1 py-0.5 rounded-full flex-shrink-0">
-          PR
+      {(isPR || isNewPB) && (
+        <span className={`text-[9px] font-bold px-1 py-0.5 rounded-full flex-shrink-0 ${
+          isNewPB && !isPR
+            ? 'text-amber-400 bg-amber-400/15 border border-amber-400/30 animate-pulse'
+            : 'text-amber-400 bg-amber-400/15 border border-amber-400/30'
+        }`}>
+          {isNewPB && !isPR ? 'NEW PB' : 'PR'}
         </span>
       )}
 
@@ -853,6 +865,7 @@ function SortableExerciseCard({
               workoutExerciseUuid={we.uuid}
               onUpdate={onUpdateSet}
               onDelete={onDeleteSet}
+              pbWeight={set.weight}
             />
           ))}
 
