@@ -458,7 +458,11 @@ export async function getExerciseProgress(exerciseUuid: string, since?: Date): P
       FROM workout_sets ws
       JOIN workout_exercises we ON ws.workout_exercise_uuid = we.uuid
       JOIN workouts w ON we.workout_uuid = w.uuid
-      WHERE we.exercise_uuid = $1
+      WHERE we.exercise_uuid IN (
+          SELECT e2.uuid FROM exercises e1
+          JOIN exercises e2 ON e2.title = e1.title
+          WHERE e1.uuid = $1
+        )
         AND ws.is_completed = true
         AND ws.weight IS NOT NULL
         AND ws.repetitions IS NOT NULL
@@ -507,7 +511,11 @@ export async function getExercisePRs(exerciseUuid: string): Promise<{
     FROM workout_sets ws
     JOIN workout_exercises we ON ws.workout_exercise_uuid = we.uuid
     JOIN workouts w ON we.workout_uuid = w.uuid
-    WHERE we.exercise_uuid = $1
+    WHERE we.exercise_uuid IN (
+        SELECT e2.uuid FROM exercises e1
+        JOIN exercises e2 ON e2.title = e1.title
+        WHERE e1.uuid = $1
+      )
       AND ws.is_completed = true
       AND ws.weight IS NOT NULL
       AND ws.repetitions IS NOT NULL
@@ -542,7 +550,11 @@ export async function getExerciseVolumeTrend(exerciseUuid: string, since?: Date)
     FROM workout_sets ws
     JOIN workout_exercises we ON ws.workout_exercise_uuid = we.uuid
     JOIN workouts w ON we.workout_uuid = w.uuid
-    WHERE we.exercise_uuid = $1
+    WHERE we.exercise_uuid IN (
+        SELECT e2.uuid FROM exercises e1
+        JOIN exercises e2 ON e2.title = e1.title
+        WHERE e1.uuid = $1
+      )
       AND ws.is_completed = true
       AND ws.weight IS NOT NULL
       AND ws.repetitions IS NOT NULL
@@ -583,7 +595,11 @@ export async function getExerciseRecentSets(
     FROM workout_sets ws
     JOIN workout_exercises we ON ws.workout_exercise_uuid = we.uuid
     JOIN workouts w ON we.workout_uuid = w.uuid
-    WHERE we.exercise_uuid = $1
+    WHERE we.exercise_uuid IN (
+        SELECT e2.uuid FROM exercises e1
+        JOIN exercises e2 ON e2.title = e1.title
+        WHERE e1.uuid = $1
+      )
       AND ws.is_completed = true
       AND ws.weight IS NOT NULL
       AND ws.repetitions IS NOT NULL
