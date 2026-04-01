@@ -30,16 +30,20 @@ export function useCurrentWorkoutFull(): LocalWorkoutWithExercises | null | unde
       .filter(e => !e._deleted)
       .sortBy('order_index');
 
+    // Build a map from the exercises table so Dexie observes it for reactivity
+    // (single-key .get() calls aren't tracked by useLiveQuery)
+    const neededUuids = wes.map(we => we.exercise_uuid.toLowerCase());
+    const allExercises = await db.exercises.where('uuid').anyOf(neededUuids).toArray();
+    const exerciseMap = new Map(allExercises.map(e => [e.uuid, e]));
+
     const exercises = await Promise.all(
       wes.map(async we => {
-        const [exercise, sets] = await Promise.all([
-          db.exercises.get(we.exercise_uuid.toLowerCase()),
-          db.workout_sets
-            .where('workout_exercise_uuid')
-            .equals(we.uuid)
-            .filter(s => !s._deleted)
-            .sortBy('order_index'),
-        ]);
+        const exercise = exerciseMap.get(we.exercise_uuid.toLowerCase());
+        const sets = await db.workout_sets
+          .where('workout_exercise_uuid')
+          .equals(we.uuid)
+          .filter(s => !s._deleted)
+          .sortBy('order_index');
         return { ...we, exercise: exercise!, sets };
       }),
     );
@@ -246,16 +250,18 @@ export function useWorkoutFull(uuid: string | null): LocalWorkoutWithExercises |
         .filter(e => !e._deleted)
         .sortBy('order_index');
 
+      const neededUuids = wes.map(we => we.exercise_uuid.toLowerCase());
+      const allExercises = await db.exercises.where('uuid').anyOf(neededUuids).toArray();
+      const exerciseMap = new Map(allExercises.map(e => [e.uuid, e]));
+
       const exercises = await Promise.all(
         wes.map(async we => {
-          const [exercise, sets] = await Promise.all([
-            db.exercises.get(we.exercise_uuid),
-            db.workout_sets
-              .where('workout_exercise_uuid')
-              .equals(we.uuid)
-              .filter(s => !s._deleted)
-              .sortBy('order_index'),
-          ]);
+          const exercise = exerciseMap.get(we.exercise_uuid.toLowerCase());
+          const sets = await db.workout_sets
+            .where('workout_exercise_uuid')
+            .equals(we.uuid)
+            .filter(s => !s._deleted)
+            .sortBy('order_index');
           return { ...we, exercise: exercise!, sets };
         }),
       );

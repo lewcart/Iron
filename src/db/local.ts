@@ -128,13 +128,31 @@ export async function setMeta(key: string, value: string | number): Promise<void
 
 const HYDRATE_STALE_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 
+type HydrationListener = (ready: boolean) => void;
+const hydrationListeners = new Set<HydrationListener>();
+let _exercisesReady = false;
+
+export function isExercisesReady() { return _exercisesReady; }
+export function subscribeExercisesReady(fn: HydrationListener) {
+  hydrationListeners.add(fn);
+  return () => { hydrationListeners.delete(fn); };
+}
+
+function setExercisesReady(ready: boolean) {
+  _exercisesReady = ready;
+  hydrationListeners.forEach(fn => fn(ready));
+}
+
 export async function hydrateExercises(): Promise<void> {
   try {
     const lastHydrated = await getMeta('exercises_hydrated_at');
     const count = await db.exercises.count();
 
-    if (count > 0 && lastHydrated && Date.now() - Number(lastHydrated) < HYDRATE_STALE_MS) {
-      return; // Fresh enough
+    if (count > 0) {
+      setExercisesReady(true);
+      if (lastHydrated && Date.now() - Number(lastHydrated) < HYDRATE_STALE_MS) {
+        return; // Fresh enough
+      }
     }
 
     const res = await fetch(`${apiBase()}/api/exercises?limit=10000`);
@@ -143,7 +161,10 @@ export async function hydrateExercises(): Promise<void> {
     const exercises: LocalExercise[] = await res.json();
     await db.exercises.bulkPut(exercises);
     await setMeta('exercises_hydrated_at', Date.now());
+    setExercisesReady(true);
   } catch {
-    // Network unavailable — that's fine, use what's in IndexedDB
+    // Network unavailable — mark ready if we have cached data
+    const count = await db.exercises.count();
+    if (count > 0) setExercisesReady(true);
   }
 }

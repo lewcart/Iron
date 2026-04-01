@@ -11,7 +11,7 @@ const tabs = [
   { href: '/history', label: 'History' },
   { href: '/workout', label: 'Workout' },
   { href: '/exercises', label: 'Exercises' },
-  { href: '/plans', label: 'Plans' },
+  { href: '/nutrition', label: 'Nutrition' },
 ];
 
 /** Mirrors the active-state logic from TabBar.tsx */
@@ -35,7 +35,7 @@ describe('tabs configuration', () => {
     expect(hrefs).toContain('/history');
     expect(hrefs).toContain('/workout');
     expect(hrefs).toContain('/exercises');
-    expect(hrefs).toContain('/plans');
+    expect(hrefs).toContain('/nutrition');
   });
 
   it('has a non-empty label for every tab', () => {

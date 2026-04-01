@@ -16,7 +16,7 @@ import {
 } from '@/lib/rest-notifications';
 import { consumeScheduleTap } from '@/lib/workout-schedule';
 import Link from 'next/link';
-import { Check, ChevronDown, ChevronRight, Plus, Search, X } from 'lucide-react';
+import { Check, ChevronDown, ChevronRight, GripVertical, Plus, Search, Settings, X } from 'lucide-react';
 import type { WorkoutPlan, WorkoutRoutine, WorkoutRoutineExercise, WorkoutRoutineSet, Exercise } from '@/types';
 import { formatTime, calcCompletedSets, calcTotalVolume } from './workout-utils';
 import { uuid as genUUID } from '@/lib/uuid';
@@ -33,7 +33,23 @@ import {
   addSet as mutAddSet,
   updateSet as mutUpdateSet,
   deleteSet as mutDeleteSet,
+  reorderExercises,
 } from '@/lib/mutations';
+import {
+  DndContext,
+  closestCenter,
+  TouchSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from '@dnd-kit/core';
+import {
+  SortableContext,
+  useSortable,
+  verticalListSortingStrategy,
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 import { db } from '@/db/local';
 import { syncEngine } from '@/lib/sync';
 import { apiBase } from '@/lib/api/client';
@@ -749,6 +765,110 @@ interface PlanWithRoutines extends WorkoutPlan {
   routines: RoutineWithExercises[];
 }
 
+// ─── Sortable exercise card ─────────────────────────────────────────────────
+
+function SortableExerciseCard({
+  we,
+  isExpanded,
+  onToggle,
+  onRemove,
+  onAddSet,
+  onUpdateSet,
+  onDeleteSet,
+}: {
+  we: LocalWorkoutExerciseEntry;
+  isExpanded: boolean;
+  onToggle: () => void;
+  onRemove: () => void;
+  onAddSet: () => void;
+  onUpdateSet: (workoutExerciseUuid: string, setUuid: string, weight: number, reps: number) => Promise<void>;
+  onDeleteSet: (uuid: string) => Promise<void>;
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: we.uuid });
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : 1,
+    zIndex: isDragging ? 10 : undefined,
+  };
+
+  const completedSets = we.sets.filter(s => s.is_completed).length;
+  const totalSets = we.sets.length;
+  const allDone = totalSets > 0 && completedSets === totalSets;
+
+  return (
+    <div ref={setNodeRef} style={style} className="ios-section">
+      {/* Exercise header — swipe to delete */}
+      <SwipeToDelete onDelete={onRemove}>
+        <div className="flex items-center w-full min-h-[44px]">
+          <div
+            className="flex items-center justify-center px-1 py-2.5 touch-none cursor-grab active:cursor-grabbing"
+            {...attributes}
+            {...listeners}
+          >
+            <GripVertical className="h-4 w-4 text-muted-foreground/50" />
+          </div>
+          <button
+            onClick={onToggle}
+            className="flex items-center gap-2 px-2 py-2.5 flex-1 text-left"
+          >
+            {isExpanded
+              ? <ChevronDown className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
+              : <ChevronRight className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
+            }
+            <span className={`flex-1 font-semibold text-sm truncate ${allDone ? 'text-muted-foreground' : ''}`}>
+              {we.exercise?.title ?? 'Unknown Exercise'}
+            </span>
+            {allDone ? (
+              <div className="w-5 h-5 rounded-full bg-green-500 flex items-center justify-center flex-shrink-0">
+                <Check className="h-3 w-3 text-white" strokeWidth={3} />
+              </div>
+            ) : (
+              <span className="text-xs text-muted-foreground flex-shrink-0 pr-1">
+                {completedSets}/{totalSets}
+              </span>
+            )}
+          </button>
+        </div>
+      </SwipeToDelete>
+
+      {/* Collapsible sets */}
+      {isExpanded && (
+        <>
+          {/* Column headers */}
+          <div className="flex items-center gap-2 px-3 py-1 border-t border-b border-border bg-secondary/30">
+            <div className="w-5 text-center text-[10px] font-medium text-muted-foreground">Set</div>
+            <div className="flex-1 text-right text-[10px] font-medium text-muted-foreground">Weight</div>
+            <div className="w-3" />
+            <div className="flex-1 text-right text-[10px] font-medium text-muted-foreground">Reps</div>
+          </div>
+
+          {/* Sets */}
+          {we.sets.map((set, idx) => (
+            <SetRow
+              key={set.uuid}
+              setNumber={idx + 1}
+              set={set}
+              workoutExerciseUuid={we.uuid}
+              onUpdate={onUpdateSet}
+              onDelete={onDeleteSet}
+            />
+          ))}
+
+          {/* Add set */}
+          <button
+            onClick={onAddSet}
+            className="flex items-center gap-2 px-4 py-2.5 text-primary text-sm font-medium w-full min-h-[44px] border-t border-border"
+          >
+            <Plus className="h-4 w-4" />
+            Add Set
+          </button>
+        </>
+      )}
+    </div>
+  );
+}
+
 // ─── Main page ────────────────────────────────────────────────────────────────
 export default function WorkoutPage() {
   const workout = useCurrentWorkoutFull(); // undefined = loading, null = no workout
@@ -759,6 +879,7 @@ export default function WorkoutPage() {
   const [plans, setPlans] = useState<PlanWithRoutines[] | null>(null);
   const [startingRoutine, setStartingRoutine] = useState<string | null>(null);
   const [expandedExercises, setExpandedExercises] = useState<Set<string>>(new Set());
+  const [collapsedPlans, setCollapsedPlans] = useState<Set<string>>(new Set());
   const headerRef = useRef<HTMLDivElement>(null);
   const [headerHeight, setHeaderHeight] = useState(48);
   const [scheduleTapHighlight, setScheduleTapHighlight] = useState(false);
@@ -766,6 +887,27 @@ export default function WorkoutPage() {
 
   const restTimer = useRestTimer();
   const elapsed = useElapsed(workout?.start_time ?? null);
+
+  // Drag-to-reorder sensors
+  const sensors = useSensors(
+    useSensor(TouchSensor, { activationConstraint: { delay: 300, tolerance: 5 } }),
+    useSensor(PointerSensor, { activationConstraint: { delay: 300, tolerance: 5 } }),
+  );
+
+  const handleDragEnd = useCallback(async (event: DragEndEvent) => {
+    const { active, over } = event;
+    if (!over || active.id === over.id || !workout) return;
+
+    const exercises = workout.exercises;
+    const oldIndex = exercises.findIndex(e => e.uuid === active.id);
+    const newIndex = exercises.findIndex(e => e.uuid === over.id);
+    if (oldIndex === -1 || newIndex === -1) return;
+
+    const reordered = [...exercises];
+    const [moved] = reordered.splice(oldIndex, 1);
+    reordered.splice(newIndex, 0, moved);
+    await reorderExercises(reordered.map(e => e.uuid));
+  }, [workout]);
 
   // Measure fixed header height
   useEffect(() => {
@@ -818,8 +960,24 @@ export default function WorkoutPage() {
   useEffect(() => {
     fetch(`${apiBase()}/api/plans?full=1`)
       .then(r => r.json())
-      .then(data => setPlans(data.plans ?? []))
+      .then(data => {
+        const loaded = data.plans ?? [];
+        setPlans(loaded);
+        // Collapse all plans except the first one
+        if (loaded.length > 1) {
+          setCollapsedPlans(new Set(loaded.slice(1).map((p: PlanWithRoutines) => p.uuid)));
+        }
+      })
       .catch(() => setPlans([])); // Resolve to empty on failure
+  }, []);
+
+  const togglePlan = useCallback((uuid: string) => {
+    setCollapsedPlans(prev => {
+      const next = new Set(prev);
+      if (next.has(uuid)) next.delete(uuid);
+      else next.add(uuid);
+      return next;
+    });
   }, []);
 
   const startWorkoutFromRoutine = async (_planUuid: string, routineUuid: string) => {
@@ -994,7 +1152,7 @@ export default function WorkoutPage() {
     if (prevSets.length === 0) {
       const localPrev = await db.workout_exercises
         .where('exercise_uuid')
-        .equals(exercise.uuid)
+        .equals(exercise.uuid.toLowerCase())
         .filter(e => !e._deleted && e.workout_uuid !== workout.uuid)
         .toArray();
       if (localPrev.length > 0) {
@@ -1074,8 +1232,15 @@ export default function WorkoutPage() {
     const routinesExist = plansLoaded && plans.some(p => p.routines.length > 0);
     return (
       <main className="tab-content bg-background overflow-y-auto">
-        <div className="px-4 pt-safe-plus pb-4">
+        <div className="px-4 pt-safe pb-4 flex items-center justify-between">
           <h1 className="text-2xl font-bold">Workout</h1>
+          <Link
+            href="/plans"
+            className="flex items-center gap-1.5 text-sm text-primary font-medium"
+          >
+            <Settings className="h-4 w-4" />
+            Manage
+          </Link>
         </div>
         <div className="px-4 space-y-4">
           <div
@@ -1092,35 +1257,46 @@ export default function WorkoutPage() {
 
           {routinesExist && (
             <div>
-              <div className="flex items-center justify-between mb-1 px-1">
+              <div className="mb-1 px-1">
                 <p className="text-xs font-semibold text-primary uppercase tracking-wide">Start from Routine</p>
-                <Link href="/plans" className="text-xs text-primary font-medium">Manage</Link>
               </div>
               <div className="space-y-2">
-                {plans.filter(p => p.routines.length > 0).map(plan => (
-                  <div key={plan.uuid} className="ios-section">
-                    <p className="px-4 pt-3 pb-1 text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                      {plan.title ?? 'Untitled Plan'}
-                    </p>
-                    {plan.routines.map(routine => (
+                {plans.filter(p => p.routines.length > 0).map((plan) => {
+                  const isCollapsed = collapsedPlans.has(plan.uuid);
+                  return (
+                    <div key={plan.uuid} className="ios-section">
                       <button
-                        key={routine.uuid}
-                        onClick={() => startWorkoutFromRoutine(plan.uuid, routine.uuid)}
-                        disabled={startingRoutine === routine.uuid}
-                        className="ios-row w-full text-left min-h-[52px] disabled:opacity-50"
+                        onClick={() => togglePlan(plan.uuid)}
+                        className="flex items-center gap-2 px-4 pt-3 pb-1 w-full text-left"
                       >
-                        <span className="flex-1 font-medium text-sm">
-                          {routine.title ?? 'Untitled Routine'}
+                        {isCollapsed
+                          ? <ChevronRight className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
+                          : <ChevronDown className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
+                        }
+                        <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                          {plan.title ?? 'Untitled Plan'}
                         </span>
-                        {startingRoutine === routine.uuid ? (
-                          <span className="text-xs text-muted-foreground">Starting…</span>
-                        ) : (
-                          <ChevronRight className="h-4 w-4 text-muted-foreground" />
-                        )}
                       </button>
-                    ))}
-                  </div>
-                ))}
+                      {!isCollapsed && plan.routines.map(routine => (
+                        <button
+                          key={routine.uuid}
+                          onClick={() => startWorkoutFromRoutine(plan.uuid, routine.uuid)}
+                          disabled={startingRoutine === routine.uuid}
+                          className="ios-row w-full text-left min-h-[52px] disabled:opacity-50"
+                        >
+                          <span className="flex-1 font-medium text-sm">
+                            {routine.title ?? 'Untitled Routine'}
+                          </span>
+                          {startingRoutine === routine.uuid ? (
+                            <span className="text-xs text-muted-foreground">Starting…</span>
+                          ) : (
+                            <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                          )}
+                        </button>
+                      ))}
+                    </div>
+                  );
+                })}
               </div>
             </div>
           )}
@@ -1175,77 +1351,24 @@ export default function WorkoutPage() {
         <div className="px-4 space-y-3 pb-safe-or-4">
           {/* Exercises */}
           {workout.exercises.length > 0 && (
-            <div className="space-y-2">
-              {workout.exercises.map((we) => {
-                const completedSets = we.sets.filter(s => s.is_completed).length;
-                const totalSets = we.sets.length;
-                const allDone = totalSets > 0 && completedSets === totalSets;
-                const isExpanded = expandedExercises.has(we.uuid);
-
-                return (
-                  <div key={we.uuid} className="ios-section">
-                    {/* Exercise header — swipe to delete */}
-                    <SwipeToDelete onDelete={() => handleRemoveExercise(we.uuid)}>
-                      <button
-                        onClick={() => toggleExercise(we.uuid)}
-                        className="flex items-center gap-2 px-3 py-2.5 w-full text-left min-h-[44px]"
-                      >
-                        {isExpanded
-                          ? <ChevronDown className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
-                          : <ChevronRight className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
-                        }
-                        <span className={`flex-1 font-semibold text-sm truncate ${allDone ? 'text-muted-foreground' : ''}`}>
-                          {we.exercise?.title ?? 'Unknown Exercise'}
-                        </span>
-                        {allDone ? (
-                          <div className="w-5 h-5 rounded-full bg-green-500 flex items-center justify-center flex-shrink-0">
-                            <Check className="h-3 w-3 text-white" strokeWidth={3} />
-                          </div>
-                        ) : (
-                          <span className="text-xs text-muted-foreground flex-shrink-0">
-                            {completedSets}/{totalSets}
-                          </span>
-                        )}
-                      </button>
-                    </SwipeToDelete>
-
-                    {/* Collapsible sets */}
-                    {isExpanded && (
-                      <>
-                        {/* Column headers */}
-                        <div className="flex items-center gap-2 px-3 py-1 border-t border-b border-border bg-secondary/30">
-                          <div className="w-5 text-center text-[10px] font-medium text-muted-foreground">Set</div>
-                          <div className="flex-1 text-right text-[10px] font-medium text-muted-foreground">Weight</div>
-                          <div className="w-3" />
-                          <div className="flex-1 text-right text-[10px] font-medium text-muted-foreground">Reps</div>
-                        </div>
-
-                        {/* Sets */}
-                        {we.sets.map((set, idx) => (
-                          <SetRow
-                            key={set.uuid}
-                            setNumber={idx + 1}
-                            set={set}
-                            workoutExerciseUuid={we.uuid}
-                            onUpdate={updateSet}
-                            onDelete={mutDeleteSet}
-                          />
-                        ))}
-
-                        {/* Add set */}
-                        <button
-                          onClick={() => handleAddSet(we)}
-                          className="flex items-center gap-2 px-4 py-2.5 text-primary text-sm font-medium w-full min-h-[44px] border-t border-border"
-                        >
-                          <Plus className="h-4 w-4" />
-                          Add Set
-                        </button>
-                      </>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
+            <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+              <SortableContext items={workout.exercises.map(e => e.uuid)} strategy={verticalListSortingStrategy}>
+                <div className="space-y-2">
+                  {workout.exercises.map((we) => (
+                    <SortableExerciseCard
+                      key={we.uuid}
+                      we={we}
+                      isExpanded={expandedExercises.has(we.uuid)}
+                      onToggle={() => toggleExercise(we.uuid)}
+                      onRemove={() => handleRemoveExercise(we.uuid)}
+                      onAddSet={() => handleAddSet(we)}
+                      onUpdateSet={updateSet}
+                      onDeleteSet={mutDeleteSet}
+                    />
+                  ))}
+                </div>
+              </SortableContext>
+            </DndContext>
           )}
 
           {/* Add exercises button */}

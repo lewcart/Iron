@@ -180,3 +180,17 @@ export async function deleteBodyweightLog(uuid: string): Promise<void> {
   await db.bodyweight_logs.update(uuid, { _deleted: true, _synced: false, _updated_at: now() });
   syncEngine.schedulePush();
 }
+
+// ─── Exercise reordering ──────────────────────────────────────────────────────
+
+export async function reorderExercises(orderedUuids: string[]): Promise<void> {
+  await Promise.all(
+    orderedUuids.map((uuid, index) =>
+      db.workout_exercises.update(uuid, {
+        order_index: index,
+        ...syncMeta(),
+      }),
+    ),
+  );
+  syncEngine.schedulePush();
+}

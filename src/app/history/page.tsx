@@ -62,7 +62,12 @@ export default function HistoryPage() {
   // Show skeleton while initial sync is in progress and no local data exists yet
   const [syncStatus, setSyncStatus] = useState<SyncStatus>(syncEngine.status);
   useEffect(() => syncEngine.subscribe(setSyncStatus), []);
-  const loading = workouts.length === 0 && syncStatus === 'syncing';
+  const [initialLoad, setInitialLoad] = useState(true);
+  useEffect(() => {
+    const t = setTimeout(() => setInitialLoad(false), 500);
+    return () => clearTimeout(t);
+  }, []);
+  const loading = initialLoad || (workouts.length === 0 && syncStatus === 'syncing');
 
   if (selected) {
     return <WorkoutDetail workout={selected} onBack={() => setSelected(null)} />;
