@@ -1029,17 +1029,22 @@ export default function WorkoutPage() {
           ...syncMeta,
         });
 
-        // Look up last completed sets for this exercise to prefill weights
+        // Look up PB per set position for this exercise to prefill weights
         // Try server first (includes imported history), fall back to local IndexedDB
         let lastSets: { weight: number | null; repetitions: number | null }[] = [];
         try {
           const res = await fetch(`${apiBase()}/api/exercises/${exerciseUuid}/history`);
           if (res.ok) {
             const data = await res.json();
-            const recent: { weight: number; repetitions: number; workoutUuid: string }[] = data.recentSets ?? [];
-            if (recent.length > 0) {
-              const lastWid = recent[0].workoutUuid;
-              lastSets = recent.filter(s => s.workoutUuid === lastWid);
+            const pbPerSet: { orderIndex: number; weight: number; repetitions: number }[] = data.pbPerSet ?? [];
+            if (pbPerSet.length > 0) {
+              // Build array indexed by set position
+              const pbMap = new Map(pbPerSet.map(s => [s.orderIndex, s]));
+              const maxIdx = Math.max(...pbPerSet.map(s => s.orderIndex));
+              for (let i = 0; i <= maxIdx; i++) {
+                const pb = pbMap.get(i);
+                lastSets.push(pb ? { weight: pb.weight, repetitions: pb.repetitions } : { weight: null, repetitions: null });
+              }
             }
           }
         } catch { /* offline */ }
@@ -1134,17 +1139,20 @@ export default function WorkoutPage() {
     const orderIdx = workout.exercises.length;
     const weUuid = await addExerciseToWorkout(workout.uuid, exercise.uuid, orderIdx);
 
-    // Prefill sets from server history (includes imported data)
+    // Prefill sets from PB per set position (includes imported data)
     let prevSets: { weight: number; repetitions: number }[] = [];
     try {
       const res = await fetch(`${apiBase()}/api/exercises/${exercise.uuid}/history`);
       if (res.ok) {
         const data = await res.json();
-        const recent: { weight: number; repetitions: number; workoutUuid: string }[] = data.recentSets ?? [];
-        // Take sets from the most recent workout only
-        if (recent.length > 0) {
-          const lastWorkoutUuid = recent[0].workoutUuid;
-          prevSets = recent.filter(s => s.workoutUuid === lastWorkoutUuid);
+        const pbPerSet: { orderIndex: number; weight: number; repetitions: number }[] = data.pbPerSet ?? [];
+        if (pbPerSet.length > 0) {
+          const pbMap = new Map(pbPerSet.map(s => [s.orderIndex, s]));
+          const maxIdx = Math.max(...pbPerSet.map(s => s.orderIndex));
+          for (let i = 0; i <= maxIdx; i++) {
+            const pb = pbMap.get(i);
+            prevSets.push(pb ? { weight: pb.weight, repetitions: pb.repetitions } : { weight: 0, repetitions: 0 });
+          }
         }
       }
     } catch { /* offline — fall through with no prefill */ }

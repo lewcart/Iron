@@ -616,6 +616,42 @@ export async function getExerciseRecentSets(
   }));
 }
 
+export async function getExercisePBPerSet(
+  exerciseUuid: string,
+): Promise<Array<{
+  orderIndex: number;
+  weight: number;
+  repetitions: number;
+}>> {
+  const rows = await query<{
+    order_index: number;
+    weight: string;
+    repetitions: number;
+  }>(`
+    SELECT DISTINCT ON (ws.order_index)
+      ws.order_index,
+      ws.weight,
+      ws.repetitions
+    FROM workout_sets ws
+    JOIN workout_exercises we ON ws.workout_exercise_uuid = we.uuid
+    WHERE we.exercise_uuid IN (
+        SELECT e2.uuid FROM exercises e1
+        JOIN exercises e2 ON e2.title = e1.title
+        WHERE e1.uuid = $1
+      )
+      AND ws.is_completed = true
+      AND ws.weight IS NOT NULL
+      AND ws.repetitions IS NOT NULL
+    ORDER BY ws.order_index, ws.weight DESC, ws.repetitions DESC
+  `, [exerciseUuid]);
+
+  return rows.map((row) => ({
+    orderIndex: row.order_index,
+    weight: parseFloat(row.weight),
+    repetitions: row.repetitions,
+  }));
+}
+
 // ===== WORKOUT PLANS =====
 
 export async function listPlans(): Promise<WorkoutPlan[]> {

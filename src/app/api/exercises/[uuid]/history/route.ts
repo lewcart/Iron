@@ -4,6 +4,7 @@ import {
   getExercisePRs,
   getExerciseVolumeTrend,
   getExerciseRecentSets,
+  getExercisePBPerSet,
 } from '@/db/queries';
 
 function sinceDate(range: string): Date | undefined {
@@ -23,14 +24,15 @@ export async function GET(
     const range = request.nextUrl.searchParams.get('range') ?? 'all';
     const since = sinceDate(range);
 
-    const [progress, prs, volumeTrend, recentSets] = await Promise.all([
+    const [progress, prs, volumeTrend, recentSets, pbPerSet] = await Promise.all([
       getExerciseProgress(uuid, since),
       getExercisePRs(uuid),
       getExerciseVolumeTrend(uuid, since),
       getExerciseRecentSets(uuid),
+      getExercisePBPerSet(uuid),
     ]);
 
-    return NextResponse.json({ progress, prs, volumeTrend, recentSets });
+    return NextResponse.json({ progress, prs, volumeTrend, recentSets, pbPerSet });
   } catch (err) {
     console.error('Exercise history error:', err);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
