@@ -15,6 +15,7 @@ import {
   cancelRestNotification,
 } from '@/lib/rest-notifications';
 import { consumeScheduleTap } from '@/lib/workout-schedule';
+import { HealthSection } from '@/components/HealthSection';
 import Link from 'next/link';
 import { Check, ChevronDown, ChevronRight, GripVertical, Plus, Search, Settings, X } from 'lucide-react';
 import type { WorkoutPlan, WorkoutRoutine, WorkoutRoutineExercise, WorkoutRoutineSet, Exercise } from '@/types';
@@ -1309,6 +1310,8 @@ export default function WorkoutPage() {
               <Link href="/plans" className="text-primary">Create a routine</Link> to start a pre-planned session.
             </p>
           )}
+
+          <HealthSection />
         </div>
         {showExercises && (
           <AddExerciseSheet onAdd={handleAddExercise} onClose={() => setShowExercises(false)} />

@@ -10,6 +10,9 @@ public class HealthKitPlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "isAvailable", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "requestPermissions", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "saveWorkout", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "getSteps", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "getActiveCalories", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "getRecentWorkouts", returnType: CAPPluginReturnPromise),
     ]
 
     private let healthStore = HKHealthStore()
@@ -25,7 +28,8 @@ public class HealthKitPlugin: CAPPlugin, CAPBridgedPlugin {
         }
 
         guard let activeEnergyType = HKQuantityType.quantityType(forIdentifier: .activeEnergyBurned),
-              let basalEnergyType = HKQuantityType.quantityType(forIdentifier: .basalEnergyBurned) else {
+              let basalEnergyType = HKQuantityType.quantityType(forIdentifier: .basalEnergyBurned),
+              let stepsType = HKQuantityType.quantityType(forIdentifier: .stepCount) else {
             call.reject("Failed to create HealthKit quantity types")
             return
         }
@@ -36,13 +40,95 @@ public class HealthKitPlugin: CAPPlugin, CAPBridgedPlugin {
             HKObjectType.workoutType()
         ]
 
-        healthStore.requestAuthorization(toShare: writeTypes, read: nil) { success, error in
+        let readTypes: Set<HKObjectType> = [
+            stepsType,
+            activeEnergyType,
+            HKObjectType.workoutType()
+        ]
+
+        healthStore.requestAuthorization(toShare: writeTypes, read: readTypes) { success, error in
             if let error = error {
                 call.reject(error.localizedDescription)
                 return
             }
             call.resolve(["granted": success])
         }
+    }
+
+    @objc public func getSteps(_ call: CAPPluginCall) {
+        guard HKHealthStore.isHealthDataAvailable() else {
+            call.resolve(["value": 0])
+            return
+        }
+
+        guard let stepsType = HKQuantityType.quantityType(forIdentifier: .stepCount) else {
+            call.resolve(["value": 0])
+            return
+        }
+
+        let startMs = call.getDouble("startTime") ?? startOfTodayMs()
+        let endMs = call.getDouble("endTime") ?? Double(Date().timeIntervalSince1970 * 1000)
+        let startDate = Date(timeIntervalSince1970: startMs / 1000.0)
+        let endDate = Date(timeIntervalSince1970: endMs / 1000.0)
+
+        let predicate = HKQuery.predicateForSamples(withStart: startDate, end: endDate, options: .strictStartDate)
+        let query = HKStatisticsQuery(quantityType: stepsType, quantitySamplePredicate: predicate, options: .cumulativeSum) { _, result, _ in
+            let value = result?.sumQuantity()?.doubleValue(for: HKUnit.count()) ?? 0
+            call.resolve(["value": Int(value)])
+        }
+        healthStore.execute(query)
+    }
+
+    @objc public func getActiveCalories(_ call: CAPPluginCall) {
+        guard HKHealthStore.isHealthDataAvailable() else {
+            call.resolve(["value": 0])
+            return
+        }
+
+        guard let activeEnergyType = HKQuantityType.quantityType(forIdentifier: .activeEnergyBurned) else {
+            call.resolve(["value": 0])
+            return
+        }
+
+        let startMs = call.getDouble("startTime") ?? startOfTodayMs()
+        let endMs = call.getDouble("endTime") ?? Double(Date().timeIntervalSince1970 * 1000)
+        let startDate = Date(timeIntervalSince1970: startMs / 1000.0)
+        let endDate = Date(timeIntervalSince1970: endMs / 1000.0)
+
+        let predicate = HKQuery.predicateForSamples(withStart: startDate, end: endDate, options: .strictStartDate)
+        let query = HKStatisticsQuery(quantityType: activeEnergyType, quantitySamplePredicate: predicate, options: .cumulativeSum) { _, result, _ in
+            let value = result?.sumQuantity()?.doubleValue(for: .kilocalorie()) ?? 0
+            call.resolve(["value": Int(value)])
+        }
+        healthStore.execute(query)
+    }
+
+    @objc public func getRecentWorkouts(_ call: CAPPluginCall) {
+        guard HKHealthStore.isHealthDataAvailable() else {
+            call.resolve(["workouts": []])
+            return
+        }
+
+        let startMs = call.getDouble("startTime") ?? sevenDaysAgoMs()
+        let startDate = Date(timeIntervalSince1970: startMs / 1000.0)
+
+        let predicate = HKQuery.predicateForSamples(withStart: startDate, end: Date(), options: .strictStartDate)
+        let sortDescriptor = NSSortDescriptor(key: HKSampleSortIdentifierStartDate, ascending: false)
+        let query = HKSampleQuery(sampleType: HKObjectType.workoutType(), predicate: predicate, limit: 10, sortDescriptors: [sortDescriptor]) { _, samples, _ in
+            let workouts = (samples as? [HKWorkout] ?? []).map { w -> [String: Any] in
+                let durationMins = w.duration / 60.0
+                let calories = w.totalEnergyBurned?.doubleValue(for: .kilocalorie()) ?? 0
+                return [
+                    "startTime": w.startDate.timeIntervalSince1970 * 1000,
+                    "endTime": w.endDate.timeIntervalSince1970 * 1000,
+                    "durationMinutes": Int(durationMins),
+                    "activeCalories": Int(calories),
+                    "activityType": self.activityTypeName(w.workoutActivityType),
+                ]
+            }
+            call.resolve(["workouts": workouts])
+        }
+        healthStore.execute(query)
     }
 
     @objc public func saveWorkout(_ call: CAPPluginCall) {
@@ -137,6 +223,36 @@ public class HealthKitPlugin: CAPPlugin, CAPBridgedPlugin {
                     finishCollection()
                 }
             }
+        }
+    }
+
+    // MARK: - Helpers
+
+    private func startOfTodayMs() -> Double {
+        let cal = Calendar.current
+        let start = cal.startOfDay(for: Date())
+        return start.timeIntervalSince1970 * 1000
+    }
+
+    private func sevenDaysAgoMs() -> Double {
+        let date = Calendar.current.date(byAdding: .day, value: -7, to: Date()) ?? Date()
+        return date.timeIntervalSince1970 * 1000
+    }
+
+    private func activityTypeName(_ type: HKWorkoutActivityType) -> String {
+        switch type {
+        case .traditionalStrengthTraining: return "Strength Training"
+        case .functionalStrengthTraining: return "Functional Strength"
+        case .running: return "Running"
+        case .walking: return "Walking"
+        case .cycling: return "Cycling"
+        case .swimming: return "Swimming"
+        case .yoga: return "Yoga"
+        case .highIntensityIntervalTraining: return "HIIT"
+        case .crossTraining: return "Cross Training"
+        case .elliptical: return "Elliptical"
+        case .rowing: return "Rowing"
+        default: return "Workout"
         }
     }
 }
