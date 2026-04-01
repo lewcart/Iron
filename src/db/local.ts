@@ -145,16 +145,31 @@ function setExercisesReady(ready: boolean) {
 
 export async function hydrateExercises(): Promise<void> {
   try {
-    const lastHydrated = await getMeta('exercises_hydrated_at');
     const count = await db.exercises.count();
 
-    if (count > 0) {
-      setExercisesReady(true);
-      if (lastHydrated && Date.now() - Number(lastHydrated) < HYDRATE_STALE_MS) {
-        return; // Fresh enough
-      }
+    // If empty, seed from bundled catalog immediately (no network needed)
+    if (count === 0) {
+      try {
+        const bundledRes = await fetch('/exercises-catalog.json');
+        if (bundledRes.ok) {
+          const bundled: LocalExercise[] = await bundledRes.json();
+          await db.exercises.bulkPut(bundled);
+          await setMeta('exercises_hydrated_at', Date.now());
+        }
+      } catch { /* bundled file unavailable */ }
     }
 
+    const freshCount = await db.exercises.count();
+    if (freshCount > 0) {
+      setExercisesReady(true);
+    }
+
+    const lastHydrated = await getMeta('exercises_hydrated_at');
+    if (lastHydrated && Date.now() - Number(lastHydrated) < HYDRATE_STALE_MS) {
+      return; // Fresh enough
+    }
+
+    // Try API for latest data (may include new custom exercises)
     const res = await fetch(`${apiBase()}/api/exercises?limit=10000`);
     if (!res.ok) return;
 

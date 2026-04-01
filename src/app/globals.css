@@ -9,7 +9,7 @@
     --trans-pink: 348 79% 81%;     /* #F5A9B8 */
 
     /* ── Light mode tokens ──────────────────────── */
-    --background: 0 0% 98%;
+    --background: 220 20% 95%;
     --foreground: 222 20% 12%;
     --card: 0 0% 100%;
     --card-foreground: 222 20% 12%;
@@ -103,7 +103,8 @@
 
 /* ── iOS inset grouped list ──────────────────────────── */
 .ios-section {
-  @apply rounded-xl overflow-hidden bg-white shadow-sm;
+  @apply rounded-xl overflow-hidden shadow-none;
+  background-color: #ffffff;
 }
 
 .ios-row {
