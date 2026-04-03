@@ -1852,3 +1852,303 @@ export async function deleteProgressPhoto(uuid: string): Promise<void> {
 }
 
 export { importFitbeeExport } from './fitbee-import';
+
+// ===== MCP SERVER QUERIES =====
+
+// ── Active plan ───────────────────────────────────────────────────────────────
+
+export async function getActivePlan(): Promise<WorkoutPlan & { is_active: boolean } | null> {
+  const row = await queryOne<DbRow>(`SELECT * FROM workout_plans WHERE is_active = true LIMIT 1`);
+  if (!row) return null;
+  return { ...parsePlan(row), is_active: true };
+}
+
+export async function getActivePlanWithRoutines(): Promise<{
+  plan: WorkoutPlan & { is_active: boolean };
+  routines: Array<WorkoutRoutine & { exercises: Array<WorkoutRoutineExercise & { sets: WorkoutRoutineSet[] }> }>;
+} | null> {
+  const plan = await getActivePlan();
+  if (!plan) return null;
+
+  const routines = await listRoutines(plan.uuid);
+  const routinesWithExercises = await Promise.all(
+    routines.map(async (routine) => {
+      const exercises = await listRoutineExercises(routine.uuid);
+      const exercisesWithSets = await Promise.all(
+        exercises.map(async (ex) => {
+          const sets = await listRoutineSets(ex.uuid);
+          return { ...ex, sets };
+        })
+      );
+      return { ...routine, exercises: exercisesWithSets };
+    })
+  );
+
+  return { plan, routines: routinesWithExercises };
+}
+
+export async function activatePlan(uuid: string): Promise<void> {
+  // Deactivate all plans, then activate the specified one
+  await query(`UPDATE workout_plans SET is_active = false WHERE is_active = true`);
+  await query(`UPDATE workout_plans SET is_active = true WHERE uuid = $1`, [uuid]);
+}
+
+// ── Routine set updates ───────────────────────────────────────────────────────
+
+export async function updateRoutineSet(
+  uuid: string,
+  data: { min_repetitions?: number | null; max_repetitions?: number | null }
+): Promise<WorkoutRoutineSet | null> {
+  const fields: string[] = [];
+  const params: unknown[] = [];
+  let p = 0;
+
+  if (data.min_repetitions !== undefined) {
+    fields.push(`min_repetitions = $${++p}`);
+    params.push(data.min_repetitions);
+  }
+  if (data.max_repetitions !== undefined) {
+    fields.push(`max_repetitions = $${++p}`);
+    params.push(data.max_repetitions);
+  }
+
+  if (fields.length === 0) return getRoutineSet(uuid) ?? null;
+
+  params.push(uuid);
+  await query(
+    `UPDATE workout_routine_sets SET ${fields.join(', ')} WHERE uuid = $${++p}`,
+    params
+  );
+  return (await getRoutineSet(uuid)) ?? null;
+}
+
+// ── Exercise swap ─────────────────────────────────────────────────────────────
+
+export async function swapExerciseInPlan(
+  planUuid: string,
+  fromExerciseUuid: string,
+  toExerciseUuid: string
+): Promise<number> {
+  // Update all routine exercises within the given plan that use fromExerciseUuid
+  const result = await query<DbRow>(`
+    UPDATE workout_routine_exercises wre
+    SET exercise_uuid = $1
+    FROM workout_routines wr
+    WHERE wre.workout_routine_uuid = wr.uuid
+      AND wr.workout_plan_uuid = $2
+      AND wre.exercise_uuid = $3
+    RETURNING wre.uuid
+  `, [toExerciseUuid, planUuid, fromExerciseUuid]);
+  return result.length;
+}
+
+// ── Nutrition plan replace ────────────────────────────────────────────────────
+
+export interface NutritionWeekMealInput {
+  day_of_week: number;  // 0=Sun … 6=Sat
+  meal_slot: string;    // 'breakfast' | 'lunch' | 'dinner' | 'snack'
+  meal_name: string;
+  protein_g?: number | null;
+  calories?: number | null;
+  quality_rating?: number | null;
+  sort_order?: number;
+}
+
+export async function replaceNutritionWeekPlan(meals: NutritionWeekMealInput[]): Promise<NutritionWeekMeal[]> {
+  // Full transactional replace: delete all existing week meals, insert new ones
+  await query(`DELETE FROM nutrition_week_meals`);
+
+  const inserted: NutritionWeekMeal[] = [];
+  for (const meal of meals) {
+    const m = await createNutritionWeekMeal({
+      day_of_week: meal.day_of_week,
+      meal_slot: meal.meal_slot,
+      meal_name: meal.meal_name,
+      protein_g: meal.protein_g ?? null,
+      calories: meal.calories ?? null,
+      quality_rating: meal.quality_rating ?? null,
+      sort_order: meal.sort_order ?? 0,
+    });
+    inserted.push(m);
+  }
+  return inserted;
+}
+
+// ── Training blocks ───────────────────────────────────────────────────────────
+
+export interface TrainingBlock {
+  uuid: string;
+  title: string;
+  goal: string | null;
+  workout_plan_uuid: string | null;
+  start_date: string;
+  end_date: string;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+function parseTrainingBlock(row: DbRow): TrainingBlock {
+  return {
+    uuid: row.uuid as string,
+    title: row.title as string,
+    goal: row.goal as string | null,
+    workout_plan_uuid: row.workout_plan_uuid as string | null,
+    start_date: row.start_date as string,
+    end_date: row.end_date as string,
+    notes: row.notes as string | null,
+    created_at: row.created_at as string,
+    updated_at: row.updated_at as string,
+  };
+}
+
+export async function listTrainingBlocks(): Promise<TrainingBlock[]> {
+  const rows = await query<DbRow>(`SELECT * FROM training_blocks ORDER BY start_date DESC`);
+  return rows.map(parseTrainingBlock);
+}
+
+export async function createTrainingBlock(data: {
+  title: string;
+  goal?: string | null;
+  workout_plan_uuid?: string | null;
+  start_date: string;
+  end_date: string;
+  notes?: string | null;
+}): Promise<TrainingBlock> {
+  const uuid = randomUUID();
+  const row = await queryOne<DbRow>(
+    `INSERT INTO training_blocks (uuid, title, goal, workout_plan_uuid, start_date, end_date, notes)
+     VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
+    [uuid, data.title, data.goal ?? null, data.workout_plan_uuid ?? null, data.start_date, data.end_date, data.notes ?? null]
+  );
+  return parseTrainingBlock(row!);
+}
+
+export async function updateTrainingBlock(
+  uuid: string,
+  data: { title?: string; goal?: string | null; start_date?: string; end_date?: string; notes?: string | null; workout_plan_uuid?: string | null }
+): Promise<TrainingBlock | null> {
+  const fields: string[] = [];
+  const params: unknown[] = [];
+  let p = 0;
+
+  if (data.title !== undefined) { fields.push(`title = $${++p}`); params.push(data.title); }
+  if (data.goal !== undefined) { fields.push(`goal = $${++p}`); params.push(data.goal); }
+  if (data.start_date !== undefined) { fields.push(`start_date = $${++p}`); params.push(data.start_date); }
+  if (data.end_date !== undefined) { fields.push(`end_date = $${++p}`); params.push(data.end_date); }
+  if (data.notes !== undefined) { fields.push(`notes = $${++p}`); params.push(data.notes); }
+  if (data.workout_plan_uuid !== undefined) { fields.push(`workout_plan_uuid = $${++p}`); params.push(data.workout_plan_uuid); }
+
+  if (fields.length === 0) {
+    const row = await queryOne<DbRow>(`SELECT * FROM training_blocks WHERE uuid = $1`, [uuid]);
+    return row ? parseTrainingBlock(row) : null;
+  }
+
+  params.push(uuid);
+  const row = await queryOne<DbRow>(
+    `UPDATE training_blocks SET ${fields.join(', ')} WHERE uuid = $${++p} RETURNING *`,
+    params
+  );
+  return row ? parseTrainingBlock(row) : null;
+}
+
+export async function deleteTrainingBlock(uuid: string): Promise<void> {
+  await query(`DELETE FROM training_blocks WHERE uuid = $1`, [uuid]);
+}
+
+// ── Coaching notes ────────────────────────────────────────────────────────────
+
+export interface CoachingNote {
+  uuid: string;
+  content: string;
+  is_pinned: boolean;
+  category: string | null;
+  related_exercise_uuid: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+function parseCoachingNote(row: DbRow): CoachingNote {
+  return {
+    uuid: row.uuid as string,
+    content: row.content as string,
+    is_pinned: Boolean(row.is_pinned),
+    category: row.category as string | null,
+    related_exercise_uuid: row.related_exercise_uuid as string | null,
+    created_at: row.created_at as string,
+    updated_at: row.updated_at as string,
+  };
+}
+
+export async function listCoachingNotes(options: {
+  pinned_only?: boolean;
+  category?: string;
+  limit?: number;
+} = {}): Promise<CoachingNote[]> {
+  const conditions: string[] = [];
+  const params: unknown[] = [];
+  let p = 0;
+
+  if (options.pinned_only) {
+    conditions.push(`is_pinned = true`);
+  }
+  if (options.category) {
+    conditions.push(`category = $${++p}`);
+    params.push(options.category);
+  }
+
+  const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+  const limit = options.limit ?? 50;
+  params.push(limit);
+
+  const rows = await query<DbRow>(
+    `SELECT * FROM coaching_notes ${where} ORDER BY is_pinned DESC, created_at DESC LIMIT $${++p}`,
+    params
+  );
+  return rows.map(parseCoachingNote);
+}
+
+export async function createCoachingNote(data: {
+  content: string;
+  is_pinned?: boolean;
+  category?: string | null;
+  related_exercise_uuid?: string | null;
+}): Promise<CoachingNote> {
+  const uuid = randomUUID();
+  const row = await queryOne<DbRow>(
+    `INSERT INTO coaching_notes (uuid, content, is_pinned, category, related_exercise_uuid)
+     VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+    [uuid, data.content, data.is_pinned ?? false, data.category ?? null, data.related_exercise_uuid ?? null]
+  );
+  return parseCoachingNote(row!);
+}
+
+export async function updateCoachingNote(
+  uuid: string,
+  data: { content?: string; is_pinned?: boolean; category?: string | null; related_exercise_uuid?: string | null }
+): Promise<CoachingNote | null> {
+  const fields: string[] = [];
+  const params: unknown[] = [];
+  let p = 0;
+
+  if (data.content !== undefined) { fields.push(`content = $${++p}`); params.push(data.content); }
+  if (data.is_pinned !== undefined) { fields.push(`is_pinned = $${++p}`); params.push(data.is_pinned); }
+  if (data.category !== undefined) { fields.push(`category = $${++p}`); params.push(data.category); }
+  if (data.related_exercise_uuid !== undefined) { fields.push(`related_exercise_uuid = $${++p}`); params.push(data.related_exercise_uuid); }
+
+  if (fields.length === 0) {
+    const row = await queryOne<DbRow>(`SELECT * FROM coaching_notes WHERE uuid = $1`, [uuid]);
+    return row ? parseCoachingNote(row) : null;
+  }
+
+  params.push(uuid);
+  const row = await queryOne<DbRow>(
+    `UPDATE coaching_notes SET ${fields.join(', ')} WHERE uuid = $${++p} RETURNING *`,
+    params
+  );
+  return row ? parseCoachingNote(row) : null;
+}
+
+export async function deleteCoachingNote(uuid: string): Promise<void> {
+  await query(`DELETE FROM coaching_notes WHERE uuid = $1`, [uuid]);
+}
