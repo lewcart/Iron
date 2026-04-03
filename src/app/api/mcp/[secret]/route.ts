@@ -1,40 +1,16 @@
 /**
- * Rebirth MCP Server — stateless JSON-RPC 2.0 over HTTP
+ * URL-path-secret MCP endpoint for Claude Web connector compatibility.
  *
- * Implements the Model Context Protocol so Claude can manage training,
- * nutrition, and body composition data directly in Neon.
+ * Claude Web (claude.ai) does not support custom headers, so the MCP secret
+ * must be passed as a URL path segment instead:
+ *   POST /api/mcp/<REBIRTH_MCP_SECRET>
  *
- * Auth: REBIRTH_MCP_SECRET bearer token (MCP-specific).
- *       Falls back to REBIRTH_API_KEY if REBIRTH_MCP_SECRET is unset.
- *       If neither env var is set, all requests are allowed (local dev mode).
- *
- * Transport: plain POST — no SSE streaming needed for tool calls.
- * Each Vercel invocation is stateless; initialize/tools-list/tools-call
- * all handled in the same function with no session state.
- *
- * Batch support: if the request body is an array, each item is processed
- * independently and an array of responses is returned.
+ * This route validates the path segment against REBIRTH_MCP_SECRET, then
+ * delegates to the same handler used by /api/mcp.
  */
 
 import { NextRequest, NextResponse } from 'next/server';
 import { tools, executeTool } from '@/lib/mcp-tools';
-
-// ── Auth ──────────────────────────────────────────────────────────────────────
-
-function checkAuth(request: NextRequest): NextResponse | null {
-  const secret = process.env.REBIRTH_MCP_SECRET ?? process.env.REBIRTH_API_KEY;
-  if (!secret) return null; // No secret configured — open access (local dev)
-
-  const authHeader = request.headers.get('authorization');
-  const provided =
-    authHeader?.startsWith('Bearer ') ? authHeader.slice(7) :
-    request.headers.get('x-api-key');
-
-  if (provided !== secret) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  }
-  return null;
-}
 
 // ── JSON-RPC helpers ──────────────────────────────────────────────────────────
 
@@ -46,7 +22,7 @@ function err(id: unknown, code: number, message: string) {
   return { jsonrpc: '2.0', id, error: { code, message } };
 }
 
-// ── Single request handler ────────────────────────────────────────────────────
+// ── Single request handler (shared logic) ─────────────────────────────────────
 
 type RpcRequest = {
   jsonrpc?: string;
@@ -67,7 +43,6 @@ async function handleRpcRequest(body: RpcRequest) {
       });
 
     case 'notifications/initialized':
-      // Fire-and-forget notification — no response body required
       return null;
 
     case 'ping':
@@ -92,9 +67,16 @@ async function handleRpcRequest(body: RpcRequest) {
 
 // ── Route handlers ────────────────────────────────────────────────────────────
 
-export async function POST(request: NextRequest) {
-  const authErr = checkAuth(request);
-  if (authErr) return authErr;
+export async function POST(
+  request: NextRequest,
+  { params }: { params: Promise<{ secret: string }> }
+) {
+  const { secret } = await params;
+  const expected = process.env.REBIRTH_MCP_SECRET;
+
+  if (!expected || secret !== expected) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
 
   let body: unknown;
   try {
@@ -103,7 +85,6 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ jsonrpc: '2.0', id: null, error: { code: -32700, message: 'Parse error' } });
   }
 
-  // Batch support: array of requests → array of responses
   if (Array.isArray(body)) {
     const responses = await Promise.all(
       body.map(item => handleRpcRequest(item as RpcRequest))
@@ -116,7 +97,6 @@ export async function POST(request: NextRequest) {
   return NextResponse.json(response);
 }
 
-// MCP servers must not respond to GET with an error (Claude Code health-checks via GET)
 export async function GET() {
   return NextResponse.json({ name: 'rebirth-mcp', version: '1.0.0', status: 'ok' });
 }
