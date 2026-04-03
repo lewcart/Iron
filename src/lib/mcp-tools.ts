@@ -616,47 +616,247 @@ async function findExercises(args: Record<string, unknown>) {
   return toolResult(rows);
 }
 
+// ── Shared exercise resolver ──────────────────────────────────────────────────
+
+type ResolvedExercise = { uuid: string; title: string };
+type ExerciseError = { error: string; candidates?: Array<{ uuid: string; title: string }> };
+
+async function resolveExercise(args: { exercise_id?: string; exercise_name?: string }): Promise<ResolvedExercise | ExerciseError> {
+  const { exercise_id, exercise_name } = args;
+
+  if (exercise_id) {
+    const ex = await queryOne<{ uuid: string; title: string }>(
+      'SELECT uuid, title FROM exercises WHERE uuid = $1 AND is_hidden = false',
+      [exercise_id]
+    );
+    if (!ex) return { error: `Exercise not found: ${exercise_id}` };
+    return ex;
+  }
+
+  if (exercise_name) {
+    const matches = await query<{ uuid: string; title: string }>(
+      `SELECT uuid, title FROM exercises
+       WHERE is_hidden = false
+         AND (title ILIKE $1 OR alias::text ILIKE $1)
+       ORDER BY is_custom ASC, title ASC
+       LIMIT 5`,
+      [`%${exercise_name}%`]
+    );
+    if (matches.length === 0) return { error: `No exercise found matching "${exercise_name}"` };
+    if (matches.length === 1) return matches[0];
+    return {
+      error: `Ambiguous exercise name "${exercise_name}" — be more specific`,
+      candidates: matches.map(m => ({ uuid: m.uuid, title: m.title })),
+    };
+  }
+
+  return { error: 'Provide exercise_id or exercise_name' };
+}
+
+function exerciseErrorMessage(err: ExerciseError): string {
+  if (err.candidates) {
+    return `${err.error} (candidates: ${err.candidates.map(c => `${c.title} (${c.uuid})`).join(', ')})`;
+  }
+  return err.error;
+}
+
+// ── Write tool implementations ────────────────────────────────────────────────
+
 async function createRoutine(args: Record<string, unknown>) {
-  const { title, routines } = args as {
-    title: string;
-    routines: Array<{
-      title: string;
-      order_index: number;
-      exercises?: Array<{
-        exercise_uuid: string;
-        order_index: number;
-        sets?: Array<{ min_repetitions?: number; max_repetitions?: number; order_index: number }>;
-      }>;
-    }>;
+  type SetInput = {
+    target_weight?: number;
+    target_reps?: number;
+    min_repetitions?: number;
+    max_repetitions?: number;
+    rpe_target?: number;
+    order_index?: number;
+  };
+  type ExerciseInput = {
+    exercise_id?: string;
+    exercise_uuid?: string;
+    exercise_name?: string;
+    order?: number;
+    order_index?: number;
+    sets?: SetInput[];
+  };
+  type RoutineInput = {
+    day_label?: string;
+    title?: string;
+    order?: number;
+    order_index?: number;
+    exercises?: ExerciseInput[];
   };
 
-  const planUuid = crypto.randomUUID();
-  await query('INSERT INTO workout_plans (uuid, title) VALUES ($1, $2)', [planUuid, title]);
+  const name = (args.name ?? args.title) as string | undefined;
+  const description = args.description as string | undefined;
+  const routinesInput = (args.routines ?? []) as RoutineInput[];
 
-  for (const routine of routines) {
+  if (!name) return toolError('name is required');
+  if (!routinesInput.length) return toolError('routines array is required');
+
+  // Batch-resolve all exercises before any writes to fail fast
+  const resolvedMap: Record<string, Record<string, ResolvedExercise>> = {};
+  const errors: string[] = [];
+
+  for (let ri = 0; ri < routinesInput.length; ri++) {
+    resolvedMap[ri] = {};
+    for (let ei = 0; ei < (routinesInput[ri].exercises ?? []).length; ei++) {
+      const ex = routinesInput[ri].exercises![ei];
+      const resolved = await resolveExercise({
+        exercise_id: ex.exercise_id ?? ex.exercise_uuid,
+        exercise_name: ex.exercise_name,
+      });
+      if ('error' in resolved) {
+        errors.push(`Day ${ri + 1}, exercise ${ei + 1}: ${exerciseErrorMessage(resolved)}`);
+      } else {
+        resolvedMap[ri][ei] = resolved;
+      }
+    }
+  }
+
+  if (errors.length > 0) return toolError(`Exercise resolution failed:\n${errors.join('\n')}`);
+
+  const planUuid = crypto.randomUUID();
+  await query(
+    'INSERT INTO workout_plans (uuid, title, description) VALUES ($1, $2, $3)',
+    [planUuid, name, description ?? null]
+  );
+
+  const routineIds: string[] = [];
+
+  for (let ri = 0; ri < routinesInput.length; ri++) {
+    const routine = routinesInput[ri];
     const rUuid = crypto.randomUUID();
+    routineIds.push(rUuid);
+    const routineTitle = routine.day_label ?? routine.title ?? `Day ${ri + 1}`;
+    const routineOrder = routine.order ?? routine.order_index ?? ri;
+
     await query(
       'INSERT INTO workout_routines (uuid, workout_plan_uuid, title, order_index) VALUES ($1, $2, $3, $4)',
-      [rUuid, planUuid, routine.title, routine.order_index]
+      [rUuid, planUuid, routineTitle, routineOrder]
     );
 
-    for (const ex of routine.exercises ?? []) {
+    for (let ei = 0; ei < (routine.exercises ?? []).length; ei++) {
+      const ex = routine.exercises![ei];
+      const resolved = resolvedMap[ri][ei];
       const reUuid = crypto.randomUUID();
+      const exOrder = ex.order ?? ex.order_index ?? ei;
+
       await query(
         'INSERT INTO workout_routine_exercises (uuid, workout_routine_uuid, exercise_uuid, order_index) VALUES ($1, $2, $3, $4)',
-        [reUuid, rUuid, ex.exercise_uuid, ex.order_index]
+        [reUuid, rUuid, resolved.uuid, exOrder]
       );
 
-      for (const s of ex.sets ?? []) {
+      for (let si = 0; si < (ex.sets ?? []).length; si++) {
+        const s = ex.sets![si];
         await query(
-          'INSERT INTO workout_routine_sets (uuid, workout_routine_exercise_uuid, min_repetitions, max_repetitions, order_index) VALUES ($1, $2, $3, $4, $5)',
-          [crypto.randomUUID(), reUuid, s.min_repetitions ?? null, s.max_repetitions ?? null, s.order_index]
+          `INSERT INTO workout_routine_sets
+             (uuid, workout_routine_exercise_uuid, min_repetitions, max_repetitions, target_weight, rpe_target, order_index)
+           VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+          [
+            crypto.randomUUID(), reUuid,
+            s.min_repetitions ?? null,
+            s.max_repetitions ?? s.target_reps ?? null,
+            s.target_weight ?? null,
+            s.rpe_target ?? null,
+            s.order_index ?? si,
+          ]
         );
       }
     }
   }
 
-  return toolResult({ plan_uuid: planUuid, message: `Created routine "${title}" with ${routines.length} day(s).` });
+  return toolResult({ plan_id: planUuid, routine_ids: routineIds, message: `Created routine "${name}" with ${routinesInput.length} day(s).` });
+}
+
+async function updateRoutine(args: Record<string, unknown>) {
+  const { plan_id } = args as { plan_id: string };
+  if (!plan_id) return toolError('plan_id is required');
+
+  const plan = await queryOne('SELECT uuid FROM workout_plans WHERE uuid = $1', [plan_id]);
+  if (!plan) return toolError(`Plan ${plan_id} not found`);
+
+  const fields: string[] = [];
+  const params: unknown[] = [];
+  let p = 0;
+
+  if (typeof args.name === 'string') { fields.push(`title = $${++p}`); params.push(args.name); }
+  if (args.description !== undefined) { fields.push(`description = $${++p}`); params.push(args.description ?? null); }
+  if (args.is_active === true) {
+    await query('UPDATE workout_plans SET is_active = false WHERE is_active = true');
+    fields.push(`is_active = $${++p}`); params.push(true);
+  } else if (args.is_active === false) {
+    fields.push(`is_active = $${++p}`); params.push(false);
+  }
+
+  if (fields.length === 0) return toolError('No fields to update');
+
+  params.push(plan_id);
+  const updated = await queryOne(
+    `UPDATE workout_plans SET ${fields.join(', ')} WHERE uuid = $${++p} RETURNING *`,
+    params
+  );
+  return toolResult(updated);
+}
+
+async function deleteRoutine(args: Record<string, unknown>) {
+  const { plan_id } = args as { plan_id: string };
+  if (!plan_id) return toolError('plan_id is required');
+
+  const plan = await queryOne<{ title: string }>('SELECT title FROM workout_plans WHERE uuid = $1', [plan_id]);
+  if (!plan) return toolError(`Plan ${plan_id} not found`);
+
+  await query('DELETE FROM workout_plans WHERE uuid = $1', [plan_id]);
+  return toolResult({ success: true, message: `Deleted plan "${plan.title}" and all its routines.` });
+}
+
+async function addExercise(args: Record<string, unknown>) {
+  const { routine_id, exercise_id, exercise_name, order, sets = [] } = args as {
+    routine_id: string;
+    exercise_id?: string;
+    exercise_name?: string;
+    order?: number;
+    sets?: Array<{ target_weight?: number; target_reps?: number; max_repetitions?: number; min_repetitions?: number; rpe_target?: number }>;
+  };
+
+  if (!routine_id) return toolError('routine_id is required');
+
+  const routine = await queryOne('SELECT uuid FROM workout_routines WHERE uuid = $1', [routine_id]);
+  if (!routine) return toolError(`Routine ${routine_id} not found`);
+
+  const resolved = await resolveExercise({ exercise_id, exercise_name });
+  if ('error' in resolved) return toolError(exerciseErrorMessage(resolved));
+
+  const currentCount = await queryOne<{ count: string }>(
+    'SELECT COUNT(*)::int AS count FROM workout_routine_exercises WHERE workout_routine_uuid = $1',
+    [routine_id]
+  );
+  const exerciseOrder = order ?? Number(currentCount?.count ?? 0);
+
+  const reUuid = crypto.randomUUID();
+  await query(
+    'INSERT INTO workout_routine_exercises (uuid, workout_routine_uuid, exercise_uuid, order_index) VALUES ($1, $2, $3, $4)',
+    [reUuid, routine_id, resolved.uuid, exerciseOrder]
+  );
+
+  for (let si = 0; si < sets.length; si++) {
+    const s = sets[si];
+    await query(
+      `INSERT INTO workout_routine_sets
+         (uuid, workout_routine_exercise_uuid, min_repetitions, max_repetitions, target_weight, rpe_target, order_index)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      [
+        crypto.randomUUID(), reUuid,
+        s.min_repetitions ?? null,
+        s.max_repetitions ?? s.target_reps ?? null,
+        s.target_weight ?? null,
+        s.rpe_target ?? null,
+        si,
+      ]
+    );
+  }
+
+  return toolResult({ routine_exercise_id: reUuid, exercise: resolved.title, sets_created: sets.length });
 }
 
 async function activateRoutine(args: Record<string, unknown>) {
@@ -699,26 +899,109 @@ async function updateSetTargets(args: Record<string, unknown>) {
 }
 
 async function swapExercise(args: Record<string, unknown>) {
-  const { plan_uuid, old_exercise_uuid, new_exercise_uuid } = args as {
-    plan_uuid: string; old_exercise_uuid: string; new_exercise_uuid: string;
+  const { routine_id, old_exercise_id, old_exercise_name, new_exercise_id, new_exercise_name } = args as {
+    routine_id: string;
+    old_exercise_id?: string;
+    old_exercise_name?: string;
+    new_exercise_id?: string;
+    new_exercise_name?: string;
   };
 
-  const newEx = await queryOne<{ title: string }>(
-    'SELECT title FROM exercises WHERE uuid = $1 AND is_hidden = false',
-    [new_exercise_uuid]
+  if (!routine_id) return toolError('routine_id is required');
+
+  const routine = await queryOne('SELECT uuid FROM workout_routines WHERE uuid = $1', [routine_id]);
+  if (!routine) return toolError(`Routine ${routine_id} not found`);
+
+  const oldResolved = await resolveExercise({ exercise_id: old_exercise_id, exercise_name: old_exercise_name });
+  if ('error' in oldResolved) return toolError(`Old exercise — ${exerciseErrorMessage(oldResolved)}`);
+
+  const newResolved = await resolveExercise({ exercise_id: new_exercise_id, exercise_name: new_exercise_name });
+  if ('error' in newResolved) return toolError(`New exercise — ${exerciseErrorMessage(newResolved)}`);
+
+  const re = await queryOne<{ uuid: string }>(
+    'SELECT uuid FROM workout_routine_exercises WHERE workout_routine_uuid = $1 AND exercise_uuid = $2 LIMIT 1',
+    [routine_id, oldResolved.uuid]
   );
-  if (!newEx) return toolError(`Exercise ${new_exercise_uuid} not found`);
+  if (!re) return toolError(`Exercise "${oldResolved.title}" not found in this routine`);
 
-  await query(`
-    UPDATE workout_routine_exercises
-    SET exercise_uuid = $1
-    WHERE exercise_uuid = $2
-      AND workout_routine_uuid IN (
-        SELECT uuid FROM workout_routines WHERE workout_plan_uuid = $3
-      )
-  `, [new_exercise_uuid, old_exercise_uuid, plan_uuid]);
+  const setCount = await queryOne<{ count: string }>(
+    'SELECT COUNT(*)::int AS count FROM workout_routine_sets WHERE workout_routine_exercise_uuid = $1',
+    [re.uuid]
+  );
 
-  return toolResult({ message: `Swapped to "${newEx.title}" across all days in plan.` });
+  await query(
+    'UPDATE workout_routine_exercises SET exercise_uuid = $1 WHERE uuid = $2',
+    [newResolved.uuid, re.uuid]
+  );
+
+  return toolResult({
+    success: true,
+    swapped_from: oldResolved.title,
+    swapped_to: newResolved.title,
+    sets_preserved: Number(setCount?.count ?? 0),
+  });
+}
+
+async function removeExercise(args: Record<string, unknown>) {
+  const { routine_id, exercise_id, exercise_name } = args as {
+    routine_id: string;
+    exercise_id?: string;
+    exercise_name?: string;
+  };
+
+  if (!routine_id) return toolError('routine_id is required');
+
+  const resolved = await resolveExercise({ exercise_id, exercise_name });
+  if ('error' in resolved) return toolError(exerciseErrorMessage(resolved));
+
+  const re = await queryOne<{ uuid: string }>(
+    'SELECT uuid FROM workout_routine_exercises WHERE workout_routine_uuid = $1 AND exercise_uuid = $2 LIMIT 1',
+    [routine_id, resolved.uuid]
+  );
+  if (!re) return toolError(`Exercise "${resolved.title}" not found in this routine`);
+
+  await query('DELETE FROM workout_routine_exercises WHERE uuid = $1', [re.uuid]);
+  return toolResult({ success: true, removed: resolved.title });
+}
+
+async function updateSets(args: Record<string, unknown>) {
+  const { routine_exercise_id, sets } = args as {
+    routine_exercise_id: string;
+    sets: Array<{
+      target_weight?: number;
+      target_reps?: number;
+      min_repetitions?: number;
+      max_repetitions?: number;
+      rpe_target?: number;
+    }>;
+  };
+
+  if (!routine_exercise_id) return toolError('routine_exercise_id is required');
+  if (!Array.isArray(sets)) return toolError('sets is required');
+
+  const re = await queryOne('SELECT uuid FROM workout_routine_exercises WHERE uuid = $1', [routine_exercise_id]);
+  if (!re) return toolError(`Routine exercise ${routine_exercise_id} not found`);
+
+  await query('DELETE FROM workout_routine_sets WHERE workout_routine_exercise_uuid = $1', [routine_exercise_id]);
+
+  for (let i = 0; i < sets.length; i++) {
+    const s = sets[i];
+    await query(
+      `INSERT INTO workout_routine_sets
+         (uuid, workout_routine_exercise_uuid, min_repetitions, max_repetitions, target_weight, rpe_target, order_index)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      [
+        crypto.randomUUID(), routine_exercise_id,
+        s.min_repetitions ?? null,
+        s.max_repetitions ?? s.target_reps ?? null,
+        s.target_weight ?? null,
+        s.rpe_target ?? null,
+        i,
+      ]
+    );
+  }
+
+  return toolResult({ sets_updated: sets.length });
 }
 
 async function loadNutritionPlan(args: Record<string, unknown>) {
@@ -1054,49 +1337,79 @@ export const tools: MCPTool[] = [
   },
   {
     name: 'create_routine',
-    description: 'Creates a new workout plan with days, exercises, and set targets.',
+    description: 'Creates a new workout plan with days, exercises, and set targets. Accepts the full nested week structure in one call. Exercises can be specified by name (fuzzy-matched) or UUID.',
     inputSchema: {
       type: 'object',
       properties: {
-        title: { type: 'string', description: 'Name of the workout plan' },
+        name: { type: 'string', description: 'Name of the workout plan (also accepted as "title")' },
+        description: { type: 'string', description: 'Optional description of the plan' },
         routines: {
           type: 'array',
           description: 'Array of training days',
           items: {
             type: 'object',
             properties: {
-              title: { type: 'string' },
-              order_index: { type: 'number' },
+              day_label: { type: 'string', description: 'Day label, e.g. "Monday — Push" (also accepted as "title")' },
+              order: { type: 'number', description: 'Sort order (also accepted as "order_index")' },
               exercises: {
                 type: 'array',
                 items: {
                   type: 'object',
                   properties: {
-                    exercise_uuid: { type: 'string' },
-                    order_index: { type: 'number' },
+                    exercise_id: { type: 'string', description: 'UUID of the exercise (use instead of exercise_name)' },
+                    exercise_name: { type: 'string', description: 'Name fragment to fuzzy-match (use instead of exercise_id)' },
+                    order: { type: 'number', description: 'Sort order within the day (also accepted as "order_index")' },
                     sets: {
                       type: 'array',
                       items: {
                         type: 'object',
                         properties: {
+                          target_reps: { type: 'number', description: 'Target reps (stored as max_repetitions)' },
                           min_repetitions: { type: 'number' },
                           max_repetitions: { type: 'number' },
-                          order_index: { type: 'number' },
+                          target_weight: { type: 'number', description: 'Target load in kg' },
+                          rpe_target: { type: 'number', description: 'RPE target (5.0–10.0)' },
                         },
                       },
                     },
                   },
-                  required: ['exercise_uuid', 'order_index'],
                 },
               },
             },
-            required: ['title', 'order_index'],
+            required: ['day_label'],
           },
         },
       },
-      required: ['title', 'routines'],
+      required: ['name', 'routines'],
     },
     execute: createRoutine,
+  },
+  {
+    name: 'update_routine',
+    description: 'Updates a workout plan\'s name, description, or active status.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        plan_id: { type: 'string', description: 'UUID of the workout plan' },
+        name: { type: 'string', description: 'New name for the plan' },
+        description: { type: 'string', description: 'New description' },
+        is_active: { type: 'boolean', description: 'If true, activates this plan and deactivates any previous active plan' },
+      },
+      required: ['plan_id'],
+    },
+    execute: updateRoutine,
+  },
+  {
+    name: 'delete_routine',
+    description: 'Hard-deletes a workout plan and all its routines, exercises, and sets (CASCADE).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        plan_id: { type: 'string', description: 'UUID of the workout plan to delete' },
+      },
+      required: ['plan_id'],
+    },
+    execute: deleteRoutine,
   },
   {
     name: 'activate_routine',
@@ -1136,18 +1449,88 @@ export const tools: MCPTool[] = [
     execute: updateSetTargets,
   },
   {
-    name: 'swap_exercise',
-    description: 'Replaces all occurrences of an exercise in a plan with a different exercise.',
+    name: 'add_exercise',
+    description: 'Adds an exercise (with optional sets) to a specific routine day. Exercise can be specified by name or UUID.',
     inputSchema: {
       type: 'object',
       properties: {
-        plan_uuid: { type: 'string', description: 'UUID of the workout plan' },
-        old_exercise_uuid: { type: 'string' },
-        new_exercise_uuid: { type: 'string' },
+        routine_id: { type: 'string', description: 'UUID of the workout_routine (day)' },
+        exercise_id: { type: 'string', description: 'UUID of the exercise (use instead of exercise_name)' },
+        exercise_name: { type: 'string', description: 'Name fragment to fuzzy-match (use instead of exercise_id)' },
+        order: { type: 'number', description: 'Position within the day (defaults to end)' },
+        sets: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              target_reps: { type: 'number' },
+              min_repetitions: { type: 'number' },
+              max_repetitions: { type: 'number' },
+              target_weight: { type: 'number', description: 'Target load in kg' },
+              rpe_target: { type: 'number', description: 'RPE target (5.0–10.0)' },
+            },
+          },
+        },
       },
-      required: ['plan_uuid', 'old_exercise_uuid', 'new_exercise_uuid'],
+      required: ['routine_id'],
+    },
+    execute: addExercise,
+  },
+  {
+    name: 'swap_exercise',
+    description: 'Replaces one exercise with another within a specific routine day. Sets are preserved. Exercises can be specified by name or UUID.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        routine_id: { type: 'string', description: 'UUID of the workout_routine (day)' },
+        old_exercise_id: { type: 'string', description: 'UUID of the exercise to replace (use instead of old_exercise_name)' },
+        old_exercise_name: { type: 'string', description: 'Name fragment of the exercise to replace (use instead of old_exercise_id)' },
+        new_exercise_id: { type: 'string', description: 'UUID of the replacement exercise (use instead of new_exercise_name)' },
+        new_exercise_name: { type: 'string', description: 'Name fragment of the replacement exercise (use instead of new_exercise_id)' },
+      },
+      required: ['routine_id'],
     },
     execute: swapExercise,
+  },
+  {
+    name: 'remove_exercise',
+    description: 'Removes an exercise (and all its sets) from a specific routine day.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        routine_id: { type: 'string', description: 'UUID of the workout_routine (day)' },
+        exercise_id: { type: 'string', description: 'UUID of the exercise to remove (use instead of exercise_name)' },
+        exercise_name: { type: 'string', description: 'Name fragment to fuzzy-match (use instead of exercise_id)' },
+      },
+      required: ['routine_id'],
+    },
+    execute: removeExercise,
+  },
+  {
+    name: 'update_sets',
+    description: 'Fully replaces all sets for a routine exercise (delete + re-insert). Use routine_exercise_id from get_active_routine or add_exercise.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        routine_exercise_id: { type: 'string', description: 'UUID of the workout_routine_exercises row' },
+        sets: {
+          type: 'array',
+          description: 'New set list — completely replaces existing sets',
+          items: {
+            type: 'object',
+            properties: {
+              target_reps: { type: 'number', description: 'Target reps (stored as max_repetitions)' },
+              min_repetitions: { type: 'number' },
+              max_repetitions: { type: 'number' },
+              target_weight: { type: 'number', description: 'Target load in kg' },
+              rpe_target: { type: 'number', description: 'RPE target (5.0–10.0)' },
+            },
+          },
+        },
+      },
+      required: ['routine_exercise_id', 'sets'],
+    },
+    execute: updateSets,
   },
   {
     name: 'load_nutrition_plan',
