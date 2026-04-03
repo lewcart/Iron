@@ -72,7 +72,7 @@ export async function POST(
   { params }: { params: Promise<{ secret: string }> }
 ) {
   const { secret } = await params;
-  const expected = process.env.REBIRTH_MCP_SECRET;
+  const expected = process.env.REBIRTH_MCP_SECRET?.trim();
 
   if (!expected || secret !== expected) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });

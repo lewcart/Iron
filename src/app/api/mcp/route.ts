@@ -22,7 +22,7 @@ import { tools, executeTool } from '@/lib/mcp-tools';
 // ── Auth ──────────────────────────────────────────────────────────────────────
 
 function checkAuth(request: NextRequest): NextResponse | null {
-  const secret = process.env.REBIRTH_MCP_SECRET ?? process.env.REBIRTH_API_KEY;
+  const secret = (process.env.REBIRTH_MCP_SECRET ?? process.env.REBIRTH_API_KEY)?.trim();
   if (!secret) return null; // No secret configured — open access (local dev)
 
   const authHeader = request.headers.get('authorization');
