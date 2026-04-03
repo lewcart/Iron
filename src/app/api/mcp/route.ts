@@ -71,6 +71,60 @@ const TOOLS = [
     inputSchema: { type: 'object', properties: {} },
   },
   {
+    name: 'get_nutrition_plan',
+    description: 'Returns the current weekly meal plan grouped by day, with optional 7-day compliance summary from nutrition logs.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        include_compliance: { type: 'boolean', description: 'If true, include avg calories/protein from the last 7 logged days' },
+      },
+    },
+  },
+  {
+    name: 'get_body_comp',
+    description: 'Returns a structured body composition snapshot: current stats, 7d/30d trends, latest measurements per site, and historical weight/body-fat timeline.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        days_back: { type: 'number', description: 'History window in days (default 90)' },
+      },
+    },
+  },
+  {
+    name: 'update_body_comp',
+    description: 'Logs body composition data. Writes to bodyweight_logs (weight), body_spec_logs (body_fat_pct/lean_mass), and/or measurement_logs (circumference sites) based on which fields are provided. At least one field required.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        weight: { type: 'number', description: 'Body weight in kg' },
+        body_fat_pct: { type: 'number', description: 'Body fat percentage (InBody scan)' },
+        lean_mass: { type: 'number', description: 'Lean mass in kg (InBody scan)' },
+        measurements: {
+          type: 'object',
+          description: 'Circumference measurements in cm (any subset)',
+          properties: {
+            chest: { type: 'number' },
+            waist: { type: 'number' },
+            hips: { type: 'number' },
+            neck: { type: 'number' },
+            shoulders: { type: 'number' },
+            abdomen: { type: 'number' },
+            left_arm: { type: 'number' },
+            right_arm: { type: 'number' },
+            left_forearm: { type: 'number' },
+            right_forearm: { type: 'number' },
+            left_thigh: { type: 'number' },
+            right_thigh: { type: 'number' },
+            left_calf: { type: 'number' },
+            right_calf: { type: 'number' },
+          },
+        },
+        notes: { type: 'string' },
+        date: { type: 'string', description: 'ISO date string (default: today)' },
+      },
+    },
+  },
+  {
     name: 'get_body_comp_trend',
     description: 'Returns body composition trend data: weight, body spec, and measurements.',
     inputSchema: {
@@ -193,27 +247,48 @@ const TOOLS = [
   },
   {
     name: 'load_nutrition_plan',
-    description: 'Replaces the entire standard-week meal template with a new plan.',
+    description: 'Replaces the entire standard-week meal template with a new plan. Accepts days with nested meals.',
     inputSchema: {
       type: 'object',
       properties: {
-        meals: {
+        days: {
           type: 'array',
+          description: 'Array of days with their meals',
           items: {
             type: 'object',
             properties: {
-              day_of_week: { type: 'number', description: '0=Mon … 6=Sun' },
-              meal_slot: { type: 'string', description: 'e.g. "breakfast", "lunch", "dinner", "snack"' },
-              meal_name: { type: 'string' },
-              protein_g: { type: 'number' },
-              calories: { type: 'number' },
-              sort_order: { type: 'number' },
+              day: { type: ['string', 'number'], description: 'Day name (Mon/Tue/Wed/Thu/Fri/Sat/Sun) or number (1=Mon … 7=Sun)' },
+              meals: {
+                type: 'array',
+                items: {
+                  type: 'object',
+                  properties: {
+                    slot: { type: 'string', description: 'breakfast | lunch | dinner | snack' },
+                    description: { type: 'string', description: 'Meal name/description' },
+                    calories: { type: 'number' },
+                    protein_g: { type: 'number' },
+                    carbs_g: { type: 'number', description: 'Accepted but not stored (column absent from schema)' },
+                    fat_g: { type: 'number', description: 'Accepted but not stored (column absent from schema)' },
+                  },
+                  required: ['slot', 'description'],
+                },
+              },
             },
-            required: ['day_of_week', 'meal_slot', 'meal_name'],
+            required: ['day', 'meals'],
+          },
+        },
+        targets: {
+          type: 'object',
+          description: 'Daily macro targets — accepted but not stored (no targets table exists)',
+          properties: {
+            calories: { type: 'number' },
+            protein_g: { type: 'number' },
+            carbs_g: { type: 'number' },
+            fat_g: { type: 'number' },
           },
         },
       },
-      required: ['meals'],
+      required: ['days'],
     },
   },
   {
@@ -350,6 +425,9 @@ async function handleToolCall(name: string, args: Record<string, unknown>) {
       case 'get_exercise_history': return await getExerciseHistory(args);
       case 'get_active_routine': return await getActiveRoutine();
       case 'get_active_nutrition_plan': return await getActiveNutritionPlan();
+      case 'get_nutrition_plan': return await getNutritionPlan(args);
+      case 'get_body_comp': return await getBodyComp(args);
+      case 'update_body_comp': return await updateBodyComp(args);
       case 'get_body_comp_trend': return await getBodyCompTrend(args);
       case 'get_weekly_summary': return await getWeeklySummary();
       case 'find_exercises': return await findExercises(args);
@@ -522,6 +600,247 @@ async function getActiveNutritionPlan() {
     ORDER BY day_of_week, sort_order
   `);
   return toolResult(meals);
+}
+
+// ── Read: get_nutrition_plan ──────────────────────────────────────────────────
+
+const DOW_NAMES = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+
+async function getNutritionPlan(args: Record<string, unknown>) {
+  const includeCompliance = args.include_compliance === true;
+
+  const meals = await query<{
+    day_of_week: number; meal_slot: string; meal_name: string;
+    protein_g: number | null; calories: number | null; sort_order: number;
+  }>(`
+    SELECT day_of_week, meal_slot, meal_name, protein_g, calories, sort_order
+    FROM nutrition_week_meals
+    ORDER BY day_of_week, sort_order
+  `);
+
+  // Group by day
+  const byDay = new Map<number, typeof meals>();
+  for (const m of meals) {
+    if (!byDay.has(m.day_of_week)) byDay.set(m.day_of_week, []);
+    byDay.get(m.day_of_week)!.push(m);
+  }
+
+  const week_plan = Array.from(byDay.entries())
+    .sort(([a], [b]) => a - b)
+    .map(([dow, dayMeals]) => ({
+      day: DOW_NAMES[dow] ?? String(dow),
+      meals: dayMeals.map(m => ({
+        slot: m.meal_slot,
+        description: m.meal_name,
+        calories: m.calories,
+        protein_g: m.protein_g,
+      })),
+    }));
+
+  const result: Record<string, unknown> = { week_plan };
+
+  if (includeCompliance) {
+    const compliance = await queryOne<{
+      avg_calories: string | null; avg_protein: string | null; logged_days: string;
+    }>(`
+      SELECT
+        ROUND(AVG(daily_cal)::numeric, 1) AS avg_calories,
+        ROUND(AVG(daily_prot)::numeric, 1) AS avg_protein,
+        COUNT(*)::int AS logged_days
+      FROM (
+        SELECT
+          DATE(logged_at) AS d,
+          SUM(calories) AS daily_cal,
+          SUM(protein_g) AS daily_prot
+        FROM nutrition_logs
+        WHERE logged_at >= NOW() - INTERVAL '7 days'
+        GROUP BY DATE(logged_at)
+      ) sub
+    `);
+    result.compliance_7d = {
+      avg_calories: compliance?.avg_calories != null ? Number(compliance.avg_calories) : null,
+      avg_protein: compliance?.avg_protein != null ? Number(compliance.avg_protein) : null,
+      logged_days: Number(compliance?.logged_days ?? 0),
+    };
+  }
+
+  return toolResult(result);
+}
+
+// ── Read: get_body_comp ───────────────────────────────────────────────────────
+
+async function getBodyComp(args: Record<string, unknown>) {
+  const daysBack = Number(args.days_back ?? 90);
+
+  const [latestWeight, latestSpec, weight7dAgo, weight30dAgo, spec7dAgo, spec30dAgo, latestMeasurements, history] = await Promise.all([
+    queryOne<{ weight_kg: string; logged_at: string }>(`
+      SELECT weight_kg, logged_at FROM bodyweight_logs ORDER BY logged_at DESC LIMIT 1
+    `),
+    queryOne<{ body_fat_pct: string | null; lean_mass_kg: string | null; measured_at: string }>(`
+      SELECT body_fat_pct, lean_mass_kg, measured_at FROM body_spec_logs ORDER BY measured_at DESC LIMIT 1
+    `),
+    queryOne<{ weight_kg: string }>(`
+      SELECT weight_kg FROM bodyweight_logs
+      WHERE logged_at <= NOW() - interval '7 days'
+      ORDER BY logged_at DESC LIMIT 1
+    `),
+    queryOne<{ weight_kg: string }>(`
+      SELECT weight_kg FROM bodyweight_logs
+      WHERE logged_at <= NOW() - interval '30 days'
+      ORDER BY logged_at DESC LIMIT 1
+    `),
+    queryOne<{ body_fat_pct: string | null }>(`
+      SELECT body_fat_pct FROM body_spec_logs
+      WHERE measured_at <= NOW() - interval '7 days'
+      ORDER BY measured_at DESC LIMIT 1
+    `),
+    queryOne<{ body_fat_pct: string | null }>(`
+      SELECT body_fat_pct FROM body_spec_logs
+      WHERE measured_at <= NOW() - interval '30 days'
+      ORDER BY measured_at DESC LIMIT 1
+    `),
+    query<{ site: string; value_cm: string }>(`
+      SELECT DISTINCT ON (site) site, value_cm
+      FROM measurement_logs
+      ORDER BY site, measured_at DESC
+    `),
+    query<{ date: string; weight_kg: string; body_fat_pct: string | null; lean_mass_kg: string | null }>(`
+      WITH bw AS (
+        SELECT logged_at::date AS date, weight_kg
+        FROM bodyweight_logs
+        WHERE logged_at > NOW() - ($1 || ' days')::interval
+      ),
+      spec AS (
+        SELECT DISTINCT ON (measured_at::date) measured_at::date AS date, body_fat_pct, lean_mass_kg
+        FROM body_spec_logs
+        WHERE measured_at > NOW() - ($1 || ' days')::interval
+        ORDER BY measured_at::date, measured_at DESC
+      )
+      SELECT bw.date, bw.weight_kg, spec.body_fat_pct, spec.lean_mass_kg
+      FROM bw LEFT JOIN spec ON bw.date = spec.date
+      ORDER BY bw.date DESC
+    `, [daysBack]),
+  ]);
+
+  const toNum = (v: string | null | undefined) => (v != null ? parseFloat(v) : null);
+
+  const currentWeight = toNum(latestWeight?.weight_kg);
+  const currentBF = toNum(latestSpec?.body_fat_pct);
+  const currentLM = toNum(latestSpec?.lean_mass_kg);
+
+  const w7 = toNum(weight7dAgo?.weight_kg);
+  const w30 = toNum(weight30dAgo?.weight_kg);
+  const bf7 = toNum(spec7dAgo?.body_fat_pct);
+  const bf30 = toNum(spec30dAgo?.body_fat_pct);
+
+  const round2 = (n: number | null) => n != null ? Math.round(n * 100) / 100 : null;
+
+  const measurementsObj: Record<string, number> = {};
+  for (const m of latestMeasurements) {
+    measurementsObj[m.site] = parseFloat(m.value_cm);
+  }
+
+  return toolResult({
+    current: {
+      weight: currentWeight,
+      body_fat_pct: currentBF,
+      lean_mass: currentLM,
+      date: latestWeight?.logged_at ?? null,
+    },
+    trend_7d: {
+      weight_change: round2(currentWeight != null && w7 != null ? currentWeight - w7 : null),
+      bf_change: round2(currentBF != null && bf7 != null ? currentBF - bf7 : null),
+    },
+    trend_30d: {
+      weight_change: round2(currentWeight != null && w30 != null ? currentWeight - w30 : null),
+      bf_change: round2(currentBF != null && bf30 != null ? currentBF - bf30 : null),
+    },
+    measurements: measurementsObj,
+    history: history.map(r => ({
+      date: r.date,
+      weight: toNum(r.weight_kg),
+      body_fat_pct: toNum(r.body_fat_pct),
+      lean_mass: toNum(r.lean_mass_kg),
+    })),
+  });
+}
+
+// ── Write: update_body_comp ───────────────────────────────────────────────────
+
+// Maps tool-facing measurement field names to DB site names
+const MEASUREMENT_SITE_MAP: Record<string, string> = {
+  chest: 'chest',
+  waist: 'waist',
+  hips: 'hips',
+  neck: 'neck',
+  shoulders: 'shoulders',
+  abdomen: 'abdomen',
+  left_arm: 'left_bicep',
+  right_arm: 'right_bicep',
+  left_forearm: 'left_forearm',
+  right_forearm: 'right_forearm',
+  left_thigh: 'left_thigh',
+  right_thigh: 'right_thigh',
+  left_calf: 'left_calf',
+  right_calf: 'right_calf',
+};
+
+async function updateBodyComp(args: Record<string, unknown>) {
+  const {
+    weight, body_fat_pct, lean_mass,
+    measurements = {},
+    notes,
+    date,
+  } = args as {
+    weight?: number;
+    body_fat_pct?: number;
+    lean_mass?: number;
+    measurements?: Record<string, number>;
+    notes?: string;
+    date?: string;
+  };
+
+  const hasAnyField =
+    weight !== undefined ||
+    body_fat_pct !== undefined ||
+    lean_mass !== undefined ||
+    Object.keys(measurements).length > 0;
+
+  if (!hasAnyField) {
+    return toolError('At least one field (weight, body_fat_pct, lean_mass, or a measurement) must be provided.');
+  }
+
+  // Use parameterized timestamp to avoid SQL injection
+  const loggedAt = date ? new Date(date) : new Date();
+  let entries_created = 0;
+
+  if (weight !== undefined) {
+    await query(
+      `INSERT INTO bodyweight_logs (uuid, weight_kg, logged_at) VALUES ($1, $2, $3)`,
+      [crypto.randomUUID(), weight, loggedAt]
+    );
+    entries_created++;
+  }
+
+  if (body_fat_pct !== undefined || lean_mass !== undefined) {
+    await query(
+      `INSERT INTO body_spec_logs (uuid, body_fat_pct, lean_mass_kg, notes, measured_at)
+       VALUES ($1, $2, $3, $4, $5)`,
+      [crypto.randomUUID(), body_fat_pct ?? null, lean_mass ?? null, notes ?? null, loggedAt]
+    );
+    entries_created++;
+  }
+
+  for (const [field, value] of Object.entries(measurements)) {
+    const site = MEASUREMENT_SITE_MAP[field] ?? field;
+    await query(
+      `INSERT INTO measurement_logs (uuid, site, value_cm, measured_at) VALUES ($1, $2, $3, $4)`,
+      [crypto.randomUUID(), site, value, loggedAt]
+    );
+    entries_created++;
+  }
+
+  return toolResult({ success: true, entries_created });
 }
 
 // ── Read: get_body_comp_trend ─────────────────────────────────────────────────
@@ -738,29 +1057,58 @@ async function swapExercise(args: Record<string, unknown>) {
 
 // ── Write: load_nutrition_plan ────────────────────────────────────────────────
 
+const DAY_NAME_MAP: Record<string, number> = {
+  mon: 0, tue: 1, wed: 2, thu: 3, fri: 4, sat: 5, sun: 6,
+};
+
+function parseDayOfWeek(day: string | number): number {
+  if (typeof day === 'number') return Math.max(0, Math.min(6, day - 1));
+  const key = String(day).toLowerCase().slice(0, 3);
+  return DAY_NAME_MAP[key] ?? 0;
+}
+
 async function loadNutritionPlan(args: Record<string, unknown>) {
-  const { meals } = args as {
-    meals: Array<{
-      day_of_week: number; meal_slot: string; meal_name: string;
-      protein_g?: number; calories?: number; sort_order?: number;
+  const { days, targets } = args as {
+    days: Array<{
+      day: string | number;
+      meals: Array<{
+        slot: string; description: string; calories?: number;
+        protein_g?: number; carbs_g?: number; fat_g?: number;
+      }>;
     }>;
+    targets?: { calories?: number; protein_g?: number; carbs_g?: number; fat_g?: number };
   };
 
   // Full replace — delete all then insert
   await query('DELETE FROM nutrition_week_meals');
 
-  for (const m of meals) {
-    await query(
-      `INSERT INTO nutrition_week_meals (uuid, day_of_week, meal_slot, meal_name, protein_g, calories, sort_order)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-      [
-        crypto.randomUUID(), m.day_of_week, m.meal_slot, m.meal_name,
-        m.protein_g ?? null, m.calories ?? null, m.sort_order ?? 0,
-      ]
-    );
+  let mealCount = 0;
+  for (const d of days) {
+    const dow = parseDayOfWeek(d.day as string | number);
+    for (let i = 0; i < d.meals.length; i++) {
+      const m = d.meals[i];
+      await query(
+        `INSERT INTO nutrition_week_meals (uuid, day_of_week, meal_slot, meal_name, protein_g, calories, sort_order)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+        [crypto.randomUUID(), dow, m.slot, m.description, m.protein_g ?? null, m.calories ?? null, i]
+      );
+      mealCount++;
+    }
   }
 
-  return toolResult({ loaded: meals.length, message: `Nutrition plan loaded with ${meals.length} meal entries.` });
+  const notes: string[] = [];
+  if (targets) notes.push('targets not stored (no targets table in schema)');
+  const hasUnstorableFields = days.some(d =>
+    d.meals.some(m => m.carbs_g !== undefined || m.fat_g !== undefined)
+  );
+  if (hasUnstorableFields) notes.push('carbs_g and fat_g not stored (columns absent from nutrition_week_meals)');
+
+  return toolResult({
+    success: true,
+    meals_created: mealCount,
+    weeks_loaded: days.length,
+    ...(notes.length > 0 ? { notes } : {}),
+  });
 }
 
 // ── Write: log_body_comp ──────────────────────────────────────────────────────
