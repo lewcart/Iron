@@ -9,7 +9,7 @@
     --trans-pink: 348 79% 81%;     /* #F5A9B8 */
 
     /* ── Light mode tokens ──────────────────────── */
-    --background: 0 0% 98%;
+    --background: 220 14% 97%;
     --foreground: 222 20% 12%;
     --card: 0 0% 100%;
     --card-foreground: 222 20% 12%;
@@ -64,7 +64,6 @@
   }
   body {
     @apply bg-background text-foreground;
-    overscroll-behavior: none;
     touch-action: manipulation;
   }
 
@@ -104,7 +103,7 @@
 
 /* ── iOS inset grouped list ──────────────────────────── */
 .ios-section {
-  @apply rounded-xl overflow-hidden bg-card shadow-sm;
+  @apply rounded-xl overflow-hidden shadow-none bg-card;
 }
 
 .ios-row {
@@ -123,17 +122,15 @@
 /* ── Scrollable main area (accounts for bottom tab bar) ─ */
 .tab-content {
   /* Tab bar = inner row + safe-area padding on <nav>; count each once only */
-  padding-bottom: calc(var(--tab-bar-inner-height) + env(safe-area-inset-bottom, 0px));
+  padding-bottom: calc(var(--tab-bar-inner-height) + env(safe-area-inset-bottom, 0px) + 1rem);
   /* svh avoids most toolbar-induced jumps vs vh/dvh when the URL bar shows or hides */
   min-height: 100vh;
   min-height: 100svh;
 }
 
 /* ── Safe area inset utilities ───────────────────────────── */
-/* Use .pt-safe on page header divs instead of pt-14            */
-/* Use .top-safe on sticky elements instead of top-0            */
-.pt-safe {
-  padding-top: env(safe-area-inset-top, 3.5rem);
+.pb-safe-or-4 {
+  padding-bottom: max(env(safe-area-inset-bottom, 0px), 1rem);
 }
 
 .top-safe {

@@ -13,12 +13,20 @@ type SyncStatusListener = (status: SyncStatus) => void;
 
 class SyncEngine {
   private _status: SyncStatus = 'idle';
+  private _lastError: string | null = null;
   private _listeners = new Set<SyncStatusListener>();
   private _pushDebounceTimer: ReturnType<typeof setTimeout> | null = null;
   private _periodicTimer: ReturnType<typeof setInterval> | null = null;
+  // Keep refs so we can remove them on stop()
+  private _onOnline = () => { this.setStatus('syncing'); this.sync(); };
+  private _onOffline = () => this.setStatus('offline');
 
   get status(): SyncStatus {
     return this._status;
+  }
+
+  get lastError(): string | null {
+    return this._lastError;
   }
 
   private setStatus(s: SyncStatus) {
@@ -58,7 +66,10 @@ class SyncEngine {
         body: JSON.stringify({ workouts, workout_exercises, workout_sets, bodyweight_logs }),
       });
 
-      if (!res.ok) throw new Error(`Push failed: ${res.status}`);
+      if (!res.ok) {
+        const body = await res.text().catch(() => '');
+        throw new Error(`HTTP ${res.status}: ${body.slice(0, 200)}`);
+      }
 
       // Mark all as synced
       const now = Date.now();
@@ -70,7 +81,10 @@ class SyncEngine {
       ]);
 
       this.setStatus('idle');
-    } catch {
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      this._lastError = `push: ${msg}`;
+      console.error('[sync] push error:', err);
       this.setStatus(navigator.onLine ? 'error' : 'offline');
     }
   }
@@ -89,7 +103,10 @@ class SyncEngine {
 
     try {
       const res = await fetch(url);
-      if (!res.ok) throw new Error(`Pull failed: ${res.status}`);
+      if (!res.ok) {
+        const body = await res.text().catch(() => '');
+        throw new Error(`HTTP ${res.status}: ${body.slice(0, 200)}`);
+      }
 
       const data = await res.json() as {
         workouts: import('@/db/local').LocalWorkout[];
@@ -101,12 +118,13 @@ class SyncEngine {
       };
 
       // Upsert — server wins for conflicts (single-user, server is authoritative)
-      await Promise.all([
-        data.workouts.length && db.workouts.bulkPut(data.workouts.map(r => ({ ...r, _synced: true }))),
-        data.workout_exercises.length && db.workout_exercises.bulkPut(data.workout_exercises.map(r => ({ ...r, _synced: true }))),
-        data.workout_sets.length && db.workout_sets.bulkPut(data.workout_sets.map(r => ({ ...r, _synced: true }))),
-        data.bodyweight_logs.length && db.bodyweight_logs.bulkPut(data.bodyweight_logs.map(r => ({ ...r, _synced: true }))),
-      ]);
+      // Use single Dexie transaction to avoid iOS WebKit IndexedDB limits
+      await db.transaction('rw', db.workouts, db.workout_exercises, db.workout_sets, db.bodyweight_logs, async () => {
+        if (data.workouts.length) await db.workouts.bulkPut(data.workouts.map(r => ({ ...r, _synced: true })));
+        if (data.workout_exercises.length) await db.workout_exercises.bulkPut(data.workout_exercises.map(r => ({ ...r, _synced: true })));
+        if (data.workout_sets.length) await db.workout_sets.bulkPut(data.workout_sets.map(r => ({ ...r, _synced: true })));
+        if (data.bodyweight_logs.length) await db.bodyweight_logs.bulkPut(data.bodyweight_logs.map(r => ({ ...r, _synced: true })));
+      });
 
       // Apply server-side deletes
       if (data.deleted) {
@@ -119,8 +137,12 @@ class SyncEngine {
       }
 
       await setMeta('last_pull_at', data.pulled_at);
+      this._lastError = null;
       this.setStatus('idle');
-    } catch {
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      this._lastError = `pull: ${msg}`;
+      console.error('[sync] pull error:', err);
       this.setStatus(navigator.onLine ? 'error' : 'offline');
     }
   }
@@ -134,7 +156,12 @@ class SyncEngine {
     }
     this.setStatus('syncing');
     await this.push();
+    // Don't let a successful pull mask a push error
+    const statusAfterPush = this._status;
     await this.pull();
+    if (statusAfterPush === 'error' && this._status === 'idle') {
+      this.setStatus('error');
+    }
   }
 
   // ─── Debounced push (called after mutations) ──────────────────────────────
@@ -155,16 +182,14 @@ class SyncEngine {
       if (navigator.onLine) this.pull();
     }, 60_000);
 
-    // Network recovery
-    window.addEventListener('online', () => {
-      this.setStatus('syncing');
-      this.sync();
-    });
-    window.addEventListener('offline', () => this.setStatus('offline'));
+    window.addEventListener('online', this._onOnline);
+    window.addEventListener('offline', this._onOffline);
   }
 
   stop(): void {
     if (this._periodicTimer) clearInterval(this._periodicTimer);
+    window.removeEventListener('online', this._onOnline);
+    window.removeEventListener('offline', this._onOffline);
   }
 }
 

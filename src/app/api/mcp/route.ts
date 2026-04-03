@@ -1,486 +1,968 @@
 /**
- * Rebirth MCP Server — JSON-RPC 2.0 endpoint
+ * Rebirth MCP Server — stateless JSON-RPC 2.0 over HTTP
  *
- * Exposes fitness data tools for Claude coaching automation.
- * Auth: Bearer token via REBIRTH_API_KEY (open in dev if unset).
+ * Implements the Model Context Protocol so Claude can manage training,
+ * nutrition, and body composition data directly in Neon.
  *
- * Tool groups:
- *   Readers    — get_recent_workouts, get_exercise_history, get_active_routine,
- *                get_active_nutrition_plan, get_body_comp_trend, get_weekly_summary
- *   Finders    — find_exercises
- *   Writers    — create_routine, activate_routine, update_set_targets,
- *                swap_exercise, load_nutrition_plan, log_body_comp
- *   Coaching   — list_coaching_notes, create_coaching_note, update_coaching_note,
- *                delete_coaching_note
- *   Blocks     — list_training_blocks, create_training_block, update_training_block,
- *                delete_training_block
+ * Auth: REBIRTH_API_KEY bearer token (same as the rest of the API).
+ * If the env var is unset all requests are allowed (local dev mode).
+ *
+ * Transport: plain POST — no SSE streaming needed for tool calls.
+ * Each Vercel invocation is stateless; initialize/tools-list/tools-call
+ * all handled in the same function with no session state.
  */
 
 import { NextRequest, NextResponse } from 'next/server';
 import { requireApiKey } from '@/lib/api-auth';
-import {
-  getLastWorkoutsWithDetails,
-  getExerciseProgress,
-  getExercisePRs,
-  listExercises,
-  getActivePlanWithRoutines,
-  listNutritionWeekMeals,
-  listBodySpecLogs,
-  listMeasurementLogs,
-  listBodyweightLogs,
-  getWeekWorkouts,
-  getWeekVolume,
-  getWorkoutStreak,
-  getWeekMuscleFrequency,
-  listPlans,
-  createPlan,
-  createRoutine,
-  addExerciseToRoutine,
-  addRoutineSet,
-  activatePlan,
-  updateRoutineSet,
-  listRoutineExercises,
-  listRoutineSets,
-  swapExerciseInPlan,
-  replaceNutritionWeekPlan,
-  createBodySpecLog,
-  createMeasurementLog,
-  logBodyweight,
-  listCoachingNotes,
-  createCoachingNote,
-  updateCoachingNote,
-  deleteCoachingNote,
-  listTrainingBlocks,
-  createTrainingBlock,
-  updateTrainingBlock,
-  deleteTrainingBlock,
-  type NutritionWeekMealInput,
-} from '@/db/queries';
+import { query, queryOne } from '@/db/db';
 
-// ── Types ─────────────────────────────────────────────────────────────────────
+// ── JSON-RPC helpers ──────────────────────────────────────────────────────────
 
-interface JsonRpcRequest {
-  jsonrpc: '2.0';
-  id: string | number | null;
-  method: string;
-  params?: Record<string, unknown>;
-}
-
-interface JsonRpcError {
-  code: number;
-  message: string;
-  data?: unknown;
-}
-
-function ok(id: string | number | null, result: unknown) {
+function ok(id: unknown, result: unknown) {
   return NextResponse.json({ jsonrpc: '2.0', id, result });
 }
 
-function err(id: string | number | null, code: number, message: string, data?: unknown) {
-  const error: JsonRpcError = { code, message };
-  if (data !== undefined) error.data = data;
-  return NextResponse.json({ jsonrpc: '2.0', id, error }, { status: 200 });
+function err(id: unknown, code: number, message: string) {
+  return NextResponse.json({ jsonrpc: '2.0', id, error: { code, message } });
 }
+
+function toolResult(content: unknown) {
+  return { content: [{ type: 'text', text: JSON.stringify(content, null, 2) }] };
+}
+
+function toolError(message: string) {
+  return { content: [{ type: 'text', text: message }], isError: true };
+}
+
+// ── Tool schemas ──────────────────────────────────────────────────────────────
+
+const TOOLS = [
+  // ── Read tools ──────────────────────────────────────────────────────────────
+  {
+    name: 'get_recent_workouts',
+    description: 'Returns the last N completed workout sessions with exercises and sets.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        limit: { type: 'number', description: 'Number of workouts to return (default 10, max 50)' },
+      },
+    },
+  },
+  {
+    name: 'get_exercise_history',
+    description: 'Returns historical performance data for a specific exercise.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        exercise_uuid: { type: 'string', description: 'UUID of the exercise' },
+        limit: { type: 'number', description: 'Number of sessions to return (default 20)' },
+      },
+      required: ['exercise_uuid'],
+    },
+  },
+  {
+    name: 'get_active_routine',
+    description: 'Returns the currently active workout plan with all routines, exercises, and set targets.',
+    inputSchema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'get_active_nutrition_plan',
+    description: 'Returns the current standard-week meal plan template.',
+    inputSchema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'get_body_comp_trend',
+    description: 'Returns body composition trend data: weight, body spec, and measurements.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        days: { type: 'number', description: 'Look-back window in days (default 90)' },
+      },
+    },
+  },
+  {
+    name: 'get_weekly_summary',
+    description: 'Returns a summary of the current week: workouts logged, nutrition totals, bodyweight.',
+    inputSchema: { type: 'object', properties: {} },
+  },
+  // ── Write tools ─────────────────────────────────────────────────────────────
+  {
+    name: 'find_exercises',
+    description: 'Fuzzy-search the exercise library by name or muscle group.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'Name fragment to search for' },
+        muscle_group: { type: 'string', description: 'Optional muscle group filter (e.g. "chest", "quads")' },
+      },
+      required: ['query'],
+    },
+  },
+  {
+    name: 'create_routine',
+    description: 'Creates a new workout plan with days, exercises, and set targets.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        title: { type: 'string', description: 'Name of the workout plan' },
+        routines: {
+          type: 'array',
+          description: 'Array of training days',
+          items: {
+            type: 'object',
+            properties: {
+              title: { type: 'string' },
+              order_index: { type: 'number' },
+              exercises: {
+                type: 'array',
+                items: {
+                  type: 'object',
+                  properties: {
+                    exercise_uuid: { type: 'string' },
+                    order_index: { type: 'number' },
+                    sets: {
+                      type: 'array',
+                      items: {
+                        type: 'object',
+                        properties: {
+                          min_repetitions: { type: 'number' },
+                          max_repetitions: { type: 'number' },
+                          order_index: { type: 'number' },
+                        },
+                      },
+                    },
+                  },
+                  required: ['exercise_uuid', 'order_index'],
+                },
+              },
+            },
+            required: ['title', 'order_index'],
+          },
+        },
+      },
+      required: ['title', 'routines'],
+    },
+  },
+  {
+    name: 'activate_routine',
+    description: 'Atomically sets the given workout plan as active, deactivating any previous active plan.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        plan_uuid: { type: 'string', description: 'UUID of the workout plan to activate' },
+      },
+      required: ['plan_uuid'],
+    },
+  },
+  {
+    name: 'update_set_targets',
+    description: 'Updates rep/RPE targets for sets on a specific exercise in a routine.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        routine_uuid: { type: 'string' },
+        exercise_uuid: { type: 'string' },
+        sets: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              order_index: { type: 'number' },
+              min_repetitions: { type: 'number' },
+              max_repetitions: { type: 'number' },
+            },
+            required: ['order_index'],
+          },
+        },
+      },
+      required: ['routine_uuid', 'exercise_uuid', 'sets'],
+    },
+  },
+  {
+    name: 'swap_exercise',
+    description: 'Replaces all occurrences of an exercise in a plan with a different exercise.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        plan_uuid: { type: 'string', description: 'UUID of the workout plan' },
+        old_exercise_uuid: { type: 'string' },
+        new_exercise_uuid: { type: 'string' },
+      },
+      required: ['plan_uuid', 'old_exercise_uuid', 'new_exercise_uuid'],
+    },
+  },
+  {
+    name: 'load_nutrition_plan',
+    description: 'Replaces the entire standard-week meal template with a new plan.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        meals: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              day_of_week: { type: 'number', description: '0=Mon … 6=Sun' },
+              meal_slot: { type: 'string', description: 'e.g. "breakfast", "lunch", "dinner", "snack"' },
+              meal_name: { type: 'string' },
+              protein_g: { type: 'number' },
+              calories: { type: 'number' },
+              sort_order: { type: 'number' },
+            },
+            required: ['day_of_week', 'meal_slot', 'meal_name'],
+          },
+        },
+      },
+      required: ['meals'],
+    },
+  },
+  {
+    name: 'log_body_comp',
+    description: 'Logs a body composition snapshot (weight, body fat %, measurements).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        weight_kg: { type: 'number' },
+        body_fat_pct: { type: 'number' },
+        lean_mass_kg: { type: 'number' },
+        height_cm: { type: 'number' },
+        measurements: {
+          type: 'array',
+          description: 'Tape measurements by site',
+          items: {
+            type: 'object',
+            properties: {
+              site: { type: 'string', description: 'e.g. "waist", "hips", "chest", "thigh"' },
+              value_cm: { type: 'number' },
+            },
+            required: ['site', 'value_cm'],
+          },
+        },
+        notes: { type: 'string' },
+      },
+    },
+  },
+  // ── Coaching notes ───────────────────────────────────────────────────────────
+  {
+    name: 'list_coaching_notes',
+    description: 'Returns Claude-authored coaching notes, optionally filtered to pinned or a specific context.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        pinned_only: { type: 'boolean', description: 'If true, return only pinned notes' },
+        context: { type: 'string', description: 'Filter by context: workout | nutrition | body_comp | general' },
+        limit: { type: 'number', description: 'Max results (default 50)' },
+      },
+    },
+  },
+  {
+    name: 'create_coaching_note',
+    description: 'Creates a coaching note that Claude can pin for persistent context.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        note: { type: 'string', description: 'Note content' },
+        context: { type: 'string', description: 'workout | nutrition | body_comp | general' },
+        pinned: { type: 'boolean', description: 'Pin this note for easy recall' },
+      },
+      required: ['note'],
+    },
+  },
+  {
+    name: 'update_coaching_note',
+    description: 'Updates an existing coaching note (content, context, or pinned state).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        uuid: { type: 'string' },
+        note: { type: 'string' },
+        context: { type: 'string' },
+        pinned: { type: 'boolean' },
+      },
+      required: ['uuid'],
+    },
+  },
+  {
+    name: 'delete_coaching_note',
+    description: 'Deletes a coaching note.',
+    inputSchema: {
+      type: 'object',
+      properties: { uuid: { type: 'string' } },
+      required: ['uuid'],
+    },
+  },
+  // ── Training blocks ──────────────────────────────────────────────────────────
+  {
+    name: 'list_training_blocks',
+    description: 'Returns all training blocks (periodisation periods) ordered by start date.',
+    inputSchema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'create_training_block',
+    description: 'Creates a training block defining a periodisation period with a goal and linked plan.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: 'Block name, e.g. "Hypertrophy Phase 1"' },
+        goal: { type: 'string', description: 'strength | hypertrophy | endurance | cut | recomp | maintenance' },
+        started_at: { type: 'string', description: 'ISO date, e.g. "2026-04-07"' },
+        ended_at: { type: 'string', description: 'ISO date (optional)' },
+        workout_plan_uuid: { type: 'string', description: 'UUID of the linked workout plan (optional)' },
+        notes: { type: 'string' },
+      },
+      required: ['name', 'goal', 'started_at'],
+    },
+  },
+  {
+    name: 'update_training_block',
+    description: 'Updates a training block.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        uuid: { type: 'string' },
+        name: { type: 'string' },
+        goal: { type: 'string' },
+        started_at: { type: 'string' },
+        ended_at: { type: 'string' },
+        notes: { type: 'string' },
+        workout_plan_uuid: { type: 'string' },
+      },
+      required: ['uuid'],
+    },
+  },
+  {
+    name: 'delete_training_block',
+    description: 'Deletes a training block.',
+    inputSchema: {
+      type: 'object',
+      properties: { uuid: { type: 'string' } },
+      required: ['uuid'],
+    },
+  },
+];
 
 // ── Tool handlers ─────────────────────────────────────────────────────────────
 
-async function handleTool(method: string, params: Record<string, unknown>) {
-  switch (method) {
-
-    // ── READERS ────────────────────────────────────────────────────────────
-
-    case 'get_recent_workouts': {
-      const limit = typeof params.limit === 'number' ? params.limit : 10;
-      return getLastWorkoutsWithDetails(Math.min(limit, 50));
+async function handleToolCall(name: string, args: Record<string, unknown>) {
+  try {
+    switch (name) {
+      case 'get_recent_workouts': return await getRecentWorkouts(args);
+      case 'get_exercise_history': return await getExerciseHistory(args);
+      case 'get_active_routine': return await getActiveRoutine();
+      case 'get_active_nutrition_plan': return await getActiveNutritionPlan();
+      case 'get_body_comp_trend': return await getBodyCompTrend(args);
+      case 'get_weekly_summary': return await getWeeklySummary();
+      case 'find_exercises': return await findExercises(args);
+      case 'create_routine': return await createRoutine(args);
+      case 'activate_routine': return await activateRoutine(args);
+      case 'update_set_targets': return await updateSetTargets(args);
+      case 'swap_exercise': return await swapExercise(args);
+      case 'load_nutrition_plan': return await loadNutritionPlan(args);
+      case 'log_body_comp': return await logBodyComp(args);
+      case 'list_coaching_notes': return await listCoachingNotes(args);
+      case 'create_coaching_note': return await createCoachingNote(args);
+      case 'update_coaching_note': return await updateCoachingNote(args);
+      case 'delete_coaching_note': return await deleteCoachingNote(args);
+      case 'list_training_blocks': return await listTrainingBlocks();
+      case 'create_training_block': return await createTrainingBlock(args);
+      case 'update_training_block': return await updateTrainingBlock(args);
+      case 'delete_training_block': return await deleteTrainingBlock(args);
+      default: return toolError(`Unknown tool: ${name}`);
     }
+  } catch (e) {
+    return toolError(e instanceof Error ? e.message : String(e));
+  }
+}
 
-    case 'get_exercise_history': {
-      const { exercise_uuid, since_days } = params;
-      if (typeof exercise_uuid !== 'string') throw { code: -32602, message: 'exercise_uuid required' };
-      const since = typeof since_days === 'number'
-        ? new Date(Date.now() - since_days * 86400_000)
-        : undefined;
-      const [progress, prs] = await Promise.all([
-        getExerciseProgress(exercise_uuid, since),
-        getExercisePRs(exercise_uuid),
-      ]);
-      return { exercise_uuid, progress, prs };
-    }
+// ── Read: get_recent_workouts ─────────────────────────────────────────────────
 
-    case 'get_active_routine': {
-      const data = await getActivePlanWithRoutines();
-      if (!data) return null;
-      return data;
-    }
+async function getRecentWorkouts(args: Record<string, unknown>) {
+  const limit = Math.min(Number(args.limit ?? 10), 50);
 
-    case 'get_active_nutrition_plan': {
-      const meals = await listNutritionWeekMeals();
-      // Group by day for readability
-      const byDay: Record<number, typeof meals> = {};
-      for (const meal of meals) {
-        if (!byDay[meal.day_of_week]) byDay[meal.day_of_week] = [];
-        byDay[meal.day_of_week].push(meal);
-      }
-      return { meals, by_day: byDay };
-    }
+  const workouts = await query<{
+    uuid: string; title: string | null; start_time: string; end_time: string | null;
+    comment: string | null; routine_title: string | null;
+  }>(`
+    SELECT w.uuid, w.title, w.start_time, w.end_time, w.comment,
+           wr.title AS routine_title
+    FROM workouts w
+    LEFT JOIN workout_routines wr ON wr.uuid = w.workout_routine_uuid
+    WHERE w.is_current = false
+    ORDER BY w.start_time DESC
+    LIMIT $1
+  `, [limit]);
 
-    case 'get_body_comp_trend': {
-      const limit = typeof params.limit === 'number' ? params.limit : 30;
-      const [body_spec, measurements, bodyweight] = await Promise.all([
-        listBodySpecLogs(Math.min(limit, 180)),
-        listMeasurementLogs({ limit: Math.min(limit * 10, 500) }),
-        listBodyweightLogs(Math.min(limit, 180)),
-      ]);
-      return { body_spec, measurements, bodyweight };
-    }
+  if (workouts.length === 0) return toolResult([]);
 
-    case 'get_weekly_summary': {
-      const [workouts, volume, streak, muscleRows] = await Promise.all([
-        getWeekWorkouts(),
-        getWeekVolume(),
-        getWorkoutStreak(),
-        getWeekMuscleFrequency(),
-      ]);
+  const uuids = workouts.map(w => w.uuid);
+  const exercises = await query<{
+    workout_uuid: string; exercise_uuid: string; exercise_title: string;
+    we_uuid: string; order_index: number;
+  }>(`
+    SELECT we.workout_uuid, we.exercise_uuid, e.title AS exercise_title,
+           we.uuid AS we_uuid, we.order_index
+    FROM workout_exercises we
+    JOIN exercises e ON e.uuid = we.exercise_uuid
+    WHERE we.workout_uuid = ANY($1)
+    ORDER BY we.workout_uuid, we.order_index
+  `, [uuids]);
 
-      // Flatten muscle group mentions into a frequency map
-      const muscleFreq: Record<string, number> = {};
-      for (const row of muscleRows) {
-        const muscles = Array.isArray(row.primary_muscles)
-          ? row.primary_muscles
-          : JSON.parse((row.primary_muscles as string) || '[]');
-        for (const m of muscles) {
-          muscleFreq[m] = (muscleFreq[m] ?? 0) + 1;
-        }
-      }
+  const weUuids = exercises.map(e => e.we_uuid);
+  const sets = weUuids.length > 0 ? await query<{
+    workout_exercise_uuid: string; weight: number | null; repetitions: number | null;
+    rpe: number | null; is_completed: boolean; is_pr: boolean; order_index: number;
+  }>(`
+    SELECT workout_exercise_uuid, weight, repetitions, rpe, is_completed, is_pr, order_index
+    FROM workout_sets
+    WHERE workout_exercise_uuid = ANY($1)
+    ORDER BY workout_exercise_uuid, order_index
+  `, [weUuids]) : [];
 
-      return {
-        workouts_this_week: workouts.length,
-        total_volume_kg: volume,
-        week_streak: streak.length,
-        muscle_frequency: muscleFreq,
-        workouts,
-      };
-    }
+  // Assemble
+  const setsByWe = sets.reduce((acc, s) => {
+    (acc[s.workout_exercise_uuid] ??= []).push(s);
+    return acc;
+  }, {} as Record<string, typeof sets>);
 
-    // ── FINDERS ────────────────────────────────────────────────────────────
+  const exByWorkout = exercises.reduce((acc, e) => {
+    (acc[e.workout_uuid] ??= []).push({ ...e, sets: setsByWe[e.we_uuid] ?? [] });
+    return acc;
+  }, {} as Record<string, unknown[]>);
 
-    case 'find_exercises': {
-      const search = typeof params.search === 'string' ? params.search : undefined;
-      const muscleGroup = typeof params.muscle_group === 'string' ? params.muscle_group : undefined;
-      const equipment = typeof params.equipment === 'string' ? params.equipment : undefined;
+  return toolResult(workouts.map(w => ({ ...w, exercises: exByWorkout[w.uuid] ?? [] })));
+}
 
-      if (!search && !muscleGroup && !equipment) {
-        throw { code: -32602, message: 'At least one of search, muscle_group, or equipment required' };
-      }
+// ── Read: get_exercise_history ────────────────────────────────────────────────
 
-      const exercises = await listExercises({ search, muscleGroup, equipment });
-      return { count: exercises.length, exercises: exercises.slice(0, 20) };
-    }
+async function getExerciseHistory(args: Record<string, unknown>) {
+  const { exercise_uuid, limit = 20 } = args as { exercise_uuid: string; limit?: number };
 
-    // ── WRITERS ────────────────────────────────────────────────────────────
+  const rows = await query<{
+    session_date: string; weight: number | null; repetitions: number | null;
+    rpe: number | null; is_pr: boolean; set_order: number;
+  }>(`
+    SELECT w.start_time AS session_date,
+           ws.weight, ws.repetitions, ws.rpe, ws.is_pr, ws.order_index AS set_order
+    FROM workout_sets ws
+    JOIN workout_exercises we ON we.uuid = ws.workout_exercise_uuid
+    JOIN workouts w ON w.uuid = we.workout_uuid
+    WHERE we.exercise_uuid = $1
+      AND w.is_current = false
+      AND ws.is_completed = true
+    ORDER BY w.start_time DESC, ws.order_index
+    LIMIT $2
+  `, [exercise_uuid, Math.min(Number(limit), 100)]);
 
-    case 'create_routine': {
-      const { title, routines } = params;
-      if (typeof title !== 'string') throw { code: -32602, message: 'title required' };
+  return toolResult(rows);
+}
 
-      const plan = await createPlan(title);
+// ── Read: get_active_routine ──────────────────────────────────────────────────
 
-      // routines: Array<{ title, exercises: Array<{ exercise_uuid, sets: Array<{ min_reps, max_reps }> }> }>
-      if (Array.isArray(routines)) {
-        for (let ri = 0; ri < routines.length; ri++) {
-          const r = routines[ri] as Record<string, unknown>;
-          if (typeof r.title !== 'string') continue;
+async function getActiveRoutine() {
+  const plan = await queryOne<{ uuid: string; title: string | null }>(`
+    SELECT uuid, title FROM workout_plans WHERE is_active = true LIMIT 1
+  `);
 
-          const routine = await createRoutine(plan.uuid, r.title);
+  if (!plan) return toolResult(null);
 
-          if (Array.isArray(r.exercises)) {
-            for (let ei = 0; ei < r.exercises.length; ei++) {
-              const e = r.exercises[ei] as Record<string, unknown>;
-              if (typeof e.exercise_uuid !== 'string') continue;
+  const routines = await query<{
+    uuid: string; title: string | null; comment: string | null; order_index: number;
+  }>(`
+    SELECT uuid, title, comment, order_index
+    FROM workout_routines WHERE workout_plan_uuid = $1
+    ORDER BY order_index
+  `, [plan.uuid]);
 
-              const re = await addExerciseToRoutine(routine.uuid, e.exercise_uuid);
+  const rUuids = routines.map(r => r.uuid);
+  const rExercises = rUuids.length > 0 ? await query<{
+    routine_uuid: string; re_uuid: string; exercise_uuid: string;
+    exercise_title: string; order_index: number;
+  }>(`
+    SELECT wre.workout_routine_uuid AS routine_uuid, wre.uuid AS re_uuid,
+           wre.exercise_uuid, e.title AS exercise_title, wre.order_index
+    FROM workout_routine_exercises wre
+    JOIN exercises e ON e.uuid = wre.exercise_uuid
+    WHERE wre.workout_routine_uuid = ANY($1)
+    ORDER BY wre.workout_routine_uuid, wre.order_index
+  `, [rUuids]) : [];
 
-              if (Array.isArray(e.sets)) {
-                for (const s of e.sets as Record<string, unknown>[]) {
-                  await addRoutineSet(re.uuid, {
-                    minRepetitions: typeof s.min_reps === 'number' ? s.min_reps : undefined,
-                    maxRepetitions: typeof s.max_reps === 'number' ? s.max_reps : undefined,
-                  });
-                }
-              }
-            }
-          }
-        }
-      }
+  const reUuids = rExercises.map(e => e.re_uuid);
+  const rSets = reUuids.length > 0 ? await query<{
+    workout_routine_exercise_uuid: string; min_repetitions: number | null;
+    max_repetitions: number | null; order_index: number;
+  }>(`
+    SELECT workout_routine_exercise_uuid, min_repetitions, max_repetitions, order_index
+    FROM workout_routine_sets
+    WHERE workout_routine_exercise_uuid = ANY($1)
+    ORDER BY workout_routine_exercise_uuid, order_index
+  `, [reUuids]) : [];
 
-      // Return what was just created regardless of active state
-      const allPlans = await listPlans();
-      const created = allPlans.find(p => p.uuid === plan.uuid);
-      return { plan: created ?? plan };
-    }
+  const setsByRe = rSets.reduce((acc, s) => {
+    (acc[s.workout_routine_exercise_uuid] ??= []).push(s);
+    return acc;
+  }, {} as Record<string, typeof rSets>);
 
-    case 'activate_routine': {
-      const { plan_uuid } = params;
-      if (typeof plan_uuid !== 'string') throw { code: -32602, message: 'plan_uuid required' };
-      await activatePlan(plan_uuid);
-      const data = await getActivePlanWithRoutines();
-      return { activated: plan_uuid, active_plan: data };
-    }
+  const exByRoutine = rExercises.reduce((acc, e) => {
+    (acc[e.routine_uuid] ??= []).push({ ...e, sets: setsByRe[e.re_uuid] ?? [] });
+    return acc;
+  }, {} as Record<string, unknown[]>);
 
-    case 'update_set_targets': {
-      // Updates rep targets across multiple sets in a routine
-      // sets: Array<{ routine_set_uuid, min_reps?, max_reps? }>
-      const { sets } = params;
-      if (!Array.isArray(sets) || sets.length === 0) {
-        throw { code: -32602, message: 'sets array required' };
-      }
+  return toolResult({
+    ...plan,
+    routines: routines.map(r => ({ ...r, exercises: exByRoutine[r.uuid] ?? [] })),
+  });
+}
 
-      const results = [];
-      for (const s of sets as Record<string, unknown>[]) {
-        if (typeof s.routine_set_uuid !== 'string') continue;
-        const updated = await updateRoutineSet(s.routine_set_uuid, {
-          min_repetitions: typeof s.min_reps === 'number' ? s.min_reps : undefined,
-          max_repetitions: typeof s.max_reps === 'number' ? s.max_reps : undefined,
-        });
-        results.push(updated);
-      }
-      return { updated: results.length, sets: results };
-    }
+// ── Read: get_active_nutrition_plan ──────────────────────────────────────────
 
-    case 'swap_exercise': {
-      const { plan_uuid, from_exercise_uuid, to_exercise_uuid } = params;
-      if (typeof plan_uuid !== 'string') throw { code: -32602, message: 'plan_uuid required' };
-      if (typeof from_exercise_uuid !== 'string') throw { code: -32602, message: 'from_exercise_uuid required' };
-      if (typeof to_exercise_uuid !== 'string') throw { code: -32602, message: 'to_exercise_uuid required' };
+async function getActiveNutritionPlan() {
+  const meals = await query(`
+    SELECT day_of_week, meal_slot, meal_name, protein_g, calories, sort_order
+    FROM nutrition_week_meals
+    ORDER BY day_of_week, sort_order
+  `);
+  return toolResult(meals);
+}
 
-      const count = await swapExerciseInPlan(plan_uuid, from_exercise_uuid, to_exercise_uuid);
-      return { swapped_count: count, plan_uuid, from: from_exercise_uuid, to: to_exercise_uuid };
-    }
+// ── Read: get_body_comp_trend ─────────────────────────────────────────────────
 
-    case 'load_nutrition_plan': {
-      const { meals } = params;
-      if (!Array.isArray(meals) || meals.length === 0) {
-        throw { code: -32602, message: 'meals array required' };
-      }
+async function getBodyCompTrend(args: Record<string, unknown>) {
+  const days = Number(args.days ?? 90);
 
-      const mealInputs: NutritionWeekMealInput[] = (meals as Record<string, unknown>[]).map(m => {
-        if (typeof m.day_of_week !== 'number' || typeof m.meal_name !== 'string') {
-          throw { code: -32602, message: 'Each meal requires day_of_week (number) and meal_name (string)' };
-        }
-        return {
-          day_of_week: m.day_of_week,
-          meal_slot: typeof m.meal_slot === 'string' ? m.meal_slot : 'meal',
-          meal_name: m.meal_name,
-          protein_g: typeof m.protein_g === 'number' ? m.protein_g : null,
-          calories: typeof m.calories === 'number' ? m.calories : null,
-          quality_rating: typeof m.quality_rating === 'number' ? m.quality_rating : null,
-          sort_order: typeof m.sort_order === 'number' ? m.sort_order : 0,
-        };
-      });
+  const [bodySpec, bodyweight, measurements] = await Promise.all([
+    query(`
+      SELECT measured_at, weight_kg, body_fat_pct, lean_mass_kg, height_cm, notes
+      FROM body_spec_logs
+      WHERE measured_at > NOW() - ($1 || ' days')::interval
+      ORDER BY measured_at DESC
+    `, [days]),
+    query(`
+      SELECT logged_at, weight_kg
+      FROM bodyweight_logs
+      WHERE logged_at > NOW() - ($1 || ' days')::interval
+      ORDER BY logged_at DESC
+    `, [days]),
+    query(`
+      SELECT site, value_cm, measured_at
+      FROM measurement_logs
+      WHERE measured_at > NOW() - ($1 || ' days')::interval
+      ORDER BY site, measured_at DESC
+    `, [days]),
+  ]);
 
-      const inserted = await replaceNutritionWeekPlan(mealInputs);
-      return { replaced: inserted.length, meals: inserted };
-    }
+  return toolResult({ body_spec: bodySpec, bodyweight, measurements });
+}
 
-    case 'log_body_comp': {
-      const { measured_at } = params;
-      const results: Record<string, unknown> = {};
+// ── Read: get_weekly_summary ──────────────────────────────────────────────────
 
-      // Body spec (InBody / DEXA style)
-      if (params.body_fat_pct != null || params.lean_mass_kg != null || params.weight_kg != null) {
-        results.body_spec = await createBodySpecLog({
-          height_cm: typeof params.height_cm === 'number' ? params.height_cm : null,
-          weight_kg: typeof params.weight_kg === 'number' ? params.weight_kg : null,
-          body_fat_pct: typeof params.body_fat_pct === 'number' ? params.body_fat_pct : null,
-          lean_mass_kg: typeof params.lean_mass_kg === 'number' ? params.lean_mass_kg : null,
-          notes: typeof params.notes === 'string' ? params.notes : null,
-          measured_at: typeof measured_at === 'string' ? measured_at : new Date().toISOString(),
-        });
-      }
+async function getWeeklySummary() {
+  const [workouts, nutrition, bodyweight] = await Promise.all([
+    query(`
+      SELECT w.uuid, w.title, w.start_time, w.end_time,
+             COUNT(ws.uuid) AS sets_completed
+      FROM workouts w
+      LEFT JOIN workout_exercises we ON we.workout_uuid = w.uuid
+      LEFT JOIN workout_sets ws ON ws.workout_exercise_uuid = we.uuid AND ws.is_completed = true
+      WHERE w.start_time >= date_trunc('week', NOW())
+        AND w.is_current = false
+      GROUP BY w.uuid, w.title, w.start_time, w.end_time
+      ORDER BY w.start_time
+    `),
+    query(`
+      SELECT day_local,
+             SUM(calories) AS total_calories,
+             SUM(protein_g) AS total_protein_g
+      FROM nutrition_food_entries
+      WHERE day_local >= to_char(date_trunc('week', NOW()), 'YYYY-MM-DD')
+      GROUP BY day_local
+      ORDER BY day_local
+    `),
+    queryOne(`
+      SELECT weight_kg, logged_at
+      FROM bodyweight_logs
+      ORDER BY logged_at DESC
+      LIMIT 1
+    `),
+  ]);
 
-      // Tape measurements
-      if (params.measurements && typeof params.measurements === 'object') {
-        const m = params.measurements as Record<string, number>;
-        const measurementEntries = Object.entries(m);
-        const measurementResults = [];
-        for (const [site, value_cm] of measurementEntries) {
-          if (typeof value_cm === 'number') {
-            const log = await createMeasurementLog({
-              site,
-              value_cm,
-              notes: null,
-              measured_at: typeof measured_at === 'string' ? measured_at : undefined,
-            });
-            measurementResults.push(log);
-          }
-        }
-        results.measurements = measurementResults;
-      }
+  return toolResult({ workouts, nutrition, latest_bodyweight: bodyweight });
+}
 
-      // Scale weight only
-      if (params.weight_kg != null && params.body_fat_pct == null) {
-        results.bodyweight = await logBodyweight(
-          params.weight_kg as number,
-          typeof params.notes === 'string' ? params.notes : undefined,
+// ── Write: find_exercises ─────────────────────────────────────────────────────
+
+async function findExercises(args: Record<string, unknown>) {
+  const { query: q, muscle_group } = args as { query: string; muscle_group?: string };
+
+  const pattern = `%${q}%`;
+  let rows;
+
+  if (muscle_group) {
+    rows = await query(`
+      SELECT uuid, title, primary_muscles, secondary_muscles, equipment
+      FROM exercises
+      WHERE is_hidden = false
+        AND (title ILIKE $1 OR alias::text ILIKE $1)
+        AND (primary_muscles::text ILIKE $2 OR secondary_muscles::text ILIKE $2)
+      ORDER BY title
+      LIMIT 15
+    `, [pattern, `%${muscle_group}%`]);
+  } else {
+    rows = await query(`
+      SELECT uuid, title, primary_muscles, secondary_muscles, equipment
+      FROM exercises
+      WHERE is_hidden = false
+        AND (title ILIKE $1 OR alias::text ILIKE $1)
+      ORDER BY title
+      LIMIT 15
+    `, [pattern]);
+  }
+
+  return toolResult(rows);
+}
+
+// ── Write: create_routine ─────────────────────────────────────────────────────
+
+async function createRoutine(args: Record<string, unknown>) {
+  const { title, routines } = args as {
+    title: string;
+    routines: Array<{
+      title: string;
+      order_index: number;
+      exercises?: Array<{
+        exercise_uuid: string;
+        order_index: number;
+        sets?: Array<{ min_repetitions?: number; max_repetitions?: number; order_index: number }>;
+      }>;
+    }>;
+  };
+
+  const planUuid = crypto.randomUUID();
+
+  await query('INSERT INTO workout_plans (uuid, title) VALUES ($1, $2)', [planUuid, title]);
+
+  for (const routine of routines) {
+    const rUuid = crypto.randomUUID();
+    await query(
+      'INSERT INTO workout_routines (uuid, workout_plan_uuid, title, order_index) VALUES ($1, $2, $3, $4)',
+      [rUuid, planUuid, routine.title, routine.order_index]
+    );
+
+    for (const ex of routine.exercises ?? []) {
+      const reUuid = crypto.randomUUID();
+      await query(
+        'INSERT INTO workout_routine_exercises (uuid, workout_routine_uuid, exercise_uuid, order_index) VALUES ($1, $2, $3, $4)',
+        [reUuid, rUuid, ex.exercise_uuid, ex.order_index]
+      );
+
+      for (const s of ex.sets ?? []) {
+        await query(
+          'INSERT INTO workout_routine_sets (uuid, workout_routine_exercise_uuid, min_repetitions, max_repetitions, order_index) VALUES ($1, $2, $3, $4, $5)',
+          [crypto.randomUUID(), reUuid, s.min_repetitions ?? null, s.max_repetitions ?? null, s.order_index]
         );
       }
-
-      return results;
     }
-
-    // ── COACHING NOTES ─────────────────────────────────────────────────────
-
-    case 'list_coaching_notes': {
-      const pinned_only = params.pinned_only === true;
-      const category = typeof params.category === 'string' ? params.category : undefined;
-      const limit = typeof params.limit === 'number' ? params.limit : 50;
-      return listCoachingNotes({ pinned_only, category, limit });
-    }
-
-    case 'create_coaching_note': {
-      const { content } = params;
-      if (typeof content !== 'string') throw { code: -32602, message: 'content required' };
-      return createCoachingNote({
-        content,
-        is_pinned: params.is_pinned === true,
-        category: typeof params.category === 'string' ? params.category : null,
-        related_exercise_uuid: typeof params.related_exercise_uuid === 'string' ? params.related_exercise_uuid : null,
-      });
-    }
-
-    case 'update_coaching_note': {
-      const { uuid } = params;
-      if (typeof uuid !== 'string') throw { code: -32602, message: 'uuid required' };
-      return updateCoachingNote(uuid, {
-        content: typeof params.content === 'string' ? params.content : undefined,
-        is_pinned: typeof params.is_pinned === 'boolean' ? params.is_pinned : undefined,
-        category: params.category !== undefined ? (params.category as string | null) : undefined,
-        related_exercise_uuid: params.related_exercise_uuid !== undefined
-          ? (params.related_exercise_uuid as string | null)
-          : undefined,
-      });
-    }
-
-    case 'delete_coaching_note': {
-      const { uuid } = params;
-      if (typeof uuid !== 'string') throw { code: -32602, message: 'uuid required' };
-      await deleteCoachingNote(uuid);
-      return { deleted: uuid };
-    }
-
-    // ── TRAINING BLOCKS ────────────────────────────────────────────────────
-
-    case 'list_training_blocks': {
-      return listTrainingBlocks();
-    }
-
-    case 'create_training_block': {
-      const { title, start_date, end_date } = params;
-      if (typeof title !== 'string') throw { code: -32602, message: 'title required' };
-      if (typeof start_date !== 'string') throw { code: -32602, message: 'start_date required' };
-      if (typeof end_date !== 'string') throw { code: -32602, message: 'end_date required' };
-      return createTrainingBlock({
-        title,
-        start_date,
-        end_date,
-        goal: typeof params.goal === 'string' ? params.goal : null,
-        workout_plan_uuid: typeof params.workout_plan_uuid === 'string' ? params.workout_plan_uuid : null,
-        notes: typeof params.notes === 'string' ? params.notes : null,
-      });
-    }
-
-    case 'update_training_block': {
-      const { uuid } = params;
-      if (typeof uuid !== 'string') throw { code: -32602, message: 'uuid required' };
-      return updateTrainingBlock(uuid, {
-        title: typeof params.title === 'string' ? params.title : undefined,
-        goal: params.goal !== undefined ? (params.goal as string | null) : undefined,
-        start_date: typeof params.start_date === 'string' ? params.start_date : undefined,
-        end_date: typeof params.end_date === 'string' ? params.end_date : undefined,
-        notes: params.notes !== undefined ? (params.notes as string | null) : undefined,
-        workout_plan_uuid: params.workout_plan_uuid !== undefined
-          ? (params.workout_plan_uuid as string | null)
-          : undefined,
-      });
-    }
-
-    case 'delete_training_block': {
-      const { uuid } = params;
-      if (typeof uuid !== 'string') throw { code: -32602, message: 'uuid required' };
-      await deleteTrainingBlock(uuid);
-      return { deleted: uuid };
-    }
-
-    default:
-      throw { code: -32601, message: `Method not found: ${method}` };
   }
+
+  return toolResult({ plan_uuid: planUuid, message: `Created routine "${title}" with ${routines.length} day(s).` });
+}
+
+// ── Write: activate_routine ───────────────────────────────────────────────────
+
+async function activateRoutine(args: Record<string, unknown>) {
+  const { plan_uuid } = args as { plan_uuid: string };
+
+  const plan = await queryOne('SELECT uuid, title FROM workout_plans WHERE uuid = $1', [plan_uuid]);
+  if (!plan) return toolError(`Plan ${plan_uuid} not found`);
+
+  // Atomic swap — deactivate all then activate target
+  await query('UPDATE workout_plans SET is_active = false WHERE is_active = true');
+  await query('UPDATE workout_plans SET is_active = true WHERE uuid = $1', [plan_uuid]);
+
+  return toolResult({ activated: plan_uuid, message: `Plan is now active.` });
+}
+
+// ── Write: update_set_targets ─────────────────────────────────────────────────
+
+async function updateSetTargets(args: Record<string, unknown>) {
+  const { routine_uuid, exercise_uuid, sets } = args as {
+    routine_uuid: string;
+    exercise_uuid: string;
+    sets: Array<{ order_index: number; min_repetitions?: number; max_repetitions?: number }>;
+  };
+
+  const re = await queryOne<{ uuid: string }>(
+    'SELECT uuid FROM workout_routine_exercises WHERE workout_routine_uuid = $1 AND exercise_uuid = $2 LIMIT 1',
+    [routine_uuid, exercise_uuid]
+  );
+  if (!re) return toolError(`Exercise ${exercise_uuid} not found in routine ${routine_uuid}`);
+
+  let updated = 0;
+  for (const s of sets) {
+    const result = await query(
+      `UPDATE workout_routine_sets
+       SET min_repetitions = COALESCE($1, min_repetitions),
+           max_repetitions = COALESCE($2, max_repetitions)
+       WHERE workout_routine_exercise_uuid = $3 AND order_index = $4`,
+      [s.min_repetitions ?? null, s.max_repetitions ?? null, re.uuid, s.order_index]
+    );
+    if (result.length >= 0) updated++;
+  }
+
+  return toolResult({ updated_sets: updated });
+}
+
+// ── Write: swap_exercise ──────────────────────────────────────────────────────
+
+async function swapExercise(args: Record<string, unknown>) {
+  const { plan_uuid, old_exercise_uuid, new_exercise_uuid } = args as {
+    plan_uuid: string; old_exercise_uuid: string; new_exercise_uuid: string;
+  };
+
+  const newEx = await queryOne<{ title: string }>(
+    'SELECT title FROM exercises WHERE uuid = $1 AND is_hidden = false',
+    [new_exercise_uuid]
+  );
+  if (!newEx) return toolError(`Exercise ${new_exercise_uuid} not found`);
+
+  await query(`
+    UPDATE workout_routine_exercises
+    SET exercise_uuid = $1
+    WHERE exercise_uuid = $2
+      AND workout_routine_uuid IN (
+        SELECT uuid FROM workout_routines WHERE workout_plan_uuid = $3
+      )
+  `, [new_exercise_uuid, old_exercise_uuid, plan_uuid]);
+
+  return toolResult({ message: `Swapped to "${newEx.title}" across all days in plan.` });
+}
+
+// ── Write: load_nutrition_plan ────────────────────────────────────────────────
+
+async function loadNutritionPlan(args: Record<string, unknown>) {
+  const { meals } = args as {
+    meals: Array<{
+      day_of_week: number; meal_slot: string; meal_name: string;
+      protein_g?: number; calories?: number; sort_order?: number;
+    }>;
+  };
+
+  // Full replace — delete all then insert
+  await query('DELETE FROM nutrition_week_meals');
+
+  for (const m of meals) {
+    await query(
+      `INSERT INTO nutrition_week_meals (uuid, day_of_week, meal_slot, meal_name, protein_g, calories, sort_order)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      [
+        crypto.randomUUID(), m.day_of_week, m.meal_slot, m.meal_name,
+        m.protein_g ?? null, m.calories ?? null, m.sort_order ?? 0,
+      ]
+    );
+  }
+
+  return toolResult({ loaded: meals.length, message: `Nutrition plan loaded with ${meals.length} meal entries.` });
+}
+
+// ── Write: log_body_comp ──────────────────────────────────────────────────────
+
+async function logBodyComp(args: Record<string, unknown>) {
+  const { weight_kg, body_fat_pct, lean_mass_kg, height_cm, measurements = [], notes } = args as {
+    weight_kg?: number; body_fat_pct?: number; lean_mass_kg?: number;
+    height_cm?: number; measurements?: Array<{ site: string; value_cm: number }>;
+    notes?: string;
+  };
+
+  const logged: string[] = [];
+
+  if (weight_kg !== undefined) {
+    await query(
+      'INSERT INTO bodyweight_logs (uuid, weight_kg, logged_at) VALUES ($1, $2, NOW())',
+      [crypto.randomUUID(), weight_kg]
+    );
+    logged.push('bodyweight');
+  }
+
+  if (body_fat_pct !== undefined || lean_mass_kg !== undefined || height_cm !== undefined) {
+    await query(
+      `INSERT INTO body_spec_logs (uuid, weight_kg, body_fat_pct, lean_mass_kg, height_cm, notes, measured_at)
+       VALUES ($1, $2, $3, $4, $5, $6, NOW())`,
+      [crypto.randomUUID(), weight_kg ?? null, body_fat_pct ?? null, lean_mass_kg ?? null, height_cm ?? null, notes ?? null]
+    );
+    logged.push('body_spec');
+  }
+
+  for (const m of measurements as Array<{ site: string; value_cm: number }>) {
+    await query(
+      'INSERT INTO measurement_logs (uuid, site, value_cm, measured_at) VALUES ($1, $2, $3, NOW())',
+      [crypto.randomUUID(), m.site, m.value_cm]
+    );
+  }
+  if ((measurements as unknown[]).length > 0) logged.push(`${(measurements as unknown[]).length} measurements`);
+
+  return toolResult({ logged, message: `Logged: ${logged.join(', ') || 'nothing'}.` });
+}
+
+// ── Coaching notes ────────────────────────────────────────────────────────────
+
+async function listCoachingNotes(args: Record<string, unknown>) {
+  const conditions: string[] = [];
+  const params: unknown[] = [];
+  let p = 0;
+
+  if (args.pinned_only === true) conditions.push('pinned = true');
+  if (typeof args.context === 'string') { conditions.push(`context = $${++p}`); params.push(args.context); }
+
+  const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+  const limit = Math.min(Number(args.limit ?? 50), 200);
+  params.push(limit);
+
+  const rows = await query(
+    `SELECT * FROM coaching_notes ${where} ORDER BY pinned DESC, created_at DESC LIMIT $${++p}`,
+    params
+  );
+  return toolResult(rows);
+}
+
+async function createCoachingNote(args: Record<string, unknown>) {
+  const { note, context = null, pinned = false } = args;
+  if (typeof note !== 'string') return toolError('note is required');
+
+  const row = await queryOne(
+    `INSERT INTO coaching_notes (uuid, note, context, pinned) VALUES ($1, $2, $3, $4) RETURNING *`,
+    [crypto.randomUUID(), note, context ?? null, Boolean(pinned)]
+  );
+  return toolResult(row);
+}
+
+async function updateCoachingNote(args: Record<string, unknown>) {
+  const { uuid } = args;
+  if (typeof uuid !== 'string') return toolError('uuid is required');
+
+  const fields: string[] = [];
+  const params: unknown[] = [];
+  let p = 0;
+
+  if (typeof args.note === 'string') { fields.push(`note = $${++p}`); params.push(args.note); }
+  if (args.context !== undefined) { fields.push(`context = $${++p}`); params.push(args.context ?? null); }
+  if (typeof args.pinned === 'boolean') { fields.push(`pinned = $${++p}`); params.push(args.pinned); }
+
+  if (fields.length === 0) return toolError('No fields to update');
+
+  params.push(uuid);
+  const row = await queryOne(
+    `UPDATE coaching_notes SET ${fields.join(', ')} WHERE uuid = $${++p} RETURNING *`,
+    params
+  );
+  return row ? toolResult(row) : toolError('Note not found');
+}
+
+async function deleteCoachingNote(args: Record<string, unknown>) {
+  const { uuid } = args;
+  if (typeof uuid !== 'string') return toolError('uuid is required');
+  await query(`DELETE FROM coaching_notes WHERE uuid = $1`, [uuid]);
+  return toolResult({ deleted: uuid });
+}
+
+// ── Training blocks ───────────────────────────────────────────────────────────
+
+async function listTrainingBlocks() {
+  const rows = await query(`SELECT * FROM training_blocks ORDER BY started_at DESC`);
+  return toolResult(rows);
+}
+
+async function createTrainingBlock(args: Record<string, unknown>) {
+  const { name, goal, started_at, ended_at = null, workout_plan_uuid = null, notes = null } = args;
+  if (typeof name !== 'string') return toolError('name is required');
+  if (typeof goal !== 'string') return toolError('goal is required');
+  if (typeof started_at !== 'string') return toolError('started_at is required');
+
+  const row = await queryOne(
+    `INSERT INTO training_blocks (uuid, name, goal, started_at, ended_at, workout_plan_uuid, notes)
+     VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
+    [crypto.randomUUID(), name, goal, started_at, ended_at ?? null, workout_plan_uuid ?? null, notes ?? null]
+  );
+  return toolResult(row);
+}
+
+async function updateTrainingBlock(args: Record<string, unknown>) {
+  const { uuid } = args;
+  if (typeof uuid !== 'string') return toolError('uuid is required');
+
+  const fields: string[] = [];
+  const params: unknown[] = [];
+  let p = 0;
+
+  if (typeof args.name === 'string') { fields.push(`name = $${++p}`); params.push(args.name); }
+  if (typeof args.goal === 'string') { fields.push(`goal = $${++p}`); params.push(args.goal); }
+  if (typeof args.started_at === 'string') { fields.push(`started_at = $${++p}`); params.push(args.started_at); }
+  if (args.ended_at !== undefined) { fields.push(`ended_at = $${++p}`); params.push(args.ended_at ?? null); }
+  if (args.notes !== undefined) { fields.push(`notes = $${++p}`); params.push(args.notes ?? null); }
+  if (args.workout_plan_uuid !== undefined) { fields.push(`workout_plan_uuid = $${++p}`); params.push(args.workout_plan_uuid ?? null); }
+
+  if (fields.length === 0) return toolError('No fields to update');
+
+  params.push(uuid);
+  const row = await queryOne(
+    `UPDATE training_blocks SET ${fields.join(', ')} WHERE uuid = $${++p} RETURNING *`,
+    params
+  );
+  return row ? toolResult(row) : toolError('Training block not found');
+}
+
+async function deleteTrainingBlock(args: Record<string, unknown>) {
+  const { uuid } = args;
+  if (typeof uuid !== 'string') return toolError('uuid is required');
+  await query(`DELETE FROM training_blocks WHERE uuid = $1`, [uuid]);
+  return toolResult({ deleted: uuid });
 }
 
 // ── Route handler ─────────────────────────────────────────────────────────────
 
 export async function POST(request: NextRequest) {
-  const denied = requireApiKey(request);
-  if (denied) return denied;
+  // Auth check
+  const authErr = requireApiKey(request);
+  if (authErr) return authErr;
 
-  let body: JsonRpcRequest;
+  let body: { jsonrpc?: string; method?: string; params?: Record<string, unknown>; id?: unknown };
   try {
     body = await request.json();
   } catch {
     return err(null, -32700, 'Parse error');
   }
 
-  if (body.jsonrpc !== '2.0' || typeof body.method !== 'string') {
-    return err(body.id ?? null, -32600, 'Invalid Request');
-  }
+  const { method, params = {}, id } = body;
 
-  try {
-    const result = await handleTool(body.method, body.params ?? {});
-    return ok(body.id ?? null, result);
-  } catch (e) {
-    if (e && typeof e === 'object' && 'code' in e && 'message' in e) {
-      const rpcErr = e as JsonRpcError;
-      return err(body.id ?? null, rpcErr.code, rpcErr.message, rpcErr.data);
+  switch (method) {
+    case 'initialize':
+      return ok(id, {
+        protocolVersion: '2024-11-05',
+        capabilities: { tools: {} },
+        serverInfo: { name: 'rebirth', version: '1.0.0' },
+      });
+
+    case 'notifications/initialized':
+      // Fire-and-forget notification — no response body required
+      return new NextResponse(null, { status: 204 });
+
+    case 'ping':
+      return ok(id, {});
+
+    case 'tools/list':
+      return ok(id, { tools: TOOLS });
+
+    case 'tools/call': {
+      const name = params.name as string;
+      const toolArgs = (params.arguments ?? {}) as Record<string, unknown>;
+      const result = await handleToolCall(name, toolArgs);
+      return ok(id, result);
     }
-    console.error('[MCP] Unhandled error:', e);
-    return err(body.id ?? null, -32603, 'Internal error');
+
+    default:
+      return err(id, -32601, `Method not found: ${method}`);
   }
 }
 
-// Introspection: list available tools
-export async function GET(request: NextRequest) {
-  const denied = requireApiKey(request);
-  if (denied) return denied;
-
-  return NextResponse.json({
-    server: 'rebirth-mcp',
-    version: '1.0.0',
-    tools: [
-      // Readers
-      { name: 'get_recent_workouts', description: 'Recent completed workouts with exercises and volume', params: ['limit?'] },
-      { name: 'get_exercise_history', description: 'Progression data and PRs for a specific exercise', params: ['exercise_uuid', 'since_days?'] },
-      { name: 'get_active_routine', description: 'The currently active training plan with all routines and set targets', params: [] },
-      { name: 'get_active_nutrition_plan', description: 'Current week meal plan grouped by day', params: [] },
-      { name: 'get_body_comp_trend', description: 'Body spec, measurements, and weight logs', params: ['limit?'] },
-      { name: 'get_weekly_summary', description: 'This week — workout count, volume, streak, muscle frequency', params: [] },
-      // Finders
-      { name: 'find_exercises', description: 'Fuzzy search the exercise library', params: ['search?', 'muscle_group?', 'equipment?'] },
-      // Writers
-      { name: 'create_routine', description: 'Create a new workout plan with routines and exercises', params: ['title', 'routines?'] },
-      { name: 'activate_routine', description: 'Mark a plan as the active training plan (atomic swap)', params: ['plan_uuid'] },
-      { name: 'update_set_targets', description: 'Update rep targets on routine sets', params: ['sets'] },
-      { name: 'swap_exercise', description: 'Replace an exercise across all routines in a plan', params: ['plan_uuid', 'from_exercise_uuid', 'to_exercise_uuid'] },
-      { name: 'load_nutrition_plan', description: 'Replace the entire week meal plan (transactional)', params: ['meals'] },
-      { name: 'log_body_comp', description: 'Log body composition data (InBody, tape measurements, scale weight)', params: ['weight_kg?', 'body_fat_pct?', 'lean_mass_kg?', 'measurements?', 'measured_at?'] },
-      // Coaching notes
-      { name: 'list_coaching_notes', description: 'List coaching notes, optionally filtered by pinned/category', params: ['pinned_only?', 'category?', 'limit?'] },
-      { name: 'create_coaching_note', description: 'Create a coaching note (pinnable context for Claude)', params: ['content', 'is_pinned?', 'category?', 'related_exercise_uuid?'] },
-      { name: 'update_coaching_note', description: 'Update a coaching note', params: ['uuid', 'content?', 'is_pinned?', 'category?'] },
-      { name: 'delete_coaching_note', description: 'Delete a coaching note', params: ['uuid'] },
-      // Training blocks
-      { name: 'list_training_blocks', description: 'List all training blocks (periodisation)', params: [] },
-      { name: 'create_training_block', description: 'Create a training block with goal, dates, and linked plan', params: ['title', 'start_date', 'end_date', 'goal?', 'workout_plan_uuid?'] },
-      { name: 'update_training_block', description: 'Update a training block', params: ['uuid', 'title?', 'goal?', 'start_date?', 'end_date?', 'notes?'] },
-      { name: 'delete_training_block', description: 'Delete a training block', params: ['uuid'] },
-    ],
-  });
+// MCP servers must not respond to GET with an error (Claude Code health-checks via GET)
+export async function GET() {
+  return NextResponse.json({ name: 'rebirth-mcp', version: '1.0.0', status: 'ok' });
 }

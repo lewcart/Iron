@@ -128,22 +128,78 @@ export async function setMeta(key: string, value: string | number): Promise<void
 
 const HYDRATE_STALE_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 
+type HydrationListener = (ready: boolean) => void;
+const hydrationListeners = new Set<HydrationListener>();
+let _exercisesReady = false;
+
+export function isExercisesReady() { return _exercisesReady; }
+export function subscribeExercisesReady(fn: HydrationListener) {
+  hydrationListeners.add(fn);
+  return () => { hydrationListeners.delete(fn); };
+}
+
+function setExercisesReady(ready: boolean) {
+  _exercisesReady = ready;
+  hydrationListeners.forEach(fn => fn(ready));
+}
+
 export async function hydrateExercises(): Promise<void> {
   try {
-    const lastHydrated = await getMeta('exercises_hydrated_at');
     const count = await db.exercises.count();
+    console.log('[hydrate] exercises in IndexedDB:', count);
 
-    if (count > 0 && lastHydrated && Date.now() - Number(lastHydrated) < HYDRATE_STALE_MS) {
+    // If empty, seed from bundled catalog immediately (no network needed)
+    if (count === 0) {
+      try {
+        const bundledRes = await fetch('/exercises-catalog.json');
+        console.log('[hydrate] bundled catalog fetch:', bundledRes.status);
+        if (bundledRes.ok) {
+          const bundled: LocalExercise[] = await bundledRes.json();
+          console.log('[hydrate] seeding', bundled.length, 'exercises from bundled catalog');
+          // Use Dexie transaction to batch all puts in one IDB transaction
+          await db.transaction('rw', db.exercises, async () => {
+            for (const ex of bundled) {
+              await db.exercises.put(ex);
+            }
+          });
+          await setMeta('exercises_hydrated_at', Date.now());
+          console.log('[hydrate] bundled seed complete');
+        }
+      } catch (e) {
+        console.warn('[hydrate] bundled catalog failed:', e);
+      }
+    }
+
+    const freshCount = await db.exercises.count();
+    if (freshCount > 0) {
+      setExercisesReady(true);
+      console.log('[hydrate] exercises ready:', freshCount);
+    }
+
+    const lastHydrated = await getMeta('exercises_hydrated_at');
+    if (lastHydrated && Date.now() - Number(lastHydrated) < HYDRATE_STALE_MS) {
       return; // Fresh enough
     }
 
+    // Try API for latest data (may include new custom exercises)
     const res = await fetch(`${apiBase()}/api/exercises?limit=10000`);
-    if (!res.ok) return;
+    if (!res.ok) {
+      console.warn('[hydrate] API fetch failed:', res.status);
+      return;
+    }
 
     const exercises: LocalExercise[] = await res.json();
-    await db.exercises.bulkPut(exercises);
+    console.log('[hydrate] API returned', exercises.length, 'exercises');
+    await db.transaction('rw', db.exercises, async () => {
+      for (const ex of exercises) {
+        await db.exercises.put(ex);
+      }
+    });
     await setMeta('exercises_hydrated_at', Date.now());
-  } catch {
-    // Network unavailable — that's fine, use what's in IndexedDB
+    setExercisesReady(true);
+  } catch (e) {
+    console.warn('[hydrate] error:', e);
+    const count = await db.exercises.count();
+    if (count > 0) setExercisesReady(true);
   }
 }

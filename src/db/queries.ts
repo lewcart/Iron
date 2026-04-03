@@ -448,21 +448,34 @@ export async function getExerciseProgress(exerciseUuid: string, since?: Date): P
     total_volume: string;
     max_reps_at_max_weight: number;
   }>(`
+    WITH per_workout AS (
+      SELECT
+        w.uuid AS workout_uuid,
+        w.start_time AS date,
+        ws.weight,
+        ws.repetitions,
+        MAX(ws.weight) OVER (PARTITION BY w.uuid) AS workout_max_weight
+      FROM workout_sets ws
+      JOIN workout_exercises we ON ws.workout_exercise_uuid = we.uuid
+      JOIN workouts w ON we.workout_uuid = w.uuid
+      WHERE we.exercise_uuid IN (
+          SELECT e2.uuid FROM exercises e1
+          JOIN exercises e2 ON e2.title = e1.title
+          WHERE e1.uuid = $1
+        )
+        AND ws.is_completed = true
+        AND ws.weight IS NOT NULL
+        AND ws.repetitions IS NOT NULL
+        ${sinceClause}
+    )
     SELECT
-      w.start_time AS date,
-      MAX(ws.weight) AS max_weight,
-      SUM(ws.weight * ws.repetitions) AS total_volume,
-      MAX(ws.repetitions) FILTER (WHERE ws.weight = MAX(ws.weight) OVER (PARTITION BY w.uuid)) AS max_reps_at_max_weight
-    FROM workout_sets ws
-    JOIN workout_exercises we ON ws.workout_exercise_uuid = we.uuid
-    JOIN workouts w ON we.workout_uuid = w.uuid
-    WHERE we.exercise_uuid = $1
-      AND ws.is_completed = true
-      AND ws.weight IS NOT NULL
-      AND ws.repetitions IS NOT NULL
-      ${sinceClause}
-    GROUP BY w.uuid, w.start_time
-    ORDER BY w.start_time ASC
+      date,
+      MAX(weight) AS max_weight,
+      SUM(weight * repetitions) AS total_volume,
+      MAX(repetitions) FILTER (WHERE weight = workout_max_weight) AS max_reps_at_max_weight
+    FROM per_workout
+    GROUP BY workout_uuid, date
+    ORDER BY date ASC
   `, params);
 
   return rows.map((row) => {
@@ -498,7 +511,11 @@ export async function getExercisePRs(exerciseUuid: string): Promise<{
     FROM workout_sets ws
     JOIN workout_exercises we ON ws.workout_exercise_uuid = we.uuid
     JOIN workouts w ON we.workout_uuid = w.uuid
-    WHERE we.exercise_uuid = $1
+    WHERE we.exercise_uuid IN (
+        SELECT e2.uuid FROM exercises e1
+        JOIN exercises e2 ON e2.title = e1.title
+        WHERE e1.uuid = $1
+      )
       AND ws.is_completed = true
       AND ws.weight IS NOT NULL
       AND ws.repetitions IS NOT NULL
@@ -533,7 +550,11 @@ export async function getExerciseVolumeTrend(exerciseUuid: string, since?: Date)
     FROM workout_sets ws
     JOIN workout_exercises we ON ws.workout_exercise_uuid = we.uuid
     JOIN workouts w ON we.workout_uuid = w.uuid
-    WHERE we.exercise_uuid = $1
+    WHERE we.exercise_uuid IN (
+        SELECT e2.uuid FROM exercises e1
+        JOIN exercises e2 ON e2.title = e1.title
+        WHERE e1.uuid = $1
+      )
       AND ws.is_completed = true
       AND ws.weight IS NOT NULL
       AND ws.repetitions IS NOT NULL
@@ -574,7 +595,11 @@ export async function getExerciseRecentSets(
     FROM workout_sets ws
     JOIN workout_exercises we ON ws.workout_exercise_uuid = we.uuid
     JOIN workouts w ON we.workout_uuid = w.uuid
-    WHERE we.exercise_uuid = $1
+    WHERE we.exercise_uuid IN (
+        SELECT e2.uuid FROM exercises e1
+        JOIN exercises e2 ON e2.title = e1.title
+        WHERE e1.uuid = $1
+      )
       AND ws.is_completed = true
       AND ws.weight IS NOT NULL
       AND ws.repetitions IS NOT NULL
@@ -588,6 +613,42 @@ export async function getExerciseRecentSets(
     repetitions: row.repetitions,
     rpe: row.rpe ? parseFloat(row.rpe) : null,
     workoutUuid: row.workout_uuid,
+  }));
+}
+
+export async function getExercisePBPerSet(
+  exerciseUuid: string,
+): Promise<Array<{
+  orderIndex: number;
+  weight: number;
+  repetitions: number;
+}>> {
+  const rows = await query<{
+    order_index: number;
+    weight: string;
+    repetitions: number;
+  }>(`
+    SELECT DISTINCT ON (ws.order_index)
+      ws.order_index,
+      ws.weight,
+      ws.repetitions
+    FROM workout_sets ws
+    JOIN workout_exercises we ON ws.workout_exercise_uuid = we.uuid
+    WHERE we.exercise_uuid IN (
+        SELECT e2.uuid FROM exercises e1
+        JOIN exercises e2 ON e2.title = e1.title
+        WHERE e1.uuid = $1
+      )
+      AND ws.is_completed = true
+      AND ws.weight IS NOT NULL
+      AND ws.repetitions IS NOT NULL
+    ORDER BY ws.order_index, ws.weight DESC, ws.repetitions DESC
+  `, [exerciseUuid]);
+
+  return rows.map((row) => ({
+    orderIndex: row.order_index,
+    weight: parseFloat(row.weight),
+    repetitions: row.repetitions,
   }));
 }
 
@@ -1912,7 +1973,7 @@ export async function updateRoutineSet(
     params.push(data.max_repetitions);
   }
 
-  if (fields.length === 0) return getRoutineSet(uuid) ?? null;
+  if (fields.length === 0) return (await getRoutineSet(uuid)) ?? null;
 
   params.push(uuid);
   await query(
@@ -1975,67 +2036,66 @@ export async function replaceNutritionWeekPlan(meals: NutritionWeekMealInput[]):
 }
 
 // ── Training blocks ───────────────────────────────────────────────────────────
+// Column names match migration 006: name, goal (enum), started_at, ended_at
 
 export interface TrainingBlock {
   uuid: string;
-  title: string;
-  goal: string | null;
+  name: string;
+  goal: string;
   workout_plan_uuid: string | null;
-  start_date: string;
-  end_date: string;
+  started_at: string;
+  ended_at: string | null;
   notes: string | null;
   created_at: string;
-  updated_at: string;
 }
 
 function parseTrainingBlock(row: DbRow): TrainingBlock {
   return {
     uuid: row.uuid as string,
-    title: row.title as string,
-    goal: row.goal as string | null,
+    name: row.name as string,
+    goal: row.goal as string,
     workout_plan_uuid: row.workout_plan_uuid as string | null,
-    start_date: row.start_date as string,
-    end_date: row.end_date as string,
+    started_at: row.started_at as string,
+    ended_at: row.ended_at as string | null,
     notes: row.notes as string | null,
     created_at: row.created_at as string,
-    updated_at: row.updated_at as string,
   };
 }
 
 export async function listTrainingBlocks(): Promise<TrainingBlock[]> {
-  const rows = await query<DbRow>(`SELECT * FROM training_blocks ORDER BY start_date DESC`);
+  const rows = await query<DbRow>(`SELECT * FROM training_blocks ORDER BY started_at DESC`);
   return rows.map(parseTrainingBlock);
 }
 
 export async function createTrainingBlock(data: {
-  title: string;
-  goal?: string | null;
+  name: string;
+  goal: string;
   workout_plan_uuid?: string | null;
-  start_date: string;
-  end_date: string;
+  started_at: string;
+  ended_at?: string | null;
   notes?: string | null;
 }): Promise<TrainingBlock> {
   const uuid = randomUUID();
   const row = await queryOne<DbRow>(
-    `INSERT INTO training_blocks (uuid, title, goal, workout_plan_uuid, start_date, end_date, notes)
+    `INSERT INTO training_blocks (uuid, name, goal, workout_plan_uuid, started_at, ended_at, notes)
      VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
-    [uuid, data.title, data.goal ?? null, data.workout_plan_uuid ?? null, data.start_date, data.end_date, data.notes ?? null]
+    [uuid, data.name, data.goal, data.workout_plan_uuid ?? null, data.started_at, data.ended_at ?? null, data.notes ?? null]
   );
   return parseTrainingBlock(row!);
 }
 
 export async function updateTrainingBlock(
   uuid: string,
-  data: { title?: string; goal?: string | null; start_date?: string; end_date?: string; notes?: string | null; workout_plan_uuid?: string | null }
+  data: { name?: string; goal?: string; started_at?: string; ended_at?: string | null; notes?: string | null; workout_plan_uuid?: string | null }
 ): Promise<TrainingBlock | null> {
   const fields: string[] = [];
   const params: unknown[] = [];
   let p = 0;
 
-  if (data.title !== undefined) { fields.push(`title = $${++p}`); params.push(data.title); }
+  if (data.name !== undefined) { fields.push(`name = $${++p}`); params.push(data.name); }
   if (data.goal !== undefined) { fields.push(`goal = $${++p}`); params.push(data.goal); }
-  if (data.start_date !== undefined) { fields.push(`start_date = $${++p}`); params.push(data.start_date); }
-  if (data.end_date !== undefined) { fields.push(`end_date = $${++p}`); params.push(data.end_date); }
+  if (data.started_at !== undefined) { fields.push(`started_at = $${++p}`); params.push(data.started_at); }
+  if (data.ended_at !== undefined) { fields.push(`ended_at = $${++p}`); params.push(data.ended_at); }
   if (data.notes !== undefined) { fields.push(`notes = $${++p}`); params.push(data.notes); }
   if (data.workout_plan_uuid !== undefined) { fields.push(`workout_plan_uuid = $${++p}`); params.push(data.workout_plan_uuid); }
 
@@ -2057,84 +2117,73 @@ export async function deleteTrainingBlock(uuid: string): Promise<void> {
 }
 
 // ── Coaching notes ────────────────────────────────────────────────────────────
+// Column names match migration 006: note, context (enum), pinned
 
 export interface CoachingNote {
   uuid: string;
-  content: string;
-  is_pinned: boolean;
-  category: string | null;
-  related_exercise_uuid: string | null;
+  note: string;
+  context: string | null;
+  pinned: boolean;
   created_at: string;
-  updated_at: string;
 }
 
 function parseCoachingNote(row: DbRow): CoachingNote {
   return {
     uuid: row.uuid as string,
-    content: row.content as string,
-    is_pinned: Boolean(row.is_pinned),
-    category: row.category as string | null,
-    related_exercise_uuid: row.related_exercise_uuid as string | null,
+    note: row.note as string,
+    context: row.context as string | null,
+    pinned: Boolean(row.pinned),
     created_at: row.created_at as string,
-    updated_at: row.updated_at as string,
   };
 }
 
 export async function listCoachingNotes(options: {
   pinned_only?: boolean;
-  category?: string;
+  context?: string;
   limit?: number;
 } = {}): Promise<CoachingNote[]> {
   const conditions: string[] = [];
   const params: unknown[] = [];
   let p = 0;
 
-  if (options.pinned_only) {
-    conditions.push(`is_pinned = true`);
-  }
-  if (options.category) {
-    conditions.push(`category = $${++p}`);
-    params.push(options.category);
-  }
+  if (options.pinned_only) conditions.push('pinned = true');
+  if (options.context) { conditions.push(`context = $${++p}`); params.push(options.context); }
 
   const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
   const limit = options.limit ?? 50;
   params.push(limit);
 
   const rows = await query<DbRow>(
-    `SELECT * FROM coaching_notes ${where} ORDER BY is_pinned DESC, created_at DESC LIMIT $${++p}`,
+    `SELECT * FROM coaching_notes ${where} ORDER BY pinned DESC, created_at DESC LIMIT $${++p}`,
     params
   );
   return rows.map(parseCoachingNote);
 }
 
 export async function createCoachingNote(data: {
-  content: string;
-  is_pinned?: boolean;
-  category?: string | null;
-  related_exercise_uuid?: string | null;
+  note: string;
+  pinned?: boolean;
+  context?: string | null;
 }): Promise<CoachingNote> {
   const uuid = randomUUID();
   const row = await queryOne<DbRow>(
-    `INSERT INTO coaching_notes (uuid, content, is_pinned, category, related_exercise_uuid)
-     VALUES ($1, $2, $3, $4, $5) RETURNING *`,
-    [uuid, data.content, data.is_pinned ?? false, data.category ?? null, data.related_exercise_uuid ?? null]
+    `INSERT INTO coaching_notes (uuid, note, context, pinned) VALUES ($1, $2, $3, $4) RETURNING *`,
+    [uuid, data.note, data.context ?? null, data.pinned ?? false]
   );
   return parseCoachingNote(row!);
 }
 
 export async function updateCoachingNote(
   uuid: string,
-  data: { content?: string; is_pinned?: boolean; category?: string | null; related_exercise_uuid?: string | null }
+  data: { note?: string; pinned?: boolean; context?: string | null }
 ): Promise<CoachingNote | null> {
   const fields: string[] = [];
   const params: unknown[] = [];
   let p = 0;
 
-  if (data.content !== undefined) { fields.push(`content = $${++p}`); params.push(data.content); }
-  if (data.is_pinned !== undefined) { fields.push(`is_pinned = $${++p}`); params.push(data.is_pinned); }
-  if (data.category !== undefined) { fields.push(`category = $${++p}`); params.push(data.category); }
-  if (data.related_exercise_uuid !== undefined) { fields.push(`related_exercise_uuid = $${++p}`); params.push(data.related_exercise_uuid); }
+  if (data.note !== undefined) { fields.push(`note = $${++p}`); params.push(data.note); }
+  if (data.pinned !== undefined) { fields.push(`pinned = $${++p}`); params.push(data.pinned); }
+  if (data.context !== undefined) { fields.push(`context = $${++p}`); params.push(data.context); }
 
   if (fields.length === 0) {
     const row = await queryOne<DbRow>(`SELECT * FROM coaching_notes WHERE uuid = $1`, [uuid]);

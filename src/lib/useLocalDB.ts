@@ -30,16 +30,31 @@ export function useCurrentWorkoutFull(): LocalWorkoutWithExercises | null | unde
       .filter(e => !e._deleted)
       .sortBy('order_index');
 
+    // Build a map from the exercises table so Dexie observes it for reactivity
+    // (single-key .get() calls aren't tracked by useLiveQuery)
+    const neededUuids = wes.map(we => we.exercise_uuid.toLowerCase());
+    const allExercises = await db.exercises.where('uuid').anyOf(neededUuids).toArray();
+    const exerciseMap = new Map(allExercises.map(e => [e.uuid, e]));
+
+    const totalExCount = await db.exercises.count();
+    const missing = neededUuids.filter(u => !exerciseMap.has(u));
+    if (missing.length > 0) {
+      console.warn('[workout] Missing exercises:', missing, '| exerciseMap size:', exerciseMap.size, '| total in DB:', totalExCount);
+      // Debug: try direct get for first missing
+      for (const m of missing) {
+        const direct = await db.exercises.get(m);
+        console.warn('[workout] direct get', m, '->', direct?.title ?? 'NOT FOUND');
+      }
+    }
+
     const exercises = await Promise.all(
       wes.map(async we => {
-        const [exercise, sets] = await Promise.all([
-          db.exercises.get(we.exercise_uuid.toLowerCase()),
-          db.workout_sets
-            .where('workout_exercise_uuid')
-            .equals(we.uuid)
-            .filter(s => !s._deleted)
-            .sortBy('order_index'),
-        ]);
+        const exercise = exerciseMap.get(we.exercise_uuid.toLowerCase());
+        const sets = await db.workout_sets
+          .where('workout_exercise_uuid')
+          .equals(we.uuid)
+          .filter(s => !s._deleted)
+          .sortBy('order_index');
         return { ...we, exercise: exercise!, sets };
       }),
     );
@@ -246,16 +261,18 @@ export function useWorkoutFull(uuid: string | null): LocalWorkoutWithExercises |
         .filter(e => !e._deleted)
         .sortBy('order_index');
 
+      const neededUuids = wes.map(we => we.exercise_uuid.toLowerCase());
+      const allExercises = await db.exercises.where('uuid').anyOf(neededUuids).toArray();
+      const exerciseMap = new Map(allExercises.map(e => [e.uuid, e]));
+
       const exercises = await Promise.all(
         wes.map(async we => {
-          const [exercise, sets] = await Promise.all([
-            db.exercises.get(we.exercise_uuid),
-            db.workout_sets
-              .where('workout_exercise_uuid')
-              .equals(we.uuid)
-              .filter(s => !s._deleted)
-              .sortBy('order_index'),
-          ]);
+          const exercise = exerciseMap.get(we.exercise_uuid.toLowerCase());
+          const sets = await db.workout_sets
+            .where('workout_exercise_uuid')
+            .equals(we.uuid)
+            .filter(s => !s._deleted)
+            .sortBy('order_index');
           return { ...we, exercise: exercise!, sets };
         }),
       );
@@ -280,4 +297,40 @@ export function useBodyweightLogs(limit = 30): LocalBodyweightLog[] {
     [],
     [],
   );
+}
+
+// ─── Autofill helpers ─────────────────────────────────────────────────────────
+
+/** Returns weight/reps to prefill a new set from the current workout's existing sets,
+ *  or from the most recent previous workout for this exercise. */
+export async function getAutoFillValues(
+  exerciseUuid: string,
+  currentSets: LocalWorkoutSet[],
+): Promise<{ weight: number | null; repetitions: number | null }> {
+  // Prefer last completed set in the current workout
+  const lastCompleted = [...currentSets]
+    .reverse()
+    .find(s => s.is_completed && !s._deleted);
+  if (lastCompleted) {
+    return { weight: lastCompleted.weight, repetitions: lastCompleted.repetitions };
+  }
+
+  // Fall back to most recent set from a previous workout
+  const allWe = await db.workout_exercises
+    .filter(e => e.exercise_uuid.toLowerCase() === exerciseUuid.toLowerCase() && !e._deleted)
+    .toArray();
+
+  for (const we of allWe.reverse()) {
+    const sets = await db.workout_sets
+      .where('workout_exercise_uuid')
+      .equals(we.uuid)
+      .filter(s => s.is_completed && !s._deleted)
+      .sortBy('order_index');
+    if (sets.length > 0) {
+      const last = sets[sets.length - 1];
+      return { weight: last.weight, repetitions: last.repetitions };
+    }
+  }
+
+  return { weight: null, repetitions: null };
 }
