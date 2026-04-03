@@ -1,21 +1,69 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
   <defs>
-    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#5BCEFA"/>
-      <stop offset="100%" stop-color="#F5A9B8"/>
+    <linearGradient id="trans-flag" x1="0" y1="50" x2="0" y2="462" gradientUnits="userSpaceOnUse">
+      <stop offset="0%"   stop-color="#5BCEFA"/>
+      <stop offset="20%"  stop-color="#5BCEFA"/>
+      <stop offset="20%"  stop-color="#F5A9B8"/>
+      <stop offset="40%"  stop-color="#F5A9B8"/>
+      <stop offset="40%"  stop-color="#FFFFFF"/>
+      <stop offset="60%"  stop-color="#FFFFFF"/>
+      <stop offset="60%"  stop-color="#F5A9B8"/>
+      <stop offset="80%"  stop-color="#F5A9B8"/>
+      <stop offset="80%"  stop-color="#5BCEFA"/>
+      <stop offset="100%" stop-color="#5BCEFA"/>
     </linearGradient>
   </defs>
-  <!-- Rounded square background -->
-  <rect width="100" height="100" rx="22" fill="url(#bg)"/>
-  <!-- Stylised "R" letterform -->
-  <text
-    x="50"
-    y="70"
-    text-anchor="middle"
-    font-family="-apple-system, BlinkMacSystemFont, 'Helvetica Neue', sans-serif"
-    font-weight="700"
-    font-size="58"
-    fill="white"
-    letter-spacing="-2"
-  >R</text>
+
+  <!-- ═══ WINGS ═══ -->
+  <g stroke="#111111" stroke-width="14" stroke-linejoin="round" stroke-linecap="round">
+    <path fill="url(#trans-flag)"
+          d="M 242,258 C 220,212 108,72 26,55 C 2,50 0,82 14,120 C 32,164 112,208 215,244 C 226,248 235,253 242,258 Z"/>
+    <path fill="url(#trans-flag)"
+          d="M 270,258 C 292,212 404,72 486,55 C 510,50 512,82 498,120 C 480,164 400,208 297,244 C 286,248 277,253 270,258 Z"/>
+    <path fill="url(#trans-flag)"
+          d="M 236,274 C 214,302 132,358 74,396 C 38,418 36,452 64,462 C 98,472 170,438 218,394 C 240,370 242,310 236,274 Z"/>
+    <path fill="url(#trans-flag)"
+          d="M 276,274 C 298,302 380,358 438,396 C 474,418 476,452 448,462 C 414,472 342,438 294,394 C 272,370 270,310 276,274 Z"/>
+  </g>
+
+  <!-- ═══ BUFF BODY ═══ -->
+
+  <!-- LEFT ARM — thick muscular tube, raised overhead to left -->
+  <!-- Black: 72, White: 46 → 13px border each side, arm tube 46px wide = properly beefy -->
+  <path stroke="#111111" stroke-width="72" stroke-linecap="round" fill="none"
+        d="M 198,222 C 175,192 152,155 148,112"/>
+  <path stroke="white"   stroke-width="46" stroke-linecap="round" fill="none"
+        d="M 198,222 C 175,192 152,155 148,112"/>
+
+  <!-- RIGHT ARM — mirror -->
+  <path stroke="#111111" stroke-width="72" stroke-linecap="round" fill="none"
+        d="M 314,222 C 337,192 360,155 364,112"/>
+  <path stroke="white"   stroke-width="46" stroke-linecap="round" fill="none"
+        d="M 314,222 C 337,192 360,155 364,112"/>
+
+  <!-- TORSO: wide chest, gentle taper -->
+  <path fill="white" stroke="#111111" stroke-width="13" stroke-linejoin="round"
+        d="M 196,224
+           C 214,215 234,210 256,210
+           C 278,210 298,215 316,224
+           L 308,356
+           C 296,368 278,375 256,375
+           C 234,375 216,368 204,356 Z"/>
+
+  <!-- Sternum -->
+  <line x1="256" y1="210" x2="256" y2="252" stroke="#111111" stroke-width="6.5" stroke-linecap="round"/>
+
+  <!-- Abs -->
+  <line x1="228" y1="270" x2="284" y2="270" stroke="#111111" stroke-width="6.5" stroke-linecap="round"/>
+  <line x1="226" y1="294" x2="286" y2="294" stroke="#111111" stroke-width="6.5" stroke-linecap="round"/>
+  <line x1="228" y1="318" x2="284" y2="318" stroke="#111111" stroke-width="6.5" stroke-linecap="round"/>
+
+  <!-- HEAD -->
+  <circle cx="256" cy="148" r="42" fill="white" stroke="#111111" stroke-width="13"/>
+
+  <!-- Antennae -->
+  <line x1="246" y1="109" x2="220" y2="79"  stroke="#111111" stroke-width="8" stroke-linecap="round"/>
+  <line x1="266" y1="109" x2="292" y2="79"  stroke="#111111" stroke-width="8" stroke-linecap="round"/>
+  <circle cx="217" cy="76" r="7" fill="#111111"/>
+  <circle cx="295" cy="76" r="7" fill="#111111"/>
 </svg>
