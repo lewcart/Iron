@@ -616,6 +616,48 @@ async function findExercises(args: Record<string, unknown>) {
   return toolResult(rows);
 }
 
+async function createExercise(args: Record<string, unknown>) {
+  const {
+    title,
+    primary_muscles,
+    secondary_muscles,
+    equipment,
+    description,
+    alias,
+  } = args as {
+    title: string;
+    primary_muscles: string[];
+    secondary_muscles?: string[];
+    equipment?: string[];
+    description?: string;
+    alias?: string[];
+  };
+
+  if (!title?.trim()) return toolError('title is required');
+  if (!Array.isArray(primary_muscles) || primary_muscles.length === 0) {
+    return toolError('primary_muscles must be a non-empty array');
+  }
+
+  const uuid = crypto.randomUUID();
+  const row = await queryOne(
+    `INSERT INTO exercises
+       (uuid, everkinetic_id, title, alias, description, primary_muscles, secondary_muscles, equipment, is_custom)
+     VALUES ($1, 0, $2, $3, $4, $5, $6, $7, true)
+     RETURNING uuid, title, primary_muscles, secondary_muscles, equipment, description`,
+    [
+      uuid,
+      title.trim(),
+      JSON.stringify(alias ?? []),
+      description ?? null,
+      JSON.stringify(primary_muscles),
+      JSON.stringify(secondary_muscles ?? []),
+      JSON.stringify(equipment ?? []),
+    ]
+  );
+
+  return toolResult(row);
+}
+
 // ── Shared exercise resolver ──────────────────────────────────────────────────
 
 type ResolvedExercise = { uuid: string; title: string };
@@ -1334,6 +1376,39 @@ export const tools: MCPTool[] = [
       required: ['query'],
     },
     execute: findExercises,
+  },
+  {
+    name: 'create_exercise',
+    description: 'Creates a new custom exercise in the library. Use this to add exercises that do not already exist before adding them to a routine.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        title: { type: 'string', description: 'Display name for the exercise (e.g. "Romanian Deadlift: Dumbbell")' },
+        primary_muscles: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Primary muscle groups targeted (e.g. ["hamstrings", "glutes"])',
+        },
+        secondary_muscles: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Secondary muscles worked (optional)',
+        },
+        equipment: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Equipment required (e.g. ["dumbbell"])',
+        },
+        description: { type: 'string', description: 'Optional description of the exercise' },
+        alias: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Alternative names for fuzzy search matching',
+        },
+      },
+      required: ['title', 'primary_muscles'],
+    },
+    execute: createExercise,
   },
   {
     name: 'create_routine',
