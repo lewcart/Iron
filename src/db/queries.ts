@@ -91,6 +91,7 @@ export async function createCustomExercise(data: {
   equipment?: string[];
   steps?: string[];
   tips?: string[];
+  movementPattern?: string;
 }): Promise<Exercise> {
   const uuid = randomUUID();
 
@@ -98,8 +99,8 @@ export async function createCustomExercise(data: {
     INSERT INTO exercises (
       uuid, everkinetic_id, title, description,
       primary_muscles, secondary_muscles, equipment,
-      steps, tips, is_custom
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, true)
+      steps, tips, is_custom, movement_pattern
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, true, $10)
   `, [
     uuid,
     10000 + Date.now(),
@@ -110,6 +111,7 @@ export async function createCustomExercise(data: {
     JSON.stringify(data.equipment || []),
     JSON.stringify(data.steps || []),
     JSON.stringify(data.tips || []),
+    data.movementPattern || null,
   ]);
 
   return (await getExercise(uuid))!;
@@ -1139,6 +1141,7 @@ export function parseExercise(row: DbRow): Exercise {
     tips: Array.isArray(row.tips) ? row.tips as string[] : JSON.parse(row.tips as string || '[]'),
     is_custom: Boolean(row.is_custom),
     is_hidden: Boolean(row.is_hidden),
+    movement_pattern: (row.movement_pattern as string | null) ?? null,
   };
 }
 

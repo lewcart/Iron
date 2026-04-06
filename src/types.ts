@@ -13,6 +13,7 @@ export interface Exercise {
   tips: string[]; // JSON array
   is_custom: boolean;
   is_hidden: boolean;
+  movement_pattern: string | null;
 }
 
 export interface Workout {

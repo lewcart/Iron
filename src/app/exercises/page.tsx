@@ -2,12 +2,13 @@
 
 import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { ChevronRight, Search, X } from 'lucide-react';
+import { ChevronRight, Plus, Search, X } from 'lucide-react';
 import type { Exercise } from '@/types';
 import { exerciseMatchesMuscleGroup } from '@/lib/muscle-groups';
 import { queryKeys } from '@/lib/api/query-keys';
 import { fetchExerciseCatalog } from '@/lib/api/exercises';
 import ExerciseDetail from './ExerciseDetail';
+import CreateExerciseForm from './CreateExerciseForm';
 
 const MUSCLE_GROUPS = [
   { key: 'chest', label: 'Chest', emoji: '💪' },
@@ -64,6 +65,7 @@ export default function ExercisesPage() {
   const [muscleExercises, setMuscleExercises] = useState<Exercise[]>([]);
   const [selectedEquipment, setSelectedEquipment] = useState<string | null>(null);
   const [equipmentExercises, setEquipmentExercises] = useState<Exercise[]>([]);
+  const [showCreateForm, setShowCreateForm] = useState(false);
 
   const searchResults = useMemo(() => {
     if (!search.trim()) return [];
@@ -184,8 +186,23 @@ export default function ExercisesPage() {
 
   return (
     <main className="tab-content bg-background">
+      {showCreateForm && (
+        <CreateExerciseForm
+          onClose={() => setShowCreateForm(false)}
+          onCreated={() => setShowCreateForm(false)}
+        />
+      )}
       <div className="px-4 pt-safe pb-3">
-        <h1 className="text-2xl font-bold mb-3">Exercises</h1>
+        <div className="flex items-center justify-between mb-3">
+          <h1 className="text-2xl font-bold">Exercises</h1>
+          <button
+            onClick={() => setShowCreateForm(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-primary text-primary-foreground text-sm font-medium rounded-full"
+          >
+            <Plus className="h-4 w-4" />
+            New
+          </button>
+        </div>
 
         <div className="relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />

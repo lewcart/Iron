@@ -5,6 +5,7 @@ import { NextRequest } from 'next/server';
 
 vi.mock('@/db/queries', () => ({
   listExercises: vi.fn(),
+  createCustomExercise: vi.fn(),
   listWorkouts: vi.fn(),
   startWorkout: vi.fn(),
   getCurrentWorkout: vi.fn(),
@@ -41,6 +42,7 @@ const mockExercise = {
   tips: [],
   is_custom: false,
   is_hidden: false,
+  movement_pattern: null,
 };
 
 const mockWorkout = {
@@ -149,6 +151,88 @@ describe('GET /api/exercises', () => {
     const req = new NextRequest('http://localhost/api/exercises');
 
     await expect(GET(req)).rejects.toThrow('DB error');
+  });
+});
+
+// ===== POST /api/exercises =====
+
+describe('POST /api/exercises', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('creates a custom exercise and returns 201', async () => {
+    const queries = await import('@/db/queries');
+    const created = { ...mockExercise, uuid: 'new-uuid', title: 'Dumbbell RDL', is_custom: true, movement_pattern: 'hinge' };
+    vi.mocked(queries.createCustomExercise).mockResolvedValue(created);
+
+    const { POST } = await import('./exercises/route');
+    const req = new NextRequest('http://localhost/api/exercises', {
+      method: 'POST',
+      body: JSON.stringify({
+        title: 'Dumbbell RDL',
+        primary_muscles: ['hamstrings', 'glutes'],
+        secondary_muscles: ['lower back'],
+        equipment: ['dumbbell'],
+        movement_pattern: 'hinge',
+        description: 'Hip hinge with dumbbells',
+      }),
+      headers: { 'Content-Type': 'application/json' },
+    });
+
+    const response = await POST(req);
+    const data = await response.json();
+
+    expect(response.status).toBe(201);
+    expect(data).toEqual(created);
+    expect(queries.createCustomExercise).toHaveBeenCalledWith({
+      title: 'Dumbbell RDL',
+      primaryMuscles: ['hamstrings', 'glutes'],
+      secondaryMuscles: ['lower back'],
+      equipment: ['dumbbell'],
+      movementPattern: 'hinge',
+      description: 'Hip hinge with dumbbells',
+    });
+  });
+
+  it('returns 400 when title is missing', async () => {
+    const { POST } = await import('./exercises/route');
+    const req = new NextRequest('http://localhost/api/exercises', {
+      method: 'POST',
+      body: JSON.stringify({ primary_muscles: ['chest'] }),
+      headers: { 'Content-Type': 'application/json' },
+    });
+
+    const response = await POST(req);
+    expect(response.status).toBe(400);
+    const data = await response.json();
+    expect(data.error).toMatch(/title/i);
+  });
+
+  it('returns 400 when primary_muscles is missing', async () => {
+    const { POST } = await import('./exercises/route');
+    const req = new NextRequest('http://localhost/api/exercises', {
+      method: 'POST',
+      body: JSON.stringify({ title: 'Press' }),
+      headers: { 'Content-Type': 'application/json' },
+    });
+
+    const response = await POST(req);
+    expect(response.status).toBe(400);
+    const data = await response.json();
+    expect(data.error).toMatch(/primary_muscles/i);
+  });
+
+  it('returns 400 for invalid JSON', async () => {
+    const { POST } = await import('./exercises/route');
+    const req = new NextRequest('http://localhost/api/exercises', {
+      method: 'POST',
+      body: 'not-json',
+      headers: { 'Content-Type': 'application/json' },
+    });
+
+    const response = await POST(req);
+    expect(response.status).toBe(400);
   });
 });
 
