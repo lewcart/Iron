@@ -1,4 +1,4 @@
--- Migration 007: Add target_weight and rpe_target to routine sets; add description to workout plans
+-- Migration 007: Add target_weight and rpe_target to routine sets, add description to workout plans
 
 ALTER TABLE workout_routine_sets
   ADD COLUMN IF NOT EXISTS target_weight NUMERIC,
