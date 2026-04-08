@@ -76,15 +76,15 @@ export default function MeasurementsPage() {
 
   useEffect(() => {
     fetch(`${apiBase()}/api/measurements?limit=90`, { headers: apiHeaders() })
-      .then(r => r.json())
-      .then((data: MeasurementLog[]) => { setLogs(data); setLoading(false); })
+      .then(r => { if (!r.ok) throw new Error('Failed'); return r.json(); })
+      .then((data: MeasurementLog[]) => { setLogs(Array.isArray(data) ? data : []); setLoading(false); })
       .catch(() => setLoading(false));
   }, []);
 
   useEffect(() => {
     fetch(`${apiBase()}/api/progress-photos?limit=50`, { headers: apiHeaders() })
-      .then(r => r.json())
-      .then((data: ProgressPhoto[]) => { setPhotos(data); setPhotosLoading(false); })
+      .then(r => { if (!r.ok) throw new Error('Failed'); return r.json(); })
+      .then((data: ProgressPhoto[]) => { setPhotos(Array.isArray(data) ? data : []); setPhotosLoading(false); })
       .catch(() => setPhotosLoading(false));
   }, []);
 

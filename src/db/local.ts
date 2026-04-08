@@ -16,6 +16,7 @@ export interface LocalExercise {
   tips: string[];
   is_custom: boolean;
   is_hidden: boolean;
+  movement_pattern: string | null;
 }
 
 export interface LocalWorkout {
