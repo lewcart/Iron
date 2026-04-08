@@ -70,6 +70,8 @@ export interface WorkoutRoutineExercise {
   order_index: number;
   /** Present when joined from exercises table (plans UI, exports). */
   exercise_title?: string | null;
+  /** Present when fetched with sets (plans UI). */
+  sets?: WorkoutRoutineSet[];
 }
 
 export interface WorkoutRoutineSet {

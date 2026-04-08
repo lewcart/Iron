@@ -11,6 +11,8 @@ import {
   addExerciseToRoutine,
 } from '@/db/queries';
 import type { DbRow } from '@/db/queries';
+import { formatSetsReps } from './utils';
+import type { WorkoutRoutineSet } from '@/types';
 
 // ─── Mock DB ──────────────────────────────────────────────────────────────────
 
@@ -341,5 +343,54 @@ describe('addExerciseToRoutine', () => {
     const params = insertCall![1];
     expect(params).toContain('routine-uuid-1');
     expect(params).toContain('ex-uuid-1');
+  });
+});
+
+// ─── formatSetsReps ───────────────────────────────────────────────────────────
+
+function makeSet(min: number | null, max: number | null): WorkoutRoutineSet {
+  return {
+    uuid: 'set-uuid',
+    workout_routine_exercise_uuid: 're-uuid',
+    min_repetitions: min,
+    max_repetitions: max,
+    tag: null,
+    comment: null,
+    order_index: 0,
+  };
+}
+
+describe('formatSetsReps', () => {
+  it('returns null for empty sets array', () => {
+    expect(formatSetsReps([])).toBeNull();
+  });
+
+  it('shows set count only when no reps defined', () => {
+    const sets = [makeSet(null, null), makeSet(null, null)];
+    expect(formatSetsReps(sets)).toBe('2 sets');
+  });
+
+  it('shows singular "set" for one set with no reps', () => {
+    expect(formatSetsReps([makeSet(null, null)])).toBe('1 set');
+  });
+
+  it('shows count × reps when min equals max', () => {
+    const sets = [makeSet(10, 10), makeSet(10, 10), makeSet(10, 10)];
+    expect(formatSetsReps(sets)).toBe('3 × 10');
+  });
+
+  it('shows count × range when reps vary', () => {
+    const sets = [makeSet(8, 12), makeSet(8, 12), makeSet(8, 12)];
+    expect(formatSetsReps(sets)).toBe('3 × 8–12');
+  });
+
+  it('spans across different set configurations', () => {
+    const sets = [makeSet(6, 8), makeSet(8, 10), makeSet(10, 12)];
+    expect(formatSetsReps(sets)).toBe('3 × 6–12');
+  });
+
+  it('handles mix of null and defined reps', () => {
+    const sets = [makeSet(null, null), makeSet(8, 12)];
+    expect(formatSetsReps(sets)).toBe('2 × 8–12');
   });
 });

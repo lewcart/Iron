@@ -4,6 +4,7 @@ import { useState, useCallback, useMemo } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ChevronDown, ChevronRight, ChevronUp, Plus, Search, Trash2, X } from 'lucide-react';
 import type { WorkoutPlan, WorkoutRoutine, WorkoutRoutineExercise, Exercise } from '@/types';
+import { formatSetsReps } from './utils';
 import { queryKeys } from '@/lib/api/query-keys';
 import { fetchPlansWithRoutines, type PlanWithRoutines } from '@/lib/api/plans';
 import { fetchExerciseCatalog } from '@/lib/api/exercises';
@@ -252,19 +253,25 @@ function RoutineCard({
               <p className="px-4 py-3 text-sm text-muted-foreground">No exercises yet</p>
             ) : (
               <div className="divide-y divide-border">
-                {routine.exercises.map((re) => (
-                  <div key={re.uuid} className="flex items-center px-4 py-2.5 gap-3">
-                    <div className="flex-1">
-                      <p className="text-sm text-foreground">{re.exercise_title ?? 'Unknown'}</p>
+                {routine.exercises.map((re) => {
+                  const setsReps = formatSetsReps(re.sets ?? []);
+                  return (
+                    <div key={re.uuid} className="flex items-center px-4 py-2.5 gap-3">
+                      <div className="flex-1">
+                        <p className="text-sm text-foreground">{re.exercise_title ?? 'Unknown'}</p>
+                        {setsReps && (
+                          <p className="text-xs text-muted-foreground mt-0.5">{setsReps}</p>
+                        )}
+                      </div>
+                      <button
+                        onClick={() => handleRemoveExercise(re.exercise_uuid)}
+                        className="text-muted-foreground hover:text-destructive transition-colors p-1"
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
                     </div>
-                    <button
-                      onClick={() => handleRemoveExercise(re.exercise_uuid)}
-                      className="text-muted-foreground hover:text-destructive transition-colors p-1"
-                    >
-                      <X className="h-4 w-4" />
-                    </button>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
             <button
