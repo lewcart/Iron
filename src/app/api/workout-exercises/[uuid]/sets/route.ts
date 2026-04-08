@@ -7,7 +7,7 @@ import {
   getWorkoutExercise,
   getHistoricalBestsForExercise,
 } from '@/db/queries';
-import { estimate1RM } from '@/lib/pr';
+import { isNewEstimated1RM } from '@/lib/pr';
 
 async function detectAndMarkPR(
   setUuid: string,
@@ -19,12 +19,7 @@ async function detectAndMarkPR(
   if (!we) return false;
 
   const bests = await getHistoricalBestsForExercise(we.exercise_uuid, we.workout_uuid);
-  const new1RM = estimate1RM(weight, repetitions);
-
-  const isPR =
-    weight > bests.bestWeight ||
-    repetitions > bests.bestReps ||
-    new1RM > bests.best1RM;
+  const isPR = isNewEstimated1RM(weight, repetitions, bests.best1RM);
 
   if (isPR) {
     await updateSet(setUuid, { isPr: true });

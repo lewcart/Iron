@@ -24,6 +24,19 @@ export interface PRResult {
 }
 
 /**
+ * Returns true if the given weight+reps would set a new estimated 1RM record
+ * compared to the provided all-time best.
+ */
+export function isNewEstimated1RM(
+  weight: number,
+  reps: number,
+  allTimeBest1RM: number,
+): boolean {
+  if (weight === 0 || reps === 0) return false;
+  return estimate1RM(weight, reps) > allTimeBest1RM;
+}
+
+/**
  * Calculate personal records from an array of completed sets.
  * Returns the best set for each of three categories:
  *   - estimated1RM: highest Epley 1RM estimate

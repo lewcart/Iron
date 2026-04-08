@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { estimate1RM, calculatePRs } from './pr';
+import { estimate1RM, calculatePRs, isNewEstimated1RM } from './pr';
 
 // ===== estimate1RM =====
 
@@ -33,6 +33,36 @@ describe('estimate1RM', () => {
 
   it('returns 0 when both weight and reps are 0', () => {
     expect(estimate1RM(0, 0)).toBe(0);
+  });
+});
+
+// ===== isNewEstimated1RM =====
+
+describe('isNewEstimated1RM', () => {
+  it('returns true when estimated 1RM exceeds all-time best', () => {
+    // estimate1RM(100, 10) ≈ 133.33
+    expect(isNewEstimated1RM(100, 10, 130)).toBe(true);
+  });
+
+  it('returns false when estimated 1RM equals all-time best', () => {
+    const orm = 100 * (1 + 10 / 30); // ≈ 133.33
+    expect(isNewEstimated1RM(100, 10, orm)).toBe(false);
+  });
+
+  it('returns false when estimated 1RM is below all-time best', () => {
+    expect(isNewEstimated1RM(80, 5, 200)).toBe(false);
+  });
+
+  it('returns false when weight is 0', () => {
+    expect(isNewEstimated1RM(0, 10, 0)).toBe(false);
+  });
+
+  it('returns false when reps is 0', () => {
+    expect(isNewEstimated1RM(100, 0, 0)).toBe(false);
+  });
+
+  it('returns true against a zero all-time best (first ever set)', () => {
+    expect(isNewEstimated1RM(60, 5, 0)).toBe(true);
   });
 });
 

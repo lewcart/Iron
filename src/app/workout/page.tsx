@@ -22,8 +22,9 @@ import type { WorkoutPlan, WorkoutRoutine, WorkoutRoutineExercise, WorkoutRoutin
 import { formatTime, calcCompletedSets, calcTotalVolume } from './workout-utils';
 import { uuid as genUUID } from '@/lib/uuid';
 import { useUnit } from '@/context/UnitContext';
-import { useCurrentWorkoutFull, useExercises, getAutoFillValues } from '@/lib/useLocalDB';
+import { useCurrentWorkoutFull, useExercises, getAutoFillValues, getAllTimeBest1RM } from '@/lib/useLocalDB';
 import type { LocalWorkoutExerciseEntry, LocalWorkoutWithExercises } from '@/lib/useLocalDB';
+import { isNewEstimated1RM } from '@/lib/pr';
 import type { LocalWorkoutSet } from '@/db/local';
 import {
   startWorkout as mutStartWorkout,
@@ -663,14 +664,14 @@ function SetRow({
   workoutExerciseUuid,
   onUpdate,
   onDelete,
-  pbWeight,
+  allTimeBest1RM,
 }: {
   setNumber: number;
   set: LocalWorkoutSet;
   workoutExerciseUuid: string;
   onUpdate: (weUuid: string, setUuid: string, weight: number, reps: number) => Promise<void>;
   onDelete: (setUuid: string) => Promise<void>;
-  pbWeight?: number | null;
+  allTimeBest1RM?: number | null;
 }) {
   const { toDisplay, fromInput, label } = useUnit();
   const [weight, setWeight] = useState(
@@ -679,11 +680,12 @@ function SetRow({
   const [reps, setReps] = useState(set.repetitions?.toString() ?? '');
   const [saving, setSaving] = useState(false);
 
-  // Live "NEW PB" detection — compare current input against stored PB
-  // pbWeight is the initial PB value captured at mount time
-  const pbWeightRef = useRef(pbWeight);
+  // Live PD detection — compare current estimated 1RM against all-time best.
+  // No is_completed guard: badge persists naturally after completion since
+  // weight/reps values don't change once the set is ticked off.
   const currentWeightKg = fromInput(parseFloat(weight) || 0);
-  const isNewPB = !set.is_completed && pbWeightRef.current != null && pbWeightRef.current > 0 && currentWeightKg > pbWeightRef.current;
+  const currentReps = parseInt(reps) || 0;
+  const isLivePD = allTimeBest1RM != null && isNewEstimated1RM(currentWeightKg, currentReps, allTimeBest1RM);
 
   const handleComplete = async () => {
     setSaving(true);
@@ -695,9 +697,10 @@ function SetRow({
 
   const completed = set.is_completed;
   const isPR = set.is_pr;
+  const showPD = isPR || isLivePD;
 
   const inner = (
-    <div className={`flex items-center gap-2 py-1.5 px-3 border-b border-border last:border-0 ${completed && !isPR ? 'opacity-60' : ''} ${isPR || isNewPB ? 'bg-amber-500/5' : ''}`}>
+    <div className={`flex items-center gap-2 py-1.5 px-3 border-b border-border last:border-0 ${completed ? 'opacity-60' : ''}`}>
       {/* Set number */}
       <div className="w-5 text-center text-xs font-semibold text-muted-foreground">{setNumber}</div>
 
@@ -709,7 +712,7 @@ function SetRow({
           placeholder="—"
           value={weight}
           onChange={e => setWeight(e.target.value)}
-          onFocus={e => e.target.scrollIntoView({ behavior: 'smooth', block: 'center' })}
+          onFocus={e => { e.target.scrollIntoView({ behavior: 'smooth', block: 'center' }); e.target.select(); }}
           className="w-full text-right text-sm font-medium bg-transparent outline-none min-h-[36px]"
         />
         <span className="text-[10px] text-muted-foreground">{label}</span>
@@ -725,20 +728,16 @@ function SetRow({
           placeholder="—"
           value={reps}
           onChange={e => setReps(e.target.value)}
-          onFocus={e => e.target.scrollIntoView({ behavior: 'smooth', block: 'center' })}
+          onFocus={e => { e.target.scrollIntoView({ behavior: 'smooth', block: 'center' }); e.target.select(); }}
           className="w-full text-right text-sm font-medium bg-transparent outline-none min-h-[36px]"
         />
         <span className="text-[10px] text-muted-foreground">reps</span>
       </div>
 
-      {/* PR badge */}
-      {(isPR || isNewPB) && (
-        <span className={`text-[9px] font-bold px-1 py-0.5 rounded-full flex-shrink-0 ${
-          isNewPB && !isPR
-            ? 'text-amber-400 bg-amber-400/15 border border-amber-400/30 animate-pulse'
-            : 'text-amber-400 bg-amber-400/15 border border-amber-400/30'
-        }`}>
-          {isNewPB && !isPR ? 'NEW PB' : 'PR'}
+      {/* PD badge — subtle indicator, no row layout changes */}
+      {showPD && (
+        <span className="text-[9px] font-bold px-1 py-0.5 rounded-full flex-shrink-0 text-amber-400 bg-amber-400/15 border border-amber-400/30">
+          PR
         </span>
       )}
 
@@ -747,9 +746,7 @@ function SetRow({
         onClick={handleComplete}
         disabled={saving}
         className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 transition-colors ${
-          isPR
-            ? 'bg-amber-400 text-white ring-2 ring-amber-400/40'
-            : completed
+          completed
             ? 'bg-green-500 text-white'
             : 'border-2 border-border text-transparent hover:border-primary'
         }`}
@@ -809,6 +806,11 @@ function SortableExerciseCard({
   const totalSets = we.sets.length;
   const allDone = totalSets > 0 && completedSets === totalSets;
 
+  const [allTimeBest1RM, setAllTimeBest1RM] = useState<number>(0);
+  useEffect(() => {
+    getAllTimeBest1RM(we.exercise_uuid, we.workout_uuid).then(setAllTimeBest1RM);
+  }, [we.exercise_uuid, we.workout_uuid]);
+
   return (
     <div ref={setNodeRef} style={style} className="ios-section">
       {/* Exercise header — swipe to delete */}
@@ -865,7 +867,7 @@ function SortableExerciseCard({
               workoutExerciseUuid={we.uuid}
               onUpdate={onUpdateSet}
               onDelete={onDeleteSet}
-              pbWeight={set.weight}
+              allTimeBest1RM={allTimeBest1RM}
             />
           ))}
 

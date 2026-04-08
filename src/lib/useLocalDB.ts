@@ -301,6 +301,32 @@ export function useBodyweightLogs(limit = 30): LocalBodyweightLog[] {
 
 // ─── Autofill helpers ─────────────────────────────────────────────────────────
 
+/** Returns the all-time best estimated 1RM (Epley) for an exercise, excluding the
+ *  given workout. Returns 0 if no historical sets exist. */
+export async function getAllTimeBest1RM(
+  exerciseUuid: string,
+  excludeWorkoutUuid: string,
+): Promise<number> {
+  const allWe = await db.workout_exercises
+    .filter(we => we.exercise_uuid.toLowerCase() === exerciseUuid.toLowerCase() && !we._deleted)
+    .toArray();
+
+  let best = 0;
+  for (const we of allWe) {
+    if (we.workout_uuid === excludeWorkoutUuid) continue;
+    const sets = await db.workout_sets
+      .where('workout_exercise_uuid')
+      .equals(we.uuid)
+      .filter(s => s.is_completed && !s._deleted && s.weight != null && s.repetitions != null)
+      .toArray();
+    for (const s of sets) {
+      const orm = s.weight! * (1 + s.repetitions! / 30);
+      if (orm > best) best = orm;
+    }
+  }
+  return best;
+}
+
 /** Returns weight/reps to prefill a new set from the current workout's existing sets,
  *  or from the most recent previous workout for this exercise. */
 export async function getAutoFillValues(

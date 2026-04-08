@@ -406,15 +406,11 @@ export async function listWorkoutSets(workoutExerciseUuid: string): Promise<Work
 export async function getHistoricalBestsForExercise(
   exerciseUuid: string,
   excludeWorkoutUuid: string,
-): Promise<{ bestWeight: number; bestReps: number; best1RM: number }> {
+): Promise<{ best1RM: number }> {
   const row = await queryOne<{
-    best_weight: string | null;
-    best_reps: string | null;
     best_1rm: string | null;
   }>(`
     SELECT
-      MAX(ws.weight) AS best_weight,
-      MAX(ws.repetitions) AS best_reps,
       MAX(ws.weight * (1 + ws.repetitions::float / 30)) AS best_1rm
     FROM workout_sets ws
     JOIN workout_exercises we ON ws.workout_exercise_uuid = we.uuid
@@ -427,8 +423,6 @@ export async function getHistoricalBestsForExercise(
   `, [exerciseUuid, excludeWorkoutUuid]);
 
   return {
-    bestWeight: row?.best_weight ? parseFloat(row.best_weight) : 0,
-    bestReps: row?.best_reps ? parseFloat(row.best_reps) : 0,
     best1RM: row?.best_1rm ? parseFloat(row.best_1rm) : 0,
   };
 }
@@ -1984,6 +1978,10 @@ export async function updateRoutineSet(
     params
   );
   return (await getRoutineSet(uuid)) ?? null;
+}
+
+export async function deleteRoutineSet(uuid: string): Promise<void> {
+  await query('DELETE FROM workout_routine_sets WHERE uuid = $1', [uuid]);
 }
 
 // ── Exercise swap ─────────────────────────────────────────────────────────────
