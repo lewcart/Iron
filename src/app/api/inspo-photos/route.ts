@@ -24,6 +24,7 @@ export async function POST(request: NextRequest) {
     blob_url: body.blob_url,
     notes: body.notes ?? null,
     taken_at: body.taken_at,
+    burst_group_id: body.burst_group_id ?? null,
   });
   return NextResponse.json(photo, { status: 201 });
 }

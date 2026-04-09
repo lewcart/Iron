@@ -331,10 +331,12 @@ CREATE TABLE IF NOT EXISTS inspo_photos (
   blob_url TEXT NOT NULL,
   notes TEXT,
   taken_at TIMESTAMP NOT NULL DEFAULT NOW(),
-  created_at TIMESTAMP DEFAULT NOW()
+  created_at TIMESTAMP DEFAULT NOW(),
+  burst_group_id TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_inspo_photos_taken_at ON inspo_photos(taken_at DESC);
+CREATE INDEX IF NOT EXISTS idx_inspo_photos_burst_group_id ON inspo_photos(burst_group_id);
 
 -- Module 7: Progress photos
 CREATE TABLE IF NOT EXISTS progress_photos (

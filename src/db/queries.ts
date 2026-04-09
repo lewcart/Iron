@@ -788,6 +788,16 @@ export async function removeExerciseFromRoutine(uuid: string): Promise<void> {
   await query('DELETE FROM workout_routine_exercises WHERE uuid = $1', [uuid]);
 }
 
+export async function updateRoutineExercise(
+  uuid: string,
+  data: { comment?: string | null }
+): Promise<WorkoutRoutineExercise | undefined> {
+  if (data.comment !== undefined) {
+    await query('UPDATE workout_routine_exercises SET comment = $1 WHERE uuid = $2', [data.comment, uuid]);
+  }
+  return getRoutineExercise(uuid);
+}
+
 // ===== WORKOUT ROUTINE SETS =====
 
 export async function listRoutineSets(routineExerciseUuid: string): Promise<WorkoutRoutineSet[]> {
@@ -960,14 +970,14 @@ export async function startWorkoutFromRoutine(routineUuid: string): Promise<Star
   for (const routineExercise of routineExercises) {
     const weUuid = randomUUID();
     await query(
-      'INSERT INTO workout_exercises (uuid, workout_uuid, exercise_uuid, order_index) VALUES ($1, $2, $3, $4)',
-      [weUuid, workout.uuid, routineExercise.exercise_uuid, routineExercise.order_index]
+      'INSERT INTO workout_exercises (uuid, workout_uuid, exercise_uuid, comment, order_index) VALUES ($1, $2, $3, $4, $5)',
+      [weUuid, workout.uuid, routineExercise.exercise_uuid, routineExercise.comment ?? null, routineExercise.order_index]
     );
     allExercises.push({
       uuid: weUuid,
       workout_uuid: workout.uuid,
       exercise_uuid: routineExercise.exercise_uuid,
-      comment: null,
+      comment: routineExercise.comment ?? null,
       order_index: routineExercise.order_index,
     });
 
@@ -1918,6 +1928,7 @@ function parseInspoPhoto(row: DbRow): InspoPhoto {
     blob_url: row.blob_url as string,
     notes: row.notes as string | null,
     taken_at: row.taken_at as string,
+    burst_group_id: row.burst_group_id as string | null,
   };
 }
 
@@ -1925,12 +1936,13 @@ export async function createInspoPhoto(data: {
   blob_url: string;
   notes?: string | null;
   taken_at?: string;
+  burst_group_id?: string | null;
 }): Promise<InspoPhoto> {
   const uuid = randomUUID();
   const row = await queryOne(
-    `INSERT INTO inspo_photos (uuid, blob_url, notes, taken_at)
-     VALUES ($1, $2, $3, COALESCE($4::TIMESTAMP, NOW())) RETURNING *`,
-    [uuid, data.blob_url, data.notes ?? null, data.taken_at ?? null],
+    `INSERT INTO inspo_photos (uuid, blob_url, notes, taken_at, burst_group_id)
+     VALUES ($1, $2, $3, COALESCE($4::TIMESTAMP, NOW()), $5) RETURNING *`,
+    [uuid, data.blob_url, data.notes ?? null, data.taken_at ?? null, data.burst_group_id ?? null],
   );
   return parseInspoPhoto(row!);
 }

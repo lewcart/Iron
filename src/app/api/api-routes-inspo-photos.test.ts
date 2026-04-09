@@ -22,6 +22,7 @@ const mockPhoto = {
   blob_url: 'https://blob.vercel-storage.com/inspo-photos/inspo-uuid-1.jpg',
   notes: null,
   taken_at: '2026-04-09T10:00:00.000Z',
+  burst_group_id: null,
 };
 
 // ===== GET /api/inspo-photos =====
@@ -86,6 +87,7 @@ describe('POST /api/inspo-photos', () => {
       blob_url: 'https://blob.vercel-storage.com/inspo-photos/inspo-uuid-1.jpg',
       notes: null,
       taken_at: '2026-04-09T10:00:00.000Z',
+      burst_group_id: null,
     });
   });
 
@@ -119,6 +121,7 @@ describe('POST /api/inspo-photos', () => {
       blob_url: 'https://example.com/photo.jpg',
       notes: null,
       taken_at: undefined,
+      burst_group_id: null,
     });
   });
 });

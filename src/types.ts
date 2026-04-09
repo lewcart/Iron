@@ -308,4 +308,5 @@ export interface InspoPhoto {
   blob_url: string;
   notes: string | null;
   taken_at: string;
+  burst_group_id: string | null;
 }

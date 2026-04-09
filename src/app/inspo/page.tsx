@@ -27,10 +27,6 @@ function PhotoCard({
   const [confirming, setConfirming] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
-  const handleLongPress = useCallback(() => {
-    setConfirming(true);
-  }, []);
-
   const handleDelete = useCallback(async () => {
     setDeleting(true);
     try {
@@ -50,7 +46,7 @@ function PhotoCard({
         className="relative aspect-[3/4] overflow-hidden rounded-xl bg-zinc-800"
         onContextMenu={(e) => {
           e.preventDefault();
-          handleLongPress();
+          setConfirming(true);
         }}
       >
         <Image
@@ -63,7 +59,6 @@ function PhotoCard({
         />
       </div>
 
-      {/* Long-press delete confirmation */}
       {confirming && (
         <div className="absolute inset-0 rounded-xl bg-black/70 flex flex-col items-center justify-center gap-3 z-10">
           <p className="text-white text-xs font-medium">Delete?</p>
@@ -89,6 +84,104 @@ function PhotoCard({
   );
 }
 
+function BurstGroupRow({
+  photos,
+  onDelete,
+}: {
+  photos: InspoPhoto[];
+  onDelete: (uuid: string) => void;
+}) {
+  const [deletingAll, setDeletingAll] = useState(false);
+  const [confirmDeleteAll, setConfirmDeleteAll] = useState(false);
+
+  const handleDeleteAll = useCallback(async () => {
+    setDeletingAll(true);
+    try {
+      await Promise.all(
+        photos.map((p) =>
+          fetchJsonAuthed(`${apiBase()}/api/inspo-photos/${p.uuid}`, { method: 'DELETE' }),
+        ),
+      );
+      photos.forEach((p) => onDelete(p.uuid));
+    } catch {
+      setDeletingAll(false);
+      setConfirmDeleteAll(false);
+    }
+  }, [photos, onDelete]);
+
+  return (
+    <div className="col-span-2 rounded-2xl border border-zinc-700/60 bg-zinc-900/60 p-2.5 space-y-2">
+      {/* Burst header */}
+      <div className="flex items-center justify-between px-0.5">
+        <div className="flex items-center gap-1.5">
+          <span className="text-[10px] font-semibold tracking-widest text-zinc-400 uppercase">
+            Burst · {photos.length} shots
+          </span>
+          <span className="text-[10px] text-zinc-500">{formatDate(photos[0].taken_at)}</span>
+        </div>
+        <button
+          onClick={() => setConfirmDeleteAll(true)}
+          className="text-[10px] text-zinc-500 hover:text-red-400 transition-colors px-1.5 py-0.5 rounded"
+        >
+          Delete all
+        </button>
+      </div>
+
+      {/* Horizontal scroll strip */}
+      <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-none">
+        {photos.map((photo) => (
+          <div key={photo.uuid} className="flex-none w-28">
+            <PhotoCard photo={photo} onDelete={onDelete} />
+          </div>
+        ))}
+      </div>
+
+      {/* Delete all confirmation */}
+      {confirmDeleteAll && (
+        <div className="rounded-xl bg-black/70 flex items-center justify-center gap-3 py-2 px-3">
+          <p className="text-white text-xs font-medium flex-1">Delete all {photos.length} shots?</p>
+          <button
+            onClick={handleDeleteAll}
+            disabled={deletingAll}
+            className="flex items-center gap-1 px-3 py-1.5 bg-red-600 text-white text-xs rounded-lg disabled:opacity-50"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+            Delete all
+          </button>
+          <button
+            onClick={() => setConfirmDeleteAll(false)}
+            className="px-3 py-1.5 bg-zinc-700 text-white text-xs rounded-lg"
+          >
+            Cancel
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Combine photos into display items: solo photos or burst groups
+type GalleryItem =
+  | { type: 'solo'; photo: InspoPhoto }
+  | { type: 'burst'; burstGroupId: string; photos: InspoPhoto[] };
+
+function buildGalleryItems(photos: InspoPhoto[]): GalleryItem[] {
+  const items: GalleryItem[] = [];
+  const seenBursts = new Set<string>();
+
+  for (const photo of photos) {
+    if (!photo.burst_group_id) {
+      items.push({ type: 'solo', photo });
+    } else if (!seenBursts.has(photo.burst_group_id)) {
+      seenBursts.add(photo.burst_group_id);
+      const burst = photos.filter((p) => p.burst_group_id === photo.burst_group_id);
+      items.push({ type: 'burst', burstGroupId: photo.burst_group_id, photos: burst });
+    }
+  }
+
+  return items;
+}
+
 export default function InspoGalleryPage() {
   const [photos, setPhotos] = useState<InspoPhoto[]>([]);
   const [loading, setLoading] = useState(true);
@@ -104,6 +197,8 @@ export default function InspoGalleryPage() {
   const handleDelete = useCallback((uuid: string) => {
     setPhotos((prev) => prev.filter((p) => p.uuid !== uuid));
   }, []);
+
+  const galleryItems = buildGalleryItems(photos);
 
   return (
     <div className="min-h-screen bg-background pb-safe-or-4">
@@ -145,9 +240,17 @@ export default function InspoGalleryPage() {
 
         {!loading && photos.length > 0 && (
           <div className="grid grid-cols-2 gap-2">
-            {photos.map((photo) => (
-              <PhotoCard key={photo.uuid} photo={photo} onDelete={handleDelete} />
-            ))}
+            {galleryItems.map((item) =>
+              item.type === 'solo' ? (
+                <PhotoCard key={item.photo.uuid} photo={item.photo} onDelete={handleDelete} />
+              ) : (
+                <BurstGroupRow
+                  key={item.burstGroupId}
+                  photos={item.photos}
+                  onDelete={handleDelete}
+                />
+              ),
+            )}
           </div>
         )}
       </div>
