@@ -301,3 +301,11 @@ export interface ProgressPhoto {
   notes: string | null;
   taken_at: string;
 }
+
+// Inspo photos — physique inspiration captured discreetly
+export interface InspoPhoto {
+  uuid: string;
+  blob_url: string;
+  notes: string | null;
+  taken_at: string;
+}

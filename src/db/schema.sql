@@ -325,6 +325,17 @@ CREATE TABLE IF NOT EXISTS clothes_test_logs (
 
 CREATE INDEX IF NOT EXISTS idx_clothes_test_logs_logged_at ON clothes_test_logs(logged_at DESC);
 
+-- Inspo photos — discreet physique inspiration captures
+CREATE TABLE IF NOT EXISTS inspo_photos (
+  uuid TEXT PRIMARY KEY,
+  blob_url TEXT NOT NULL,
+  notes TEXT,
+  taken_at TIMESTAMP NOT NULL DEFAULT NOW(),
+  created_at TIMESTAMP DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_inspo_photos_taken_at ON inspo_photos(taken_at DESC);
+
 -- Module 7: Progress photos
 CREATE TABLE IF NOT EXISTS progress_photos (
   uuid TEXT PRIMARY KEY,

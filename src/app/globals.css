@@ -137,6 +137,12 @@
   top: env(safe-area-inset-top, 0px);
 }
 
+/* ── Inspo capture flash animation ──────────────────────── */
+@keyframes inspo-flash {
+  0%   { opacity: 0.85; }
+  100% { opacity: 0; }
+}
+
 /* ── Typography scale ────────────────────────────────── */
 .text-heading {
   @apply text-2xl font-bold tracking-tight;

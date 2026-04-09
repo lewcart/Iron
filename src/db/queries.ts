@@ -21,6 +21,7 @@ import type {
   DysphoriaLog,
   ClothesTestLog,
   ProgressPhoto,
+  InspoPhoto,
 } from '../types';
 import { calculatePRs } from '../lib/pr';
 import { muscleGroupSearchTerms } from '../lib/muscle-groups';
@@ -1907,6 +1908,43 @@ export async function listProgressPhotos(limit = 50): Promise<ProgressPhoto[]> {
 
 export async function deleteProgressPhoto(uuid: string): Promise<void> {
   await query(`DELETE FROM progress_photos WHERE uuid = $1`, [uuid]);
+}
+
+// ===== INSPO PHOTOS =====
+
+function parseInspoPhoto(row: DbRow): InspoPhoto {
+  return {
+    uuid: row.uuid as string,
+    blob_url: row.blob_url as string,
+    notes: row.notes as string | null,
+    taken_at: row.taken_at as string,
+  };
+}
+
+export async function createInspoPhoto(data: {
+  blob_url: string;
+  notes?: string | null;
+  taken_at?: string;
+}): Promise<InspoPhoto> {
+  const uuid = randomUUID();
+  const row = await queryOne(
+    `INSERT INTO inspo_photos (uuid, blob_url, notes, taken_at)
+     VALUES ($1, $2, $3, COALESCE($4::TIMESTAMP, NOW())) RETURNING *`,
+    [uuid, data.blob_url, data.notes ?? null, data.taken_at ?? null],
+  );
+  return parseInspoPhoto(row!);
+}
+
+export async function listInspoPhotos(limit = 50): Promise<InspoPhoto[]> {
+  const rows = await query(
+    `SELECT * FROM inspo_photos ORDER BY taken_at DESC LIMIT $1`,
+    [limit],
+  );
+  return rows.map(parseInspoPhoto);
+}
+
+export async function deleteInspoPhoto(uuid: string): Promise<void> {
+  await query(`DELETE FROM inspo_photos WHERE uuid = $1`, [uuid]);
 }
 
 export { importFitbeeExport } from './fitbee-import';

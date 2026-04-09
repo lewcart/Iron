@@ -6,6 +6,7 @@ import { UnitProvider } from "@/context/UnitContext";
 import { NetworkProvider } from "@/context/NetworkContext";
 import { SyncStatus } from "@/components/SyncStatus";
 import { InstallPrompt } from "@/components/InstallPrompt";
+import { InspoCaptureButton } from "@/components/InspoCaptureButton";
 
 export const metadata: Metadata = {
   title: "Rebirth",
@@ -46,6 +47,7 @@ export default function RootLayout({
             <UnitProvider>
               {children}
               <TabBar />
+              <InspoCaptureButton />
               <SyncStatus />
               <InstallPrompt />
             </UnitProvider>
