@@ -15,11 +15,43 @@
 		504EC30F1FED79650016851F /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 504EC30E1FED79650016851F /* Assets.xcassets */; };
 		504EC3121FED79650016851F /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 504EC3101FED79650016851F /* LaunchScreen.storyboard */; };
 		50B271D11FEDC1A000F3C39B /* public in Resources */ = {isa = PBXBuildFile; fileRef = 50B271D01FEDC1A000F3C39B /* public */; };
+		66A038B9F6CCA4CD69ED3A7C /* Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = C3C8B189A272DBD88E2B5226 /* Info.plist */; };
+		A9401796DFFB4961E62B1B17 /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 95B0D3245656B25E47BA3FE9 /* Foundation.framework */; };
+		BCDB60B1669B43B1F7D02C66 /* InspoBurstPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EC6C38970F00C7EEB816A32 /* InspoBurstPlugin.swift */; };
+		E81EF3DAF5F016DC13FD47EA /* FitspoControlWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = D121A798D2850322D0EBD90E /* FitspoControlWidget.swift */; };
+		EB3F38C6B219C7B4BDF48FE1 /* FitspoControlExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 149ADFA03562280CEC976416 /* FitspoControlExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, CodeSignOnCopy, ); }; };
+		ED5330C7A68AF9CFC81F4F99 /* FitspoBurstIntent.swift in Sources */ = {isa = PBXBuildFile; fileRef = E64E87D18C5A9BB8F67CCC7F /* FitspoBurstIntent.swift */; };
 		HK0000000000000000000001 /* HealthKitPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = HK0000000000000000000002 /* HealthKitPlugin.swift */; };
 		HK0000000000000000000003 /* HealthKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = HK0000000000000000000004 /* HealthKit.framework */; settings = {ATTRIBUTES = (Required, ); }; };
 /* End PBXBuildFile section */
 
+/* Begin PBXContainerItemProxy section */
+		8179A3FC9BFCB5C45AA3587D /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 504EC2FC1FED79650016851F /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 5FBFD96826DC10BD522E899F;
+			remoteInfo = FitspoControlExtension;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		E92C5B18CB366AF51C8264F8 /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				EB3F38C6B219C7B4BDF48FE1 /* FitspoControlExtension.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
 /* Begin PBXFileReference section */
+		149ADFA03562280CEC976416 /* FitspoControlExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = FitspoControlExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		1D4E083451DF98FFBEDE8AE4 /* FitspoControlExtension.entitlements */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.entitlements; path = FitspoControlExtension.entitlements; sourceTree = "<group>"; };
 		2FAD9762203C412B000D30F8 /* config.xml */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = config.xml; sourceTree = "<group>"; };
 		50379B222058CBB4000EE86E /* capacitor.config.json */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.json; path = capacitor.config.json; sourceTree = "<group>"; };
 		504EC3041FED79650016851F /* App.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = App.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -29,13 +61,26 @@
 		504EC3111FED79650016851F /* Base */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; name = Base; path = Base.lproj/LaunchScreen.storyboard; sourceTree = "<group>"; };
 		504EC3131FED79650016851F /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		50B271D01FEDC1A000F3C39B /* public */ = {isa = PBXFileReference; lastKnownFileType = folder; path = public; sourceTree = "<group>"; };
+		5EC6C38970F00C7EEB816A32 /* InspoBurstPlugin.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = InspoBurstPlugin.swift; sourceTree = "<group>"; };
 		958DCC722DB07C7200EA8C5F /* debug.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; name = debug.xcconfig; path = ../debug.xcconfig; sourceTree = SOURCE_ROOT; };
+		95B0D3245656B25E47BA3FE9 /* Foundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Foundation.framework; path = Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS18.0.sdk/System/Library/Frameworks/Foundation.framework; sourceTree = DEVELOPER_DIR; };
+		C3C8B189A272DBD88E2B5226 /* Info.plist */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		D121A798D2850322D0EBD90E /* FitspoControlWidget.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = FitspoControlWidget.swift; sourceTree = "<group>"; };
+		E64E87D18C5A9BB8F67CCC7F /* FitspoBurstIntent.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = FitspoBurstIntent.swift; sourceTree = "<group>"; };
 		HK0000000000000000000002 /* HealthKitPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthKitPlugin.swift; sourceTree = "<group>"; };
 		HK0000000000000000000004 /* HealthKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = HealthKit.framework; path = System/Library/Frameworks/HealthKit.framework; sourceTree = SDKROOT; };
 		HK0000000000000000000005 /* App.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = App.entitlements; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
+		14393632D1E31E3A3B88B48F /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A9401796DFFB4961E62B1B17 /* Foundation.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		504EC3011FED79650016851F /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
@@ -55,21 +100,15 @@
 				504EC3061FED79650016851F /* App */,
 				504EC3051FED79650016851F /* Products */,
 				HK0000000000000000000006 /* Frameworks */,
+				71D66E76DCE38F69E6753DAF /* FitspoControlExtension */,
 			);
-			sourceTree = "<group>";
-		};
-		HK0000000000000000000006 /* Frameworks */ = {
-			isa = PBXGroup;
-			children = (
-				HK0000000000000000000004 /* HealthKit.framework */,
-			);
-			name = Frameworks;
 			sourceTree = "<group>";
 		};
 		504EC3051FED79650016851F /* Products */ = {
 			isa = PBXGroup;
 			children = (
 				504EC3041FED79650016851F /* App.app */,
+				149ADFA03562280CEC976416 /* FitspoControlExtension.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -87,8 +126,38 @@
 				504EC3131FED79650016851F /* Info.plist */,
 				2FAD9762203C412B000D30F8 /* config.xml */,
 				50B271D01FEDC1A000F3C39B /* public */,
+				5EC6C38970F00C7EEB816A32 /* InspoBurstPlugin.swift */,
 			);
 			path = App;
+			sourceTree = "<group>";
+		};
+		6734149AE45030C3B8CF8052 /* iOS */ = {
+			isa = PBXGroup;
+			children = (
+				95B0D3245656B25E47BA3FE9 /* Foundation.framework */,
+			);
+			name = iOS;
+			sourceTree = "<group>";
+		};
+		71D66E76DCE38F69E6753DAF /* FitspoControlExtension */ = {
+			isa = PBXGroup;
+			children = (
+				E64E87D18C5A9BB8F67CCC7F /* FitspoBurstIntent.swift */,
+				D121A798D2850322D0EBD90E /* FitspoControlWidget.swift */,
+				C3C8B189A272DBD88E2B5226 /* Info.plist */,
+				1D4E083451DF98FFBEDE8AE4 /* FitspoControlExtension.entitlements */,
+			);
+			name = FitspoControlExtension;
+			path = FitspoControlExtension;
+			sourceTree = "<group>";
+		};
+		HK0000000000000000000006 /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				HK0000000000000000000004 /* HealthKit.framework */,
+				6734149AE45030C3B8CF8052 /* iOS */,
+			);
+			name = Frameworks;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -101,10 +170,12 @@
 				504EC3001FED79650016851F /* Sources */,
 				504EC3011FED79650016851F /* Frameworks */,
 				504EC3021FED79650016851F /* Resources */,
+				E92C5B18CB366AF51C8264F8 /* Embed Foundation Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				4048F6B0EA3E970ED9D62B88 /* PBXTargetDependency */,
 			);
 			name = App;
 			packageProductDependencies = (
@@ -113,6 +184,23 @@
 			productName = App;
 			productReference = 504EC3041FED79650016851F /* App.app */;
 			productType = "com.apple.product-type.application";
+		};
+		5FBFD96826DC10BD522E899F /* FitspoControlExtension */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 927E23269B71E55775B613EC /* Build configuration list for PBXNativeTarget "FitspoControlExtension" */;
+			buildPhases = (
+				10C0E46478D17426866B75C4 /* Sources */,
+				14393632D1E31E3A3B88B48F /* Frameworks */,
+				222FD3D29DD0FA6E4DFEA40F /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = FitspoControlExtension;
+			productName = FitspoControlExtension;
+			productReference = 149ADFA03562280CEC976416 /* FitspoControlExtension.appex */;
+			productType = "com.apple.product-type.app-extension";
 		};
 /* End PBXNativeTarget section */
 
@@ -147,11 +235,20 @@
 			projectRoot = "";
 			targets = (
 				504EC3031FED79650016851F /* App */,
+				5FBFD96826DC10BD522E899F /* FitspoControlExtension */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
+		222FD3D29DD0FA6E4DFEA40F /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				66A038B9F6CCA4CD69ED3A7C /* Info.plist in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		504EC3021FED79650016851F /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -168,16 +265,35 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
+		10C0E46478D17426866B75C4 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				ED5330C7A68AF9CFC81F4F99 /* FitspoBurstIntent.swift in Sources */,
+				E81EF3DAF5F016DC13FD47EA /* FitspoControlWidget.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		504EC3001FED79650016851F /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
 				504EC3081FED79650016851F /* AppDelegate.swift in Sources */,
 				HK0000000000000000000001 /* HealthKitPlugin.swift in Sources */,
+				BCDB60B1669B43B1F7D02C66 /* InspoBurstPlugin.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		4048F6B0EA3E970ED9D62B88 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			name = FitspoControlExtension;
+			target = 5FBFD96826DC10BD522E899F /* FitspoControlExtension */;
+			targetProxy = 8179A3FC9BFCB5C45AA3587D /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin PBXVariantGroup section */
 		504EC30B1FED79650016851F /* Main.storyboard */ = {
@@ -199,6 +315,23 @@
 /* End PBXVariantGroup section */
 
 /* Begin XCBuildConfiguration section */
+		261345E970C5A129FFE3CB02 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CLANG_ENABLE_OBJC_WEAK = NO;
+				CODE_SIGN_ENTITLEMENTS = FitspoControlExtension/FitspoControlExtension.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = FitspoControlExtension/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				PRODUCT_BUNDLE_IDENTIFIER = app.rebirth.FitspoControlExtension;
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Debug;
+		};
 		504EC3141FED79650016851F /* Debug */ = {
 			isa = XCBuildConfiguration;
 			baseConfigurationReference = 958DCC722DB07C7200EA8C5F /* debug.xcconfig */;
@@ -354,6 +487,24 @@
 			};
 			name = Release;
 		};
+		9D7E303B73160CD035D26234 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CLANG_ENABLE_OBJC_WEAK = NO;
+				CODE_SIGN_ENTITLEMENTS = FitspoControlExtension/FitspoControlExtension.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = FitspoControlExtension/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				PRODUCT_BUNDLE_IDENTIFIER = app.rebirth.FitspoControlExtension;
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -371,6 +522,15 @@
 			buildConfigurations = (
 				504EC3171FED79650016851F /* Debug */,
 				504EC3181FED79650016851F /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		927E23269B71E55775B613EC /* Build configuration list for PBXNativeTarget "FitspoControlExtension" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				9D7E303B73160CD035D26234 /* Release */,
+				261345E970C5A129FFE3CB02 /* Debug */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

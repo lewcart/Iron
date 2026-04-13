@@ -1,8 +1,9 @@
 'use client';
 
-import { useRef, useState, useCallback } from 'react';
+import { useRef, useState, useCallback, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { apiBase, fetchJsonAuthed } from '@/lib/api/client';
+import { onNativeBurstTrigger } from '@/lib/inspo-burst-control';
 
 const BURST_COUNT = 5;
 const BURST_INTERVAL_MS = 1500;
@@ -16,33 +17,6 @@ async function openBackCamera(): Promise<MediaStream> {
     },
     audio: false,
   });
-}
-
-async function captureFrameFromStream(stream: MediaStream): Promise<Blob> {
-  const video = document.createElement('video');
-  video.srcObject = stream;
-  video.setAttribute('playsinline', 'true');
-  video.muted = true;
-
-  // If video isn't playing yet, wait for it
-  if (video.readyState < 2) {
-    await video.play();
-  } else {
-    video.play();
-  }
-
-  const canvas = document.createElement('canvas');
-  canvas.width = video.videoWidth || 1280;
-  canvas.height = video.videoHeight || 720;
-  canvas.getContext('2d')!.drawImage(video, 0, 0, canvas.width, canvas.height);
-
-  return new Promise<Blob>((resolve, reject) =>
-    canvas.toBlob(
-      (blob) => (blob ? resolve(blob) : reject(new Error('canvas.toBlob failed'))),
-      'image/jpeg',
-      0.85,
-    ),
-  );
 }
 
 function sleep(ms: number) {
@@ -158,6 +132,9 @@ export function InspoCaptureButton() {
     setBurstProgress(0);
     setCapturing(false);
   }, [capturing, triggerFlash, uploadBlob]);
+
+  // Subscribe to the iOS 18 Lock Screen control trigger.
+  useEffect(() => onNativeBurstTrigger(triggerCapture), [triggerCapture]);
 
   const handlePointerDown = useCallback(() => {
     didLongPress.current = false;
