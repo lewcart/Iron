@@ -245,6 +245,7 @@ public class HealthKitPlugin: CAPPlugin, CAPBridgedPlugin {
         case .functionalStrengthTraining: return "Functional Strength"
         case .running: return "Running"
         case .walking: return "Walking"
+        case .hiking: return "Hiking"
         case .cycling: return "Cycling"
         case .swimming: return "Swimming"
         case .yoga: return "Yoga"

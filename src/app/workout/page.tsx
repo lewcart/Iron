@@ -17,7 +17,7 @@ import {
 import { consumeScheduleTap } from '@/lib/workout-schedule';
 import { HealthSection } from '@/components/HealthSection';
 import Link from 'next/link';
-import { Check, ChevronDown, ChevronRight, GripVertical, Plus, Search, Settings, X } from 'lucide-react';
+import { Check, ChevronDown, ChevronRight, Clock, GripVertical, Plus, Search, Settings, X } from 'lucide-react';
 import type { WorkoutPlan, WorkoutRoutine, WorkoutRoutineExercise, WorkoutRoutineSet, Exercise } from '@/types';
 import { formatTime, calcCompletedSets, calcTotalVolume } from './workout-utils';
 import { uuid as genUUID } from '@/lib/uuid';
@@ -699,6 +699,15 @@ function SetRow({
   const isPR = set.is_pr;
   const showPD = isPR || isLivePD;
 
+  const repsPlaceholder = (() => {
+    const min = set.min_target_reps;
+    const max = set.max_target_reps;
+    if (min != null && max != null) return min === max ? `${min}` : `${min}–${max}`;
+    if (min != null) return `${min}`;
+    if (max != null) return `${max}`;
+    return '—';
+  })();
+
   const inner = (
     <div className={`flex items-center gap-2 py-1.5 px-3 border-b border-border last:border-0 ${completed ? 'opacity-60' : ''}`}>
       {/* Set number */}
@@ -725,7 +734,7 @@ function SetRow({
         <input
           type="number"
           inputMode="numeric"
-          placeholder="—"
+          placeholder={repsPlaceholder}
           value={reps}
           onChange={e => setReps(e.target.value)}
           onFocus={e => { e.target.scrollIntoView({ behavior: 'smooth', block: 'center' }); e.target.select(); }}
@@ -734,25 +743,25 @@ function SetRow({
         <span className="text-[10px] text-muted-foreground">reps</span>
       </div>
 
-      {/* PD badge — subtle indicator, no row layout changes */}
-      {showPD && (
-        <span className="text-[9px] font-bold px-1 py-0.5 rounded-full flex-shrink-0 text-amber-400 bg-amber-400/15 border border-amber-400/30">
-          PR
-        </span>
-      )}
-
-      {/* Complete button */}
-      <button
-        onClick={handleComplete}
-        disabled={saving}
-        className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 transition-colors ${
-          completed
-            ? 'bg-green-500 text-white'
-            : 'border-2 border-border text-transparent hover:border-primary'
-        }`}
-      >
-        <Check className="h-3.5 w-3.5" />
-      </button>
+      {/* Complete button — PR badge overlaid to keep column widths stable */}
+      <div className="relative flex-shrink-0">
+        <button
+          onClick={handleComplete}
+          disabled={saving}
+          className={`w-8 h-8 rounded-full flex items-center justify-center transition-colors ${
+            completed
+              ? 'bg-green-500 text-white'
+              : 'border-2 border-border text-transparent hover:border-primary'
+          }`}
+        >
+          <Check className="h-3.5 w-3.5" />
+        </button>
+        {showPD && (
+          <span className="absolute -top-1.5 -right-1.5 text-[8px] font-bold px-0.5 leading-[14px] rounded-full text-amber-400 bg-amber-400/15 border border-amber-400/30 pointer-events-none">
+            PR
+          </span>
+        )}
+      </div>
     </div>
   );
 
@@ -831,8 +840,13 @@ function SortableExerciseCard({
               ? <ChevronDown className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
               : <ChevronRight className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
             }
-            <span className={`flex-1 font-semibold text-sm truncate ${allDone ? 'text-muted-foreground' : ''}`}>
-              {we.exercise?.title ?? 'Unknown Exercise'}
+            <span className="flex-1 min-w-0">
+              <span className={`block font-semibold text-sm truncate ${allDone ? 'text-muted-foreground' : ''}`}>
+                {we.exercise?.title ?? 'Unknown Exercise'}
+              </span>
+              {we.comment && (
+                <span className="block text-xs text-muted-foreground italic truncate">{we.comment}</span>
+              )}
             </span>
             {allDone ? (
               <div className="w-5 h-5 rounded-full bg-green-500 flex items-center justify-center flex-shrink-0">
@@ -850,12 +864,13 @@ function SortableExerciseCard({
       {/* Collapsible sets */}
       {isExpanded && (
         <>
-          {/* Column headers */}
+          {/* Column headers — mirrors SetRow layout exactly */}
           <div className="flex items-center gap-2 px-3 py-1 border-t border-b border-border bg-secondary/30">
             <div className="w-5 text-center text-[10px] font-medium text-muted-foreground">Set</div>
             <div className="flex-1 text-right text-[10px] font-medium text-muted-foreground">Weight</div>
             <div className="w-3" />
             <div className="flex-1 text-right text-[10px] font-medium text-muted-foreground">Reps</div>
+            <div className="w-8 flex-shrink-0" />
           </div>
 
           {/* Sets */}
@@ -1039,7 +1054,7 @@ export default function WorkoutPage() {
           uuid: weUuid,
           workout_uuid: workoutUuid,
           exercise_uuid: exerciseUuid,
-          comment: null,
+          comment: routineExercise.comment ?? null,
           order_index: routineExercise.order_index,
           ...syncMeta,
         });
@@ -1258,13 +1273,22 @@ export default function WorkoutPage() {
       <main className="tab-content bg-background overflow-y-auto">
         <div className="px-4 pt-safe pb-4 flex items-center justify-between">
           <h1 className="text-2xl font-bold">Workout</h1>
-          <Link
-            href="/plans"
-            className="flex items-center gap-1.5 text-sm text-primary font-medium"
-          >
-            <Settings className="h-4 w-4" />
-            Manage
-          </Link>
+          <div className="flex items-center gap-3">
+            <Link
+              href="/history"
+              className="flex items-center justify-center text-muted-foreground min-h-[44px] min-w-[44px]"
+              aria-label="History"
+            >
+              <Clock className="h-5 w-5" strokeWidth={1.75} />
+            </Link>
+            <Link
+              href="/plans"
+              className="flex items-center gap-1.5 text-sm text-primary font-medium min-h-[44px]"
+            >
+              <Settings className="h-4 w-4" />
+              Manage
+            </Link>
+          </div>
         </div>
         <div className="px-4 space-y-4">
           <div

@@ -2,9 +2,8 @@
 
 import { useState, useCallback, useMemo } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ChevronDown, ChevronRight, ChevronUp, Plus, Search, Trash2, X } from 'lucide-react';
-import type { WorkoutPlan, WorkoutRoutine, WorkoutRoutineExercise, Exercise } from '@/types';
-import { formatSetsReps } from './utils';
+import { ChevronDown, ChevronRight, ChevronUp, Check, Plus, Search, Trash2, X } from 'lucide-react';
+import type { WorkoutPlan, WorkoutRoutine, WorkoutRoutineExercise, WorkoutRoutineSet, Exercise } from '@/types';
 import { queryKeys } from '@/lib/api/query-keys';
 import { fetchPlansWithRoutines, type PlanWithRoutines } from '@/lib/api/plans';
 import { fetchExerciseCatalog } from '@/lib/api/exercises';
@@ -111,6 +110,17 @@ function ExerciseSelectorSheet({
 
 // ─── Routine card ─────────────────────────────────────────────────────────────
 
+function formatSet(s: WorkoutRoutineSet): string {
+  if (s.min_repetitions != null && s.max_repetitions != null) {
+    return s.min_repetitions === s.max_repetitions
+      ? `${s.min_repetitions}`
+      : `${s.min_repetitions}–${s.max_repetitions}`;
+  }
+  if (s.min_repetitions != null) return `${s.min_repetitions}`;
+  if (s.max_repetitions != null) return `${s.max_repetitions}`;
+  return '—';
+}
+
 function RoutineCard({
   planUuid,
   routine: initialRoutine,
@@ -142,11 +152,15 @@ function RoutineCard({
   const [expanded, setExpanded] = useState(false);
   const [showExerciseSelector, setShowExerciseSelector] = useState(false);
   const [starting, setStarting] = useState(false);
+  const [editingSet, setEditingSet] = useState<{ uuid: string; min: string; max: string } | null>(null);
+  const [editingNotes, setEditingNotes] = useState<{ exerciseUuid: string; value: string } | null>(null);
+
+  const setsBase = (routineExerciseUuid: string) =>
+    `${apiBase()}/api/plans/${planUuid}/routines/${initialRoutine.uuid}/exercises/${routineExerciseUuid}/sets`;
 
   const loadExercises = useCallback(async () => {
     const res = await fetch(`${apiBase()}/api/plans/${planUuid}/routines/${initialRoutine.uuid}/exercises`);
     const routineExercises = await res.json();
-
     setRoutine(prev => ({ ...prev, exercises: routineExercises, loaded: true }));
   }, [planUuid, initialRoutine.uuid]);
 
@@ -176,6 +190,79 @@ function RoutineCard({
     });
     await loadExercises();
     invalidatePlans();
+  };
+
+  const handleAddSet = async (routineExerciseUuid: string) => {
+    const res = await fetch(setsBase(routineExerciseUuid), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    });
+    const newSet: WorkoutRoutineSet = await res.json();
+    setRoutine(prev => ({
+      ...prev,
+      exercises: prev.exercises.map(ex =>
+        ex.uuid === routineExerciseUuid
+          ? { ...ex, sets: [...(ex.sets ?? []), newSet] }
+          : ex
+      ),
+    }));
+    setEditingSet({ uuid: newSet.uuid, min: '', max: '' });
+  };
+
+  const handleSaveSet = async () => {
+    if (!editingSet) return;
+    const minVal = editingSet.min.trim() === '' ? null : Number(editingSet.min);
+    const maxVal = editingSet.max.trim() === '' ? null : Number(editingSet.max);
+    // Find which exercise owns this set
+    const ownerEx = routine.exercises.find(ex => ex.sets?.some(s => s.uuid === editingSet.uuid));
+    if (!ownerEx) { setEditingSet(null); return; }
+    const res = await fetch(`${setsBase(ownerEx.uuid)}/${editingSet.uuid}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ minRepetitions: minVal, maxRepetitions: maxVal }),
+    });
+    const updated: WorkoutRoutineSet = await res.json();
+    setRoutine(prev => ({
+      ...prev,
+      exercises: prev.exercises.map(ex =>
+        ex.uuid === ownerEx.uuid
+          ? { ...ex, sets: (ex.sets ?? []).map(s => s.uuid === updated.uuid ? updated : s) }
+          : ex
+      ),
+    }));
+    setEditingSet(null);
+  };
+
+  const handleDeleteSet = async (routineExerciseUuid: string, setUuid: string) => {
+    await fetch(`${setsBase(routineExerciseUuid)}/${setUuid}`, { method: 'DELETE' });
+    setRoutine(prev => ({
+      ...prev,
+      exercises: prev.exercises.map(ex =>
+        ex.uuid === routineExerciseUuid
+          ? { ...ex, sets: (ex.sets ?? []).filter(s => s.uuid !== setUuid) }
+          : ex
+      ),
+    }));
+    if (editingSet?.uuid === setUuid) setEditingSet(null);
+  };
+
+  const handleSaveNotes = async () => {
+    if (!editingNotes) return;
+    const { exerciseUuid, value } = editingNotes;
+    const comment = value.trim() || null;
+    await fetch(`${apiBase()}/api/plans/${planUuid}/routines/${initialRoutine.uuid}/exercises/${exerciseUuid}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ comment }),
+    });
+    setRoutine(prev => ({
+      ...prev,
+      exercises: prev.exercises.map(ex =>
+        ex.uuid === exerciseUuid ? { ...ex, comment } : ex
+      ),
+    }));
+    setEditingNotes(null);
   };
 
   const handleStartWorkout = async () => {
@@ -253,25 +340,113 @@ function RoutineCard({
               <p className="px-4 py-3 text-sm text-muted-foreground">No exercises yet</p>
             ) : (
               <div className="divide-y divide-border">
-                {routine.exercises.map((re) => {
-                  const setsReps = formatSetsReps(re.sets ?? []);
-                  return (
-                    <div key={re.uuid} className="flex items-center px-4 py-2.5 gap-3">
-                      <div className="flex-1">
-                        <p className="text-sm text-foreground">{re.exercise_title ?? 'Unknown'}</p>
-                        {setsReps && (
-                          <p className="text-xs text-muted-foreground mt-0.5">{setsReps}</p>
+                {routine.exercises.map((re) => (
+                  <div key={re.uuid}>
+                    {/* Exercise row */}
+                    <div className="flex items-start px-4 py-2.5 gap-3">
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium text-foreground">{re.exercise_title ?? 'Unknown'}</p>
+                        {editingNotes?.exerciseUuid === re.uuid ? (
+                          <div className="flex items-center gap-1.5 mt-1">
+                            <input
+                              autoFocus
+                              type="text"
+                              placeholder="Add note (e.g. pause at bottom)"
+                              value={editingNotes.value}
+                              onChange={e => setEditingNotes(prev => prev ? { ...prev, value: e.target.value } : prev)}
+                              onKeyDown={e => { if (e.key === 'Enter') handleSaveNotes(); if (e.key === 'Escape') setEditingNotes(null); }}
+                              className="flex-1 bg-background border border-input rounded px-2 py-0.5 text-xs outline-none focus:border-primary"
+                            />
+                            <button onClick={handleSaveNotes} className="text-primary p-0.5" aria-label="Save notes">
+                              <Check className="h-3.5 w-3.5" />
+                            </button>
+                            <button onClick={() => setEditingNotes(null)} className="text-muted-foreground p-0.5" aria-label="Cancel">
+                              <X className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
+                        ) : (
+                          <button
+                            onClick={() => setEditingNotes({ exerciseUuid: re.uuid, value: re.comment ?? '' })}
+                            className="mt-0.5 text-left"
+                          >
+                            {re.comment
+                              ? <span className="text-xs text-muted-foreground italic">{re.comment}</span>
+                              : <span className="text-xs text-muted-foreground/50">Add note…</span>
+                            }
+                          </button>
                         )}
                       </div>
                       <button
                         onClick={() => handleRemoveExercise(re.exercise_uuid)}
-                        className="text-muted-foreground hover:text-destructive transition-colors p-1"
+                        className="text-muted-foreground hover:text-destructive transition-colors p-1 flex-shrink-0"
+                        aria-label="Remove exercise"
                       >
                         <X className="h-4 w-4" />
                       </button>
                     </div>
-                  );
-                })}
+                    {/* Set rows */}
+                    {(re.sets ?? []).map((set, si) => (
+                      <div key={set.uuid} className="flex items-center pl-8 pr-3 py-1.5 gap-2 bg-muted/30">
+                        <span className="text-xs text-muted-foreground w-10 flex-shrink-0">Set {si + 1}</span>
+                        {editingSet?.uuid === set.uuid ? (
+                          <>
+                            <input
+                              autoFocus
+                              type="number"
+                              min={1}
+                              placeholder="min"
+                              value={editingSet.min}
+                              onChange={e => setEditingSet(prev => prev ? { ...prev, min: e.target.value } : prev)}
+                              onKeyDown={e => { if (e.key === 'Enter') handleSaveSet(); if (e.key === 'Escape') setEditingSet(null); }}
+                              className="w-14 bg-background border border-input rounded px-2 py-0.5 text-sm text-center outline-none focus:border-primary"
+                            />
+                            <span className="text-xs text-muted-foreground">–</span>
+                            <input
+                              type="number"
+                              min={1}
+                              placeholder="max"
+                              value={editingSet.max}
+                              onChange={e => setEditingSet(prev => prev ? { ...prev, max: e.target.value } : prev)}
+                              onKeyDown={e => { if (e.key === 'Enter') handleSaveSet(); if (e.key === 'Escape') setEditingSet(null); }}
+                              className="w-14 bg-background border border-input rounded px-2 py-0.5 text-sm text-center outline-none focus:border-primary"
+                            />
+                            <span className="text-xs text-muted-foreground flex-1">reps</span>
+                            <button onClick={handleSaveSet} className="text-primary p-1" aria-label="Save">
+                              <Check className="h-3.5 w-3.5" />
+                            </button>
+                            <button onClick={() => setEditingSet(null)} className="text-muted-foreground p-1" aria-label="Cancel">
+                              <X className="h-3.5 w-3.5" />
+                            </button>
+                          </>
+                        ) : (
+                          <>
+                            <button
+                              onClick={() => setEditingSet({ uuid: set.uuid, min: set.min_repetitions != null ? String(set.min_repetitions) : '', max: set.max_repetitions != null ? String(set.max_repetitions) : '' })}
+                              className="flex-1 text-left text-sm text-foreground"
+                            >
+                              {formatSet(set)} reps
+                            </button>
+                            <button
+                              onClick={() => handleDeleteSet(re.uuid, set.uuid)}
+                              className="text-muted-foreground hover:text-destructive transition-colors p-1"
+                              aria-label="Delete set"
+                            >
+                              <X className="h-3.5 w-3.5" />
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    ))}
+                    {/* Add set */}
+                    <button
+                      onClick={() => handleAddSet(re.uuid)}
+                      className="flex items-center gap-1.5 pl-8 pr-4 py-1.5 text-primary text-xs font-medium w-full bg-muted/30"
+                    >
+                      <Plus className="h-3 w-3" />
+                      Add set
+                    </button>
+                  </div>
+                ))}
               </div>
             )}
             <button

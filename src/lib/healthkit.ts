@@ -52,6 +52,30 @@ interface HealthKitPlugin {
 
 export const HealthKit = registerPlugin<HealthKitPlugin>('HealthKit');
 
+/**
+ * Activity type remapping rules.
+ * Key: activityType string from HealthKit iOS mapping.
+ * Value: { displayType, intensityMultiplier }
+ *
+ * "Hiking" on Apple Watch is how Lou logs dog walks. Reclassify to "Dog Walk"
+ * with 0.65x intensity since it's lower effort than actual hiking.
+ * "Walking" remains unchanged — those are gym commute walks at full value.
+ */
+const ACTIVITY_REMAP: Record<string, { displayType: string; intensityMultiplier: number }> = {
+  Hiking: { displayType: 'Dog Walk', intensityMultiplier: 0.65 },
+};
+
+/** Apply activity type remapping and intensity scaling to a HealthKit workout. */
+export function reclassifyWorkout(workout: HealthWorkout): HealthWorkout {
+  const remap = ACTIVITY_REMAP[workout.activityType];
+  if (!remap) return workout;
+  return {
+    ...workout,
+    activityType: remap.displayType,
+    activeCalories: Math.round(workout.activeCalories * remap.intensityMultiplier),
+  };
+}
+
 /** Estimate active calories for a strength training session based on duration. */
 function estimateActiveKcal(durationMs: number): number {
   const minutes = durationMs / 1000 / 60;
@@ -121,7 +145,7 @@ export async function fetchHealthSummary(): Promise<HealthSummary | null> {
     return {
       steps: stepsResult.value,
       activeCalories: caloriesResult.value,
-      recentWorkouts: workoutsResult.workouts,
+      recentWorkouts: workoutsResult.workouts.map(reclassifyWorkout),
     };
   } catch {
     return null;
