@@ -10,47 +10,38 @@ import UIKit
 class SceneDelegate: UIResponder, UIWindowSceneDelegate {
     var window: UIWindow?
 
-    override init() {
-        super.init()
-        appDelegateCrumb("SceneDelegate init")
-    }
-
+    // Warm: external URL open (Safari `rebirth://burst`, etc.).
     func scene(_ scene: UIScene, openURLContexts URLContexts: Set<UIOpenURLContext>) {
-        for ctx in URLContexts {
-            appDelegateCrumb("SceneDelegate openURLContexts url=\(ctx.url.absoluteString)")
-            if ctx.url.scheme == "rebirth" && ctx.url.host == "burst" {
-                let defaults = UserDefaults(suiteName: "group.app.rebirth")
-                defaults?.set(true, forKey: "fitspoBurstPending")
-                defaults?.synchronize()
-                NotificationCenter.default.post(
-                    name: Notification.Name("FitspoBurstPending"),
-                    object: nil
-                )
-            }
+        for ctx in URLContexts where ctx.url.scheme == "rebirth" && ctx.url.host == "burst" {
+            postBurstNotification(delay: 0)
         }
     }
 
-    // Cold-launch URLs arrive via connectionOptions on scene connect.
+    // Cold: launched from a URL. Plugin + webview aren't ready yet so delay
+    // the notification slightly, and InspoBurstPlugin.checkPendingFlag() on
+    // load() is the secondary catch.
     func scene(_ scene: UIScene,
                willConnectTo session: UISceneSession,
                options connectionOptions: UIScene.ConnectionOptions) {
-        for ctx in connectionOptions.urlContexts {
-            appDelegateCrumb("SceneDelegate willConnectTo url=\(ctx.url.absoluteString)")
-            if ctx.url.scheme == "rebirth" && ctx.url.host == "burst" {
-                let defaults = UserDefaults(suiteName: "group.app.rebirth")
-                defaults?.set(true, forKey: "fitspoBurstPending")
-                defaults?.synchronize()
-                // Post with a slight delay so Capacitor bridge + plugin load()
-                // have a chance to set up the notification observer. The
-                // checkPendingFlag() path in the plugin's load() is the other
-                // half of the belt-and-braces.
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                    NotificationCenter.default.post(
-                        name: Notification.Name("FitspoBurstPending"),
-                        object: nil
-                    )
-                }
-            }
+        for ctx in connectionOptions.urlContexts where ctx.url.scheme == "rebirth" && ctx.url.host == "burst" {
+            postBurstNotification(delay: 0.5)
+        }
+    }
+
+    private func postBurstNotification(delay: TimeInterval) {
+        let defaults = UserDefaults(suiteName: "group.app.rebirth")
+        defaults?.set(true, forKey: "fitspoBurstPending")
+        defaults?.synchronize()
+        let fire = {
+            NotificationCenter.default.post(
+                name: Notification.Name("FitspoBurstPending"),
+                object: nil
+            )
+        }
+        if delay > 0 {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: fire)
+        } else {
+            fire()
         }
     }
 }

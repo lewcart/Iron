@@ -1,40 +1,16 @@
 import UIKit
 import Capacitor
 
-/// Temporary file-based diagnostic — writes to Documents/rebirth-debug.log
-/// so we can verify the URL / flag / notification chain without fighting
-/// os_log redaction + idevicesyslog flakiness.
-func appDelegateCrumb(_ label: String) {
-    let ts = ISO8601DateFormatter().string(from: Date())
-    let line = "\(ts)  \(label)\n"
-    let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
-    guard let url = docs?.appendingPathComponent("rebirth-debug.log") else { return }
-    if let h = try? FileHandle(forWritingTo: url) {
-        h.seekToEndOfFile(); h.write(line.data(using: .utf8) ?? Data()); try? h.close()
-    } else {
-        try? line.data(using: .utf8)?.write(to: url)
-    }
-    NSLog("%{public}@", "[Rebirth] " + label)
-}
-
 @UIApplicationMain
 class AppDelegate: UIResponder, UIApplicationDelegate {
 
     var window: UIWindow?
 
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
-        let launchURL = launchOptions?[.url] as? URL
-        appDelegateCrumb("didFinishLaunching launchURL=\(launchURL?.absoluteString ?? "nil")")
-        // If the app is launching FROM a URL (cold start from Control Widget),
-        // handle it here since application(_:open:) may not fire in this path.
-        if let url = launchURL, url.scheme == "rebirth" && url.host == "burst" {
-            handleBurstURL()
-        }
         return true
     }
 
     private func handleBurstURL() {
-        appDelegateCrumb("handleBurstURL — setting flag + posting notification")
         let defaults = UserDefaults(suiteName: "group.app.rebirth")
         defaults?.set(true, forKey: "fitspoBurstPending")
         defaults?.synchronize()
@@ -60,9 +36,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
 
     func applicationDidBecomeActive(_ application: UIApplication) {
         let defaults = UserDefaults(suiteName: "group.app.rebirth")
-        let hasFlag = defaults?.bool(forKey: "fitspoBurstPending") ?? false
-        appDelegateCrumb("didBecomeActive defaults=\(defaults == nil ? "nil" : "ok") hasFlag=\(hasFlag)")
-        if hasFlag {
+        if defaults?.bool(forKey: "fitspoBurstPending") == true {
             defaults?.set(false, forKey: "fitspoBurstPending")
             defaults?.synchronize()
             NotificationCenter.default.post(
@@ -77,26 +51,19 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     }
 
     func application(_ app: UIApplication, open url: URL, options: [UIApplication.OpenURLOptionsKey: Any] = [:]) -> Bool {
-        appDelegateCrumb("application(_:open:) url=\(url.absoluteString)")
         if url.scheme == "rebirth" && url.host == "burst" {
             handleBurstURL()
         }
         return ApplicationDelegateProxy.shared.application(app, open: url, options: options)
     }
 
-    // Scene-based lifecycle fallback (iOS 13+ scene apps route URLs here
-    // instead of application(_:open:). We don't declare scenes, but iOS 18
-    // apps sometimes get scenes anyway). Handled via the window's scene.
+    // iOS 18 wraps our app in a scene even without a manifest, so URL opens
+    // from external apps (Safari, etc.) route to scene(_:openURLContexts:)
+    // on a UISceneDelegate. Info.plist points scenes at our SceneDelegate.
     @available(iOS 13.0, *)
     func application(_ application: UIApplication,
                      configurationForConnecting connectingSceneSession: UISceneSession,
                      options: UIScene.ConnectionOptions) -> UISceneConfiguration {
-        appDelegateCrumb("configurationForConnecting urls=\(options.urlContexts.map { $0.url.absoluteString })")
-        for ctx in options.urlContexts {
-            if ctx.url.scheme == "rebirth" && ctx.url.host == "burst" {
-                handleBurstURL()
-            }
-        }
         let config = UISceneConfiguration(name: nil, sessionRole: connectingSceneSession.role)
         config.delegateClass = SceneDelegate.self
         return config
