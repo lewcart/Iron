@@ -30,13 +30,19 @@ export interface StartRestActivityOptions {
   exerciseName?: string;
   /** Which set just finished (1-indexed). */
   setNumber?: number;
+  /** Optional — if supplied, the widget starts in red count-UP mode from this epoch ms. */
+  overtimeStart?: number;
 }
 
 export interface UpdateRestActivityOptions {
-  /** New absolute epoch ms when the rest period ends. */
-  endTime: number;
+  /** New absolute epoch ms when the rest period ends. Omit to keep the existing value. */
+  endTime?: number;
   /** Reserved for future pause/resume support. */
   paused?: boolean;
+  /** Set to an epoch ms to switch the widget into red count-UP mode. */
+  overtimeStart?: number;
+  /** Set to `true` to clear overtime mode and return to countdown. */
+  overtimeStartNull?: boolean;
 }
 
 interface RestTimerPluginInterface {

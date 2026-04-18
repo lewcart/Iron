@@ -6,9 +6,12 @@ import ActivityKit
 /// the countdown appears on the Lock Screen and Dynamic Island.
 ///
 /// JS API (see `src/lib/native/rest-timer-activity.ts`):
-///   RestTimer.start({ endTime, duration, exerciseName?, setNumber? })
-///   RestTimer.update({ endTime, paused? })
+///   RestTimer.start({ endTime, duration, exerciseName?, setNumber?, overtimeStart? })
+///   RestTimer.update({ endTime?, paused?, overtimeStart? | overtimeStartNull? })
 ///   RestTimer.end()
+///
+/// `overtimeStart` (epoch ms) switches the widget into red count-UP mode.
+/// Pass `overtimeStartNull: true` on update to clear it back to countdown.
 ///
 /// Missing support (simulator, iOS < 16.2, user disabled Live Activities in
 /// Settings) is treated as silent success — the web UI still works; we just
@@ -34,6 +37,7 @@ public class RestTimerPlugin: CAPPlugin, CAPBridgedPlugin {
         let duration = call.getInt("duration") ?? 0
         let exerciseName = call.getString("exerciseName") ?? "Rest"
         let setNumber = call.getInt("setNumber") ?? 0
+        let overtimeStartMs = call.getDouble("overtimeStart")
 
         guard endTimeMs > 0 else {
             call.reject("endTime (epoch ms) is required")
@@ -52,10 +56,12 @@ public class RestTimerPlugin: CAPPlugin, CAPBridgedPlugin {
                 exerciseName: exerciseName,
                 setNumber: setNumber
             )
+            let overtimeStart = overtimeStartMs.map { Date(timeIntervalSince1970: $0 / 1000.0) }
             let initialState = RestTimerAttributes.ContentState(
                 endDate: endDate,
                 duration: duration,
-                paused: false
+                paused: false,
+                overtimeStart: overtimeStart
             )
 
             Task {
@@ -92,13 +98,6 @@ public class RestTimerPlugin: CAPPlugin, CAPBridgedPlugin {
     // MARK: - update
 
     @objc func update(_ call: CAPPluginCall) {
-        let endTimeMs = call.getDouble("endTime") ?? call.getDouble("endTimeMs") ?? 0
-
-        guard endTimeMs > 0 else {
-            call.reject("endTime (epoch ms) is required")
-            return
-        }
-
         if #available(iOS 16.2, *) {
             guard let activity = RestTimerPlugin.currentActivityAny as? Activity<RestTimerAttributes> else {
                 // Nothing to update → treat as success.
@@ -106,21 +105,37 @@ public class RestTimerPlugin: CAPPlugin, CAPBridgedPlugin {
                 return
             }
 
-            let paused = call.getBool("paused") ?? activity.content.state.paused
-            let endDate = Date(timeIntervalSince1970: endTimeMs / 1000.0)
-            // Preserve original duration if the caller didn't supply one.
-            let duration = call.getInt("duration") ?? activity.content.state.duration
+            let current = activity.content.state
+            let endTimeMs = call.getDouble("endTime") ?? call.getDouble("endTimeMs")
+            let endDate = endTimeMs.map { Date(timeIntervalSince1970: $0 / 1000.0) } ?? current.endDate
+            let paused = call.getBool("paused") ?? current.paused
+            let duration = call.getInt("duration") ?? current.duration
+
+            // overtimeStart: set a new value, clear it with `overtimeStartNull: true`,
+            // or omit to preserve the existing value.
+            let overtimeStart: Date?
+            if call.getBool("overtimeStartNull") == true {
+                overtimeStart = nil
+            } else if let ms = call.getDouble("overtimeStart") {
+                overtimeStart = Date(timeIntervalSince1970: ms / 1000.0)
+            } else {
+                overtimeStart = current.overtimeStart
+            }
+
             let newState = RestTimerAttributes.ContentState(
                 endDate: endDate,
                 duration: duration,
-                paused: paused
+                paused: paused,
+                overtimeStart: overtimeStart
             )
 
             Task {
-                let content = ActivityContent(
-                    state: newState,
-                    staleDate: endDate.addingTimeInterval(60)
-                )
+                // Overtime widgets should stay fresh indefinitely; countdown widgets
+                // become stale a minute after endDate.
+                let staleDate = overtimeStart == nil
+                    ? endDate.addingTimeInterval(60)
+                    : Date().addingTimeInterval(60 * 60) // 1h
+                let content = ActivityContent(state: newState, staleDate: staleDate)
                 await activity.update(content)
                 call.resolve()
             }

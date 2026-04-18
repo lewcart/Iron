@@ -642,7 +642,7 @@ export default function SettingsPage() {
               <div className="flex-1">
                 <span className="text-sm font-medium">Keep Rest Timer Running</span>
                 <p className="text-xs text-muted-foreground mt-0.5 pr-4">
-                  Shows a red countdown when the rest period has elapsed.
+                  Counts up in red after your rest period ends so you can see total rest time.
                 </p>
               </div>
               <Toggle on={keepRestRunning} onToggle={() => updateKeepRestRunning(!keepRestRunning)} />

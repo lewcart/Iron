@@ -12,9 +12,11 @@ struct RestTimerLiveActivityBundle: WidgetBundle {
     }
 }
 
-// Trans-flag blue, matches the app's primary accent.
+// Trans-flag blue, matches the app's primary accent. Red is used when the
+// rest period has elapsed and we're counting up in "keep running" mode.
 private enum Palette {
     static let accent: Color = Color(.sRGB, red: 91.0 / 255.0, green: 206.0 / 255.0, blue: 250.0 / 255.0, opacity: 1.0)
+    static let overtime: Color = Color(.sRGB, red: 239.0 / 255.0, green: 68.0 / 255.0, blue: 68.0 / 255.0, opacity: 1.0)
 }
 
 /// The Live Activity widget. One configuration drives both the Lock Screen
@@ -25,16 +27,18 @@ struct RestTimerLiveActivity: Widget {
             // Lock Screen / banner presentation.
             LockScreenView(context: context)
                 .activityBackgroundTint(Color.black.opacity(0.6))
-                .activitySystemActionForegroundColor(Palette.accent)
+                .activitySystemActionForegroundColor(tint(for: context.state))
 
         } dynamicIsland: { context in
-            DynamicIsland {
+            let state = context.state
+            let activeColor = tint(for: state)
+            return DynamicIsland {
                 // Expanded regions (when the user long-presses the island).
                 DynamicIslandExpandedRegion(.leading) {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("REST")
+                        Text(state.overtimeStart == nil ? "REST" : "OVERTIME")
                             .font(.caption2.weight(.semibold))
-                            .foregroundStyle(Palette.accent)
+                            .foregroundStyle(activeColor)
                         Text(context.attributes.exerciseName)
                             .font(.callout.weight(.semibold))
                             .lineLimit(1)
@@ -42,10 +46,10 @@ struct RestTimerLiveActivity: Widget {
                     .padding(.leading, 4)
                 }
                 DynamicIslandExpandedRegion(.trailing) {
-                    countdownLabel(endDate: context.state.endDate)
+                    timerLabel(state: state)
                         .font(.system(size: 28, weight: .semibold, design: .rounded))
                         .monospacedDigit()
-                        .foregroundStyle(Palette.accent)
+                        .foregroundStyle(activeColor)
                         .padding(.trailing, 4)
                 }
                 DynamicIslandExpandedRegion(.bottom) {
@@ -61,28 +65,35 @@ struct RestTimerLiveActivity: Widget {
                 }
             } compactLeading: {
                 Image(systemName: "timer")
-                    .foregroundStyle(Palette.accent)
+                    .foregroundStyle(activeColor)
             } compactTrailing: {
-                countdownLabel(endDate: context.state.endDate)
+                timerLabel(state: state)
                     .monospacedDigit()
-                    .foregroundStyle(Palette.accent)
-                    .frame(maxWidth: 56)
+                    .foregroundStyle(activeColor)
+                    .frame(maxWidth: 64)
             } minimal: {
                 Image(systemName: "timer")
-                    .foregroundStyle(Palette.accent)
+                    .foregroundStyle(activeColor)
             }
             .widgetURL(URL(string: "rebirth://workout"))
-            .keylineTint(Palette.accent)
+            .keylineTint(activeColor)
         }
     }
 
-    /// Self-updating countdown — the system refreshes the frame, not us.
-    @ViewBuilder
-    private func countdownLabel(endDate: Date) -> Text {
-        // `timerInterval:countsDown:` renders `mm:ss` style text and stops at
-        // endDate automatically. `now` as the start ensures the initial frame
-        // reflects "time remaining" immediately.
-        Text(timerInterval: Date()...endDate, countsDown: true)
+    /// Countdown while resting, count-up once overtime begins. Both forms are
+    /// self-updating via `Text(timerInterval:)` — the system renders frames
+    /// without us pushing updates.
+    private func timerLabel(state: RestTimerAttributes.ContentState) -> Text {
+        if let start = state.overtimeStart {
+            // Count UP from the moment rest expired.
+            return Text("+") + Text(timerInterval: start...Date.distantFuture, countsDown: false)
+        }
+        // Standard countdown to endDate.
+        return Text(timerInterval: Date()...state.endDate, countsDown: true)
+    }
+
+    private func tint(for state: RestTimerAttributes.ContentState) -> Color {
+        state.overtimeStart == nil ? Palette.accent : Palette.overtime
     }
 }
 
@@ -90,14 +101,17 @@ struct RestTimerLiveActivity: Widget {
 private struct LockScreenView: View {
     let context: ActivityViewContext<RestTimerAttributes>
 
+    private var isOvertime: Bool { context.state.overtimeStart != nil }
+    private var tint: Color { isOvertime ? Palette.overtime : Palette.accent }
+
     var body: some View {
         HStack(alignment: .center, spacing: 14) {
             // Left — exercise + set number + label
             VStack(alignment: .leading, spacing: 4) {
-                Text("REST")
+                Text(isOvertime ? "OVERTIME" : "REST")
                     .font(.caption.weight(.bold))
                     .tracking(1.4)
-                    .foregroundStyle(Palette.accent)
+                    .foregroundStyle(tint)
                 Text(context.attributes.exerciseName)
                     .font(.headline)
                     .foregroundStyle(.white)
@@ -109,14 +123,20 @@ private struct LockScreenView: View {
 
             Spacer(minLength: 8)
 
-            // Right — big countdown.
+            // Right — big countdown / count-up.
             VStack(alignment: .trailing, spacing: 2) {
-                Text(timerInterval: Date()...context.state.endDate, countsDown: true)
-                    .font(.system(size: 40, weight: .semibold, design: .rounded))
-                    .monospacedDigit()
-                    .foregroundStyle(Palette.accent)
-                    .multilineTextAlignment(.trailing)
-                Text("remaining")
+                Group {
+                    if let start = context.state.overtimeStart {
+                        Text("+") + Text(timerInterval: start...Date.distantFuture, countsDown: false)
+                    } else {
+                        Text(timerInterval: Date()...context.state.endDate, countsDown: true)
+                    }
+                }
+                .font(.system(size: 40, weight: .semibold, design: .rounded))
+                .monospacedDigit()
+                .foregroundStyle(tint)
+                .multilineTextAlignment(.trailing)
+                Text(isOvertime ? "past rest" : "remaining")
                     .font(.caption2)
                     .foregroundStyle(.white.opacity(0.6))
             }

@@ -20,11 +20,16 @@ public struct RestTimerAttributes: ActivityAttributes {
         public var duration: Int
         /// Reserved for future pause/resume — currently always false.
         public var paused: Bool
+        /// When set, the rest period has elapsed and the widget should render a
+        /// red count-UP from this date rather than a countdown. Corresponds to
+        /// the user's "Keep Rest Timer Running" setting.
+        public var overtimeStart: Date?
 
-        public init(endDate: Date, duration: Int, paused: Bool = false) {
+        public init(endDate: Date, duration: Int, paused: Bool = false, overtimeStart: Date? = nil) {
             self.endDate = endDate
             self.duration = duration
             self.paused = paused
+            self.overtimeStart = overtimeStart
         }
     }
 
