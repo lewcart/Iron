@@ -3,7 +3,7 @@
 import { useRef, useState, useCallback, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { apiBase, fetchJsonAuthed } from '@/lib/api/client';
-import { onNativeBurstTrigger } from '@/lib/inspo-burst-control';
+import { onNativeBurstTrigger, savePhotoToLibrary } from '@/lib/inspo-burst-control';
 import { db } from '@/db/local';
 import { uuid as genUUID } from '@/lib/uuid';
 
@@ -117,6 +117,10 @@ export function InspoCaptureButton() {
         } catch (err) {
           console.warn('[inspo] local save failed:', err);
         }
+        // Also save to the iOS Photos library so the shot is accessible
+        // outside the app. Fire-and-forget — Photos-save shouldn't block
+        // the burst cadence.
+        savePhotoToLibrary(blob).catch((err) => console.warn('[inspo] Photos save failed:', err));
         local.push({ uuid, blob, takenAt });
         triggerFlash();
 
