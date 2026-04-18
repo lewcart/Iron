@@ -51,6 +51,12 @@
 	<key>UIViewControllerBasedStatusBarAppearance</key>
 	<true/>
 
+	<!-- Camera access — the in-app fitspo burst button uses the WKWebView
+	     navigator.mediaDevices.getUserMedia API to capture physique inspo
+	     photos. iOS blocks mediaDevices entirely when this key is missing. -->
+	<key>NSCameraUsageDescription</key>
+	<string>Rebirth uses your camera to take discreet fitspo / physique inspiration photos during workouts.</string>
+
 	<!-- Location permissions — geofence monitoring requires Always authorization -->
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>Rebirth uses your location to detect when you arrive home so it can automatically end your workout.</string>
