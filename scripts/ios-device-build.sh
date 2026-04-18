@@ -31,8 +31,11 @@ DEVICE_ARG="${1:-}"
 if [ -n "$DEVICE_ARG" ]; then
   DEVICE_ID="$DEVICE_ARG"
 else
+  # Extract a UUID from a line that mentions iPhone + connected.
   DEVICE_ID=$(xcrun devicectl list devices 2>/dev/null \
-    | awk '/iPhone/ && /connected/ { print $(NF-2); exit }' )
+    | grep -E 'iPhone.*connected|connected.*iPhone' \
+    | grep -oE '[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}' \
+    | head -1)
   if [ -z "$DEVICE_ID" ]; then
     echo "No connected iOS device. Plug one in or pass a device name/UDID." >&2
     exit 1
