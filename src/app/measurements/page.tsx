@@ -559,7 +559,7 @@ export default function MeasurementsPage() {
                   {inbodyScans.map(scan => (
                     <Link
                       key={scan.uuid}
-                      href={`/measurements/inbody/${scan.uuid}`}
+                      href={`/measurements/inbody/detail?uuid=${scan.uuid}`}
                       className="block rounded-2xl bg-card border border-border p-4 active:scale-[0.99] transition"
                     >
                       <div className="flex items-center justify-between">

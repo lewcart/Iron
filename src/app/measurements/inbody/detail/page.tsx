@@ -1,8 +1,8 @@
 'use client';
 
-import { useEffect, useState, use as usePromise } from 'react';
+import { Suspense, useEffect, useState } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { ChevronLeft, Trash2 } from 'lucide-react';
 import type { InbodyScan, BodyGoal, BodyNormRange } from '@/types';
 import { apiBase } from '@/lib/api/client';
@@ -20,8 +20,17 @@ function apiHeaders(): HeadersInit {
 
 const GROUPS: MetricGroup[] = ['body_comp', 'derived', 'seg_lean', 'seg_fat', 'circumference', 'recommendation'];
 
-export default function InbodyScanDetailPage({ params }: { params: Promise<{ uuid: string }> }) {
-  const { uuid } = usePromise(params);
+export default function InbodyScanDetailPage() {
+  return (
+    <Suspense fallback={<main className="tab-content bg-background" />}>
+      <InbodyScanDetailInner />
+    </Suspense>
+  );
+}
+
+function InbodyScanDetailInner() {
+  const searchParams = useSearchParams();
+  const uuid = searchParams.get('uuid') ?? '';
   const router = useRouter();
   const [scan, setScan] = useState<InbodyScan | null>(null);
   const [loading, setLoading] = useState(true);
