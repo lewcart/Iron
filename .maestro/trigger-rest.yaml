@@ -1,0 +1,24 @@
+appId: app.rebirth
+---
+- launchApp:
+    clearState: false
+- waitForAnimationToEnd:
+    timeout: 5000
+# Tap directly on the REST label to reveal presets
+- tapOn:
+    text: "REST"
+    optional: true
+- takeScreenshot: 01-after-rest-tap
+# Try to tap on Hip Thrust set row's checkbox via coordinates (right side)
+# The "16 reps" text is the reps column — tap the circle to its right
+- tapOn:
+    text: "16 reps"
+    optional: true
+- takeScreenshot: 02-after-set1-row
+# Double-tap on set row might open edit mode
+- tapOn:
+    point: "90%,27%"
+- takeScreenshot: 03-tap-checkbox-area
+- tapOn:
+    point: "90%,34%"
+- takeScreenshot: 04-tap-checkbox-area-2

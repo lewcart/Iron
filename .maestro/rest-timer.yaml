@@ -1,0 +1,14 @@
+appId: app.rebirth
+---
+- launchApp:
+    clearState: false
+- assertVisible: "Rebirth"
+    optional: true
+- tapOn:
+    text: "Workout"
+    optional: true
+- takeScreenshot: 01-after-launch
+- tapOn:
+    text: "Workout"
+    optional: true
+- takeScreenshot: 02-workout-tab
