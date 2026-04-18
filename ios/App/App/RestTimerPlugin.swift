@@ -79,7 +79,6 @@ public class RestTimerPlugin: CAPPlugin, CAPBridgedPlugin {
                     RestTimerPlugin.currentActivityAny = activity
                     call.resolve()
                 } catch {
-                    // Not fatal — JS timer still works.
                     CAPLog.print("[RestTimerPlugin] start failed:", error.localizedDescription)
                     call.resolve()
                 }
