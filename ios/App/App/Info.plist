@@ -92,5 +92,28 @@
 			</array>
 		</dict>
 	</array>
+
+	<!-- Scene manifest — explicitly wire our SceneDelegate so URL opens via
+	     scene(_:openURLContexts:) reach our code. Without this, iOS 18 may
+	     auto-wrap the app in a default scene that swallows URLs. -->
+	<key>UIApplicationSceneManifest</key>
+	<dict>
+		<key>UIApplicationSupportsMultipleScenes</key>
+		<false/>
+		<key>UISceneConfigurations</key>
+		<dict>
+			<key>UIWindowSceneSessionRoleApplication</key>
+			<array>
+				<dict>
+					<key>UISceneConfigurationName</key>
+					<string>Default Configuration</string>
+					<key>UISceneDelegateClassName</key>
+					<string>App.SceneDelegate</string>
+					<key>UISceneStoryboardFile</key>
+					<string>Main</string>
+				</dict>
+			</array>
+		</dict>
+	</dict>
 </dict>
 </plist>

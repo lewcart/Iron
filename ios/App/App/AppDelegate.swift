@@ -1,16 +1,47 @@
 import UIKit
 import Capacitor
 
+/// Temporary file-based diagnostic — writes to Documents/rebirth-debug.log
+/// so we can verify the URL / flag / notification chain without fighting
+/// os_log redaction + idevicesyslog flakiness.
+func appDelegateCrumb(_ label: String) {
+    let ts = ISO8601DateFormatter().string(from: Date())
+    let line = "\(ts)  \(label)\n"
+    let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
+    guard let url = docs?.appendingPathComponent("rebirth-debug.log") else { return }
+    if let h = try? FileHandle(forWritingTo: url) {
+        h.seekToEndOfFile(); h.write(line.data(using: .utf8) ?? Data()); try? h.close()
+    } else {
+        try? line.data(using: .utf8)?.write(to: url)
+    }
+    NSLog("%{public}@", "[Rebirth] " + label)
+}
+
 @UIApplicationMain
 class AppDelegate: UIResponder, UIApplicationDelegate {
 
     var window: UIWindow?
 
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
-        // When iOS relaunches the app in the background due to a CLRegion boundary crossing,
-        // GeofencePlugin.load() re-creates the CLLocationManager and re-registers the monitored
-        // region so the didDetermineState callback fires within the ~10 s background window.
+        let launchURL = launchOptions?[.url] as? URL
+        appDelegateCrumb("didFinishLaunching launchURL=\(launchURL?.absoluteString ?? "nil")")
+        // If the app is launching FROM a URL (cold start from Control Widget),
+        // handle it here since application(_:open:) may not fire in this path.
+        if let url = launchURL, url.scheme == "rebirth" && url.host == "burst" {
+            handleBurstURL()
+        }
         return true
+    }
+
+    private func handleBurstURL() {
+        appDelegateCrumb("handleBurstURL — setting flag + posting notification")
+        let defaults = UserDefaults(suiteName: "group.app.rebirth")
+        defaults?.set(true, forKey: "fitspoBurstPending")
+        defaults?.synchronize()
+        NotificationCenter.default.post(
+            name: Notification.Name("FitspoBurstPending"),
+            object: nil
+        )
     }
 
     func applicationWillResignActive(_ application: UIApplication) {
@@ -30,11 +61,10 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     func applicationDidBecomeActive(_ application: UIApplication) {
         let defaults = UserDefaults(suiteName: "group.app.rebirth")
         let hasFlag = defaults?.bool(forKey: "fitspoBurstPending") ?? false
-        NSLog("%{public}@", "[AppDelegate] didBecomeActive — defaults=\(defaults == nil ? "nil" : "ok") hasFlag=\(hasFlag)")
+        appDelegateCrumb("didBecomeActive defaults=\(defaults == nil ? "nil" : "ok") hasFlag=\(hasFlag)")
         if hasFlag {
             defaults?.set(false, forKey: "fitspoBurstPending")
             defaults?.synchronize()
-            NSLog("%{public}@", "[AppDelegate] posting FitspoBurstPending notification")
             NotificationCenter.default.post(
                 name: Notification.Name("FitspoBurstPending"),
                 object: nil
@@ -47,21 +77,29 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     }
 
     func application(_ app: UIApplication, open url: URL, options: [UIApplication.OpenURLOptionsKey: Any] = [:]) -> Bool {
-        NSLog("%{public}@", "[AppDelegate] open url: \(url.absoluteString)")
-        // rebirth://burst — fired by FitspoControlWidget. Set the shared flag
-        // and post the notification so InspoBurstPlugin can trigger the JS
-        // burst capture. applicationDidBecomeActive also covers this path as
-        // a fallback.
+        appDelegateCrumb("application(_:open:) url=\(url.absoluteString)")
         if url.scheme == "rebirth" && url.host == "burst" {
-            let defaults = UserDefaults(suiteName: "group.app.rebirth")
-            defaults?.set(true, forKey: "fitspoBurstPending")
-            defaults?.synchronize()
-            NotificationCenter.default.post(
-                name: Notification.Name("FitspoBurstPending"),
-                object: nil
-            )
+            handleBurstURL()
         }
         return ApplicationDelegateProxy.shared.application(app, open: url, options: options)
+    }
+
+    // Scene-based lifecycle fallback (iOS 13+ scene apps route URLs here
+    // instead of application(_:open:). We don't declare scenes, but iOS 18
+    // apps sometimes get scenes anyway). Handled via the window's scene.
+    @available(iOS 13.0, *)
+    func application(_ application: UIApplication,
+                     configurationForConnecting connectingSceneSession: UISceneSession,
+                     options: UIScene.ConnectionOptions) -> UISceneConfiguration {
+        appDelegateCrumb("configurationForConnecting urls=\(options.urlContexts.map { $0.url.absoluteString })")
+        for ctx in options.urlContexts {
+            if ctx.url.scheme == "rebirth" && ctx.url.host == "burst" {
+                handleBurstURL()
+            }
+        }
+        let config = UISceneConfiguration(name: nil, sessionRole: connectingSceneSession.role)
+        config.delegateClass = SceneDelegate.self
+        return config
     }
 
     func application(_ application: UIApplication, continue userActivity: NSUserActivity, restorationHandler: @escaping ([UIUserActivityRestoring]?) -> Void) -> Bool {
