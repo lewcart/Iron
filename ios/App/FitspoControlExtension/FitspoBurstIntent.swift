@@ -14,9 +14,15 @@ struct FitspoBurstIntent: AppIntent {
     static var openAppWhenRun: Bool = true
 
     func perform() async throws -> some IntentResult {
+        NSLog("%{public}@", "[FitspoBurstIntent] perform() entered")
         let defaults = UserDefaults(suiteName: "group.app.rebirth")
-        defaults?.set(true, forKey: "fitspoBurstPending")
-        defaults?.synchronize()
+        if defaults == nil {
+            NSLog("%{public}@", "[FitspoBurstIntent] FAILED — UserDefaults suite 'group.app.rebirth' returned nil (app group not accessible from extension)")
+        } else {
+            defaults?.set(true, forKey: "fitspoBurstPending")
+            defaults?.synchronize()
+            NSLog("%{public}@", "[FitspoBurstIntent] flag set; verify=\(defaults?.bool(forKey: "fitspoBurstPending") ?? false)")
+        }
         return .result()
     }
 }

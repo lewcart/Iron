@@ -78,5 +78,19 @@
 		<string>location</string>
 		<string>fetch</string>
 	</array>
+
+	<!-- Custom URL scheme — iOS 18 FitspoControlWidget taps fire
+	     rebirth://burst, AppDelegate handles it to trigger the burst. -->
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>app.rebirth</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>rebirth</string>
+			</array>
+		</dict>
+	</array>
 </dict>
 </plist>

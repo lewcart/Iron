@@ -25,6 +25,7 @@
 		E81EF3DAF5F016DC13FD47EA /* FitspoControlWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = D121A798D2850322D0EBD90E /* FitspoControlWidget.swift */; };
 		EB3F38C6B219C7B4BDF48FE1 /* FitspoControlExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 149ADFA03562280CEC976416 /* FitspoControlExtension.appex */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		ED5330C7A68AF9CFC81F4F99 /* FitspoBurstIntent.swift in Sources */ = {isa = PBXBuildFile; fileRef = E64E87D18C5A9BB8F67CCC7F /* FitspoBurstIntent.swift */; };
+		RB0000000000000000000003 /* FitspoBurstIntent.swift in Sources */ = {isa = PBXBuildFile; fileRef = E64E87D18C5A9BB8F67CCC7F /* FitspoBurstIntent.swift */; };
 		HK0000000000000000000001 /* HealthKitPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = HK0000000000000000000002 /* HealthKitPlugin.swift */; };
 		HK0000000000000000000003 /* HealthKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = HK0000000000000000000004 /* HealthKit.framework */; settings = {ATTRIBUTES = (Required, ); }; };
 /* End PBXBuildFile section */
@@ -355,6 +356,7 @@
 				BCDB60B1669B43B1F7D02C66 /* InspoBurstPlugin.swift in Sources */,
 				35976665B93CB7279F053E62 /* RestTimerPlugin.swift in Sources */,
 				6E5DE5F1666A3B2916B5D955 /* RestTimerAttributes.swift in Sources */,
+				RB0000000000000000000003 /* FitspoBurstIntent.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

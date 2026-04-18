@@ -31,37 +31,33 @@ public class InspoBurstPlugin: CAPPlugin, CAPBridgedPlugin {
     private static let burstFlagKey = "fitspoBurstPending"
 
     override public func load() {
+        NSLog("%{public}@", "[InspoBurstPlugin] load() — adding observer + checking flag")
         NotificationCenter.default.addObserver(
             self,
             selector: #selector(handleBurstPending),
             name: InspoBurstPlugin.burstNotificationName,
             object: nil
         )
-        // Also catch the case where the Lock Screen control fired BEFORE the
-        // plugin loaded — AppDelegate may have already cleared the flag via
-        // NotificationCenter (missed because we weren't listening yet), OR
-        // the flag is still set because AppDelegate hadn't run yet.
         checkPendingFlag()
     }
 
     private func checkPendingFlag() {
         let defaults = UserDefaults(suiteName: InspoBurstPlugin.appGroupSuite)
-        if defaults?.bool(forKey: InspoBurstPlugin.burstFlagKey) == true {
+        let hasFlag = defaults?.bool(forKey: InspoBurstPlugin.burstFlagKey) ?? false
+        NSLog("%{public}@", "[InspoBurstPlugin] checkPendingFlag — defaults=\(defaults == nil ? "nil" : "ok") hasFlag=\(hasFlag)")
+        if hasFlag {
             defaults?.set(false, forKey: InspoBurstPlugin.burstFlagKey)
             defaults?.synchronize()
-            emitBurst()
+            emitBurst(source: "checkPendingFlag")
         }
     }
 
     @objc private func handleBurstPending() {
-        emitBurst()
+        emitBurst(source: "notification")
     }
 
-    private func emitBurst() {
-        // retainUntilConsumed queues the event for JS listeners that
-        // subscribe AFTER we fire — InspoCaptureButton mounts after the
-        // webview's bundle loads, which is often after AppDelegate has
-        // already posted the notification.
+    private func emitBurst(source: String) {
+        NSLog("%{public}@", "[InspoBurstPlugin] emitBurst (\(source)) — firing burstTrigger to JS")
         notifyListeners("burstTrigger", data: [:], retainUntilConsumed: true)
     }
 

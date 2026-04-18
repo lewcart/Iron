@@ -28,12 +28,13 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     }
 
     func applicationDidBecomeActive(_ application: UIApplication) {
-        // Check if the iOS 18 Lock Screen control set the burst-pending flag.
-        // If so, clear it and notify InspoBurstPlugin to fire the event into the JS layer.
         let defaults = UserDefaults(suiteName: "group.app.rebirth")
-        if defaults?.bool(forKey: "fitspoBurstPending") == true {
+        let hasFlag = defaults?.bool(forKey: "fitspoBurstPending") ?? false
+        NSLog("%{public}@", "[AppDelegate] didBecomeActive — defaults=\(defaults == nil ? "nil" : "ok") hasFlag=\(hasFlag)")
+        if hasFlag {
             defaults?.set(false, forKey: "fitspoBurstPending")
             defaults?.synchronize()
+            NSLog("%{public}@", "[AppDelegate] posting FitspoBurstPending notification")
             NotificationCenter.default.post(
                 name: Notification.Name("FitspoBurstPending"),
                 object: nil
@@ -46,8 +47,20 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     }
 
     func application(_ app: UIApplication, open url: URL, options: [UIApplication.OpenURLOptionsKey: Any] = [:]) -> Bool {
-        // Called when the app was launched with a url. Feel free to add additional processing here,
-        // but if you want the App API to support tracking app url opens, make sure to keep this call
+        NSLog("%{public}@", "[AppDelegate] open url: \(url.absoluteString)")
+        // rebirth://burst — fired by FitspoControlWidget. Set the shared flag
+        // and post the notification so InspoBurstPlugin can trigger the JS
+        // burst capture. applicationDidBecomeActive also covers this path as
+        // a fallback.
+        if url.scheme == "rebirth" && url.host == "burst" {
+            let defaults = UserDefaults(suiteName: "group.app.rebirth")
+            defaults?.set(true, forKey: "fitspoBurstPending")
+            defaults?.synchronize()
+            NotificationCenter.default.post(
+                name: Notification.Name("FitspoBurstPending"),
+                object: nil
+            )
+        }
         return ApplicationDelegateProxy.shared.application(app, open: url, options: options)
     }
 

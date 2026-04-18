@@ -170,7 +170,13 @@ export function InspoCaptureButton() {
   }, [capturing, triggerFlash, uploadBlob]);
 
   // Subscribe to the iOS 18 Lock Screen control trigger.
-  useEffect(() => onNativeBurstTrigger(triggerCapture), [triggerCapture]);
+  useEffect(() => {
+    console.info('[InspoCaptureButton] subscribing to burstTrigger');
+    return onNativeBurstTrigger(() => {
+      console.info('[InspoCaptureButton] burstTrigger received — firing capture');
+      triggerCapture();
+    });
+  }, [triggerCapture]);
 
   const handlePointerDown = useCallback(() => {
     didLongPress.current = false;

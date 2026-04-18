@@ -1,3 +1,4 @@
+import AppIntents
 import SwiftUI
 import WidgetKit
 
@@ -13,12 +14,17 @@ struct FitspoControlBundle: WidgetBundle {
 
 /// iOS 18 Lock Screen / Control Centre control that triggers a fitspo burst
 /// in the Rebirth app with a single tap.
+///
+/// iOS 18 extensions can't use `openAppWhenRun` on AppIntents, so we open
+/// the app via a custom URL scheme (`rebirth://burst`). AppDelegate picks
+/// up the URL, sets the shared-UserDefaults flag, and InspoBurstPlugin
+/// fires the JS event as usual.
 struct FitspoControlWidget: ControlWidget {
     static let kind = "app.rebirth.FitspoControlWidget"
 
     var body: some ControlWidgetConfiguration {
         StaticControlConfiguration(kind: Self.kind) {
-            ControlWidgetButton(action: FitspoBurstIntent()) {
+            ControlWidgetButton(action: OpenURLIntent(URL(string: "rebirth://burst")!)) {
                 Label("Fitspo Burst", systemImage: "bolt.heart.fill")
             }
         }
