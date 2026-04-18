@@ -2,6 +2,7 @@
 
 import { useRef, useState, useCallback, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
+import { Camera } from 'lucide-react';
 import { apiBase, fetchJsonAuthed } from '@/lib/api/client';
 import { onNativeBurstTrigger, savePhotoToLibrary } from '@/lib/inspo-burst-control';
 import { db } from '@/db/local';
@@ -251,7 +252,7 @@ export function InspoCaptureButton() {
         {capturing ? (
           <span className="h-5 w-5 rounded-full border-2 border-white/30 border-t-white animate-spin" />
         ) : (
-          '💪'
+          <Camera className="h-5 w-5 text-white" strokeWidth={2} />
         )}
       </button>
     </>
