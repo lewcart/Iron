@@ -7,17 +7,10 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     var window: UIWindow?
 
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
+        // When iOS relaunches the app in the background due to a CLRegion boundary crossing,
+        // GeofencePlugin.load() re-creates the CLLocationManager and re-registers the monitored
+        // region so the didDetermineState callback fires within the ~10 s background window.
         return true
-    }
-
-    private func handleBurstURL() {
-        let defaults = UserDefaults(suiteName: "group.app.rebirth")
-        defaults?.set(true, forKey: "fitspoBurstPending")
-        defaults?.synchronize()
-        NotificationCenter.default.post(
-            name: Notification.Name("FitspoBurstPending"),
-            object: nil
-        )
     }
 
     func applicationWillResignActive(_ application: UIApplication) {
@@ -51,22 +44,9 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     }
 
     func application(_ app: UIApplication, open url: URL, options: [UIApplication.OpenURLOptionsKey: Any] = [:]) -> Bool {
-        if url.scheme == "rebirth" && url.host == "burst" {
-            handleBurstURL()
-        }
+        // Called when the app was launched with a url. Feel free to add additional processing here,
+        // but if you want the App API to support tracking app url opens, make sure to keep this call
         return ApplicationDelegateProxy.shared.application(app, open: url, options: options)
-    }
-
-    // iOS 18 wraps our app in a scene even without a manifest, so URL opens
-    // from external apps (Safari, etc.) route to scene(_:openURLContexts:)
-    // on a UISceneDelegate. Info.plist points scenes at our SceneDelegate.
-    @available(iOS 13.0, *)
-    func application(_ application: UIApplication,
-                     configurationForConnecting connectingSceneSession: UISceneSession,
-                     options: UIScene.ConnectionOptions) -> UISceneConfiguration {
-        let config = UISceneConfiguration(name: nil, sessionRole: connectingSceneSession.role)
-        config.delegateClass = SceneDelegate.self
-        return config
     }
 
     func application(_ application: UIApplication, continue userActivity: NSUserActivity, restorationHandler: @escaping ([UIUserActivityRestoring]?) -> Void) -> Bool {
