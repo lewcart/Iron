@@ -20,7 +20,8 @@
     "db:dedupe-exercises": "tsx src/db/deduplicate-exercises.ts",
     "cli:build": "tsc src/cli.ts --outDir dist --module nodenext --moduleResolution nodenext --target es2022 --esModuleInterop --skipLibCheck",
     "cli": "tsx src/cli.ts",
-    "test": "vitest run"
+    "test": "vitest run",
+    "ios:device": "bash scripts/ios-device-build.sh"
   },
   "dependencies": {
     "@capacitor/app": "^8.1.0",
