@@ -26,6 +26,9 @@ public class InspoBurstPlugin: CAPPlugin, CAPBridgedPlugin {
 
     // Notification name shared with AppDelegate
     static let burstNotificationName = Notification.Name("FitspoBurstPending")
+    // Shared UserDefaults suite (matches the App Group)
+    private static let appGroupSuite = "group.app.rebirth"
+    private static let burstFlagKey = "fitspoBurstPending"
 
     override public func load() {
         NotificationCenter.default.addObserver(
@@ -34,10 +37,32 @@ public class InspoBurstPlugin: CAPPlugin, CAPBridgedPlugin {
             name: InspoBurstPlugin.burstNotificationName,
             object: nil
         )
+        // Also catch the case where the Lock Screen control fired BEFORE the
+        // plugin loaded — AppDelegate may have already cleared the flag via
+        // NotificationCenter (missed because we weren't listening yet), OR
+        // the flag is still set because AppDelegate hadn't run yet.
+        checkPendingFlag()
+    }
+
+    private func checkPendingFlag() {
+        let defaults = UserDefaults(suiteName: InspoBurstPlugin.appGroupSuite)
+        if defaults?.bool(forKey: InspoBurstPlugin.burstFlagKey) == true {
+            defaults?.set(false, forKey: InspoBurstPlugin.burstFlagKey)
+            defaults?.synchronize()
+            emitBurst()
+        }
     }
 
     @objc private func handleBurstPending() {
-        notifyListeners("burstTrigger", data: [:])
+        emitBurst()
+    }
+
+    private func emitBurst() {
+        // retainUntilConsumed queues the event for JS listeners that
+        // subscribe AFTER we fire — InspoCaptureButton mounts after the
+        // webview's bundle loads, which is often after AppDelegate has
+        // already posted the notification.
+        notifyListeners("burstTrigger", data: [:], retainUntilConsumed: true)
     }
 
     // MARK: - savePhoto
