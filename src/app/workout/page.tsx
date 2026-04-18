@@ -14,6 +14,11 @@ import {
   scheduleRestNotification,
   cancelRestNotification,
 } from '@/lib/rest-notifications';
+import {
+  startRestActivity,
+  updateRestActivity,
+  endRestActivity,
+} from '@/lib/native/rest-timer-activity';
 import { consumeScheduleTap } from '@/lib/workout-schedule';
 import { HealthSection } from '@/components/HealthSection';
 import Link from 'next/link';
@@ -129,6 +134,9 @@ function useRestTimer() {
         stopInterval();
         endTimeRef.current = null;
         clearPersistedTimer();
+        // Live Activity auto-dismisses at endDate, but call end() anyway in
+        // case ActivityKit hasn't cleared it yet — belt & braces.
+        void endRestActivity();
         setRunning(false);
         setRemaining(0);
         setTimeout(notify, 0);
@@ -138,7 +146,7 @@ function useRestTimer() {
     }, 500); // 500ms poll so display never lags more than half a second
   }, [notify, stopInterval]);
 
-  const start = useCallback((seconds: number) => {
+  const start = useCallback((seconds: number, context?: { exerciseName?: string; setNumber?: number }) => {
     const endTime = Date.now() + seconds * 1000;
     endTimeRef.current = endTime;
     persistTimer(endTime, seconds);
@@ -146,6 +154,13 @@ function useRestTimer() {
     setSelected(seconds);
     setRemaining(seconds);
     setRunning(true);
+    // Fire-and-forget native Live Activity — silent no-op on web / unsupported.
+    void startRestActivity({
+      endTime,
+      duration: seconds,
+      exerciseName: context?.exerciseName,
+      setNumber: context?.setNumber,
+    });
   }, []);
 
   const cancel = useCallback(() => {
@@ -153,6 +168,7 @@ function useRestTimer() {
     endTimeRef.current = null;
     clearPersistedTimer();
     cancelRestNotification();
+    void endRestActivity();
     setRunning(false);
     setSelected(null);
     setRemaining(0);
@@ -171,6 +187,7 @@ function useRestTimer() {
       const saved = readPersistedTimer();
       persistTimer(endTimeRef.current, saved?.duration ?? rem);
       scheduleRestNotification(endTimeRef.current);
+      void updateRestActivity({ endTime: endTimeRef.current });
     }
   }, [cancel]);
 
@@ -214,6 +231,7 @@ function useRestTimer() {
         endTimeRef.current = null;
         clearPersistedTimer();
         cancelRestNotification();
+        void endRestActivity();
         setRunning(false);
         setRemaining(0);
         notify();
@@ -1233,7 +1251,14 @@ export default function WorkoutPage() {
     // Auto-start rest timer if enabled in settings
     const { defaultRest, autoStart } = getRestSettings();
     if (autoStart) {
-      restTimer.start(defaultRest);
+      // Pass exercise name + set number so the Live Activity can show context
+      // on the Lock Screen and in the Dynamic Island.
+      const we = workout?.exercises.find(e => e.uuid === workoutExerciseUuid);
+      const exerciseName = we?.exercise?.title;
+      const setNumber = we
+        ? we.sets.filter(s => !s._deleted).findIndex(s => s.uuid === setUuid) + 1
+        : undefined;
+      restTimer.start(defaultRest, { exerciseName, setNumber });
     }
     // Note: PR detection happens server-side after sync; is_pr updates via pull
   };

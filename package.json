@@ -10,6 +10,7 @@
     "dev": "next dev",
     "build": "next build",
     "build:cap": "mv src/app/api src/_api_tmp && CAPACITOR_BUILD=1 next build; mv src/_api_tmp src/app/api",
+    "cap:sync": "npx cap sync ios && node -e \"const f='ios/App/CapApp-SPM/Package.swift';const fs=require('fs');fs.writeFileSync(f,fs.readFileSync(f,'utf8').replace('swift-tools-version: 5.9','swift-tools-version: 6.0'))\"",
     "start": "next start",
     "lint": "next lint",
     "db:migrate": "tsx src/db/migrate.ts",
