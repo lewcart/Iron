@@ -1,8 +1,8 @@
 // Background-safe rest timer — pure utility functions
 // These are separated from the hook so they can be unit-tested in Node.
 
-export const TIMER_END_KEY = 'iron-rest-end-time';
-export const TIMER_DURATION_KEY = 'iron-rest-duration';
+export const TIMER_END_KEY = 'rebirth-rest-end-time';
+export const TIMER_DURATION_KEY = 'rebirth-rest-duration';
 
 export interface TimerStorage {
   getItem(key: string): string | null;

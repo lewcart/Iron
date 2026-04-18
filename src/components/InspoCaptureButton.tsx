@@ -2,8 +2,11 @@
 
 import { useRef, useState, useCallback, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
+import { Camera } from 'lucide-react';
 import { apiBase, fetchJsonAuthed } from '@/lib/api/client';
-import { onNativeBurstTrigger } from '@/lib/inspo-burst-control';
+import { onNativeBurstTrigger, savePhotoToLibrary } from '@/lib/inspo-burst-control';
+import { db } from '@/db/local';
+import { uuid as genUUID } from '@/lib/uuid';
 
 const BURST_COUNT = 5;
 const BURST_INTERVAL_MS = 1500;
@@ -49,7 +52,9 @@ export function InspoCaptureButton() {
       headers: authHeaders,
       body: formData,
     });
-    if (!uploadRes.ok) throw new Error('Upload failed');
+    if (!uploadRes.ok) {
+      throw new Error(`Upload ${uploadRes.status} ${uploadRes.statusText || ''}`.trim());
+    }
     const { url } = await uploadRes.json();
     return url as string;
   }, []);
@@ -77,7 +82,7 @@ export function InspoCaptureButton() {
     // Settle time for camera auto-exposure (only needed once)
     await sleep(400);
 
-    const blobs: { blob: Blob; takenAt: string }[] = [];
+    const local: { uuid: string; blob: Blob; takenAt: string }[] = [];
 
     try {
       for (let i = 0; i < BURST_COUNT; i++) {
@@ -96,7 +101,28 @@ export function InspoCaptureButton() {
           ),
         );
 
-        blobs.push({ blob, takenAt: new Date().toISOString() });
+        const takenAt = new Date().toISOString();
+        const uuid = genUUID();
+        // Persist to IndexedDB immediately — if upload later fails, the photo
+        // is still preserved locally and can be retried from the gallery.
+        try {
+          await db.inspo_photos.put({
+            uuid,
+            burst_group_id: burstGroupId,
+            taken_at: takenAt,
+            blob,
+            blob_url: null,
+            uploaded: '0',
+            created_at: takenAt,
+          });
+        } catch (err) {
+          console.warn('[inspo] local save failed:', err);
+        }
+        // Also save to the iOS Photos library so the shot is accessible
+        // outside the app. Fire-and-forget — Photos-save shouldn't block
+        // the burst cadence.
+        savePhotoToLibrary(blob).catch((err) => console.warn('[inspo] Photos save failed:', err));
+        local.push({ uuid, blob, takenAt });
         triggerFlash();
 
         if (i < BURST_COUNT - 1) {
@@ -107,10 +133,12 @@ export function InspoCaptureButton() {
       stream.getTracks().forEach((t) => t.stop());
     }
 
-    // Upload all frames in parallel, then save metadata
-    try {
-      await Promise.all(
-        blobs.map(async ({ blob, takenAt }, i) => {
+    // Best-effort upload. Each local row flips to uploaded='1' on success;
+    // failures stay as '0' and remain visible in the local gallery.
+    const failures: string[] = [];
+    await Promise.all(
+      local.map(async ({ uuid, blob, takenAt }, i) => {
+        try {
           const filename = `inspo-burst-${burstGroupId}-${i + 1}.jpg`;
           const url = await uploadBlob(blob, filename);
           await fetchJsonAuthed(`${apiBase()}/api/inspo-photos`, {
@@ -121,12 +149,20 @@ export function InspoCaptureButton() {
               burst_group_id: burstGroupId,
             }),
           });
-        }),
-      );
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Upload failed';
-      setError(msg);
-      setTimeout(() => setError(null), 2500);
+          try {
+            await db.inspo_photos.update(uuid, { uploaded: '1', blob_url: url });
+          } catch { /* non-fatal */ }
+        } catch (err) {
+          failures.push(err instanceof Error ? err.message : 'upload error');
+        }
+      }),
+    );
+    if (failures.length > 0) {
+      const first = failures[0];
+      setError(failures.length === BURST_COUNT
+        ? `All uploads failed (${first}). Saved locally.`
+        : `${failures.length}/${BURST_COUNT} uploads failed (${first}). Saved locally.`);
+      setTimeout(() => setError(null), 3500);
     }
 
     setBurstProgress(0);
@@ -134,7 +170,13 @@ export function InspoCaptureButton() {
   }, [capturing, triggerFlash, uploadBlob]);
 
   // Subscribe to the iOS 18 Lock Screen control trigger.
-  useEffect(() => onNativeBurstTrigger(triggerCapture), [triggerCapture]);
+  useEffect(() => {
+    console.info('[InspoCaptureButton] subscribing to burstTrigger');
+    return onNativeBurstTrigger(() => {
+      console.info('[InspoCaptureButton] burstTrigger received — firing capture');
+      triggerCapture();
+    });
+  }, [triggerCapture]);
 
   const handlePointerDown = useCallback(() => {
     didLongPress.current = false;
@@ -216,7 +258,7 @@ export function InspoCaptureButton() {
         {capturing ? (
           <span className="h-5 w-5 rounded-full border-2 border-white/30 border-t-white animate-spin" />
         ) : (
-          '💪'
+          <Camera className="h-5 w-5 text-white" strokeWidth={2} />
         )}
       </button>
     </>

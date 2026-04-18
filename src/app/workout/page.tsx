@@ -14,6 +14,11 @@ import {
   scheduleRestNotification,
   cancelRestNotification,
 } from '@/lib/rest-notifications';
+import {
+  startRestActivity,
+  updateRestActivity,
+  endRestActivity,
+} from '@/lib/native/rest-timer-activity';
 import { consumeScheduleTap } from '@/lib/workout-schedule';
 import { HealthSection } from '@/components/HealthSection';
 import Link from 'next/link';
@@ -60,9 +65,14 @@ import { apiBase } from '@/lib/api/client';
 function getRestSettings() {
   if (typeof window === 'undefined') return { defaultRest: 90, autoStart: true };
   return {
-    defaultRest: parseInt(localStorage.getItem('iron-rest-default') ?? '90', 10),
-    autoStart: localStorage.getItem('iron-rest-auto-start') !== 'false',
+    defaultRest: parseInt(localStorage.getItem('rebirth-rest-default') ?? '90', 10),
+    autoStart: localStorage.getItem('rebirth-rest-auto-start') !== 'false',
   };
+}
+
+function getKeepRestRunning(): boolean {
+  if (typeof window === 'undefined') return false;
+  return localStorage.getItem('rebirth-rest-keep-running') === 'true';
 }
 
 // ─── Rest timer hook (background-safe) ───────────────────────────────────────
@@ -78,10 +88,16 @@ const readPersistedTimer = () => _readPersistedTimer(localStorage);
 function useRestTimer() {
   const [selected, setSelected] = useState<number | null>(null);
   const [remaining, setRemaining] = useState(0);
+  const [overtime, setOvertime] = useState(0); // seconds past endTime (0 when still counting down)
   const [running, setRunning] = useState(false);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   // Absolute epoch ms when the timer expires — the source of truth
   const endTimeRef = useRef<number | null>(null);
+  // Whether we've already crossed zero and are counting up.
+  const overtimeStartedRef = useRef(false);
+  // Guard so `notify()` fires exactly once per rest period (even if we stay
+  // running in overtime for a while).
+  const notifiedRef = useRef(false);
 
   const notify = useCallback(() => {
     // Vibrate (Android / Chrome — not supported on iOS)
@@ -124,38 +140,77 @@ function useRestTimer() {
     stopInterval();
     intervalRef.current = setInterval(() => {
       if (endTimeRef.current === null) return;
-      const rem = computeRemaining(endTimeRef.current, Date.now());
+      const now = Date.now();
+      const rem = computeRemaining(endTimeRef.current, now);
       if (rem <= 0) {
-        stopInterval();
-        endTimeRef.current = null;
-        clearPersistedTimer();
-        setRunning(false);
-        setRemaining(0);
-        setTimeout(notify, 0);
+        // Fire notification once as we cross zero.
+        if (!notifiedRef.current) {
+          notifiedRef.current = true;
+          setTimeout(notify, 0);
+        }
+        const keepRunning = getKeepRestRunning();
+        if (keepRunning) {
+          // Enter / stay in overtime mode — count UP past endTime.
+          if (!overtimeStartedRef.current) {
+            overtimeStartedRef.current = true;
+            // Tell the Live Activity to switch to red count-up. Widget
+            // renders autonomously from here; no per-tick updates needed.
+            void updateRestActivity({ overtimeStart: endTimeRef.current });
+          }
+          const over = Math.floor((now - endTimeRef.current) / 1000);
+          setRemaining(0);
+          setOvertime(over);
+        } else {
+          stopInterval();
+          endTimeRef.current = null;
+          overtimeStartedRef.current = false;
+          clearPersistedTimer();
+          // Live Activity auto-dismisses at endDate, but call end() anyway in
+          // case ActivityKit hasn't cleared it yet — belt & braces.
+          void endRestActivity();
+          setRunning(false);
+          setRemaining(0);
+          setOvertime(0);
+        }
       } else {
         setRemaining(rem);
+        setOvertime(0);
       }
     }, 500); // 500ms poll so display never lags more than half a second
   }, [notify, stopInterval]);
 
-  const start = useCallback((seconds: number) => {
+  const start = useCallback((seconds: number, context?: { exerciseName?: string; setNumber?: number }) => {
     const endTime = Date.now() + seconds * 1000;
     endTimeRef.current = endTime;
+    overtimeStartedRef.current = false;
+    notifiedRef.current = false;
     persistTimer(endTime, seconds);
     scheduleRestNotification(endTime);
     setSelected(seconds);
     setRemaining(seconds);
+    setOvertime(0);
     setRunning(true);
+    // Fire-and-forget native Live Activity — silent no-op on web / unsupported.
+    void startRestActivity({
+      endTime,
+      duration: seconds,
+      exerciseName: context?.exerciseName,
+      setNumber: context?.setNumber,
+    });
   }, []);
 
   const cancel = useCallback(() => {
     stopInterval();
     endTimeRef.current = null;
+    overtimeStartedRef.current = false;
+    notifiedRef.current = false;
     clearPersistedTimer();
     cancelRestNotification();
+    void endRestActivity();
     setRunning(false);
     setSelected(null);
     setRemaining(0);
+    setOvertime(0);
   }, [stopInterval]);
 
   const adjust = useCallback((delta: number) => {
@@ -171,6 +226,7 @@ function useRestTimer() {
       const saved = readPersistedTimer();
       persistTimer(endTimeRef.current, saved?.duration ?? rem);
       scheduleRestNotification(endTimeRef.current);
+      void updateRestActivity({ endTime: endTimeRef.current });
     }
   }, [cancel]);
 
@@ -207,18 +263,38 @@ function useRestTimer() {
     let cleanup: (() => void) | undefined;
     App.addListener('appStateChange', ({ isActive }) => {
       if (!isActive || endTimeRef.current === null) return;
-      const rem = computeRemaining(endTimeRef.current, Date.now());
+      const now = Date.now();
+      const rem = computeRemaining(endTimeRef.current, now);
       if (rem <= 0) {
         // Timer expired while backgrounded — native notification already fired;
-        // cancel it in case it's still pending, then play in-app alert.
-        endTimeRef.current = null;
-        clearPersistedTimer();
+        // cancel it in case it's still pending.
         cancelRestNotification();
-        setRunning(false);
-        setRemaining(0);
-        notify();
+        if (!notifiedRef.current) {
+          notifiedRef.current = true;
+          notify();
+        }
+        const keepRunning = getKeepRestRunning();
+        if (keepRunning) {
+          // Re-enter overtime mode. Widget already switched via the tick
+          // that ran before backgrounding, OR we need to switch now.
+          if (!overtimeStartedRef.current) {
+            overtimeStartedRef.current = true;
+            void updateRestActivity({ overtimeStart: endTimeRef.current });
+          }
+          setRemaining(0);
+          setOvertime(Math.floor((now - endTimeRef.current) / 1000));
+        } else {
+          endTimeRef.current = null;
+          overtimeStartedRef.current = false;
+          clearPersistedTimer();
+          void endRestActivity();
+          setRunning(false);
+          setRemaining(0);
+          setOvertime(0);
+        }
       } else {
         setRemaining(rem);
+        setOvertime(0);
       }
     }).then(handle => {
       cleanup = () => handle.remove();
@@ -227,7 +303,8 @@ function useRestTimer() {
   }, [notify]);
 
   const progress = selected ? remaining / selected : 0;
-  return { selected, remaining, running, progress, start, cancel, adjust };
+  const isOvertime = overtime > 0;
+  return { selected, remaining, overtime, isOvertime, running, progress, start, cancel, adjust };
 }
 
 // ─── Elapsed timer ───────────────────────────────────────────────────────────
@@ -267,7 +344,16 @@ function WorkoutSummaryBar({
 }) {
   const completedSets = calcCompletedSets(exercises);
   const timerActive = restTimer.running || (restTimer.selected !== null && restTimer.remaining === 0);
-  const expired = restTimer.selected !== null && restTimer.remaining === 0 && !restTimer.running;
+  const inOvertime = restTimer.isOvertime;
+  const expired = restTimer.selected !== null && restTimer.remaining === 0 && !restTimer.running && !inOvertime;
+  const red = inOvertime || expired;
+
+  let timerLabel = '—';
+  if (inOvertime) {
+    timerLabel = `+${formatTime(restTimer.overtime)}`;
+  } else if (timerActive) {
+    timerLabel = formatTime(restTimer.remaining);
+  }
 
   return (
     <div className="bg-background border-b border-border flex items-center justify-between px-3 py-2">
@@ -289,14 +375,14 @@ function WorkoutSummaryBar({
       {/* Rest timer column — always present, tappable */}
       <button onClick={onOpenRestTimer} className="flex flex-col items-center min-w-0">
         <span className={`text-[10px] font-medium uppercase tracking-wide ${
-          expired ? 'text-red-500' : timerActive ? 'text-primary' : 'text-muted-foreground'
+          red ? 'text-red-500' : timerActive ? 'text-primary' : 'text-muted-foreground'
         }`}>
-          Rest
+          {inOvertime ? 'Over' : 'Rest'}
         </span>
         <span className={`text-sm font-mono font-semibold tabular-nums ${
-          expired ? 'text-red-500' : timerActive ? 'text-primary' : 'text-muted-foreground'
+          red ? 'text-red-500' : timerActive ? 'text-primary' : 'text-muted-foreground'
         }`}>
-          {timerActive ? formatTime(restTimer.remaining) : '—'}
+          {timerLabel}
         </span>
       </button>
     </div>
@@ -387,6 +473,8 @@ const REST_PRESETS = [60, 90, 120, 150, 180, 30];
 function RestTimerSheet({
   selected,
   remaining,
+  overtime,
+  isOvertime,
   running,
   progress,
   onStart,
@@ -396,6 +484,8 @@ function RestTimerSheet({
 }: {
   selected: number | null;
   remaining: number;
+  overtime: number;
+  isOvertime: boolean;
   running: boolean;
   progress: number;
   onStart: (seconds: number) => void;
@@ -404,8 +494,10 @@ function RestTimerSheet({
   onClose: () => void;
 }) {
   const circumference = 2 * Math.PI * 100;
-  const dashOffset = circumference * (1 - progress);
-  const expired = selected !== null && remaining === 0 && !running;
+  // In overtime the ring is fully drawn and red; in countdown it shrinks.
+  const dashOffset = isOvertime ? 0 : circumference * (1 - progress);
+  const expired = selected !== null && remaining === 0 && !running && !isOvertime;
+  const red = isOvertime || expired;
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-background">
@@ -417,7 +509,7 @@ function RestTimerSheet({
       </div>
 
       <div className="flex-1 flex flex-col items-center justify-center gap-8 p-8">
-        {!running && !expired ? (
+        {!running && !expired && !isOvertime ? (
           <>
             <p className="text-muted-foreground text-sm">Select a rest duration</p>
             <div className="grid grid-cols-3 gap-3 w-full max-w-xs">
@@ -440,7 +532,7 @@ function RestTimerSheet({
                 <circle cx="120" cy="120" r="100" fill="none" stroke="hsl(var(--secondary))" strokeWidth="12" />
                 <circle
                   cx="120" cy="120" r="100" fill="none"
-                  stroke={expired ? '#ef4444' : 'hsl(var(--primary))'}
+                  stroke={red ? '#ef4444' : 'hsl(var(--primary))'}
                   strokeWidth="12"
                   strokeLinecap="round"
                   strokeDasharray={circumference}
@@ -449,10 +541,13 @@ function RestTimerSheet({
                 />
               </svg>
               <div className="absolute inset-0 flex flex-col items-center justify-center">
-                <span className={`text-5xl font-light tabular-nums ${expired ? 'text-red-500' : ''}`}>
-                  {formatTime(remaining)}
+                <span className={`text-5xl font-light tabular-nums ${red ? 'text-red-500' : ''}`}>
+                  {isOvertime ? `+${formatTime(overtime)}` : formatTime(remaining)}
                 </span>
                 <span className="text-sm text-muted-foreground mt-1">{formatTime(selected ?? 0)}</span>
+                {isOvertime && (
+                  <span className="text-sm text-red-400 font-medium mt-2">Over rest</span>
+                )}
                 {expired && (
                   <span className="text-sm text-red-400 font-medium mt-2">Rest over!</span>
                 )}
@@ -1233,7 +1328,14 @@ export default function WorkoutPage() {
     // Auto-start rest timer if enabled in settings
     const { defaultRest, autoStart } = getRestSettings();
     if (autoStart) {
-      restTimer.start(defaultRest);
+      // Pass exercise name + set number so the Live Activity can show context
+      // on the Lock Screen and in the Dynamic Island.
+      const we = workout?.exercises.find(e => e.uuid === workoutExerciseUuid);
+      const exerciseName = we?.exercise?.title;
+      const setNumber = we
+        ? we.sets.filter(s => !s._deleted).findIndex(s => s.uuid === setUuid) + 1
+        : undefined;
+      restTimer.start(defaultRest, { exerciseName, setNumber });
     }
     // Note: PR detection happens server-side after sync; is_pr updates via pull
   };
@@ -1458,6 +1560,8 @@ export default function WorkoutPage() {
         <RestTimerSheet
           selected={restTimer.selected}
           remaining={restTimer.remaining}
+          overtime={restTimer.overtime}
+          isOvertime={restTimer.isOvertime}
           running={restTimer.running}
           progress={restTimer.progress}
           onStart={restTimer.start}

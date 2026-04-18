@@ -93,7 +93,7 @@ export default function NutritionPage() {
 
   // ── load protein target ───────────────────────────────────────────────────
   useEffect(() => {
-    const saved = localStorage.getItem('iron-nutrition-protein-target');
+    const saved = localStorage.getItem('rebirth-nutrition-protein-target');
     if (saved) setProteinTarget(parseInt(saved, 10));
   }, []);
 
@@ -656,7 +656,7 @@ export default function NutritionPage() {
                         const v = parseInt(e.target.value, 10);
                         if (v > 0) {
                           setProteinTarget(v);
-                          localStorage.setItem('iron-nutrition-protein-target', String(v));
+                          localStorage.setItem('rebirth-nutrition-protein-target', String(v));
                         }
                       }}
                       className="w-16 bg-transparent text-sm text-right outline-none text-muted-foreground"

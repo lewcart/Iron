@@ -82,12 +82,27 @@ export interface LocalMeta {
 
 // ─── Dexie database ────────────────────────────────────────────────────────────
 
+/** A captured inspo burst photo stored locally before (or independent of) upload. */
+export interface LocalInspoPhoto {
+  uuid: string;
+  burst_group_id: string;
+  taken_at: string;
+  /** Raw JPEG Blob from canvas.toBlob */
+  blob: Blob;
+  /** Remote Vercel Blob URL once uploaded; null when still local-only. */
+  blob_url: string | null;
+  /** '1' when successfully uploaded + registered server-side, '0' otherwise. */
+  uploaded: '0' | '1';
+  created_at: string;
+}
+
 export class IronDB extends Dexie {
   exercises!: Table<LocalExercise, string>;
   workouts!: Table<LocalWorkout, string>;
   workout_exercises!: Table<LocalWorkoutExercise, string>;
   workout_sets!: Table<LocalWorkoutSet, string>;
   bodyweight_logs!: Table<LocalBodyweightLog, string>;
+  inspo_photos!: Table<LocalInspoPhoto, string>;
   _meta!: Table<LocalMeta, string>;
 
   constructor() {
@@ -108,6 +123,14 @@ export class IronDB extends Dexie {
     this.version(2).stores(stores).upgrade(async tx => {
       await tx.table('exercises').clear();
       await tx.table('_meta').delete('exercises_hydrated_at');
+    });
+
+    // v3: local inspo photos — burst captures persist locally so they survive
+    // upload failures. Indexed by taken_at DESC for gallery, uploaded for sync
+    // queries, burst_group_id for grouping.
+    this.version(3).stores({
+      ...stores,
+      inspo_photos: 'uuid, burst_group_id, taken_at, uploaded',
     });
   }
 }

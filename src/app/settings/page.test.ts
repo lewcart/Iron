@@ -80,15 +80,15 @@ describe('formatTime', () => {
 
 describe('readLS', () => {
   it('returns fallback when window is undefined (node env)', () => {
-    expect(readLS('iron-rest-default', '90')).toBe('90');
+    expect(readLS('rebirth-rest-default', '90')).toBe('90');
   });
 
   it('returns fallback for any key in node env', () => {
-    expect(readLS('iron-rest-auto-start', 'true')).toBe('true');
+    expect(readLS('rebirth-rest-auto-start', 'true')).toBe('true');
   });
 
   it('returns fallback for keep-running setting in node env', () => {
-    expect(readLS('iron-rest-keep-running', 'false')).toBe('false');
+    expect(readLS('rebirth-rest-keep-running', 'false')).toBe('false');
   });
 });
 

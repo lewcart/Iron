@@ -1,3 +1,4 @@
+import AppIntents
 import SwiftUI
 import WidgetKit
 
@@ -13,6 +14,11 @@ struct FitspoControlBundle: WidgetBundle {
 
 /// iOS 18 Lock Screen / Control Centre control that triggers a fitspo burst
 /// in the Rebirth app with a single tap.
+///
+/// `FitspoBurstIntent` lives in the main App target (with this extension as
+/// a second target membership). Because the intent's "home bundle" is the
+/// main app — not the extension — `openAppWhenRun = true` is valid and
+/// iOS will open Rebirth and run the intent in the app's process.
 struct FitspoControlWidget: ControlWidget {
     static let kind = "app.rebirth.FitspoControlWidget"
 

@@ -22,6 +22,10 @@ import type {
   ClothesTestLog,
   ProgressPhoto,
   InspoPhoto,
+  InbodyScan,
+  BodyGoal,
+  BodyNormRange,
+  BodyBalance,
 } from '../types';
 import { calculatePRs } from '../lib/pr';
 import { muscleGroupSearchTerms } from '../lib/muscle-groups';
@@ -1193,6 +1197,7 @@ export function parsePlan(row: DbRow): WorkoutPlan {
     uuid: row.uuid as string,
     title: row.title as string | null,
     order_index: (row.order_index as number) ?? 0,
+    is_active: Boolean(row.is_active),
   };
 }
 
@@ -1344,15 +1349,20 @@ function parseMeasurementLog(row: DbRow): MeasurementLog {
     value_cm: parseFloat(row.value_cm as string),
     notes: row.notes as string | null,
     measured_at: row.measured_at as string,
+    source: (row.source as string) ?? null,
+    source_ref: (row.source_ref as string) ?? null,
   };
 }
 
-export async function createMeasurementLog(data: Omit<MeasurementLog, 'uuid' | 'measured_at'> & { measured_at?: string }): Promise<MeasurementLog> {
+export async function createMeasurementLog(
+  data: Omit<MeasurementLog, 'uuid' | 'measured_at' | 'source' | 'source_ref'>
+    & { measured_at?: string; source?: string | null; source_ref?: string | null }
+): Promise<MeasurementLog> {
   const uuid = randomUUID();
   const row = await queryOne(
-    `INSERT INTO measurement_logs (uuid, site, value_cm, notes, measured_at)
-     VALUES ($1, $2, $3, $4, COALESCE($5::TIMESTAMP, NOW())) RETURNING *`,
-    [uuid, data.site, data.value_cm, data.notes ?? null, data.measured_at ?? null],
+    `INSERT INTO measurement_logs (uuid, site, value_cm, notes, measured_at, source, source_ref)
+     VALUES ($1, $2, $3, $4, COALESCE($5::TIMESTAMP, NOW()), $6, $7) RETURNING *`,
+    [uuid, data.site, data.value_cm, data.notes ?? null, data.measured_at ?? null, data.source ?? null, data.source_ref ?? null],
   );
   return parseMeasurementLog(row!);
 }
@@ -2251,4 +2261,280 @@ export async function updateCoachingNote(
 
 export async function deleteCoachingNote(uuid: string): Promise<void> {
   await query(`DELETE FROM coaching_notes WHERE uuid = $1`, [uuid]);
+}
+
+// ===== INBODY SCAN CATALOG =====
+
+/** All numeric-valued columns on inbody_scans (used for compare_inbody_scans). */
+export const INBODY_NUMERIC_COLUMNS = [
+  'height_cm',
+  'weight_kg',
+  'total_body_water_l', 'intracellular_water_l', 'extracellular_water_l',
+  'protein_kg', 'minerals_kg', 'bone_mineral_kg',
+  'body_fat_mass_kg', 'smm_kg',
+  'bmi', 'pbf_pct', 'whr', 'inbody_score', 'visceral_fat_level',
+  'bmr_kcal', 'body_cell_mass_kg', 'ecw_ratio',
+  'seg_lean_right_arm_kg', 'seg_lean_right_arm_pct',
+  'seg_lean_left_arm_kg', 'seg_lean_left_arm_pct',
+  'seg_lean_trunk_kg', 'seg_lean_trunk_pct',
+  'seg_lean_right_leg_kg', 'seg_lean_right_leg_pct',
+  'seg_lean_left_leg_kg', 'seg_lean_left_leg_pct',
+  'seg_fat_right_arm_kg', 'seg_fat_left_arm_kg', 'seg_fat_trunk_kg',
+  'seg_fat_right_leg_kg', 'seg_fat_left_leg_kg',
+  'circ_neck_cm', 'circ_chest_cm', 'circ_abdomen_cm', 'circ_hip_cm',
+  'circ_right_arm_cm', 'circ_left_arm_cm',
+  'circ_right_thigh_cm', 'circ_left_thigh_cm',
+  'target_weight_kg', 'weight_control_kg', 'fat_control_kg', 'muscle_control_kg',
+] as const;
+
+/** All writable columns excluding uuid / created_at / updated_at. */
+const INBODY_WRITABLE_COLUMNS = [
+  'scanned_at', 'device', 'venue', 'age_at_scan',
+  ...INBODY_NUMERIC_COLUMNS,
+  'balance_upper', 'balance_lower', 'balance_upper_lower',
+  'impedance', 'notes', 'raw_json',
+] as const;
+
+function num(v: unknown): number | null {
+  if (v === null || v === undefined) return null;
+  const n = typeof v === 'string' ? parseFloat(v) : Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+function int(v: unknown): number | null {
+  if (v === null || v === undefined) return null;
+  const n = typeof v === 'string' ? parseInt(v, 10) : Number(v);
+  return Number.isFinite(n) ? Math.trunc(n) : null;
+}
+
+function parseJsonObj(v: unknown): Record<string, unknown> {
+  if (!v) return {};
+  if (typeof v === 'object') return v as Record<string, unknown>;
+  try { return JSON.parse(String(v)); } catch { return {}; }
+}
+
+export function parseInbodyScan(row: DbRow): InbodyScan {
+  return {
+    uuid: row.uuid as string,
+    scanned_at: row.scanned_at instanceof Date
+      ? (row.scanned_at as Date).toISOString()
+      : String(row.scanned_at),
+    device: (row.device as string) ?? 'InBody 570',
+    venue: (row.venue as string) ?? null,
+    age_at_scan: int(row.age_at_scan),
+    height_cm: num(row.height_cm),
+    weight_kg: num(row.weight_kg),
+    total_body_water_l: num(row.total_body_water_l),
+    intracellular_water_l: num(row.intracellular_water_l),
+    extracellular_water_l: num(row.extracellular_water_l),
+    protein_kg: num(row.protein_kg),
+    minerals_kg: num(row.minerals_kg),
+    bone_mineral_kg: num(row.bone_mineral_kg),
+    body_fat_mass_kg: num(row.body_fat_mass_kg),
+    smm_kg: num(row.smm_kg),
+    bmi: num(row.bmi),
+    pbf_pct: num(row.pbf_pct),
+    whr: num(row.whr),
+    inbody_score: int(row.inbody_score),
+    visceral_fat_level: int(row.visceral_fat_level),
+    bmr_kcal: int(row.bmr_kcal),
+    body_cell_mass_kg: num(row.body_cell_mass_kg),
+    ecw_ratio: num(row.ecw_ratio),
+    seg_lean_right_arm_kg: num(row.seg_lean_right_arm_kg),
+    seg_lean_right_arm_pct: num(row.seg_lean_right_arm_pct),
+    seg_lean_left_arm_kg: num(row.seg_lean_left_arm_kg),
+    seg_lean_left_arm_pct: num(row.seg_lean_left_arm_pct),
+    seg_lean_trunk_kg: num(row.seg_lean_trunk_kg),
+    seg_lean_trunk_pct: num(row.seg_lean_trunk_pct),
+    seg_lean_right_leg_kg: num(row.seg_lean_right_leg_kg),
+    seg_lean_right_leg_pct: num(row.seg_lean_right_leg_pct),
+    seg_lean_left_leg_kg: num(row.seg_lean_left_leg_kg),
+    seg_lean_left_leg_pct: num(row.seg_lean_left_leg_pct),
+    seg_fat_right_arm_kg: num(row.seg_fat_right_arm_kg),
+    seg_fat_left_arm_kg: num(row.seg_fat_left_arm_kg),
+    seg_fat_trunk_kg: num(row.seg_fat_trunk_kg),
+    seg_fat_right_leg_kg: num(row.seg_fat_right_leg_kg),
+    seg_fat_left_leg_kg: num(row.seg_fat_left_leg_kg),
+    circ_neck_cm: num(row.circ_neck_cm),
+    circ_chest_cm: num(row.circ_chest_cm),
+    circ_abdomen_cm: num(row.circ_abdomen_cm),
+    circ_hip_cm: num(row.circ_hip_cm),
+    circ_right_arm_cm: num(row.circ_right_arm_cm),
+    circ_left_arm_cm: num(row.circ_left_arm_cm),
+    circ_right_thigh_cm: num(row.circ_right_thigh_cm),
+    circ_left_thigh_cm: num(row.circ_left_thigh_cm),
+    target_weight_kg: num(row.target_weight_kg),
+    weight_control_kg: num(row.weight_control_kg),
+    fat_control_kg: num(row.fat_control_kg),
+    muscle_control_kg: num(row.muscle_control_kg),
+    balance_upper: (row.balance_upper as BodyBalance | null) ?? null,
+    balance_lower: (row.balance_lower as BodyBalance | null) ?? null,
+    balance_upper_lower: (row.balance_upper_lower as BodyBalance | null) ?? null,
+    impedance: parseJsonObj(row.impedance) as Record<string, Record<string, number>>,
+    notes: (row.notes as string) ?? null,
+    raw_json: parseJsonObj(row.raw_json),
+    created_at: row.created_at instanceof Date
+      ? (row.created_at as Date).toISOString()
+      : String(row.created_at),
+    updated_at: row.updated_at instanceof Date
+      ? (row.updated_at as Date).toISOString()
+      : String(row.updated_at),
+  };
+}
+
+export type InbodyScanInput = Partial<Omit<InbodyScan, 'uuid' | 'created_at' | 'updated_at'>> & {
+  scanned_at: string;
+};
+
+function normaliseInbodyValue(col: string, val: unknown): unknown {
+  if (val === null || val === undefined) return null;
+  if (col === 'impedance' || col === 'raw_json') {
+    return typeof val === 'string' ? val : JSON.stringify(val);
+  }
+  return val;
+}
+
+export async function createInbodyScan(data: InbodyScanInput): Promise<InbodyScan> {
+  if (!data.scanned_at) throw new Error('scanned_at is required');
+  const uuid = randomUUID();
+  const cols: string[] = ['uuid'];
+  const params: unknown[] = [uuid];
+  const placeholders: string[] = ['$1'];
+  let i = 2;
+  for (const col of INBODY_WRITABLE_COLUMNS) {
+    const val = (data as Record<string, unknown>)[col];
+    if (val === undefined) continue;
+    cols.push(col);
+    params.push(normaliseInbodyValue(col, val));
+    placeholders.push(`$${i++}`);
+  }
+  const row = await queryOne(
+    `INSERT INTO inbody_scans (${cols.join(', ')}) VALUES (${placeholders.join(', ')}) RETURNING *`,
+    params,
+  );
+  return parseInbodyScan(row!);
+}
+
+export async function listInbodyScans(options: { limit?: number; from?: string; to?: string } = {}): Promise<InbodyScan[]> {
+  const { limit = 90, from, to } = options;
+  const params: unknown[] = [];
+  let sql = 'SELECT * FROM inbody_scans WHERE 1=1';
+  if (from) { sql += ` AND scanned_at >= $${params.length + 1}`; params.push(from); }
+  if (to)   { sql += ` AND scanned_at <= $${params.length + 1}`; params.push(to); }
+  sql += ` ORDER BY scanned_at DESC LIMIT $${params.length + 1}`;
+  params.push(limit);
+  const rows = await query(sql, params);
+  return rows.map(parseInbodyScan);
+}
+
+export async function getInbodyScan(uuid: string): Promise<InbodyScan | null> {
+  const row = await queryOne(`SELECT * FROM inbody_scans WHERE uuid = $1`, [uuid]);
+  return row ? parseInbodyScan(row) : null;
+}
+
+export async function getLatestInbodyScan(): Promise<InbodyScan | null> {
+  const row = await queryOne(`SELECT * FROM inbody_scans ORDER BY scanned_at DESC LIMIT 1`, []);
+  return row ? parseInbodyScan(row) : null;
+}
+
+export async function updateInbodyScan(uuid: string, data: Partial<InbodyScanInput>): Promise<InbodyScan | null> {
+  const fields: string[] = [];
+  const params: unknown[] = [];
+  let i = 1;
+  for (const col of INBODY_WRITABLE_COLUMNS) {
+    const val = (data as Record<string, unknown>)[col];
+    if (val === undefined) continue;
+    fields.push(`${col} = $${i++}`);
+    params.push(normaliseInbodyValue(col, val));
+  }
+  if (fields.length === 0) return getInbodyScan(uuid);
+  params.push(uuid);
+  const row = await queryOne(
+    `UPDATE inbody_scans SET ${fields.join(', ')} WHERE uuid = $${i} RETURNING *`,
+    params,
+  );
+  return row ? parseInbodyScan(row) : null;
+}
+
+export async function deleteInbodyScan(uuid: string): Promise<void> {
+  // Cascade-cleanup: also remove any measurement_logs rows tagged as auto-inserts
+  // from this scan (source_ref = uuid) so deleting a scan cleans its derived data.
+  await query(`DELETE FROM measurement_logs WHERE source = $1 AND source_ref = $2`, ['inbody_scan', uuid]);
+  await query(`DELETE FROM inbody_scans WHERE uuid = $1`, [uuid]);
+}
+
+// ===== BODY GOALS (Me reference) =====
+
+export function parseBodyGoal(row: DbRow): BodyGoal {
+  return {
+    metric_key: row.metric_key as string,
+    target_value: parseFloat(row.target_value as string),
+    unit: row.unit as string,
+    direction: row.direction as BodyGoal['direction'],
+    notes: (row.notes as string) ?? null,
+    updated_at: row.updated_at instanceof Date
+      ? (row.updated_at as Date).toISOString()
+      : String(row.updated_at),
+  };
+}
+
+export async function getBodyGoals(): Promise<Record<string, BodyGoal>> {
+  const rows = await query(`SELECT * FROM body_goals ORDER BY metric_key ASC`, []);
+  const out: Record<string, BodyGoal> = {};
+  for (const r of rows) {
+    const g = parseBodyGoal(r);
+    out[g.metric_key] = g;
+  }
+  return out;
+}
+
+export async function upsertBodyGoal(
+  metric_key: string,
+  data: { target_value: number; unit: string; direction: BodyGoal['direction']; notes?: string | null }
+): Promise<BodyGoal> {
+  const row = await queryOne(
+    `INSERT INTO body_goals (metric_key, target_value, unit, direction, notes, updated_at)
+     VALUES ($1, $2, $3, $4, $5, NOW())
+     ON CONFLICT (metric_key) DO UPDATE SET
+       target_value = EXCLUDED.target_value,
+       unit = EXCLUDED.unit,
+       direction = EXCLUDED.direction,
+       notes = EXCLUDED.notes,
+       updated_at = NOW()
+     RETURNING *`,
+    [metric_key, data.target_value, data.unit, data.direction, data.notes ?? null],
+  );
+  return parseBodyGoal(row!);
+}
+
+export async function deleteBodyGoal(metric_key: string): Promise<void> {
+  await query(`DELETE FROM body_goals WHERE metric_key = $1`, [metric_key]);
+}
+
+// ===== BODY NORM RANGES =====
+
+export function parseBodyNormRange(row: DbRow): BodyNormRange {
+  return {
+    id: Number(row.id),
+    sex: row.sex as 'M' | 'F',
+    metric_key: row.metric_key as string,
+    age_min: row.age_min == null ? null : Number(row.age_min),
+    age_max: row.age_max == null ? null : Number(row.age_max),
+    height_min_cm: row.height_min_cm == null ? null : parseFloat(row.height_min_cm as string),
+    height_max_cm: row.height_max_cm == null ? null : parseFloat(row.height_max_cm as string),
+    low: parseFloat(row.low as string),
+    high: parseFloat(row.high as string),
+    source: (row.source as string) ?? null,
+    notes: (row.notes as string) ?? null,
+  };
+}
+
+export async function getBodyNormRanges(sex: 'M' | 'F'): Promise<Record<string, BodyNormRange[]>> {
+  const rows = await query(`SELECT * FROM body_norm_ranges WHERE sex = $1 ORDER BY metric_key ASC, id ASC`, [sex]);
+  const out: Record<string, BodyNormRange[]> = {};
+  for (const r of rows) {
+    const range = parseBodyNormRange(r);
+    (out[range.metric_key] ??= []).push(range);
+  }
+  return out;
 }

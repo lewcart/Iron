@@ -145,7 +145,7 @@ describe('CLI commands', () => {
 
       expect(migrate.migrate).toHaveBeenCalledOnce();
       expect(consoleLogSpy).toHaveBeenCalledWith(
-        '✓ Database initialized. Run "iron seed" to load exercises.'
+        '✓ Database initialized. Run "rebirth seed" to load exercises.'
       );
     });
   });
@@ -394,7 +394,7 @@ describe('CLI commands', () => {
       await runCli('current-workout');
 
       expect(consoleLogSpy).toHaveBeenCalledWith('No workout in progress');
-      expect(consoleLogSpy).toHaveBeenCalledWith('Start one with: iron start-workout');
+      expect(consoleLogSpy).toHaveBeenCalledWith('Start one with: rebirth start-workout');
     });
 
     it('prints workout header when workout is active', async () => {

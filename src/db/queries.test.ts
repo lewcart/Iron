@@ -20,6 +20,13 @@ import {
   updateSet,
   getWorkoutSet,
   listWorkoutSets,
+  createInbodyScan,
+  listInbodyScans,
+  getInbodyScan,
+  getLatestInbodyScan,
+  updateInbodyScan,
+  deleteInbodyScan,
+  parseInbodyScan,
 } from './queries';
 import type { DbRow } from './queries';
 
@@ -1330,5 +1337,207 @@ describe('listWorkoutSets', () => {
     expect(result[0].max_target_reps).toBe(6);
     expect(result[0].is_completed).toBe(true);
     expect(result[0].order_index).toBe(2);
+  });
+});
+
+// ===== INBODY SCANS =====
+
+describe('parseInbodyScan', () => {
+  const baseRow: DbRow = {
+    uuid: 'scan-1',
+    scanned_at: '2026-03-01T07:30:00.000Z',
+    device: 'InBody 570',
+    venue: 'Gym Alpha',
+    age_at_scan: 34,
+    height_cm: '166',
+    weight_kg: '62.4',
+    pbf_pct: '22.1',
+    smm_kg: '25.3',
+    inbody_score: 78,
+    visceral_fat_level: 5,
+    balance_upper: 'balanced',
+    balance_lower: null,
+    balance_upper_lower: null,
+    impedance: '{"50kHz":{"ra":380,"la":382,"trunk":25,"rl":290,"ll":293}}',
+    notes: 'First scan',
+    raw_json: '{}',
+    created_at: '2026-03-01T07:31:00.000Z',
+    updated_at: '2026-03-01T07:31:00.000Z',
+  };
+
+  it('parses numeric strings into numbers', () => {
+    const s = parseInbodyScan(baseRow);
+    expect(s.weight_kg).toBe(62.4);
+    expect(s.height_cm).toBe(166);
+    expect(s.pbf_pct).toBeCloseTo(22.1);
+    expect(s.smm_kg).toBeCloseTo(25.3);
+    expect(s.inbody_score).toBe(78);
+    expect(s.visceral_fat_level).toBe(5);
+  });
+
+  it('parses impedance JSON string', () => {
+    const s = parseInbodyScan(baseRow);
+    expect(s.impedance['50kHz']).toBeDefined();
+    expect(s.impedance['50kHz'].ra).toBe(380);
+  });
+
+  it('preserves balance enum when set', () => {
+    const s = parseInbodyScan(baseRow);
+    expect(s.balance_upper).toBe('balanced');
+    expect(s.balance_lower).toBeNull();
+  });
+
+  it('handles missing numeric columns as null', () => {
+    const row: DbRow = { ...baseRow, weight_kg: null, height_cm: null, pbf_pct: null };
+    const s = parseInbodyScan(row);
+    expect(s.weight_kg).toBeNull();
+    expect(s.height_cm).toBeNull();
+    expect(s.pbf_pct).toBeNull();
+  });
+
+  it('passes through object impedance (non-string)', () => {
+    const row: DbRow = { ...baseRow, impedance: { '50kHz': { ra: 100 } } };
+    const s = parseInbodyScan(row);
+    expect(s.impedance['50kHz'].ra).toBe(100);
+  });
+});
+
+describe('createInbodyScan', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('requires scanned_at', async () => {
+    await expect(createInbodyScan({} as unknown as { scanned_at: string })).rejects.toThrow(/scanned_at/);
+  });
+
+  it('inserts only the provided fields', async () => {
+    const db = await import('./db.js');
+    vi.mocked(db.queryOne).mockResolvedValueOnce({
+      uuid: 'scan-new', scanned_at: '2026-03-01T07:30:00.000Z', device: 'InBody 570',
+      weight_kg: '60', pbf_pct: '22', impedance: '{}', raw_json: '{}',
+      created_at: '2026-03-01T07:30:00.000Z', updated_at: '2026-03-01T07:30:00.000Z',
+    });
+
+    const scan = await createInbodyScan({
+      scanned_at: '2026-03-01T07:30:00.000Z',
+      weight_kg: 60,
+      pbf_pct: 22,
+    });
+
+    const [sql, params] = vi.mocked(db.queryOne).mock.calls[0] as unknown as [string, unknown[]];
+    expect(sql).toContain('INSERT INTO inbody_scans');
+    expect(sql).toContain('RETURNING *');
+    // Required fields: uuid, scanned_at, weight_kg, pbf_pct (exactly — no extras)
+    expect(params.length).toBe(4);
+    expect(scan.uuid).toBe('scan-new');
+    expect(scan.weight_kg).toBe(60);
+    expect(scan.pbf_pct).toBe(22);
+  });
+
+  it('serialises impedance to JSON string', async () => {
+    const db = await import('./db.js');
+    vi.mocked(db.queryOne).mockResolvedValueOnce({
+      uuid: 'scan-imp', scanned_at: '2026-03-01T07:30:00.000Z', device: 'InBody 570',
+      impedance: '{"50kHz":{"ra":380}}', raw_json: '{}',
+      created_at: '2026-03-01T07:30:00.000Z', updated_at: '2026-03-01T07:30:00.000Z',
+    });
+    await createInbodyScan({
+      scanned_at: '2026-03-01T07:30:00.000Z',
+      impedance: { '50kHz': { ra: 380 } },
+    });
+    const [, params] = vi.mocked(db.queryOne).mock.calls[0] as unknown as [string, unknown[]];
+    const impParam = params[params.length - 1];
+    expect(typeof impParam).toBe('string');
+    expect(impParam).toBe('{"50kHz":{"ra":380}}');
+  });
+});
+
+describe('listInbodyScans', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('applies from/to window and orders DESC by scanned_at', async () => {
+    const db = await import('./db.js');
+    vi.mocked(db.query).mockResolvedValueOnce([]);
+    await listInbodyScans({ limit: 10, from: '2026-01-01', to: '2026-04-01' });
+    const [sql, params] = vi.mocked(db.query).mock.calls[0] as unknown as [string, unknown[]];
+    expect(sql).toContain('FROM inbody_scans');
+    expect(sql).toContain('scanned_at >=');
+    expect(sql).toContain('scanned_at <=');
+    expect(sql).toContain('ORDER BY scanned_at DESC');
+    expect(params).toContain('2026-01-01');
+    expect(params).toContain('2026-04-01');
+    expect(params).toContain(10);
+  });
+
+  it('falls back to 90 limit when none provided', async () => {
+    const db = await import('./db.js');
+    vi.mocked(db.query).mockResolvedValueOnce([]);
+    await listInbodyScans();
+    const [, params] = vi.mocked(db.query).mock.calls[0] as unknown as [string, unknown[]];
+    expect(params).toEqual([90]);
+  });
+});
+
+describe('getInbodyScan / getLatestInbodyScan', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('getInbodyScan returns null when not found', async () => {
+    const db = await import('./db.js');
+    vi.mocked(db.queryOne).mockResolvedValueOnce(null);
+    const scan = await getInbodyScan('missing');
+    expect(scan).toBeNull();
+  });
+
+  it('getLatestInbodyScan picks ORDER BY scanned_at DESC LIMIT 1', async () => {
+    const db = await import('./db.js');
+    vi.mocked(db.queryOne).mockResolvedValueOnce(null);
+    await getLatestInbodyScan();
+    const [sql] = vi.mocked(db.queryOne).mock.calls[0] as unknown as [string, unknown[]];
+    expect(sql).toContain('ORDER BY scanned_at DESC');
+    expect(sql).toContain('LIMIT 1');
+  });
+});
+
+describe('updateInbodyScan', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('no-ops to a getInbodyScan when no fields provided', async () => {
+    const db = await import('./db.js');
+    vi.mocked(db.queryOne).mockResolvedValueOnce({
+      uuid: 'scan-1', scanned_at: '2026-03-01T07:30:00.000Z', device: 'InBody 570',
+      impedance: '{}', raw_json: '{}',
+      created_at: '2026-03-01T07:30:00.000Z', updated_at: '2026-03-01T07:30:00.000Z',
+    });
+    await updateInbodyScan('scan-1', {});
+    const [sql] = vi.mocked(db.queryOne).mock.calls[0] as unknown as [string, unknown[]];
+    expect(sql).toContain('SELECT * FROM inbody_scans');
+  });
+
+  it('builds UPDATE with only provided fields', async () => {
+    const db = await import('./db.js');
+    vi.mocked(db.queryOne).mockResolvedValueOnce({
+      uuid: 'scan-1', scanned_at: '2026-03-01T07:30:00.000Z', device: 'InBody 570',
+      weight_kg: '61', impedance: '{}', raw_json: '{}',
+      created_at: '2026-03-01T07:30:00.000Z', updated_at: '2026-03-01T07:31:00.000Z',
+    });
+    await updateInbodyScan('scan-1', { weight_kg: 61, notes: 'updated' });
+    const [sql, params] = vi.mocked(db.queryOne).mock.calls[0] as unknown as [string, unknown[]];
+    expect(sql).toMatch(/UPDATE inbody_scans SET/);
+    expect(sql).toContain('weight_kg = ');
+    expect(sql).toContain('notes = ');
+    expect(params[params.length - 1]).toBe('scan-1');
+  });
+});
+
+describe('deleteInbodyScan', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('deletes auto-inserted circumferences then the scan row', async () => {
+    const db = await import('./db.js');
+    vi.mocked(db.query).mockResolvedValue([]);
+    await deleteInbodyScan('scan-gone');
+    const calls = vi.mocked(db.query).mock.calls;
+    expect(calls.length).toBe(2);
+    expect(calls[0][0]).toContain('DELETE FROM measurement_logs WHERE source');
+    expect(calls[1][0]).toContain('DELETE FROM inbody_scans WHERE uuid');
   });
 });

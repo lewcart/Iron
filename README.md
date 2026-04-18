@@ -1,10 +1,10 @@
-# Iron
+# Rebirth
 
-Personal workout tracking app - CLI-first architecture.
+Personal fitness, body, nutrition, HRT, and wellbeing tracker — CLI-first architecture.
 
 ## Overview
 
-Iron is a personal-use web app for tracking workouts, exercises, and progress. Inspired by the iOS app [Iron Workout Tracker](https://github.com/karimknaebel/Iron).
+Rebirth is a personal-use web + iOS app for tracking workouts, body composition, nutrition, HRT, and wellbeing. The workout core was inspired by the iOS app [Iron Workout Tracker](https://github.com/karimknaebel/Iron); Rebirth extends that foundation into a full holistic tracker.
 
 ## Key Features
 
@@ -12,13 +12,19 @@ Iron is a personal-use web app for tracking workouts, exercises, and progress. I
 - **Exercise Library**: 400+ built-in exercises + custom exercises
 - **Workout Tracking**: Log sets, reps, weight, RPE
 - **Workout Plans**: Create reusable workout routines
+- **Body & Measurements**: Bodyweight, body-spec versions, circumference logs, progress photos
+- **Nutrition**: Standard Week templates, per-food entries, Fitbee imports
+- **HRT**: Protocols + daily adherence log
+- **Wellbeing**: Mood/energy/sleep/stress + dysphoria/euphoria journal
 - **History & Stats**: Track progress, personal records, 1RM estimates
+- **iOS (Capacitor)**: native iPhone app with HealthKit, Lock Screen ControlWidget, local notifications
 
 ## Tech Stack
 
 - **Frontend**: Next.js 15 + React 19 + TypeScript
-- **Database**: SQLite (better-sqlite3)
+- **Database**: PostgreSQL (Neon) + Dexie for offline
 - **CLI**: Commander.js
+- **iOS**: Capacitor 8
 - **Deployment**: Vercel
 
 ## Getting Started
@@ -30,6 +36,8 @@ npm install
 ```
 
 ### Database Setup
+
+See `NEON_SETUP.md` for Neon Postgres setup. Then:
 
 ```bash
 npm run db:migrate
@@ -50,22 +58,22 @@ npm run cli -- --help
 
 ```bash
 # Start a workout
-iron start-workout
+rebirth start-workout
 
 # Add exercise to current workout
-iron add-exercise <exercise-name>
+rebirth add-exercise <exercise-name>
 
 # Log a set
-iron log-set <weight> <reps>
+rebirth log-set <weight> <reps>
 
 # Finish workout
-iron finish-workout
+rebirth finish-workout
 
 # View history
-iron list-workouts
+rebirth list-workouts
 
 # List exercises
-iron list-exercises
+rebirth list-exercises
 ```
 
 ## Architecture
@@ -78,24 +86,28 @@ Every meaningful action is accessible via CLI:
 - Workout plans (create, manage routines)
 - History queries (workouts, stats, PRs)
 
-This enables automation tools (Zephyr, notion-daemon, Claude Code) to interact with Iron without touching the UI.
+This enables automation tools (Mission Control, Claude Code, MCP server) to interact with Rebirth without touching the UI.
 
 ### Data Model
 
-- **Exercises**: Built-in library + custom user exercises
-- **Workouts**: Workout sessions with start/end times
-- **WorkoutExercises**: Exercises performed in a workout
-- **WorkoutSets**: Individual sets with weight, reps, RPE
-- **WorkoutPlans**: Templates for workout routines
-- **WorkoutRoutines**: Days/sessions within a plan
+Module 1 — Training:
+- **Exercises**, **Workouts**, **WorkoutExercises**, **WorkoutSets**, **WorkoutPlans**, **WorkoutRoutines**
+
+Modules 2–10 — Body / Nutrition / HRT / Wellbeing:
+- **body_spec_logs**, **bodyweight_logs**, **measurement_logs**, **progress_photos**
+- **nutrition_logs**, **nutrition_food_entries**, **nutrition_week_meals**
+- **hrt_protocols**, **hrt_logs**
+- **wellbeing_logs**, **dysphoria_logs**, **clothes_test_logs**, **inspo_photos**
 
 ## Development
 
 - `npm run dev` - Start Next.js dev server
 - `npm run build` - Build for production
+- `npm run build:cap` - Build static export for Capacitor iOS
 - `npm run cli` - Run CLI commands
 - `npm run db:migrate` - Run database migrations
 - `npm run db:seed` - Seed exercise database
+- `npm test` - Run vitest suite
 
 ## License
 

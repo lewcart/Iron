@@ -24,6 +24,9 @@
 	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<!-- ActivityKit — required to start Live Activities for the rest timer. -->
+	<key>NSSupportsLiveActivities</key>
+	<true/>
 	<key>UILaunchStoryboardName</key>
 	<string>LaunchScreen</string>
 	<key>UIMainStoryboardFile</key>
@@ -48,6 +51,19 @@
 	<key>UIViewControllerBasedStatusBarAppearance</key>
 	<true/>
 
+	<!-- Camera access — the in-app fitspo burst button uses the WKWebView
+	     navigator.mediaDevices.getUserMedia API to capture physique inspo
+	     photos. iOS blocks mediaDevices entirely when this key is missing. -->
+	<key>NSCameraUsageDescription</key>
+	<string>Rebirth uses your camera to take discreet fitspo / physique inspiration photos during workouts.</string>
+
+	<!-- Photo library add-only access — captured inspo burst shots are saved
+	     to the user's Photos library so they're accessible outside the app
+	     even if the upload fails. Using "AddUsageDescription" scopes this to
+	     write-only; we never read the user's existing photos. -->
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>Rebirth saves the photos you capture (fitspo bursts, progress) to your Photos library so you can find them there too.</string>
+
 	<!-- Location permissions — geofence monitoring requires Always authorization -->
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>Rebirth uses your location to detect when you arrive home so it can automatically end your workout.</string>
@@ -62,5 +78,6 @@
 		<string>location</string>
 		<string>fetch</string>
 	</array>
+
 </dict>
 </plist>

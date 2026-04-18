@@ -21,7 +21,7 @@ import { migrate } from './db/migrate.js';
 const program = new Command();
 
 program
-  .name('iron')
+  .name('rebirth')
   .description('CLI-first workout tracker')
   .version('0.1.0');
 
@@ -32,7 +32,7 @@ program
   .description('Initialize database')
   .action(async () => {
     await migrate();
-    console.log('✓ Database initialized. Run "iron seed" to load exercises.');
+    console.log('✓ Database initialized. Run "rebirth seed" to load exercises.');
   });
 
 // ===== EXERCISES =====
@@ -139,7 +139,7 @@ program
     console.log(`✓ Started workout`);
     console.log(`  UUID: ${workout.uuid}`);
     console.log(`  Time: ${new Date(workout.start_time).toLocaleString()}`);
-    console.log('\nAdd exercises with: iron add-exercise <exercise-uuid>');
+    console.log('\nAdd exercises with: rebirth add-exercise <exercise-uuid>');
   });
 
 program
@@ -149,7 +149,7 @@ program
     const workout = await getCurrentWorkout();
     if (!workout) {
       console.log('No workout in progress');
-      console.log('Start one with: iron start-workout');
+      console.log('Start one with: rebirth start-workout');
       return;
     }
 
@@ -189,7 +189,7 @@ program
     const workout = await getCurrentWorkout();
     if (!workout) {
       console.log('❌ No workout in progress');
-      console.log('Start one with: iron start-workout');
+      console.log('Start one with: rebirth start-workout');
       return;
     }
 

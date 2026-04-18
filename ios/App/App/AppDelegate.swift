@@ -28,8 +28,6 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     }
 
     func applicationDidBecomeActive(_ application: UIApplication) {
-        // Check if the iOS 18 Lock Screen control set the burst-pending flag.
-        // If so, clear it and notify InspoBurstPlugin to fire the event into the JS layer.
         let defaults = UserDefaults(suiteName: "group.app.rebirth")
         if defaults?.bool(forKey: "fitspoBurstPending") == true {
             defaults?.set(false, forKey: "fitspoBurstPending")

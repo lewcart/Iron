@@ -24,8 +24,10 @@ import {
   type WorkoutScheduleConfig,
 } from '@/lib/workout-schedule';
 import Link from 'next/link';
+import { Capacitor } from '@capacitor/core';
 import { useUnit } from '@/context/UnitContext';
 import { REBIRTH_EQUIPMENT_LS_KEY } from '@/lib/available-equipment';
+import { REST_LIVE_ACTIVITY_LS_KEY, endRestActivity } from '@/lib/native/rest-timer-activity';
 import type { BodyweightLog } from '@/types';
 import { apiBase } from '@/lib/api/client';
 import {
@@ -107,14 +109,18 @@ export default function SettingsPage() {
 
   // Rest timer
   const [defaultRest, setDefaultRest] = useState(() =>
-    parseInt(readLS('iron-rest-default', '90'), 10)
+    parseInt(readLS('rebirth-rest-default', '90'), 10)
   );
   const [autoStart, setAutoStart] = useState(() =>
-    readLS('iron-rest-auto-start', 'true') !== 'false'
+    readLS('rebirth-rest-auto-start', 'true') !== 'false'
   );
   const [keepRestRunning, setKeepRestRunning] = useState(() =>
-    readLS('iron-rest-keep-running', 'false') === 'true'
+    readLS('rebirth-rest-keep-running', 'false') === 'true'
   );
+  const [liveActivity, setLiveActivity] = useState(() =>
+    readLS(REST_LIVE_ACTIVITY_LS_KEY, 'true') !== 'false'
+  );
+  const isNativePlatform = typeof window !== 'undefined' && Capacitor.isNativePlatform();
 
   // Workout schedule
   const [schedule, setSchedule] = useState<WorkoutScheduleConfig>(() => loadScheduleConfig());
@@ -241,12 +247,12 @@ export default function SettingsPage() {
 
   const updateDefaultRest = (v: number) => {
     setDefaultRest(v);
-    localStorage.setItem('iron-rest-default', String(v));
+    localStorage.setItem('rebirth-rest-default', String(v));
   };
 
   const updateAutoStart = (v: boolean) => {
     setAutoStart(v);
-    localStorage.setItem('iron-rest-auto-start', String(v));
+    localStorage.setItem('rebirth-rest-auto-start', String(v));
     if (v && typeof Notification !== 'undefined' && Notification.permission === 'default') {
       Notification.requestPermission();
     }
@@ -254,7 +260,17 @@ export default function SettingsPage() {
 
   const updateKeepRestRunning = (v: boolean) => {
     setKeepRestRunning(v);
-    localStorage.setItem('iron-rest-keep-running', String(v));
+    localStorage.setItem('rebirth-rest-keep-running', String(v));
+  };
+
+  const updateLiveActivity = (v: boolean) => {
+    setLiveActivity(v);
+    localStorage.setItem(REST_LIVE_ACTIVITY_LS_KEY, String(v));
+    // If the user just switched it OFF, end any Activity that's currently
+    // running so it doesn't linger on the Lock Screen.
+    if (!v) {
+      endRestActivity().catch(() => {});
+    }
   };
 
   const openProfileEdit = () => {
@@ -626,11 +642,22 @@ export default function SettingsPage() {
               <div className="flex-1">
                 <span className="text-sm font-medium">Keep Rest Timer Running</span>
                 <p className="text-xs text-muted-foreground mt-0.5 pr-4">
-                  Shows a red countdown when the rest period has elapsed.
+                  Counts up in red after your rest period ends so you can see total rest time.
                 </p>
               </div>
               <Toggle on={keepRestRunning} onToggle={() => updateKeepRestRunning(!keepRestRunning)} />
             </div>
+            {isNativePlatform && (
+              <div className="ios-row justify-between">
+                <div className="flex-1">
+                  <span className="text-sm font-medium">Dynamic Island Countdown</span>
+                  <p className="text-xs text-muted-foreground mt-0.5 pr-4">
+                    Shows the rest countdown on the Lock Screen and Dynamic Island.
+                  </p>
+                </div>
+                <Toggle on={liveActivity} onToggle={() => updateLiveActivity(!liveActivity)} />
+              </div>
+            )}
           </div>
         </div>
 

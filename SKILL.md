@@ -1,6 +1,6 @@
 # SKILL.md — Rebirth API Reference
 
-This file teaches Claude (Stud on Mac Studio, Loft via web_fetch) how to query, create, update, and delete data across all six Rebirth modules via the Iron REST API.
+This file teaches Claude (Stud on Mac Studio, Loft via web_fetch) how to query, create, update, and delete data across all six Rebirth modules via the Rebirth REST API.
 
 ## Auth
 
@@ -575,10 +575,14 @@ echo "=== Last HRT dose ===" && curl -s -H "Authorization: Bearer $KEY" "$BASE/a
 
 ## Running Migrations
 
-After pulling code changes that modify `src/db/schema.sql`:
+After pulling code changes that add files under `src/db/migrations/`:
 
 ```bash
 npm run db:migrate
 ```
 
-This is idempotent — it uses `CREATE TABLE IF NOT EXISTS` and `ADD COLUMN IF NOT EXISTS`.
+The migrator tracks applied files in a `schema_migrations` table and only runs new ones. Each migration is applied inside a single Postgres transaction — a failure rolls back the whole file. To revert the last migration (requires a companion `.down.sql`):
+
+```bash
+npm run db:rollback
+```

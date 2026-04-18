@@ -27,7 +27,7 @@ export function UnitProvider({ children }: { children: React.ReactNode }) {
   const [unit, setUnitState] = useState<WeightUnit>('kg');
 
   useEffect(() => {
-    const stored = localStorage.getItem('iron-weight-unit') as WeightUnit | null;
+    const stored = localStorage.getItem('rebirth-weight-unit') as WeightUnit | null;
     if (stored === 'kg' || stored === 'lbs') {
       setUnitState(stored);
     }
@@ -35,7 +35,7 @@ export function UnitProvider({ children }: { children: React.ReactNode }) {
 
   const setUnit = (u: WeightUnit) => {
     setUnitState(u);
-    localStorage.setItem('iron-weight-unit', u);
+    localStorage.setItem('rebirth-weight-unit', u);
   };
 
   return (

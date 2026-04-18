@@ -24,5 +24,21 @@ export async function queryOne<T = Record<string, unknown>>(text: string, params
   return rows.length > 0 ? rows[0] : null;
 }
 
+/**
+ * Run a batch of (text, params) queries inside a single Postgres transaction
+ * over the Neon HTTP driver. Either every statement commits or none do.
+ */
+export async function transaction(
+  statements: Array<{ text: string; params?: unknown[] }>
+): Promise<void> {
+  if (statements.length === 0) return;
+  const sql = getSql() as unknown as {
+    (text: string, params?: unknown[]): unknown;
+    transaction: (queries: unknown[]) => Promise<unknown>;
+  };
+  const queries = statements.map(({ text, params }) => sql(text, params ?? []));
+  await sql.transaction(queries);
+}
+
 // No-op kept for compatibility with migrate.ts
 export async function closePool(): Promise<void> {}

@@ -1,24 +1,27 @@
 {
-  "name": "iron",
+  "name": "rebirth",
   "version": "0.1.0",
   "private": true,
   "type": "module",
   "bin": {
-    "iron": "./dist/cli.js"
+    "rebirth": "./dist/cli.js"
   },
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "build:cap": "mv src/app/api src/_api_tmp && CAPACITOR_BUILD=1 next build; mv src/_api_tmp src/app/api",
+    "cap:sync": "npx cap sync ios && node scripts/cap-post-sync.mjs",
     "start": "next start",
     "lint": "next lint",
     "db:migrate": "tsx src/db/migrate.ts",
+    "db:rollback": "tsx src/db/migrate.ts rollback",
     "db:seed": "tsx src/db/seed.ts",
     "db:seed-routines": "tsx src/db/seed-routines.ts",
     "db:dedupe-exercises": "tsx src/db/deduplicate-exercises.ts",
     "cli:build": "tsc src/cli.ts --outDir dist --module nodenext --moduleResolution nodenext --target es2022 --esModuleInterop --skipLibCheck",
     "cli": "tsx src/cli.ts",
-    "test": "vitest run"
+    "test": "vitest run",
+    "ios:device": "bash scripts/ios-device-build.sh"
   },
   "dependencies": {
     "@capacitor/app": "^8.1.0",

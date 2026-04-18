@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		2FAD9763203C412B000D30F8 /* config.xml in Resources */ = {isa = PBXBuildFile; fileRef = 2FAD9762203C412B000D30F8 /* config.xml */; };
+		35976665B93CB7279F053E62 /* RestTimerPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = FD5E740390A75C0F2061E3BF /* RestTimerPlugin.swift */; };
 		4D22ABE92AF431CB00220026 /* CapApp-SPM in Frameworks */ = {isa = PBXBuildFile; productRef = 4D22ABE82AF431CB00220026 /* CapApp-SPM */; };
 		50379B232058CBB4000EE86E /* capacitor.config.json in Resources */ = {isa = PBXBuildFile; fileRef = 50379B222058CBB4000EE86E /* capacitor.config.json */; };
 		504EC3081FED79650016851F /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 504EC3071FED79650016851F /* AppDelegate.swift */; };
@@ -15,17 +16,28 @@
 		504EC30F1FED79650016851F /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 504EC30E1FED79650016851F /* Assets.xcassets */; };
 		504EC3121FED79650016851F /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 504EC3101FED79650016851F /* LaunchScreen.storyboard */; };
 		50B271D11FEDC1A000F3C39B /* public in Resources */ = {isa = PBXBuildFile; fileRef = 50B271D01FEDC1A000F3C39B /* public */; };
-		66A038B9F6CCA4CD69ED3A7C /* Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = C3C8B189A272DBD88E2B5226 /* Info.plist */; };
+		6E5DE5F1666A3B2916B5D955 /* RestTimerAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = E821CA38A7C622120A207A08 /* RestTimerAttributes.swift */; };
+		8AAE170FA2FC1B2107046A00 /* RestTimerLiveActivity.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = B70ECA36E07E47254F7A8C94 /* RestTimerLiveActivity.appex */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
+		995DECA840D4453CDDB51624 /* RestTimerAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = E821CA38A7C622120A207A08 /* RestTimerAttributes.swift */; };
 		A9401796DFFB4961E62B1B17 /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 95B0D3245656B25E47BA3FE9 /* Foundation.framework */; };
 		BCDB60B1669B43B1F7D02C66 /* InspoBurstPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EC6C38970F00C7EEB816A32 /* InspoBurstPlugin.swift */; };
+		C3A959FD13211607714A1599 /* RestTimerLiveActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = B72C4CFA9F269091844B4FFE /* RestTimerLiveActivity.swift */; };
 		E81EF3DAF5F016DC13FD47EA /* FitspoControlWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = D121A798D2850322D0EBD90E /* FitspoControlWidget.swift */; };
-		EB3F38C6B219C7B4BDF48FE1 /* FitspoControlExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 149ADFA03562280CEC976416 /* FitspoControlExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, CodeSignOnCopy, ); }; };
+		EB3F38C6B219C7B4BDF48FE1 /* FitspoControlExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 149ADFA03562280CEC976416 /* FitspoControlExtension.appex */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		ED5330C7A68AF9CFC81F4F99 /* FitspoBurstIntent.swift in Sources */ = {isa = PBXBuildFile; fileRef = E64E87D18C5A9BB8F67CCC7F /* FitspoBurstIntent.swift */; };
+		RB0000000000000000000003 /* FitspoBurstIntent.swift in Sources */ = {isa = PBXBuildFile; fileRef = E64E87D18C5A9BB8F67CCC7F /* FitspoBurstIntent.swift */; };
 		HK0000000000000000000001 /* HealthKitPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = HK0000000000000000000002 /* HealthKitPlugin.swift */; };
 		HK0000000000000000000003 /* HealthKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = HK0000000000000000000004 /* HealthKit.framework */; settings = {ATTRIBUTES = (Required, ); }; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
+		4D1AB298AD93100258BE1FE3 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 504EC2FC1FED79650016851F /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 383087F89824781A35949B1F;
+			remoteInfo = RestTimerLiveActivity;
+		};
 		8179A3FC9BFCB5C45AA3587D /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = 504EC2FC1FED79650016851F /* Project object */;
@@ -43,6 +55,7 @@
 			dstSubfolderSpec = 13;
 			files = (
 				EB3F38C6B219C7B4BDF48FE1 /* FitspoControlExtension.appex in Embed Foundation Extensions */,
+				8AAE170FA2FC1B2107046A00 /* RestTimerLiveActivity.appex in Embed Foundation Extensions */,
 			);
 			name = "Embed Foundation Extensions";
 			runOnlyForDeploymentPostprocessing = 0;
@@ -50,6 +63,7 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		07C7B52045C74BE103E44A86 /* Info.plist */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		149ADFA03562280CEC976416 /* FitspoControlExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = FitspoControlExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		1D4E083451DF98FFBEDE8AE4 /* FitspoControlExtension.entitlements */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.entitlements; path = FitspoControlExtension.entitlements; sourceTree = "<group>"; };
 		2FAD9762203C412B000D30F8 /* config.xml */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = config.xml; sourceTree = "<group>"; };
@@ -62,11 +76,16 @@
 		504EC3131FED79650016851F /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		50B271D01FEDC1A000F3C39B /* public */ = {isa = PBXFileReference; lastKnownFileType = folder; path = public; sourceTree = "<group>"; };
 		5EC6C38970F00C7EEB816A32 /* InspoBurstPlugin.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = InspoBurstPlugin.swift; sourceTree = "<group>"; };
+		6719304ECF1C3B40062B8170 /* RestTimerLiveActivity.entitlements */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.entitlements; path = RestTimerLiveActivity.entitlements; sourceTree = "<group>"; };
 		958DCC722DB07C7200EA8C5F /* debug.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; name = debug.xcconfig; path = ../debug.xcconfig; sourceTree = SOURCE_ROOT; };
 		95B0D3245656B25E47BA3FE9 /* Foundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Foundation.framework; path = Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS18.0.sdk/System/Library/Frameworks/Foundation.framework; sourceTree = DEVELOPER_DIR; };
+		B70ECA36E07E47254F7A8C94 /* RestTimerLiveActivity.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = RestTimerLiveActivity.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		B72C4CFA9F269091844B4FFE /* RestTimerLiveActivity.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RestTimerLiveActivity.swift; sourceTree = "<group>"; };
 		C3C8B189A272DBD88E2B5226 /* Info.plist */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		D121A798D2850322D0EBD90E /* FitspoControlWidget.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = FitspoControlWidget.swift; sourceTree = "<group>"; };
 		E64E87D18C5A9BB8F67CCC7F /* FitspoBurstIntent.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = FitspoBurstIntent.swift; sourceTree = "<group>"; };
+		E821CA38A7C622120A207A08 /* RestTimerAttributes.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RestTimerAttributes.swift; sourceTree = "<group>"; };
+		FD5E740390A75C0F2061E3BF /* RestTimerPlugin.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RestTimerPlugin.swift; sourceTree = "<group>"; };
 		HK0000000000000000000002 /* HealthKitPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthKitPlugin.swift; sourceTree = "<group>"; };
 		HK0000000000000000000004 /* HealthKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = HealthKit.framework; path = System/Library/Frameworks/HealthKit.framework; sourceTree = SDKROOT; };
 		HK0000000000000000000005 /* App.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = App.entitlements; sourceTree = "<group>"; };
@@ -90,6 +109,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		917FE87A898B9A5B37273D4E /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -101,6 +127,7 @@
 				504EC3051FED79650016851F /* Products */,
 				HK0000000000000000000006 /* Frameworks */,
 				71D66E76DCE38F69E6753DAF /* FitspoControlExtension */,
+				A975DFF70717EA48CFEA8F1E /* RestTimerLiveActivity */,
 			);
 			sourceTree = "<group>";
 		};
@@ -109,6 +136,7 @@
 			children = (
 				504EC3041FED79650016851F /* App.app */,
 				149ADFA03562280CEC976416 /* FitspoControlExtension.appex */,
+				B70ECA36E07E47254F7A8C94 /* RestTimerLiveActivity.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -127,6 +155,7 @@
 				2FAD9762203C412B000D30F8 /* config.xml */,
 				50B271D01FEDC1A000F3C39B /* public */,
 				5EC6C38970F00C7EEB816A32 /* InspoBurstPlugin.swift */,
+				FD5E740390A75C0F2061E3BF /* RestTimerPlugin.swift */,
 			);
 			path = App;
 			sourceTree = "<group>";
@@ -147,8 +176,18 @@
 				C3C8B189A272DBD88E2B5226 /* Info.plist */,
 				1D4E083451DF98FFBEDE8AE4 /* FitspoControlExtension.entitlements */,
 			);
-			name = FitspoControlExtension;
 			path = FitspoControlExtension;
+			sourceTree = "<group>";
+		};
+		A975DFF70717EA48CFEA8F1E /* RestTimerLiveActivity */ = {
+			isa = PBXGroup;
+			children = (
+				E821CA38A7C622120A207A08 /* RestTimerAttributes.swift */,
+				B72C4CFA9F269091844B4FFE /* RestTimerLiveActivity.swift */,
+				07C7B52045C74BE103E44A86 /* Info.plist */,
+				6719304ECF1C3B40062B8170 /* RestTimerLiveActivity.entitlements */,
+			);
+			path = RestTimerLiveActivity;
 			sourceTree = "<group>";
 		};
 		HK0000000000000000000006 /* Frameworks */ = {
@@ -163,6 +202,23 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
+		383087F89824781A35949B1F /* RestTimerLiveActivity */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = DCF1E7967EF905BF35888A47 /* Build configuration list for PBXNativeTarget "RestTimerLiveActivity" */;
+			buildPhases = (
+				162DF99DFB5F4EA53F8FAF5C /* Sources */,
+				917FE87A898B9A5B37273D4E /* Frameworks */,
+				569982567B85F05EA170439B /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = RestTimerLiveActivity;
+			productName = RestTimerLiveActivity;
+			productReference = B70ECA36E07E47254F7A8C94 /* RestTimerLiveActivity.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
 		504EC3031FED79650016851F /* App */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = 504EC3161FED79650016851F /* Build configuration list for PBXNativeTarget "App" */;
@@ -176,6 +232,7 @@
 			);
 			dependencies = (
 				4048F6B0EA3E970ED9D62B88 /* PBXTargetDependency */,
+				DAC5D1420A6DC6D31F6FECC9 /* PBXTargetDependency */,
 			);
 			name = App;
 			packageProductDependencies = (
@@ -236,6 +293,7 @@
 			targets = (
 				504EC3031FED79650016851F /* App */,
 				5FBFD96826DC10BD522E899F /* FitspoControlExtension */,
+				383087F89824781A35949B1F /* RestTimerLiveActivity */,
 			);
 		};
 /* End PBXProject section */
@@ -245,7 +303,6 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				66A038B9F6CCA4CD69ED3A7C /* Info.plist in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -262,6 +319,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		569982567B85F05EA170439B /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
@@ -274,6 +338,15 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		162DF99DFB5F4EA53F8FAF5C /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				995DECA840D4453CDDB51624 /* RestTimerAttributes.swift in Sources */,
+				C3A959FD13211607714A1599 /* RestTimerLiveActivity.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		504EC3001FED79650016851F /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -281,6 +354,9 @@
 				504EC3081FED79650016851F /* AppDelegate.swift in Sources */,
 				HK0000000000000000000001 /* HealthKitPlugin.swift in Sources */,
 				BCDB60B1669B43B1F7D02C66 /* InspoBurstPlugin.swift in Sources */,
+				35976665B93CB7279F053E62 /* RestTimerPlugin.swift in Sources */,
+				6E5DE5F1666A3B2916B5D955 /* RestTimerAttributes.swift in Sources */,
+				RB0000000000000000000003 /* FitspoBurstIntent.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -292,6 +368,12 @@
 			name = FitspoControlExtension;
 			target = 5FBFD96826DC10BD522E899F /* FitspoControlExtension */;
 			targetProxy = 8179A3FC9BFCB5C45AA3587D /* PBXContainerItemProxy */;
+		};
+		DAC5D1420A6DC6D31F6FECC9 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			name = RestTimerLiveActivity;
+			target = 383087F89824781A35949B1F /* RestTimerLiveActivity */;
+			targetProxy = 4D1AB298AD93100258BE1FE3 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -315,6 +397,24 @@
 /* End PBXVariantGroup section */
 
 /* Begin XCBuildConfiguration section */
+		080A49A3D11F704C194C5B9A /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CLANG_ENABLE_OBJC_WEAK = NO;
+				CODE_SIGN_ENTITLEMENTS = RestTimerLiveActivity/RestTimerLiveActivity.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = RestTimerLiveActivity/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				PRODUCT_BUNDLE_IDENTIFIER = app.rebirth.RestTimerLiveActivity;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
 		261345E970C5A129FFE3CB02 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -325,6 +425,7 @@
 				INFOPLIST_FILE = FitspoControlExtension/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
 				PRODUCT_BUNDLE_IDENTIFIER = app.rebirth.FitspoControlExtension;
+				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
 				SKIP_INSTALL = YES;
 				SWIFT_VERSION = 5.0;
@@ -449,6 +550,7 @@
 				CODE_SIGN_ENTITLEMENTS = App/App.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 43687B2JMB;
 				INFOPLIST_FILE = App/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -472,6 +574,7 @@
 				CODE_SIGN_ENTITLEMENTS = App/App.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 43687B2JMB;
 				INFOPLIST_FILE = App/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -497,10 +600,30 @@
 				INFOPLIST_FILE = FitspoControlExtension/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
 				PRODUCT_BUNDLE_IDENTIFIER = app.rebirth.FitspoControlExtension;
+				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
 				SKIP_INSTALL = YES;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = 1;
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+		BBCC9A0949CED437242DB8A7 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CLANG_ENABLE_OBJC_WEAK = NO;
+				CODE_SIGN_ENTITLEMENTS = RestTimerLiveActivity/RestTimerLiveActivity.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = RestTimerLiveActivity/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				PRODUCT_BUNDLE_IDENTIFIER = app.rebirth.RestTimerLiveActivity;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
 				VALIDATE_PRODUCT = YES;
 			};
 			name = Release;
@@ -531,6 +654,15 @@
 			buildConfigurations = (
 				9D7E303B73160CD035D26234 /* Release */,
 				261345E970C5A129FFE3CB02 /* Debug */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		DCF1E7967EF905BF35888A47 /* Build configuration list for PBXNativeTarget "RestTimerLiveActivity" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				080A49A3D11F704C194C5B9A /* Debug */,
+				BBCC9A0949CED437242DB8A7 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
