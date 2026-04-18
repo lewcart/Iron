@@ -9,6 +9,7 @@ export type TimelineModule =
   | 'photo'
   | 'bodyweight'
   | 'body_spec'
+  | 'inbody_scan'
   | 'dysphoria';
 
 export interface TimelineEntry {
@@ -36,6 +37,7 @@ export async function getTimelineEntries(days: number, limit: number): Promise<T
     photoRows,
     bodyweightRows,
     bodySpecRows,
+    inbodyRows,
     dysphoriaRows,
   ] = await Promise.all([
     query<{ uuid: string; start_time: string; title: string | null; exercise_count: number }>(
@@ -82,6 +84,11 @@ export async function getTimelineEntries(days: number, limit: number): Promise<T
     query<{ uuid: string; measured_at: string; weight_kg: number | null; body_fat_pct: number | null }>(
       `SELECT uuid, measured_at, weight_kg, body_fat_pct
        FROM body_spec_logs WHERE measured_at >= $1 ORDER BY measured_at DESC`,
+      [sinceIso]
+    ),
+    query<{ uuid: string; scanned_at: string; inbody_score: number | null; weight_kg: number | null; pbf_pct: number | null; smm_kg: number | null }>(
+      `SELECT uuid, scanned_at, inbody_score, weight_kg, pbf_pct, smm_kg
+       FROM inbody_scans WHERE scanned_at >= $1 ORDER BY scanned_at DESC`,
       [sinceIso]
     ),
     query<{ uuid: string; logged_at: string; scale: number }>(
@@ -185,6 +192,21 @@ export async function getTimelineEntries(days: number, limit: number): Promise<T
       icon: 'activity',
       timestamp: bs.measured_at,
       summary: parts.length ? `Body scan · ${parts.join(', ')}` : 'Body scan',
+    });
+  }
+
+  for (const ib of inbodyRows) {
+    const parts: string[] = [];
+    if (ib.inbody_score != null) parts.push(`score ${ib.inbody_score}`);
+    if (ib.weight_kg != null) parts.push(`${ib.weight_kg} kg`);
+    if (ib.pbf_pct != null) parts.push(`${ib.pbf_pct}% BF`);
+    if (ib.smm_kg != null) parts.push(`${ib.smm_kg} kg SMM`);
+    entries.push({
+      id: ib.uuid,
+      module: 'inbody_scan',
+      icon: 'activity',
+      timestamp: ib.scanned_at,
+      summary: parts.length ? `InBody scan · ${parts.join(', ')}` : 'InBody scan',
     });
   }
 

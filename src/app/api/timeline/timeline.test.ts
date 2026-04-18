@@ -5,10 +5,10 @@ vi.mock('@/db/db', () => ({
   query: vi.fn(),
 }));
 
-// Sets up 9 empty query returns (one per module in Promise.all order)
+// Sets up 10 empty query returns (one per module in Promise.all order)
 async function mockAllEmpty() {
   const db = await import('@/db/db');
-  for (let i = 0; i < 9; i++) {
+  for (let i = 0; i < 10; i++) {
     vi.mocked(db.query).mockResolvedValueOnce([]);
   }
 }
@@ -38,7 +38,7 @@ describe('GET /api/timeline', () => {
     const req = new NextRequest('http://localhost/api/timeline');
     await GET(req);
 
-    expect(db.query).toHaveBeenCalledTimes(9);
+    expect(db.query).toHaveBeenCalledTimes(10);
   });
 
   it('caps days at 90 without throwing', async () => {
@@ -50,7 +50,7 @@ describe('GET /api/timeline', () => {
     const response = await GET(req);
 
     expect(response.status).toBe(200);
-    expect(db.query).toHaveBeenCalledTimes(9);
+    expect(db.query).toHaveBeenCalledTimes(10);
   });
 
   it('caps limit at 200 and returns all rows when under the cap', async () => {
@@ -60,6 +60,7 @@ describe('GET /api/timeline', () => {
         { uuid: 'w1', start_time: '2026-03-25T10:00:00.000Z', title: 'A', exercise_count: 2 },
         { uuid: 'w2', start_time: '2026-03-24T10:00:00.000Z', title: 'B', exercise_count: 1 },
       ])
+      .mockResolvedValueOnce([])
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([])
@@ -86,6 +87,7 @@ describe('GET /api/timeline', () => {
       .mockResolvedValueOnce([
         { uuid: 'w1', start_time: '2026-03-25T10:00:00.000Z', title: 'Push Day', exercise_count: 4 },
       ])
+      .mockResolvedValueOnce([])
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([])
@@ -121,6 +123,7 @@ describe('GET /api/timeline', () => {
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
       .mockResolvedValueOnce([]);
 
     const { GET } = await import('./route');
@@ -135,6 +138,7 @@ describe('GET /api/timeline', () => {
       .mockResolvedValueOnce([
         { uuid: 'w1', start_time: '2026-03-25T10:00:00.000Z', title: null, exercise_count: 0 },
       ])
+      .mockResolvedValueOnce([])
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([])
@@ -159,6 +163,7 @@ describe('GET /api/timeline', () => {
       .mockResolvedValueOnce([
         { uuid: 'n1', logged_at: '2026-03-25T12:00:00.000Z', meal_name: 'Lunch', meal_type: null, calories: 650.4, protein_g: 42.8 },
       ])
+      .mockResolvedValueOnce([])
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([])
@@ -191,6 +196,7 @@ describe('GET /api/timeline', () => {
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
       .mockResolvedValueOnce([]);
 
     const { GET } = await import('./route');
@@ -209,6 +215,7 @@ describe('GET /api/timeline', () => {
       .mockResolvedValueOnce([
         { uuid: 'h1', logged_at: '2026-03-25T08:00:00.000Z', medication: 'Estradiol', dose_mg: 2, taken: true },
       ])
+      .mockResolvedValueOnce([])
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([])
@@ -240,6 +247,7 @@ describe('GET /api/timeline', () => {
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
       .mockResolvedValueOnce([]);
 
     const { GET } = await import('./route');
@@ -259,6 +267,7 @@ describe('GET /api/timeline', () => {
       .mockResolvedValueOnce([
         { uuid: 'm1', measured_at: '2026-03-25T09:00:00.000Z', site: 'left_arm', value_cm: 32.5 },
       ])
+      .mockResolvedValueOnce([])
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([])
@@ -291,6 +300,7 @@ describe('GET /api/timeline', () => {
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
       .mockResolvedValueOnce([]);
 
     const { GET } = await import('./route');
@@ -317,6 +327,7 @@ describe('GET /api/timeline', () => {
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
       .mockResolvedValueOnce([]);
 
     const { GET } = await import('./route');
@@ -338,6 +349,7 @@ describe('GET /api/timeline', () => {
       .mockResolvedValueOnce([
         { uuid: 'p1', taken_at: '2026-03-25T11:00:00.000Z', pose: 'front' },
       ])
+      .mockResolvedValueOnce([])
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([]);
@@ -368,6 +380,7 @@ describe('GET /api/timeline', () => {
         { uuid: 'bw1', logged_at: '2026-03-25T08:30:00.000Z', weight_kg: 72.4 },
       ])
       .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
       .mockResolvedValueOnce([]);
 
     const { GET } = await import('./route');
@@ -396,6 +409,7 @@ describe('GET /api/timeline', () => {
       .mockResolvedValueOnce([
         { uuid: 'bs1', measured_at: '2026-03-25T09:00:00.000Z', weight_kg: 72.1, body_fat_pct: 18.5 },
       ])
+      .mockResolvedValueOnce([])
       .mockResolvedValueOnce([]);
 
     const { GET } = await import('./route');
@@ -422,6 +436,7 @@ describe('GET /api/timeline', () => {
       .mockResolvedValueOnce([
         { uuid: 'bs1', measured_at: '2026-03-25T09:00:00.000Z', weight_kg: null, body_fat_pct: null },
       ])
+      .mockResolvedValueOnce([])
       .mockResolvedValueOnce([]);
 
     const { GET } = await import('./route');
@@ -435,6 +450,7 @@ describe('GET /api/timeline', () => {
   it('formats dysphoria entry as euphoric when scale >= 7', async () => {
     const db = await import('@/db/db');
     vi.mocked(db.query)
+      .mockResolvedValueOnce([])
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([])
@@ -469,6 +485,7 @@ describe('GET /api/timeline', () => {
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
       .mockResolvedValueOnce([
         { uuid: 'd1', logged_at: '2026-03-25T10:00:00.000Z', scale: 2 },
       ]);
@@ -482,6 +499,7 @@ describe('GET /api/timeline', () => {
   it('formats dysphoria entry as neutral for mid-range scale', async () => {
     const db = await import('@/db/db');
     vi.mocked(db.query)
+      .mockResolvedValueOnce([])
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([])
@@ -522,6 +540,7 @@ describe('GET /api/timeline', () => {
         { uuid: 'bw1', logged_at: '2026-03-23T08:30:00.000Z', weight_kg: 72 },
       ])
       .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
       .mockResolvedValueOnce([]);
 
     const { GET } = await import('./route');
@@ -541,6 +560,7 @@ describe('GET /api/timeline', () => {
         { uuid: 'w2', start_time: '2026-03-24T10:00:00.000Z', title: null, exercise_count: 2 },
         { uuid: 'w3', start_time: '2026-03-23T10:00:00.000Z', title: null, exercise_count: 2 },
       ])
+      .mockResolvedValueOnce([])
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([])

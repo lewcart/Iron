@@ -1236,6 +1236,128 @@ async function deleteTrainingBlock(args: Record<string, unknown>) {
   return toolResult({ deleted: uuid });
 }
 
+// ── InBody scan catalog tools ─────────────────────────────────────────────────
+
+import {
+  listInbodyScans as dbListInbodyScans,
+  getInbodyScan as dbGetInbodyScan,
+  getLatestInbodyScan as dbGetLatestInbodyScan,
+  createInbodyScan as dbCreateInbodyScan,
+  updateInbodyScan as dbUpdateInbodyScan,
+  deleteInbodyScan as dbDeleteInbodyScan,
+  getBodyGoals as dbGetBodyGoals,
+  upsertBodyGoal as dbUpsertBodyGoal,
+  deleteBodyGoal as dbDeleteBodyGoal,
+  getBodyNormRanges as dbGetBodyNormRanges,
+  INBODY_NUMERIC_COLUMNS,
+  type InbodyScanInput,
+} from '@/db/queries';
+
+async function logInbodyScan(args: Record<string, unknown>) {
+  if (typeof args.scanned_at !== 'string') return toolError('scanned_at (ISO string) is required');
+  const scan = await dbCreateInbodyScan(args as unknown as InbodyScanInput);
+  return toolResult(scan);
+}
+
+async function updateInbodyScanTool(args: Record<string, unknown>) {
+  const { uuid, ...rest } = args;
+  if (typeof uuid !== 'string') return toolError('uuid is required');
+  const scan = await dbUpdateInbodyScan(uuid, rest as Partial<InbodyScanInput>);
+  if (!scan) return toolError(`InBody scan not found: ${uuid}`);
+  return toolResult(scan);
+}
+
+async function getInbodyScanTool(args: Record<string, unknown>) {
+  if (args.latest === true) {
+    const scan = await dbGetLatestInbodyScan();
+    return toolResult(scan);
+  }
+  if (typeof args.uuid !== 'string') return toolError('Provide uuid or { latest: true }');
+  const scan = await dbGetInbodyScan(args.uuid);
+  if (!scan) return toolError(`InBody scan not found: ${args.uuid}`);
+  return toolResult(scan);
+}
+
+async function listInbodyScansTool(args: Record<string, unknown>) {
+  const limit = typeof args.limit === 'number' ? args.limit : 90;
+  const from = typeof args.from === 'string' ? args.from : undefined;
+  const to = typeof args.to === 'string' ? args.to : undefined;
+  const scans = await dbListInbodyScans({ limit, from, to });
+  return toolResult(scans);
+}
+
+async function deleteInbodyScanTool(args: Record<string, unknown>) {
+  if (typeof args.uuid !== 'string') return toolError('uuid is required');
+  await dbDeleteInbodyScan(args.uuid);
+  return toolResult({ deleted: args.uuid });
+}
+
+async function compareInbodyScans(args: Record<string, unknown>) {
+  const { a_uuid, b_uuid } = args;
+  if (typeof a_uuid !== 'string' || typeof b_uuid !== 'string') {
+    return toolError('Both a_uuid and b_uuid are required');
+  }
+  const [a, b] = await Promise.all([dbGetInbodyScan(a_uuid), dbGetInbodyScan(b_uuid)]);
+  if (!a) return toolError(`Scan not found: ${a_uuid}`);
+  if (!b) return toolError(`Scan not found: ${b_uuid}`);
+
+  const deltas: Record<string, { a: number | null; b: number | null; delta: number | null; pct_change: number | null }> = {};
+  for (const col of INBODY_NUMERIC_COLUMNS) {
+    const aRec = a as unknown as Record<string, number | null>;
+    const bRec = b as unknown as Record<string, number | null>;
+    const av = aRec[col] ?? null;
+    const bv = bRec[col] ?? null;
+    let delta: number | null = null;
+    let pct: number | null = null;
+    if (av != null && bv != null) {
+      delta = bv - av;
+      pct = av !== 0 ? (delta / Math.abs(av)) * 100 : null;
+    }
+    deltas[col] = { a: av, b: bv, delta, pct_change: pct };
+  }
+  return toolResult({
+    a: { uuid: a.uuid, scanned_at: a.scanned_at },
+    b: { uuid: b.uuid, scanned_at: b.scanned_at },
+    deltas,
+  });
+}
+
+async function getBodyGoalsTool() {
+  const goals = await dbGetBodyGoals();
+  return toolResult(goals);
+}
+
+async function setBodyGoal(args: Record<string, unknown>) {
+  const { metric_key, target_value, unit, direction, notes } = args;
+  if (typeof metric_key !== 'string') return toolError('metric_key is required');
+  const tv = Number(target_value);
+  if (!Number.isFinite(tv)) return toolError('target_value must be numeric');
+  if (typeof unit !== 'string') return toolError('unit is required');
+  if (direction !== 'higher' && direction !== 'lower' && direction !== 'match') {
+    return toolError('direction must be one of higher|lower|match');
+  }
+  const goal = await dbUpsertBodyGoal(metric_key, {
+    target_value: tv,
+    unit,
+    direction,
+    notes: typeof notes === 'string' ? notes : null,
+  });
+  return toolResult(goal);
+}
+
+async function deleteBodyGoalTool(args: Record<string, unknown>) {
+  if (typeof args.metric_key !== 'string') return toolError('metric_key is required');
+  await dbDeleteBodyGoal(args.metric_key);
+  return toolResult({ deleted: args.metric_key });
+}
+
+async function getBodyNormRangesTool(args: Record<string, unknown>) {
+  const sex = args.sex;
+  if (sex !== 'M' && sex !== 'F') return toolError('sex must be "M" or "F"');
+  const ranges = await dbGetBodyNormRanges(sex);
+  return toolResult(ranges);
+}
+
 // ── Tool registry ─────────────────────────────────────────────────────────────
 
 export const tools: MCPTool[] = [
@@ -1785,6 +1907,175 @@ export const tools: MCPTool[] = [
       required: ['uuid'],
     },
     execute: deleteTrainingBlock,
+  },
+  // ── InBody scan catalog ───────────────────────────────────────────────────────
+  {
+    name: 'log_inbody_scan',
+    description: 'Logs a new InBody scan with every printed metric. Required: scanned_at (ISO string). Any subset of ~60 body-composition metrics may be provided.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        scanned_at: { type: 'string', description: 'ISO timestamp of the scan' },
+        device: { type: 'string' },
+        venue: { type: 'string' },
+        age_at_scan: { type: 'number' },
+        height_cm: { type: 'number' },
+        weight_kg: { type: 'number' },
+        total_body_water_l: { type: 'number' },
+        intracellular_water_l: { type: 'number' },
+        extracellular_water_l: { type: 'number' },
+        protein_kg: { type: 'number' },
+        minerals_kg: { type: 'number' },
+        bone_mineral_kg: { type: 'number' },
+        body_fat_mass_kg: { type: 'number' },
+        smm_kg: { type: 'number', description: 'Skeletal muscle mass (kg)' },
+        bmi: { type: 'number' },
+        pbf_pct: { type: 'number', description: 'Percent body fat' },
+        whr: { type: 'number', description: 'Waist-hip ratio' },
+        inbody_score: { type: 'number' },
+        visceral_fat_level: { type: 'number' },
+        bmr_kcal: { type: 'number' },
+        body_cell_mass_kg: { type: 'number' },
+        ecw_ratio: { type: 'number' },
+        seg_lean_right_arm_kg: { type: 'number' },
+        seg_lean_right_arm_pct: { type: 'number' },
+        seg_lean_left_arm_kg: { type: 'number' },
+        seg_lean_left_arm_pct: { type: 'number' },
+        seg_lean_trunk_kg: { type: 'number' },
+        seg_lean_trunk_pct: { type: 'number' },
+        seg_lean_right_leg_kg: { type: 'number' },
+        seg_lean_right_leg_pct: { type: 'number' },
+        seg_lean_left_leg_kg: { type: 'number' },
+        seg_lean_left_leg_pct: { type: 'number' },
+        seg_fat_right_arm_kg: { type: 'number' },
+        seg_fat_left_arm_kg: { type: 'number' },
+        seg_fat_trunk_kg: { type: 'number' },
+        seg_fat_right_leg_kg: { type: 'number' },
+        seg_fat_left_leg_kg: { type: 'number' },
+        circ_neck_cm: { type: 'number' },
+        circ_chest_cm: { type: 'number' },
+        circ_abdomen_cm: { type: 'number' },
+        circ_hip_cm: { type: 'number' },
+        circ_right_arm_cm: { type: 'number' },
+        circ_left_arm_cm: { type: 'number' },
+        circ_right_thigh_cm: { type: 'number' },
+        circ_left_thigh_cm: { type: 'number' },
+        target_weight_kg: { type: 'number' },
+        weight_control_kg: { type: 'number' },
+        fat_control_kg: { type: 'number' },
+        muscle_control_kg: { type: 'number' },
+        balance_upper: { type: 'string', enum: ['balanced', 'under', 'over', 'slightly_under', 'slightly_over'] },
+        balance_lower: { type: 'string', enum: ['balanced', 'under', 'over', 'slightly_under', 'slightly_over'] },
+        balance_upper_lower: { type: 'string', enum: ['balanced', 'under', 'over', 'slightly_under', 'slightly_over'] },
+        impedance: { type: 'object', description: 'Raw impedance keyed by frequency → { ra, la, trunk, rl, ll }' },
+        notes: { type: 'string' },
+        raw_json: { type: 'object' },
+      },
+      required: ['scanned_at'],
+    },
+    execute: logInbodyScan,
+  },
+  {
+    name: 'update_inbody_scan',
+    description: 'PATCH an existing InBody scan. Accepts any subset of the log_inbody_scan fields.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        uuid: { type: 'string' },
+      },
+      required: ['uuid'],
+    },
+    execute: updateInbodyScanTool,
+  },
+  {
+    name: 'get_inbody_scan',
+    description: 'Fetch a single InBody scan by uuid, or the most recent scan via { latest: true }.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        uuid: { type: 'string' },
+        latest: { type: 'boolean' },
+      },
+    },
+    execute: getInbodyScanTool,
+  },
+  {
+    name: 'list_inbody_scans',
+    description: 'Lists InBody scans, newest first. Supports limit, from, to (ISO).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        limit: { type: 'number' },
+        from: { type: 'string' },
+        to: { type: 'string' },
+      },
+    },
+    execute: listInbodyScansTool,
+  },
+  {
+    name: 'delete_inbody_scan',
+    description: 'Delete an InBody scan by uuid. Also cleans up any auto-inserted circumference rows in measurement_logs.',
+    inputSchema: {
+      type: 'object',
+      properties: { uuid: { type: 'string' } },
+      required: ['uuid'],
+    },
+    execute: deleteInbodyScanTool,
+  },
+  {
+    name: 'compare_inbody_scans',
+    description: 'Returns delta and percentage change between two scans across every numeric metric.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        a_uuid: { type: 'string' },
+        b_uuid: { type: 'string' },
+      },
+      required: ['a_uuid', 'b_uuid'],
+    },
+    execute: compareInbodyScans,
+  },
+  {
+    name: 'get_body_goals',
+    description: 'Returns user-defined body goals (the "Me" reference), keyed by metric_key.',
+    inputSchema: { type: 'object', properties: {} },
+    execute: async () => getBodyGoalsTool(),
+  },
+  {
+    name: 'set_body_goal',
+    description: 'Upserts a body goal for a given metric_key. direction must be higher|lower|match.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        metric_key: { type: 'string' },
+        target_value: { type: 'number' },
+        unit: { type: 'string' },
+        direction: { type: 'string', enum: ['higher', 'lower', 'match'] },
+        notes: { type: 'string' },
+      },
+      required: ['metric_key', 'target_value', 'unit', 'direction'],
+    },
+    execute: setBodyGoal,
+  },
+  {
+    name: 'delete_body_goal',
+    description: 'Removes a body goal.',
+    inputSchema: {
+      type: 'object',
+      properties: { metric_key: { type: 'string' } },
+      required: ['metric_key'],
+    },
+    execute: deleteBodyGoalTool,
+  },
+  {
+    name: 'get_body_norm_ranges',
+    description: 'Returns seeded healthy norm ranges for the given sex, keyed by metric_key.',
+    inputSchema: {
+      type: 'object',
+      properties: { sex: { type: 'string', enum: ['M', 'F'] } },
+      required: ['sex'],
+    },
+    execute: getBodyNormRangesTool,
   },
 ];
 

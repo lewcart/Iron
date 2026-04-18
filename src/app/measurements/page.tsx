@@ -1,13 +1,13 @@
 'use client';
 
 import { useEffect, useState, useRef } from 'react';
-import { ChevronLeft, Trash2, Camera, ImageIcon } from 'lucide-react';
+import { ChevronLeft, Trash2, Camera, ImageIcon, Activity, Target, Plus } from 'lucide-react';
 import Link from 'next/link';
 import { useUnit } from '@/context/UnitContext';
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
 } from 'recharts';
-import type { MeasurementLog, ProgressPhoto } from '@/types';
+import type { MeasurementLog, ProgressPhoto, InbodyScan } from '@/types';
 import { apiBase } from '@/lib/api/client';
 
 const SITES = [
@@ -55,7 +55,9 @@ const POSE_GUIDANCE: Record<string, string> = {
 
 export default function MeasurementsPage() {
   const { fromInput, label } = useUnit();
-  const [activeTab, setActiveTab] = useState<'measurements' | 'photos'>('measurements');
+  const [activeTab, setActiveTab] = useState<'measurements' | 'photos' | 'inbody'>('measurements');
+  const [inbodyScans, setInbodyScans] = useState<InbodyScan[]>([]);
+  const [inbodyLoading, setInbodyLoading] = useState(true);
 
   // Measurements state
   const [date, setDate] = useState(toDateInputValue);
@@ -86,6 +88,13 @@ export default function MeasurementsPage() {
       .then(r => { if (!r.ok) throw new Error('Failed'); return r.json(); })
       .then((data: ProgressPhoto[]) => { setPhotos(Array.isArray(data) ? data : []); setPhotosLoading(false); })
       .catch(() => setPhotosLoading(false));
+  }, []);
+
+  useEffect(() => {
+    fetch(`${apiBase()}/api/measurements/inbody?limit=50`, { headers: apiHeaders() })
+      .then(r => { if (!r.ok) throw new Error('Failed'); return r.json(); })
+      .then((data: InbodyScan[]) => { setInbodyScans(Array.isArray(data) ? data : []); setInbodyLoading(false); })
+      .catch(() => setInbodyLoading(false));
   }, []);
 
   const handleSaveMeasurements = async () => {
@@ -210,7 +219,7 @@ export default function MeasurementsPage() {
 
       {/* Tab switcher */}
       <div className="flex border-b border-border mx-4 mb-4">
-        {(['measurements', 'photos'] as const).map(tab => (
+        {(['measurements', 'photos', 'inbody'] as const).map(tab => (
           <button
             key={tab}
             onClick={() => setActiveTab(tab)}
@@ -220,7 +229,7 @@ export default function MeasurementsPage() {
                 : 'border-transparent text-muted-foreground'
             }`}
           >
-            {tab === 'measurements' ? 'Measurements' : 'Photos'}
+            {tab === 'measurements' ? 'Measurements' : tab === 'photos' ? 'Photos' : 'InBody'}
           </button>
         ))}
       </div>
@@ -500,6 +509,88 @@ export default function MeasurementsPage() {
                 <ImageIcon className="h-12 w-12 mb-3 opacity-20" />
                 <p className="text-sm">No progress photos yet.</p>
                 <p className="text-xs mt-1">Upload your first photo above.</p>
+              </div>
+            )}
+          </>
+        )}
+
+        {activeTab === 'inbody' && (
+          <>
+            {/* Action row */}
+            <div className="flex items-center gap-2">
+              <Link
+                href="/measurements/inbody/new"
+                className="flex items-center gap-2 px-3 py-2 bg-primary text-white text-sm font-medium rounded-lg"
+              >
+                <Plus className="h-4 w-4" />
+                New Scan
+              </Link>
+              {inbodyScans.length >= 2 && (
+                <Link
+                  href="/measurements/inbody/compare"
+                  className="flex items-center gap-2 px-3 py-2 border border-border text-sm font-medium rounded-lg"
+                >
+                  Compare
+                </Link>
+              )}
+              <Link
+                href="/measurements/goals"
+                className="flex items-center gap-2 px-3 py-2 border border-border text-sm font-medium rounded-lg"
+              >
+                <Target className="h-4 w-4" />
+                Goals
+              </Link>
+            </div>
+
+            {inbodyLoading && <p className="text-xs text-muted-foreground px-1">Loading scans…</p>}
+
+            {!inbodyLoading && inbodyScans.length === 0 && (
+              <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
+                <Activity className="h-12 w-12 mb-3 opacity-20" />
+                <p className="text-sm">No InBody scans yet.</p>
+                <p className="text-xs mt-1">Hand-enter your first scan from the sheet.</p>
+              </div>
+            )}
+
+            {!inbodyLoading && inbodyScans.length > 0 && (
+              <div>
+                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1 px-1">Scans</p>
+                <div className="space-y-2">
+                  {inbodyScans.map(scan => (
+                    <Link
+                      key={scan.uuid}
+                      href={`/measurements/inbody/${scan.uuid}`}
+                      className="block rounded-2xl bg-card border border-border p-4 active:scale-[0.99] transition"
+                    >
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <div className="text-sm font-semibold">{formatDate(scan.scanned_at)}</div>
+                          <div className="text-xs text-muted-foreground">{scan.device}{scan.venue ? ` · ${scan.venue}` : ''}</div>
+                        </div>
+                        {scan.inbody_score != null && (
+                          <div className="text-right">
+                            <div className="text-xs text-muted-foreground">Score</div>
+                            <div className="text-lg font-bold">{scan.inbody_score}</div>
+                          </div>
+                        )}
+                      </div>
+                      <div className="flex flex-wrap gap-x-4 gap-y-1 mt-3 text-xs">
+                        {scan.weight_kg != null && (
+                          <div><span className="text-muted-foreground">Weight </span><span className="font-medium">{scan.weight_kg} kg</span></div>
+                        )}
+                        {scan.pbf_pct != null && (
+                          <div><span className="text-muted-foreground">PBF </span><span className="font-medium">{scan.pbf_pct}%</span></div>
+                        )}
+                        {scan.smm_kg != null && (
+                          <div><span className="text-muted-foreground">SMM </span><span className="font-medium">{scan.smm_kg} kg</span></div>
+                        )}
+                        {scan.visceral_fat_level != null && (
+                          <div><span className="text-muted-foreground">VFL </span><span className="font-medium">{scan.visceral_fat_level}</span></div>
+                        )}
+                      </div>
+                    </Link>
+                  ))}
+                </div>
               </div>
             )}
           </>

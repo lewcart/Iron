@@ -52,6 +52,7 @@ export interface WorkoutPlan {
   uuid: string;
   title: string | null;
   order_index: number;
+  is_active: boolean;
 }
 
 export interface WorkoutRoutine {
@@ -151,6 +152,10 @@ export interface MeasurementLog {
   value_cm: number;
   notes: string | null;
   measured_at: string;
+  /** When set, identifies the system that auto-created this row (e.g. 'inbody_scan'). */
+  source?: string | null;
+  /** Reference id of the source record (e.g. the InBody scan UUID). */
+  source_ref?: string | null;
 }
 
 export type MealType = 'breakfast' | 'lunch' | 'dinner' | 'snack' | 'other';
@@ -309,4 +314,105 @@ export interface InspoPhoto {
   notes: string | null;
   taken_at: string;
   burst_group_id: string | null;
+}
+
+// ── InBody scan catalog ──────────────────────────────────────────────────────
+export type BodyBalance = 'balanced' | 'under' | 'over' | 'slightly_under' | 'slightly_over';
+
+export interface InbodyScan {
+  uuid: string;
+  scanned_at: string; // ISO
+  device: string;
+  venue: string | null;
+  age_at_scan: number | null;
+  height_cm: number | null;
+
+  // Body composition
+  weight_kg: number | null;
+  total_body_water_l: number | null;
+  intracellular_water_l: number | null;
+  extracellular_water_l: number | null;
+  protein_kg: number | null;
+  minerals_kg: number | null;
+  bone_mineral_kg: number | null;
+  body_fat_mass_kg: number | null;
+  smm_kg: number | null;
+
+  // Derived
+  bmi: number | null;
+  pbf_pct: number | null;
+  whr: number | null;
+  inbody_score: number | null;
+  visceral_fat_level: number | null;
+  bmr_kcal: number | null;
+  body_cell_mass_kg: number | null;
+  ecw_ratio: number | null;
+
+  // Segmental lean
+  seg_lean_right_arm_kg: number | null; seg_lean_right_arm_pct: number | null;
+  seg_lean_left_arm_kg: number | null;  seg_lean_left_arm_pct: number | null;
+  seg_lean_trunk_kg: number | null;     seg_lean_trunk_pct: number | null;
+  seg_lean_right_leg_kg: number | null; seg_lean_right_leg_pct: number | null;
+  seg_lean_left_leg_kg: number | null;  seg_lean_left_leg_pct: number | null;
+
+  // Segmental fat
+  seg_fat_right_arm_kg: number | null;
+  seg_fat_left_arm_kg: number | null;
+  seg_fat_trunk_kg: number | null;
+  seg_fat_right_leg_kg: number | null;
+  seg_fat_left_leg_kg: number | null;
+
+  // Circumferences (cm)
+  circ_neck_cm: number | null;
+  circ_chest_cm: number | null;
+  circ_abdomen_cm: number | null;
+  circ_hip_cm: number | null;
+  circ_right_arm_cm: number | null;
+  circ_left_arm_cm: number | null;
+  circ_right_thigh_cm: number | null;
+  circ_left_thigh_cm: number | null;
+
+  // Recommendations
+  target_weight_kg: number | null;
+  weight_control_kg: number | null;
+  fat_control_kg: number | null;
+  muscle_control_kg: number | null;
+
+  // Body balance
+  balance_upper: BodyBalance | null;
+  balance_lower: BodyBalance | null;
+  balance_upper_lower: BodyBalance | null;
+
+  // Raw impedance (freq → {ra, la, trunk, rl, ll})
+  impedance: Record<string, Record<string, number>>;
+
+  notes: string | null;
+  raw_json: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
+export type BodyGoalDirection = 'higher' | 'lower' | 'match';
+
+export interface BodyGoal {
+  metric_key: string;
+  target_value: number;
+  unit: string; // 'kg' | '%' | 'cm' | 'score' | 'level'
+  direction: BodyGoalDirection;
+  notes: string | null;
+  updated_at: string;
+}
+
+export interface BodyNormRange {
+  id: number;
+  sex: 'M' | 'F';
+  metric_key: string;
+  age_min: number | null;
+  age_max: number | null;
+  height_min_cm: number | null;
+  height_max_cm: number | null;
+  low: number;
+  high: number;
+  source: string | null;
+  notes: string | null;
 }
