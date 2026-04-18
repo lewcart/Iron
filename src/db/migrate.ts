@@ -1,11 +1,27 @@
 import './load-env.js';
-import { query, closePool } from './db.js';
-import { readFileSync, readdirSync } from 'fs';
+import { query, transaction, closePool } from './db.js';
+import { readFileSync, readdirSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
+
+const MIGRATIONS_DIR = join(__dirname, 'migrations');
+
+// Files numbered 001–010 describe schema that already exists on legacy DBs.
+// When schema_migrations is empty but `exercises` exists, we seed these as
+// applied so the migrator doesn't attempt to re-run on an already-populated DB.
+const BASELINE_MIGRATIONS = [
+  '001_core_schema.sql',
+  '002_rebirth_modules.sql',
+  '005_add_sync_columns.sql',
+  '006_mcp_support.sql',
+  '007_routine_set_targets.sql',
+  '008_seed_custom_exercises.sql',
+  '009_exercise_movement_pattern.sql',
+  '010_inspo_burst_group.sql',
+];
 
 /**
  * Splits a SQL string on `;` while respecting dollar-quoted blocks ($$...$$),
@@ -45,47 +61,145 @@ function splitSqlStatements(sql: string): string[] {
   return statements;
 }
 
-async function runSql(sql: string): Promise<void> {
-  for (const statement of splitSqlStatements(sql)) {
-    await query(statement);
+function statementsFor(sql: string): Array<{ text: string; params?: unknown[] }> {
+  return splitSqlStatements(sql).map(text => ({ text }));
+}
+
+async function ensureMigrationsTable(): Promise<void> {
+  await query(`
+    CREATE TABLE IF NOT EXISTS schema_migrations (
+      name TEXT PRIMARY KEY,
+      applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+}
+
+async function listAppliedMigrations(): Promise<Set<string>> {
+  const rows = await query<{ name: string }>('SELECT name FROM schema_migrations ORDER BY name ASC');
+  return new Set(rows.map(r => r.name));
+}
+
+async function tableExists(name: string): Promise<boolean> {
+  const rows = await query<{ exists: boolean }>(
+    `SELECT EXISTS (
+       SELECT FROM information_schema.tables
+       WHERE table_schema = 'public' AND table_name = $1
+     ) AS exists`,
+    [name]
+  );
+  return Boolean(rows[0]?.exists);
+}
+
+/**
+ * If schema_migrations is empty but the DB already has the `exercises` table,
+ * this DB pre-dates the migration-tracking system. Seed schema_migrations
+ * with all baseline files (001–010) so they aren't re-run.
+ */
+async function seedBaselineIfNeeded(applied: Set<string>): Promise<boolean> {
+  if (applied.size > 0) return false;
+  if (!(await tableExists('exercises'))) return false;
+
+  console.log('Legacy DB detected (no schema_migrations rows, but tables exist).');
+  console.log('Seeding schema_migrations with baseline migrations 001–010…');
+
+  for (const name of BASELINE_MIGRATIONS) {
+    await query(
+      'INSERT INTO schema_migrations (name) VALUES ($1) ON CONFLICT DO NOTHING',
+      [name]
+    );
+    applied.add(name);
+  }
+  console.log(`  baseline seeded: ${BASELINE_MIGRATIONS.length} migrations`);
+  return true;
+}
+
+function listMigrationFiles(): string[] {
+  try {
+    return readdirSync(MIGRATIONS_DIR)
+      .filter(f => f.endsWith('.sql') && !f.endsWith('.down.sql'))
+      .sort();
+  } catch {
+    return [];
   }
 }
 
-async function migrate() {
-  console.log('Running database migrations...');
+async function migrate(): Promise<void> {
+  console.log('Running database migrations…');
 
-  // Run base schema
-  const schema = readFileSync(join(__dirname, 'schema.sql'), 'utf-8');
-  await runSql(schema);
-  console.log('✓ Base schema applied');
+  await ensureMigrationsTable();
+  const applied = await listAppliedMigrations();
+  await seedBaselineIfNeeded(applied);
 
-  // Run ordered migration files from migrations/
-  const migrationsDir = join(__dirname, 'migrations');
-  let files: string[] = [];
-  try {
-    files = readdirSync(migrationsDir)
-      .filter(f => f.endsWith('.sql'))
-      .sort();
-  } catch {
-    // migrations directory doesn't exist — skip
+  const files = listMigrationFiles();
+  const pending = files.filter(f => !applied.has(f));
+
+  if (pending.length === 0) {
+    console.log('✓ No pending migrations — database is up to date.');
+    await closePool();
+    return;
   }
 
-  for (const file of files) {
-    const sql = readFileSync(join(migrationsDir, file), 'utf-8');
-    await runSql(sql);
-    console.log(`✓ Migration applied: ${file}`);
+  for (const file of pending) {
+    const sql = readFileSync(join(MIGRATIONS_DIR, file), 'utf-8');
+    console.log(`→ Applying ${file}…`);
+    await transaction([
+      ...statementsFor(sql),
+      { text: 'INSERT INTO schema_migrations (name) VALUES ($1)', params: [file] },
+    ]);
+    console.log(`✓ Applied ${file}`);
   }
 
-  console.log('✓ Database migrations completed');
+  console.log(`✓ Database migrations completed (${pending.length} applied).`);
+  await closePool();
+}
+
+async function rollback(): Promise<void> {
+  console.log('Rolling back last applied migration…');
+
+  await ensureMigrationsTable();
+  const rows = await query<{ name: string }>(
+    'SELECT name FROM schema_migrations ORDER BY applied_at DESC, name DESC LIMIT 1'
+  );
+  const last = rows[0]?.name;
+
+  if (!last) {
+    console.log('Nothing to roll back — schema_migrations is empty.');
+    await closePool();
+    return;
+  }
+
+  const downFile = last.replace(/\.sql$/, '.down.sql');
+  const downPath = join(MIGRATIONS_DIR, downFile);
+
+  if (!existsSync(downPath)) {
+    console.error(
+      `✗ Cannot roll back "${last}": no companion "${downFile}" found in migrations/.\n` +
+      `  Rollback is only supported for migrations that ship a matching .down.sql file.\n` +
+      `  To hand-roll a revert, create src/db/migrations/${downFile} with the inverse SQL\n` +
+      `  and re-run \`npm run db:rollback\`.`
+    );
+    await closePool();
+    process.exit(1);
+  }
+
+  const sql = readFileSync(downPath, 'utf-8');
+  await transaction([
+    ...statementsFor(sql),
+    { text: 'DELETE FROM schema_migrations WHERE name = $1', params: [last] },
+  ]);
+  console.log(`✓ Rolled back ${last}`);
+
   await closePool();
 }
 
 // Run if called directly
 if (import.meta.url === `file://${process.argv[1]}`) {
-  migrate().catch((err) => {
+  const cmd = process.argv[2] ?? 'up';
+  const run = cmd === 'rollback' || cmd === 'down' ? rollback : migrate;
+  run().catch((err) => {
     console.error('Migration failed:', err);
     process.exit(1);
   });
 }
 
-export { migrate };
+export { migrate, rollback };

@@ -1,4 +1,4 @@
-// Core data types for Iron workout tracker
+// Core data types for Rebirth
 
 export interface Exercise {
   uuid: string;

@@ -13,7 +13,7 @@ export function InstallPrompt() {
   const [dismissed, setDismissed] = useState(true); // start hidden until we know
 
   useEffect(() => {
-    if (localStorage.getItem('iron-install-dismissed')) return;
+    if (localStorage.getItem('rebirth-install-dismissed')) return;
     setDismissed(false);
 
     const handler = (e: Event) => {
@@ -38,7 +38,7 @@ export function InstallPrompt() {
   }
 
   function dismiss() {
-    localStorage.setItem('iron-install-dismissed', '1');
+    localStorage.setItem('rebirth-install-dismissed', '1');
     setDismissed(true);
   }
 
@@ -59,7 +59,7 @@ export function InstallPrompt() {
           </svg>
         </div>
         <div className="flex-1 min-w-0">
-          <p className="text-sm font-semibold text-zinc-100">Add Iron to Home Screen</p>
+          <p className="text-sm font-semibold text-zinc-100">Add Rebirth to Home Screen</p>
           <p className="text-xs text-zinc-400">For the best offline experience</p>
         </div>
         <button

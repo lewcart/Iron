@@ -60,8 +60,8 @@ import { apiBase } from '@/lib/api/client';
 function getRestSettings() {
   if (typeof window === 'undefined') return { defaultRest: 90, autoStart: true };
   return {
-    defaultRest: parseInt(localStorage.getItem('iron-rest-default') ?? '90', 10),
-    autoStart: localStorage.getItem('iron-rest-auto-start') !== 'false',
+    defaultRest: parseInt(localStorage.getItem('rebirth-rest-default') ?? '90', 10),
+    autoStart: localStorage.getItem('rebirth-rest-auto-start') !== 'false',
   };
 }
 

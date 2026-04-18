@@ -15,7 +15,6 @@
 		504EC30F1FED79650016851F /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 504EC30E1FED79650016851F /* Assets.xcassets */; };
 		504EC3121FED79650016851F /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 504EC3101FED79650016851F /* LaunchScreen.storyboard */; };
 		50B271D11FEDC1A000F3C39B /* public in Resources */ = {isa = PBXBuildFile; fileRef = 50B271D01FEDC1A000F3C39B /* public */; };
-		66A038B9F6CCA4CD69ED3A7C /* Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = C3C8B189A272DBD88E2B5226 /* Info.plist */; };
 		A9401796DFFB4961E62B1B17 /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 95B0D3245656B25E47BA3FE9 /* Foundation.framework */; };
 		BCDB60B1669B43B1F7D02C66 /* InspoBurstPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EC6C38970F00C7EEB816A32 /* InspoBurstPlugin.swift */; };
 		E81EF3DAF5F016DC13FD47EA /* FitspoControlWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = D121A798D2850322D0EBD90E /* FitspoControlWidget.swift */; };
@@ -245,7 +244,6 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				66A038B9F6CCA4CD69ED3A7C /* Info.plist in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -325,6 +323,7 @@
 				INFOPLIST_FILE = FitspoControlExtension/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
 				PRODUCT_BUNDLE_IDENTIFIER = app.rebirth.FitspoControlExtension;
+				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
 				SKIP_INSTALL = YES;
 				SWIFT_VERSION = 5.0;
@@ -497,6 +496,7 @@
 				INFOPLIST_FILE = FitspoControlExtension/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
 				PRODUCT_BUNDLE_IDENTIFIER = app.rebirth.FitspoControlExtension;
+				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
 				SKIP_INSTALL = YES;
 				SWIFT_VERSION = 5.0;

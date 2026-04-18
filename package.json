@@ -1,10 +1,10 @@
 {
-  "name": "iron",
+  "name": "rebirth",
   "version": "0.1.0",
   "private": true,
   "type": "module",
   "bin": {
-    "iron": "./dist/cli.js"
+    "rebirth": "./dist/cli.js"
   },
   "scripts": {
     "dev": "next dev",
@@ -13,6 +13,7 @@
     "start": "next start",
     "lint": "next lint",
     "db:migrate": "tsx src/db/migrate.ts",
+    "db:rollback": "tsx src/db/migrate.ts rollback",
     "db:seed": "tsx src/db/seed.ts",
     "db:seed-routines": "tsx src/db/seed-routines.ts",
     "db:dedupe-exercises": "tsx src/db/deduplicate-exercises.ts",
