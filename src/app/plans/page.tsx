@@ -2,7 +2,7 @@
 
 import { useState, useCallback, useMemo } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ChevronDown, ChevronRight, ChevronUp, Check, Plus, Search, Trash2, X } from 'lucide-react';
+import { ChevronDown, ChevronRight, ChevronUp, Check, Plus, Search, Star, Trash2, X } from 'lucide-react';
 import type { WorkoutPlan, WorkoutRoutine, WorkoutRoutineExercise, WorkoutRoutineSet, Exercise } from '@/types';
 import { queryKeys } from '@/lib/api/query-keys';
 import { fetchPlansWithRoutines, type PlanWithRoutines } from '@/lib/api/plans';
@@ -478,6 +478,7 @@ function PlanCard({
   onStartWorkout,
   onMoveUp,
   onMoveDown,
+  onActivate,
   isFirst,
   isLast,
 }: {
@@ -486,6 +487,7 @@ function PlanCard({
   onStartWorkout: () => void;
   onMoveUp?: () => void;
   onMoveDown?: () => void;
+  onActivate?: () => void;
   isFirst?: boolean;
   isLast?: boolean;
 }) {
@@ -584,16 +586,31 @@ function PlanCard({
             />
           ) : (
             <span
-              className="font-semibold text-base text-foreground"
+              className="flex items-center gap-2 font-semibold text-base text-foreground"
               onDoubleClick={e => { e.stopPropagation(); setEditingTitle(true); }}
             >
               {plan.title ?? 'Untitled Plan'}
+              {plan.is_active && (
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-primary/15 text-primary">
+                  <Star className="h-2.5 w-2.5 fill-current" />
+                  Active
+                </span>
+              )}
             </span>
           )}
         </button>
         <span className="text-xs text-muted-foreground">
           {plan.routines.length} routine{plan.routines.length !== 1 ? 's' : ''}
         </span>
+        <button
+          onClick={(e) => { e.stopPropagation(); onActivate?.(); }}
+          disabled={plan.is_active}
+          className="text-muted-foreground hover:text-primary transition-colors p-1 disabled:opacity-30 disabled:hover:text-muted-foreground"
+          aria-label={plan.is_active ? 'Active plan' : 'Make active plan'}
+          title={plan.is_active ? 'Active plan' : 'Make active plan'}
+        >
+          <Star className={`h-4 w-4 ${plan.is_active ? 'fill-primary text-primary' : ''}`} />
+        </button>
         <button
           onClick={(e) => { e.stopPropagation(); onMoveUp?.(); }}
           disabled={isFirst}
@@ -715,6 +732,7 @@ export default function PlansPage() {
         uuid: `optimistic-${Date.now()}`,
         title: title.trim(),
         order_index: (prev?.length ?? 0),
+        is_active: false,
         routines: [],
       };
       queryClient.setQueryData<PlanWithRoutines[]>(queryKeys.plans(), (old) => [
@@ -771,20 +789,34 @@ export default function PlansPage() {
   const handleMovePlan = async (index: number, direction: 'up' | 'down') => {
     const swapIndex = direction === 'up' ? index - 1 : index + 1;
     if (swapIndex < 0 || swapIndex >= plans.length) return;
-    const a = plans[index];
-    const b = plans[swapIndex];
-    await Promise.all([
-      fetch(`${apiBase()}/api/plans/${a.uuid}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ orderIndex: b.order_index }),
-      }),
-      fetch(`${apiBase()}/api/plans/${b.uuid}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ orderIndex: a.order_index }),
-      }),
-    ]);
+    const reordered = [...plans];
+    [reordered[index], reordered[swapIndex]] = [reordered[swapIndex], reordered[index]];
+    queryClient.setQueryData<PlanWithRoutines[]>(
+      queryKeys.plans(),
+      reordered.map((p, i) => ({ ...p, order_index: i }))
+    );
+    await Promise.all(
+      reordered.map((p, i) =>
+        fetch(`${apiBase()}/api/plans/${p.uuid}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ orderIndex: i }),
+        })
+      )
+    );
+    await queryClient.invalidateQueries({ queryKey: queryKeys.plans() });
+  };
+
+  const handleActivatePlan = async (uuid: string) => {
+    queryClient.setQueryData<PlanWithRoutines[]>(
+      queryKeys.plans(),
+      (old) => (old ?? []).map((p) => ({ ...p, is_active: p.uuid === uuid }))
+    );
+    await fetch(`${apiBase()}/api/plans/${uuid}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ isActive: true }),
+    });
     await queryClient.invalidateQueries({ queryKey: queryKeys.plans() });
   };
 
@@ -849,6 +881,7 @@ export default function PlansPage() {
                 onStartWorkout={handleStartWorkout}
                 onMoveUp={() => handleMovePlan(i, 'up')}
                 onMoveDown={() => handleMovePlan(i, 'down')}
+                onActivate={() => handleActivatePlan(plan.uuid)}
                 isFirst={i === 0}
                 isLast={i === plans.length - 1}
               />

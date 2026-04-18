@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getPlan, listRoutines, listRoutineExercises, updatePlan, deletePlan } from '@/db/queries';
+import { getPlan, listRoutines, listRoutineExercises, updatePlan, deletePlan, activatePlan } from '@/db/queries';
 
 export async function GET(
   _request: NextRequest,
@@ -35,15 +35,22 @@ export async function PUT(
     const { uuid } = await params;
     const body = await request.json();
 
+    if (body.isActive === true) {
+      await activatePlan(uuid);
+    }
+
     const data: { title?: string; orderIndex?: number } = {};
     if (body.title !== undefined) data.title = body.title;
     if (body.orderIndex !== undefined) data.orderIndex = body.orderIndex;
 
-    if (!data.title && data.orderIndex === undefined) {
-      return NextResponse.json({ error: 'title or orderIndex is required' }, { status: 400 });
+    if (!data.title && data.orderIndex === undefined && body.isActive !== true) {
+      return NextResponse.json({ error: 'title, orderIndex, or isActive is required' }, { status: 400 });
     }
 
-    const plan = await updatePlan(uuid, data);
+    const plan = data.title !== undefined || data.orderIndex !== undefined
+      ? await updatePlan(uuid, data)
+      : await getPlan(uuid);
+
     if (!plan) {
       return NextResponse.json({ error: 'Plan not found' }, { status: 404 });
     }

@@ -24,8 +24,10 @@ import {
   type WorkoutScheduleConfig,
 } from '@/lib/workout-schedule';
 import Link from 'next/link';
+import { Capacitor } from '@capacitor/core';
 import { useUnit } from '@/context/UnitContext';
 import { REBIRTH_EQUIPMENT_LS_KEY } from '@/lib/available-equipment';
+import { REST_LIVE_ACTIVITY_LS_KEY, endRestActivity } from '@/lib/native/rest-timer-activity';
 import type { BodyweightLog } from '@/types';
 import { apiBase } from '@/lib/api/client';
 import {
@@ -115,6 +117,10 @@ export default function SettingsPage() {
   const [keepRestRunning, setKeepRestRunning] = useState(() =>
     readLS('rebirth-rest-keep-running', 'false') === 'true'
   );
+  const [liveActivity, setLiveActivity] = useState(() =>
+    readLS(REST_LIVE_ACTIVITY_LS_KEY, 'true') !== 'false'
+  );
+  const isNativePlatform = typeof window !== 'undefined' && Capacitor.isNativePlatform();
 
   // Workout schedule
   const [schedule, setSchedule] = useState<WorkoutScheduleConfig>(() => loadScheduleConfig());
@@ -255,6 +261,16 @@ export default function SettingsPage() {
   const updateKeepRestRunning = (v: boolean) => {
     setKeepRestRunning(v);
     localStorage.setItem('rebirth-rest-keep-running', String(v));
+  };
+
+  const updateLiveActivity = (v: boolean) => {
+    setLiveActivity(v);
+    localStorage.setItem(REST_LIVE_ACTIVITY_LS_KEY, String(v));
+    // If the user just switched it OFF, end any Activity that's currently
+    // running so it doesn't linger on the Lock Screen.
+    if (!v) {
+      endRestActivity().catch(() => {});
+    }
   };
 
   const openProfileEdit = () => {
@@ -631,6 +647,17 @@ export default function SettingsPage() {
               </div>
               <Toggle on={keepRestRunning} onToggle={() => updateKeepRestRunning(!keepRestRunning)} />
             </div>
+            {isNativePlatform && (
+              <div className="ios-row justify-between">
+                <div className="flex-1">
+                  <span className="text-sm font-medium">Dynamic Island Countdown</span>
+                  <p className="text-xs text-muted-foreground mt-0.5 pr-4">
+                    Shows the rest countdown on the Lock Screen and Dynamic Island.
+                  </p>
+                </div>
+                <Toggle on={liveActivity} onToggle={() => updateLiveActivity(!liveActivity)} />
+              </div>
+            )}
           </div>
         </div>
 
