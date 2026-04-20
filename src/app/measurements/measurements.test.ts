@@ -133,6 +133,35 @@ describe('toDateInputValue', () => {
   });
 });
 
+// ===== URL-driven activeTab initialization =====
+// Mirrors the derivation logic inside MeasurementsInner:
+//   const initialTab = (searchParams?.get('tab') as TabKey | null) ?? 'measurements';
+// We test the derivation directly rather than rendering the component (which
+// would require a full next/navigation mock harness).
+
+type TabKey = 'measurements' | 'photos' | 'inbody';
+
+function deriveInitialTab(searchParamsGet: (k: string) => string | null): TabKey {
+  return (searchParamsGet('tab') as TabKey | null) ?? 'measurements';
+}
+
+describe('measurements activeTab initialization', () => {
+  it('defaults to "measurements" when no tab param is in the URL', () => {
+    const get = (_k: string) => null;
+    expect(deriveInitialTab(get)).toBe('measurements');
+  });
+
+  it('initializes to "inbody" when ?tab=inbody is in the URL', () => {
+    const get = (k: string) => k === 'tab' ? 'inbody' : null;
+    expect(deriveInitialTab(get)).toBe('inbody');
+  });
+
+  it('initializes to "photos" when ?tab=photos is in the URL', () => {
+    const get = (k: string) => k === 'tab' ? 'photos' : null;
+    expect(deriveInitialTab(get)).toBe('photos');
+  });
+});
+
 // ===== chart data derivation logic =====
 
 describe('chart data derivation', () => {

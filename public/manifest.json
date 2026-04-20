@@ -4,7 +4,6 @@
   "description": "Personal fitness tracker",
   "start_url": "/workout",
   "display": "standalone",
-  "orientation": "portrait",
   "background_color": "#5BCEFA",
   "theme_color": "#5BCEFA",
   "icons": [
