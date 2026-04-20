@@ -1497,6 +1497,329 @@ async function getBodyNormRangesTool(args: Record<string, unknown>) {
   return toolResult(ranges);
 }
 
+// ── HealthKit tools ───────────────────────────────────────────────────────────
+
+type HealthKitStatus = 'connected' | 'not_requested' | 'revoked' | 'unavailable';
+
+type SnapshotField =
+  | 'sleep_last_night' | 'hrv' | 'resting_hr' | 'vo2_max'
+  | 'activity_today' | 'unlogged_workouts_24h' | 'data_quality';
+
+const VALID_SERIES_METRICS = [
+  'steps', 'active_energy', 'basal_energy', 'exercise_minutes',
+  'heart_rate', 'hrv', 'resting_hr', 'vo2_max',
+  'sleep_asleep', 'sleep_rem', 'sleep_deep', 'sleep_core', 'sleep_awake', 'sleep_inbed',
+] as const;
+
+const VALID_WORKOUT_SOURCES = ['user_logged', 'matched', 'hk_only', 'all'] as const;
+
+async function getHealthKitStatus(): Promise<{ status: HealthKitStatus; last_sync_at: string | null; last_successful_sync_at: string | null }> {
+  const states = await query<{
+    last_sync_at: string | null;
+    last_successful_sync_at: string | null;
+    last_error: string | null;
+  }>(`SELECT last_sync_at, last_successful_sync_at, last_error
+      FROM healthkit_sync_state`);
+
+  if (states.length === 0) {
+    return { status: 'not_requested', last_sync_at: null, last_successful_sync_at: null };
+  }
+
+  const anySuccess = states.some(s => s.last_successful_sync_at != null);
+  const allRevoked = states.length > 0 && states.every(s => s.last_error === 'permission_revoked');
+
+  const lastSync = states.reduce<string | null>((acc, s) => {
+    if (!s.last_sync_at) return acc;
+    return !acc || s.last_sync_at > acc ? s.last_sync_at : acc;
+  }, null);
+
+  const lastSuccess = states.reduce<string | null>((acc, s) => {
+    if (!s.last_successful_sync_at) return acc;
+    return !acc || s.last_successful_sync_at > acc ? s.last_successful_sync_at : acc;
+  }, null);
+
+  if (allRevoked) return { status: 'revoked', last_sync_at: lastSync, last_successful_sync_at: lastSuccess };
+  if (!anySuccess) return { status: 'not_requested', last_sync_at: lastSync, last_successful_sync_at: null };
+  return { status: 'connected', last_sync_at: lastSync, last_successful_sync_at: lastSuccess };
+}
+
+function notConnectedResponse(status: HealthKitStatus) {
+  const reason = status === 'unavailable' ? 'unavailable'
+    : status === 'revoked' ? 'revoked'
+    : 'not_requested';
+  return {
+    status: 'not_connected' as const,
+    reason,
+    message: 'Ask the user to open Rebirth → Settings → Apple Health to connect their HealthKit data.',
+  };
+}
+
+async function getHealthSnapshot(args: Record<string, unknown>) {
+  const status = await getHealthKitStatus();
+  if (status.status !== 'connected') return toolResult(notConnectedResponse(status.status));
+
+  const asOf = typeof args.as_of === 'string' ? args.as_of.slice(0, 10) : new Date().toISOString().slice(0, 10);
+  const windowDays = typeof args.window_days === 'number' ? Math.min(Math.max(args.window_days, 1), 90) : 7;
+  const fields = Array.isArray(args.fields) ? (args.fields as string[]) : null;
+
+  const includes = (f: SnapshotField) => fields == null || fields.includes(f);
+
+  // Dates
+  const asOfDate = new Date(asOf);
+  const yesterday = new Date(asOfDate);
+  yesterday.setUTCDate(yesterday.getUTCDate() - 1);
+  const yesterdayIso = yesterday.toISOString().slice(0, 10);
+
+  const windowStart = new Date(asOfDate);
+  windowStart.setUTCDate(windowStart.getUTCDate() - windowDays);
+  const windowStartIso = windowStart.toISOString().slice(0, 10);
+
+  const baselineStart = new Date(asOfDate);
+  baselineStart.setUTCDate(baselineStart.getUTCDate() - 30);
+  const baselineStartIso = baselineStart.toISOString().slice(0, 10);
+
+  const out: Record<string, unknown> = { as_of: asOf };
+
+  if (includes('sleep_last_night')) {
+    const rows = await query<{ metric: string; value_sum: number | null }>(
+      `SELECT metric, value_sum FROM healthkit_daily
+       WHERE date = $1 AND metric LIKE 'sleep_%'`,
+      [yesterdayIso]
+    );
+    if (rows.length > 0) {
+      const byMetric = Object.fromEntries(rows.map(r => [r.metric, r.value_sum]));
+      out.sleep_last_night = {
+        date: yesterdayIso,
+        total_asleep_min: byMetric['sleep_asleep'] ?? null,
+        rem_min: byMetric['sleep_rem'] ?? null,
+        deep_min: byMetric['sleep_deep'] ?? null,
+        core_min: byMetric['sleep_core'] ?? null,
+        awake_min: byMetric['sleep_awake'] ?? null,
+        in_bed_min: byMetric['sleep_inbed'] ?? null,
+      };
+    }
+  }
+
+  if (includes('hrv')) {
+    const last = await queryOne<{ value_avg: number | null }>(
+      `SELECT value_avg FROM healthkit_daily
+       WHERE metric = 'hrv' AND date <= $1 ORDER BY date DESC LIMIT 1`,
+      [asOf]
+    );
+    const window = await queryOne<{ avg: number | null }>(
+      `SELECT AVG(value_avg) AS avg FROM healthkit_daily
+       WHERE metric = 'hrv' AND date > $1 AND date <= $2`,
+      [windowStartIso, asOf]
+    );
+    const baseline = await queryOne<{ avg: number | null }>(
+      `SELECT AVG(value_avg) AS avg FROM healthkit_daily
+       WHERE metric = 'hrv' AND date > $1 AND date <= $2`,
+      [baselineStartIso, asOf]
+    );
+    if (last || window?.avg || baseline?.avg) {
+      const deltaPct = (last?.value_avg != null && baseline?.avg != null && baseline.avg > 0)
+        ? Math.round(((last.value_avg - baseline.avg) / baseline.avg) * 1000) / 10
+        : null;
+      out.hrv = {
+        last: last?.value_avg ?? null,
+        window_avg: window?.avg ?? null,
+        baseline_30d_avg: baseline?.avg ?? null,
+        delta_pct: deltaPct,
+      };
+    }
+  }
+
+  if (includes('resting_hr')) {
+    const last = await queryOne<{ value_avg: number | null }>(
+      `SELECT value_avg FROM healthkit_daily
+       WHERE metric = 'resting_hr' AND date <= $1 ORDER BY date DESC LIMIT 1`,
+      [asOf]
+    );
+    const window = await queryOne<{ avg: number | null }>(
+      `SELECT AVG(value_avg) AS avg FROM healthkit_daily
+       WHERE metric = 'resting_hr' AND date > $1 AND date <= $2`,
+      [windowStartIso, asOf]
+    );
+    const baseline = await queryOne<{ avg: number | null }>(
+      `SELECT AVG(value_avg) AS avg FROM healthkit_daily
+       WHERE metric = 'resting_hr' AND date > $1 AND date <= $2`,
+      [baselineStartIso, asOf]
+    );
+    if (last || window?.avg || baseline?.avg) {
+      const deltaBpm = (last?.value_avg != null && baseline?.avg != null)
+        ? Math.round((last.value_avg - baseline.avg) * 10) / 10
+        : null;
+      out.resting_hr = {
+        last: last?.value_avg ?? null,
+        window_avg: window?.avg ?? null,
+        baseline_30d_avg: baseline?.avg ?? null,
+        delta_bpm: deltaBpm,
+      };
+    }
+  }
+
+  if (includes('vo2_max')) {
+    const latest = await queryOne<{ value_avg: number | null; date: string }>(
+      `SELECT value_avg, date::text AS date FROM healthkit_daily
+       WHERE metric = 'vo2_max' AND date <= $1 ORDER BY date DESC LIMIT 1`,
+      [asOf]
+    );
+    const baseline = await queryOne<{ avg: number | null }>(
+      `SELECT AVG(value_avg) AS avg FROM healthkit_daily
+       WHERE metric = 'vo2_max' AND date > $1 AND date <= $2`,
+      [baselineStartIso, asOf]
+    );
+    if (latest?.value_avg || baseline?.avg) {
+      const trend = (latest?.value_avg != null && baseline?.avg != null)
+        ? Math.round((latest.value_avg - baseline.avg) * 10) / 10
+        : null;
+      out.vo2_max = {
+        current: latest?.value_avg ?? null,
+        trend_30d: trend,
+      };
+    }
+  }
+
+  if (includes('activity_today')) {
+    const rows = await query<{ metric: string; value_sum: number | null }>(
+      `SELECT metric, value_sum FROM healthkit_daily
+       WHERE date = $1 AND metric IN ('steps','active_energy','basal_energy','exercise_minutes')`,
+      [asOf]
+    );
+    const byMetric = Object.fromEntries(rows.map(r => [r.metric, r.value_sum]));
+    out.activity_today = {
+      steps: byMetric['steps'] ?? null,
+      active_kcal: byMetric['active_energy'] ?? null,
+      basal_kcal: byMetric['basal_energy'] ?? null,
+      exercise_min: byMetric['exercise_minutes'] ?? null,
+    };
+  }
+
+  if (includes('unlogged_workouts_24h')) {
+    const unlogged = await query<{
+      hk_uuid: string; activity_type: string; start_at: string;
+      duration_s: number; total_energy_kcal: number | null;
+    }>(
+      `SELECT hk_uuid, activity_type, start_at, duration_s, total_energy_kcal
+       FROM healthkit_workouts
+       WHERE source = 'hk_only' AND start_at >= NOW() - interval '24 hours'
+       ORDER BY start_at DESC`
+    );
+    out.unlogged_workouts_24h = unlogged.map(u => ({
+      hk_uuid: u.hk_uuid,
+      activity_type: u.activity_type,
+      start: u.start_at,
+      duration_s: u.duration_s,
+      energy_kcal: u.total_energy_kcal,
+    }));
+  }
+
+  if (includes('data_quality')) {
+    const windowCounts = await query<{ metric: string; count: number }>(
+      `SELECT metric, COUNT(*)::int AS count FROM healthkit_daily
+       WHERE date > $1 AND date <= $2 AND metric IN ('hrv','sleep_asleep','resting_hr','steps')
+       GROUP BY metric`,
+      [windowStartIso, asOf]
+    );
+    const byMetric = Object.fromEntries(windowCounts.map(r => [r.metric, r.count]));
+
+    // Missing metrics: zero rows in the last window_days for a coaching-relevant metric
+    const missing: string[] = [];
+    for (const m of ['hrv', 'sleep_asleep', 'resting_hr', 'steps']) {
+      if (!byMetric[m]) missing.push(m);
+    }
+
+    out.data_quality = {
+      hrv_samples_window: byMetric['hrv'] ?? 0,
+      sleep_nights_window: byMetric['sleep_asleep'] ?? 0,
+      missing_metrics: missing,
+      last_sync_at: status.last_sync_at,
+      last_successful_sync_at: status.last_successful_sync_at,
+    };
+  }
+
+  return toolResult(out);
+}
+
+async function getHealthSeries(args: Record<string, unknown>) {
+  const status = await getHealthKitStatus();
+  if (status.status !== 'connected') return toolResult(notConnectedResponse(status.status));
+
+  const metric = typeof args.metric === 'string' ? args.metric : null;
+  if (!metric || !VALID_SERIES_METRICS.includes(metric as typeof VALID_SERIES_METRICS[number])) {
+    return toolError(`metric must be one of: ${VALID_SERIES_METRICS.join(', ')}`);
+  }
+  const from = typeof args.from === 'string' ? args.from.slice(0, 10) : null;
+  const to = typeof args.to === 'string' ? args.to.slice(0, 10) : new Date().toISOString().slice(0, 10);
+  if (!from) return toolError('from (YYYY-MM-DD) is required');
+  const bucket = args.bucket === 'week' ? 'week' : 'day';
+
+  if (bucket === 'day') {
+    const rows = await query<{
+      date: string; value_min: number | null; value_max: number | null;
+      value_avg: number | null; value_sum: number | null; count: number | null;
+    }>(
+      `SELECT to_char(date, 'YYYY-MM-DD') AS date,
+              value_min, value_max, value_avg, value_sum, count
+       FROM healthkit_daily
+       WHERE metric = $1 AND date >= $2 AND date <= $3
+       ORDER BY date`,
+      [metric, from, to]
+    );
+    return toolResult(rows);
+  }
+
+  // Weekly bucketing (ISO week, Mon-Sun)
+  const rows = await query<{
+    week_start: string; value_min: number | null; value_max: number | null;
+    value_avg: number | null; value_sum: number | null; count: number | null;
+  }>(
+    `SELECT to_char(date_trunc('week', date)::date, 'YYYY-MM-DD') AS week_start,
+            MIN(value_min) AS value_min,
+            MAX(value_max) AS value_max,
+            AVG(value_avg) AS value_avg,
+            SUM(value_sum) AS value_sum,
+            SUM(count) AS count
+     FROM healthkit_daily
+     WHERE metric = $1 AND date >= $2 AND date <= $3
+     GROUP BY date_trunc('week', date)
+     ORDER BY week_start`,
+    [metric, from, to]
+  );
+  return toolResult(rows);
+}
+
+async function getHealthWorkoutsTool(args: Record<string, unknown>) {
+  const status = await getHealthKitStatus();
+  if (status.status !== 'connected') return toolResult(notConnectedResponse(status.status));
+
+  const from = typeof args.from === 'string' ? args.from : null;
+  const to = typeof args.to === 'string' ? args.to : new Date().toISOString();
+  if (!from) return toolError('from (ISO) is required');
+  const sourceArg = (typeof args.source === 'string' ? args.source : 'all') as typeof VALID_WORKOUT_SOURCES[number];
+  if (!VALID_WORKOUT_SOURCES.includes(sourceArg)) {
+    return toolError(`source must be one of: ${VALID_WORKOUT_SOURCES.join(', ')}`);
+  }
+
+  let sql = `SELECT hk_uuid, activity_type,
+                    to_char(start_at, 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS start_at,
+                    to_char(end_at, 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS end_at,
+                    duration_s, total_energy_kcal, total_distance_m,
+                    avg_heart_rate, max_heart_rate,
+                    source_name, source, workout_uuid
+             FROM healthkit_workouts
+             WHERE start_at >= $1::timestamptz AND start_at <= $2::timestamptz`;
+  const params: unknown[] = [from, to];
+  if (sourceArg !== 'all') {
+    params.push(sourceArg);
+    sql += ` AND source = $${params.length}`;
+  }
+  sql += ` ORDER BY start_at DESC`;
+
+  const rows = await query(sql, params);
+  return toolResult(rows);
+}
+
 // ── Tool registry ─────────────────────────────────────────────────────────────
 
 export const tools: MCPTool[] = [
@@ -2292,6 +2615,68 @@ export const tools: MCPTool[] = [
       required: ['sex'],
     },
     execute: getBodyNormRangesTool,
+  },
+
+  // ── HealthKit tools ─────────────────────────────────────────────────────────
+  {
+    name: 'get_health_snapshot',
+    description:
+      'Returns a composite "how are they right now" snapshot from Apple HealthKit: last night sleep (total, REM, deep), HRV (latest + window + 30d baseline + delta %), resting HR (same), VO2 max, today\'s activity rings (steps, active/basal kcal, exercise min), any workouts HK recorded in the last 24h that aren\'t logged in Rebirth (source="hk_only" — this is the adherence/missed-workout signal), and data_quality info. Pass fields=["sleep_last_night","hrv"] to project only specific branches (~120 tokens vs ~500 full). Call once per session or when the user asks about health, training, or recovery. If HealthKit isn\'t connected, returns {status:"not_connected", reason, message}.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        as_of: { type: 'string', description: 'YYYY-MM-DD; defaults to today (UTC).' },
+        window_days: { type: 'number', description: 'Window for window_avg and activity baselines. Default 7, max 90.' },
+        fields: {
+          type: 'array',
+          items: {
+            type: 'string',
+            enum: ['sleep_last_night', 'hrv', 'resting_hr', 'vo2_max', 'activity_today', 'unlogged_workouts_24h', 'data_quality'],
+          },
+          description: 'Optional subset of top-level keys to return. Omit for the full snapshot.',
+        },
+      },
+    },
+    execute: getHealthSnapshot,
+  },
+  {
+    name: 'get_health_series',
+    description:
+      'Returns daily (or weekly) aggregate time-series for a single HealthKit metric. Use this for trend questions ("how has my HRV been over 2 weeks?"). Pairs with get_health_snapshot for point-in-time reads.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        metric: {
+          type: 'string',
+          enum: [...VALID_SERIES_METRICS],
+          description: 'Which aggregate to fetch. Sleep metrics report minutes per stage.',
+        },
+        from: { type: 'string', description: 'YYYY-MM-DD inclusive start.' },
+        to: { type: 'string', description: 'YYYY-MM-DD inclusive end (default today).' },
+        bucket: { type: 'string', enum: ['day', 'week'], description: 'Default day.' },
+      },
+      required: ['metric', 'from'],
+    },
+    execute: getHealthSeries,
+  },
+  {
+    name: 'get_health_workouts',
+    description:
+      'Returns HealthKit workout records in a date window. source="hk_only" finds workouts the user did (recorded by Apple Watch / similar) but didn\'t log in Rebirth — this is the reconciliation / missed-workout path for coaching. source="user_logged" = came from Rebirth. source="matched" = Apple Watch workout fuzzy-matched to a Rebirth session. source="all" (default) returns everything.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        from: { type: 'string', description: 'ISO-8601 start (e.g. 2026-04-01T00:00:00Z).' },
+        to: { type: 'string', description: 'ISO-8601 end; defaults to now.' },
+        source: {
+          type: 'string',
+          enum: [...VALID_WORKOUT_SOURCES],
+          description: 'Filter by source tag. Default "all".',
+        },
+      },
+      required: ['from'],
+    },
+    execute: getHealthWorkoutsTool,
   },
 ];
 

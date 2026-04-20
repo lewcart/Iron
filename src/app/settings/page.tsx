@@ -41,6 +41,7 @@ import {
   onHomeArrival,
 } from '@/lib/geofence';
 import { GeofenceOnboarding } from '@/components/GeofenceOnboarding';
+import { HealthKitSettings } from '@/components/HealthKitSettings';
 
 const REST_TIMES = [30, 60, 90, 120, 150, 180, 210, 240, 300];
 
@@ -789,6 +790,9 @@ export default function SettingsPage() {
             )}
           </div>
         )}
+
+        {/* ── Apple Health ────────────────────────────── */}
+        <HealthKitSettings />
 
         {/* ── Data ────────────────────────────────────── */}
         <div>

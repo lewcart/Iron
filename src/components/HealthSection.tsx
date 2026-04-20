@@ -1,8 +1,9 @@
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
+import Link from 'next/link';
 import { App } from '@capacitor/app';
-import { Activity, Flame, Footprints, ExternalLink } from 'lucide-react';
+import { Activity, Flame, Footprints, ChevronRight } from 'lucide-react';
 import { fetchHealthSummary, type HealthSummary } from '@/lib/healthkit';
 
 type State =
@@ -68,23 +69,15 @@ export function HealthSection() {
       <div>
         <p className="text-xs font-semibold text-primary uppercase tracking-wide mb-1 px-1">Today&apos;s Health</p>
         <div className="ios-section">
-          <div className="flex items-center justify-between px-4 py-4 gap-3">
+          <Link href="/settings" className="ios-row justify-between">
             <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium">HealthKit access needed</p>
-              <p className="text-xs text-muted-foreground mt-0.5">Enable Health access in iOS Settings to see steps, calories, and workouts here.</p>
+              <p className="text-sm font-medium">Connect Apple Health</p>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Share workouts, heart rate, and sleep with your coach.
+              </p>
             </div>
-            <button
-              onClick={() => {
-                // Deep-link to app settings — Capacitor doesn't expose this directly,
-                // but the URL scheme works on iOS 8+
-                window.open('app-settings:', '_system');
-              }}
-              className="flex items-center gap-1 text-xs text-primary font-medium whitespace-nowrap flex-shrink-0 min-h-[36px] px-1"
-            >
-              Open Settings
-              <ExternalLink className="h-3 w-3" />
-            </button>
-          </div>
+            <ChevronRight className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+          </Link>
         </div>
       </div>
     );
