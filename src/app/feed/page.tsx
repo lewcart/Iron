@@ -115,6 +115,11 @@ const MODULE_STYLES: Record<TimelineModule, { bg: string; text: string; label: s
     text: 'text-teal-900 dark:text-teal-200',
     label: 'Body Scan',
   },
+  inbody_scan: {
+    bg: 'bg-indigo-100 dark:bg-indigo-950/80',
+    text: 'text-indigo-800 dark:text-indigo-200',
+    label: 'InBody',
+  },
   dysphoria: {
     bg: 'bg-rose-100 dark:bg-rose-950/80',
     text: 'text-rose-800 dark:text-rose-200',
@@ -405,7 +410,11 @@ export default function FeedPage() {
               </div>
             ) : (
               timeline.map((entry) => {
-                const style = MODULE_STYLES[entry.module];
+                const style = MODULE_STYLES[entry.module] ?? {
+                  bg: 'bg-muted',
+                  text: 'text-muted-foreground',
+                  label: entry.module,
+                };
                 return (
                   <div key={`${entry.module}-${entry.id}`} className="flex items-start gap-3">
                     <div className="flex-shrink-0 mt-0.5">

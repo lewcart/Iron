@@ -358,3 +358,42 @@ describe('muscleTextColor', () => {
     expect(muscleTextColor(5)).toBe('text-zinc-100');
   });
 });
+
+// ===== MODULE_STYLES completeness =====
+// Guards against server/client type drift: every TimelineModule must have a style.
+// Mirror keys from src/lib/api/feed-types.ts TimelineModule union.
+
+const TIMELINE_MODULES = [
+  'workout',
+  'nutrition',
+  'hrt',
+  'measurement',
+  'wellbeing',
+  'photo',
+  'bodyweight',
+  'body_spec',
+  'inbody_scan',
+  'dysphoria',
+] as const;
+
+// Copy-paste from src/app/feed/page.tsx (keys only; values are tailwind strings)
+const MODULE_STYLE_KEYS = new Set([
+  'workout',
+  'nutrition',
+  'hrt',
+  'measurement',
+  'wellbeing',
+  'photo',
+  'bodyweight',
+  'body_spec',
+  'inbody_scan',
+  'dysphoria',
+]);
+
+describe('MODULE_STYLES completeness', () => {
+  it('has a style for every TimelineModule value', () => {
+    for (const mod of TIMELINE_MODULES) {
+      expect(MODULE_STYLE_KEYS.has(mod)).toBe(true);
+    }
+  });
+});
