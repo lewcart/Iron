@@ -9,6 +9,7 @@ export type TimelineModule =
   | 'photo'
   | 'bodyweight'
   | 'body_spec'
+  | 'inbody_scan'
   | 'dysphoria';
 
 export interface TimelineEntry {
