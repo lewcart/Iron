@@ -35,6 +35,8 @@ export const METRICS: MetricDef[] = [
   { key: 'bone_mineral_kg', label: 'Bone Mineral', unit: 'kg', group: 'body_comp', dp: 2 },
   { key: 'body_fat_mass_kg', label: 'Body Fat Mass', unit: 'kg', group: 'body_comp', preferredDirection: 'lower', dp: 1 },
   { key: 'smm_kg', label: 'Skeletal Muscle Mass', unit: 'kg', group: 'body_comp', preferredDirection: 'higher', dp: 1 },
+  { key: 'soft_lean_mass_kg', label: 'Soft Lean Mass', unit: 'kg', group: 'body_comp', preferredDirection: 'higher', dp: 1 },
+  { key: 'fat_free_mass_kg', label: 'Fat Free Mass', unit: 'kg', group: 'body_comp', preferredDirection: 'higher', dp: 1 },
 
   // Derived
   { key: 'bmi', label: 'BMI', unit: '', group: 'derived', preferredDirection: 'match', dp: 1 },
@@ -59,6 +61,11 @@ export const METRICS: MetricDef[] = [
   { key: 'seg_fat_trunk_kg', label: 'Trunk (fat)', unit: 'kg', group: 'seg_fat', dp: 2 },
   { key: 'seg_fat_right_leg_kg', label: 'Right Leg (fat)', unit: 'kg', group: 'seg_fat', dp: 2 },
   { key: 'seg_fat_left_leg_kg', label: 'Left Leg (fat)', unit: 'kg', group: 'seg_fat', dp: 2 },
+  { key: 'seg_fat_right_arm_pct', label: 'Fat % Right Arm', unit: '%', group: 'seg_fat', preferredDirection: 'lower', dp: 1 },
+  { key: 'seg_fat_left_arm_pct', label: 'Fat % Left Arm', unit: '%', group: 'seg_fat', preferredDirection: 'lower', dp: 1 },
+  { key: 'seg_fat_trunk_pct', label: 'Fat % Trunk', unit: '%', group: 'seg_fat', preferredDirection: 'lower', dp: 1 },
+  { key: 'seg_fat_right_leg_pct', label: 'Fat % Right Leg', unit: '%', group: 'seg_fat', preferredDirection: 'lower', dp: 1 },
+  { key: 'seg_fat_left_leg_pct', label: 'Fat % Left Leg', unit: '%', group: 'seg_fat', preferredDirection: 'lower', dp: 1 },
 
   // Circumferences
   { key: 'circ_neck_cm', label: 'Neck', unit: 'cm', group: 'circumference', dp: 1 },
@@ -69,6 +76,7 @@ export const METRICS: MetricDef[] = [
   { key: 'circ_left_arm_cm', label: 'Left Arm', unit: 'cm', group: 'circumference', dp: 1 },
   { key: 'circ_right_thigh_cm', label: 'Right Thigh', unit: 'cm', group: 'circumference', dp: 1 },
   { key: 'circ_left_thigh_cm', label: 'Left Thigh', unit: 'cm', group: 'circumference', dp: 1 },
+  { key: 'arm_muscle_circumference_cm', label: 'Arm Muscle Circumference', unit: 'cm', group: 'circumference', preferredDirection: 'higher', dp: 1 },
 
   // Recommendations
   { key: 'target_weight_kg', label: 'Target Weight', unit: 'kg', group: 'recommendation', dp: 1 },
