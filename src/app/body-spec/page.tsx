@@ -101,17 +101,18 @@ export default function BodySpecPage() {
 
   return (
     <main className="tab-content bg-background">
-      <div className="px-4 pt-safe pb-4 flex items-center gap-3">
-        <Link href="/settings" className="text-primary p-1 -ml-1">
-          <ChevronLeft className="h-5 w-5" />
-        </Link>
-        <h1 className="text-2xl font-bold">Body Spec</h1>
-      </div>
+      <div className="max-w-lg md:max-w-3xl mx-auto">
+        <div className="px-4 pt-safe pb-4 flex items-center gap-3">
+          <Link href="/settings" className="text-primary p-1 -ml-1">
+            <ChevronLeft className="h-5 w-5" />
+          </Link>
+          <h1 className="text-2xl font-bold">Body Spec</h1>
+        </div>
 
-      <div className="px-4 space-y-4 pb-8">
+        <div className="px-4 pb-8 grid grid-cols-1 md:grid-cols-3 gap-6 auto-rows-min">
 
-        {/* Log form */}
-        <div>
+        {/* Log form — left column on md:+ */}
+        <div className="md:col-span-1">
           <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1 px-1">New Entry</p>
           <div className="ios-section">
             <div className="ios-row gap-3 flex-wrap">
@@ -180,9 +181,9 @@ export default function BodySpecPage() {
           </div>
         </div>
 
-        {/* History */}
+        {/* History — right column on md:+ (spans 2/3) */}
         {!loading && logs.length > 0 && (
-          <div>
+          <div className="md:col-span-2">
             <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1 px-1">History</p>
             <div className="ios-section">
               {logs.map((log, i) => {
@@ -231,9 +232,10 @@ export default function BodySpecPage() {
         )}
 
         {!loading && logs.length === 0 && (
-          <p className="text-xs text-muted-foreground px-1">No body spec entries yet.</p>
+          <p className="text-xs text-muted-foreground px-1 md:col-span-2">No body spec entries yet.</p>
         )}
 
+        </div>
       </div>
     </main>
   );

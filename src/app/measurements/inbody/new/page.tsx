@@ -74,16 +74,20 @@ export default function NewInbodyScanPage() {
     }
   }
 
+  // Metric keys that deserve pair-rendering on md:+ (matches plan: weight+height, PBF%+SMM%, visceral_fat+bmr_kcal)
+  const PAIRED_KEYS = new Set<string>(['weight_kg', 'height_cm', 'pbf_pct', 'smm_pct', 'visceral_fat_level', 'bmr_kcal']);
+
   return (
     <main className="tab-content bg-background">
-      <div className="px-4 pt-safe pb-4 flex items-center gap-3">
-        <Link href="/measurements" className="text-primary p-1 -ml-1">
-          <ChevronLeft className="h-5 w-5" />
-        </Link>
-        <h1 className="text-2xl font-bold">New InBody Scan</h1>
-      </div>
+      <div className="max-w-md md:max-w-2xl mx-auto">
+        <div className="px-4 pt-safe pb-4 flex items-center gap-3">
+          <Link href="/measurements" className="text-primary p-1 -ml-1">
+            <ChevronLeft className="h-5 w-5" />
+          </Link>
+          <h1 className="text-2xl font-bold">New InBody Scan</h1>
+        </div>
 
-      <div className="px-4 pb-20 space-y-4">
+        <div className="px-4 pb-20 space-y-4">
         {/* Meta */}
         <div>
           <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1 px-1">Meta</p>
@@ -136,22 +140,32 @@ export default function NewInbodyScanPage() {
                 {GROUP_LABELS[group]}
               </p>
               <div className="ios-section">
-                {metrics.map(m => (
-                  <div key={m.key as string} className="ios-row justify-between gap-3">
-                    <label className="text-sm text-muted-foreground flex-1" htmlFor={`f-${m.key as string}`}>
-                      {m.label}{m.unit ? ` (${m.unit})` : ''}
-                    </label>
-                    <input
-                      id={`f-${m.key as string}`}
-                      type="number"
-                      inputMode="decimal"
-                      step="any"
-                      value={values[m.key as string] ?? ''}
-                      onChange={e => setValue(m.key as string, e.target.value)}
-                      className="w-28 bg-transparent text-sm text-right outline-none min-h-[44px]"
-                    />
-                  </div>
-                ))}
+                <div className="grid grid-cols-1 md:grid-cols-2 md:gap-x-4">
+                  {metrics.map(m => {
+                    const k = m.key as string;
+                    // Most rows stay full-width; only the "paired" set sits side-by-side at md:+
+                    const paired = PAIRED_KEYS.has(k);
+                    return (
+                      <div
+                        key={k}
+                        className={`ios-row justify-between gap-3 ${paired ? '' : 'md:col-span-2'}`}
+                      >
+                        <label className="text-sm text-muted-foreground flex-1" htmlFor={`f-${k}`}>
+                          {m.label}{m.unit ? ` (${m.unit})` : ''}
+                        </label>
+                        <input
+                          id={`f-${k}`}
+                          type="number"
+                          inputMode="decimal"
+                          step="any"
+                          value={values[k] ?? ''}
+                          onChange={e => setValue(k, e.target.value)}
+                          className="w-28 bg-transparent text-sm text-right outline-none min-h-[44px]"
+                        />
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
             </div>
           );
@@ -217,15 +231,16 @@ export default function NewInbodyScanPage() {
 
         {error && <p className="text-sm text-rose-500 px-1">{error}</p>}
 
-        {/* Submit */}
-        <div className="flex justify-end">
+        {/* Submit — full-width on mobile, auto-right on md:+ */}
+        <div className="flex md:justify-end">
           <button
             onClick={submit}
             disabled={saving}
-            className="px-6 py-3 bg-primary text-white text-sm font-semibold rounded-lg disabled:opacity-40"
+            className="w-full md:w-auto md:px-8 md:ml-auto px-6 py-3 bg-primary text-white text-sm font-semibold rounded-lg disabled:opacity-40"
           >
             {saving ? 'Saving…' : 'Save Scan'}
           </button>
+        </div>
         </div>
       </div>
     </main>

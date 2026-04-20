@@ -93,30 +93,31 @@ export default function BodyGoalsPage() {
 
   return (
     <main className="tab-content bg-background">
-      <div className="px-4 pt-safe pb-4 flex items-center gap-3">
-        <Link href="/measurements" className="text-primary p-1 -ml-1">
-          <ChevronLeft className="h-5 w-5" />
-        </Link>
-        <h1 className="text-2xl font-bold">Body Goals</h1>
-      </div>
+      <div className="max-w-lg md:max-w-4xl mx-auto">
+        <div className="px-4 pt-safe pb-4 flex items-center gap-3">
+          <Link href="/measurements" className="text-primary p-1 -ml-1">
+            <ChevronLeft className="h-5 w-5" />
+          </Link>
+          <h1 className="text-2xl font-bold">Body Goals</h1>
+        </div>
 
-      <div className="px-4 pb-20 space-y-4">
-        {loading && <p className="text-xs text-muted-foreground px-1">Loading…</p>}
+        <div className="px-4 pb-20 md:grid md:grid-cols-2 md:gap-4 md:auto-rows-min space-y-4 md:space-y-0">
+          {loading && <p className="text-xs text-muted-foreground px-1 md:col-span-2">Loading…</p>}
 
-        {!loading && !hasAnyGoal && (
-          <p className="text-sm text-muted-foreground px-1">
-            No goals set yet — tap any metric below to set a target.
-          </p>
-        )}
+          {!loading && !hasAnyGoal && (
+            <p className="text-sm text-muted-foreground px-1 md:col-span-2">
+              No goals set yet — tap any metric below to set a target.
+            </p>
+          )}
 
-        {!loading && GROUPS.map(group => {
-          const metrics = METRICS.filter(m => m.group === group);
-          return (
-            <div key={group}>
-              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1 px-1">
-                {GROUP_LABELS[group]}
-              </p>
-              <div className="ios-section">
+          {!loading && GROUPS.map(group => {
+            const metrics = METRICS.filter(m => m.group === group);
+            return (
+              <div key={group}>
+                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1 px-1">
+                  {GROUP_LABELS[group]}
+                </p>
+                <div className="ios-section">
                 {metrics.map(m => {
                   const key = m.key as string;
                   const draft = getDraft(key);
@@ -177,11 +178,12 @@ export default function BodyGoalsPage() {
                       </div>
                     </div>
                   );
-                })}
+                  })}
+                </div>
               </div>
-            </div>
-          );
-        })}
+            );
+          })}
+        </div>
       </div>
     </main>
   );
