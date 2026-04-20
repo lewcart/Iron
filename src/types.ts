@@ -337,6 +337,8 @@ export interface InbodyScan {
   bone_mineral_kg: number | null;
   body_fat_mass_kg: number | null;
   smm_kg: number | null;
+  soft_lean_mass_kg: number | null;
+  fat_free_mass_kg: number | null;
 
   // Derived
   bmi: number | null;
@@ -356,11 +358,11 @@ export interface InbodyScan {
   seg_lean_left_leg_kg: number | null;  seg_lean_left_leg_pct: number | null;
 
   // Segmental fat
-  seg_fat_right_arm_kg: number | null;
-  seg_fat_left_arm_kg: number | null;
-  seg_fat_trunk_kg: number | null;
-  seg_fat_right_leg_kg: number | null;
-  seg_fat_left_leg_kg: number | null;
+  seg_fat_right_arm_kg: number | null; seg_fat_right_arm_pct: number | null;
+  seg_fat_left_arm_kg: number | null;  seg_fat_left_arm_pct: number | null;
+  seg_fat_trunk_kg: number | null;     seg_fat_trunk_pct: number | null;
+  seg_fat_right_leg_kg: number | null; seg_fat_right_leg_pct: number | null;
+  seg_fat_left_leg_kg: number | null;  seg_fat_left_leg_pct: number | null;
 
   // Circumferences (cm)
   circ_neck_cm: number | null;
@@ -371,6 +373,7 @@ export interface InbodyScan {
   circ_left_arm_cm: number | null;
   circ_right_thigh_cm: number | null;
   circ_left_thigh_cm: number | null;
+  arm_muscle_circumference_cm: number | null;
 
   // Recommendations
   target_weight_kg: number | null;

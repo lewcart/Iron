@@ -53,6 +53,54 @@ describe('log_inbody_scan', () => {
     expect(result.uuid).toBe('scan-new');
     expect(result.weight_kg).toBe(60);
   });
+
+  it('round-trips soft lean mass, fat free mass, segmental fat %, and arm muscle circumference', async () => {
+    const db = await import('@/db/db');
+    vi.mocked(db.queryOne).mockResolvedValueOnce({
+      uuid: 'scan-ext', scanned_at: '2026-04-20T07:30:00.000Z', device: 'InBody 570',
+      soft_lean_mass_kg: '47.2',
+      fat_free_mass_kg: '50.1',
+      seg_fat_right_arm_pct: '18.4',
+      seg_fat_left_arm_pct: '18.6',
+      seg_fat_trunk_pct: '22.1',
+      seg_fat_right_leg_pct: '25.3',
+      seg_fat_left_leg_pct: '25.5',
+      arm_muscle_circumference_cm: '27.8',
+      impedance: '{}', raw_json: '{}',
+      created_at: '2026-04-20T07:30:00.000Z', updated_at: '2026-04-20T07:30:00.000Z',
+    });
+    const { result, isError } = await callTool('log_inbody_scan', {
+      scanned_at: '2026-04-20T07:30:00.000Z',
+      soft_lean_mass_kg: 47.2,
+      fat_free_mass_kg: 50.1,
+      seg_fat_right_arm_pct: 18.4,
+      seg_fat_left_arm_pct: 18.6,
+      seg_fat_trunk_pct: 22.1,
+      seg_fat_right_leg_pct: 25.3,
+      seg_fat_left_leg_pct: 25.5,
+      arm_muscle_circumference_cm: 27.8,
+    });
+    expect(isError).toBeFalsy();
+    expect(result.soft_lean_mass_kg).toBeCloseTo(47.2);
+    expect(result.fat_free_mass_kg).toBeCloseTo(50.1);
+    expect(result.seg_fat_right_arm_pct).toBeCloseTo(18.4);
+    expect(result.seg_fat_left_arm_pct).toBeCloseTo(18.6);
+    expect(result.seg_fat_trunk_pct).toBeCloseTo(22.1);
+    expect(result.seg_fat_right_leg_pct).toBeCloseTo(25.3);
+    expect(result.seg_fat_left_leg_pct).toBeCloseTo(25.5);
+    expect(result.arm_muscle_circumference_cm).toBeCloseTo(27.8);
+
+    // Verify the INSERT actually included the new columns.
+    const [sql] = vi.mocked(db.queryOne).mock.calls[0] as unknown as [string, unknown[]];
+    expect(sql).toContain('soft_lean_mass_kg');
+    expect(sql).toContain('fat_free_mass_kg');
+    expect(sql).toContain('seg_fat_right_arm_pct');
+    expect(sql).toContain('seg_fat_left_arm_pct');
+    expect(sql).toContain('seg_fat_trunk_pct');
+    expect(sql).toContain('seg_fat_right_leg_pct');
+    expect(sql).toContain('seg_fat_left_leg_pct');
+    expect(sql).toContain('arm_muscle_circumference_cm');
+  });
 });
 
 describe('update_inbody_scan', () => {

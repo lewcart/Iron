@@ -1400,6 +1400,41 @@ describe('parseInbodyScan', () => {
     const s = parseInbodyScan(row);
     expect(s.impedance['50kHz'].ra).toBe(100);
   });
+
+  it('parses soft/fat-free mass, segmental fat %, and arm muscle circumference', () => {
+    const row: DbRow = {
+      ...baseRow,
+      soft_lean_mass_kg: '47.2',
+      fat_free_mass_kg: '50.1',
+      seg_fat_right_arm_pct: '18.4',
+      seg_fat_left_arm_pct: '18.6',
+      seg_fat_trunk_pct: '22.1',
+      seg_fat_right_leg_pct: '25.3',
+      seg_fat_left_leg_pct: '25.5',
+      arm_muscle_circumference_cm: '27.8',
+    };
+    const s = parseInbodyScan(row);
+    expect(s.soft_lean_mass_kg).toBeCloseTo(47.2);
+    expect(s.fat_free_mass_kg).toBeCloseTo(50.1);
+    expect(s.seg_fat_right_arm_pct).toBeCloseTo(18.4);
+    expect(s.seg_fat_left_arm_pct).toBeCloseTo(18.6);
+    expect(s.seg_fat_trunk_pct).toBeCloseTo(22.1);
+    expect(s.seg_fat_right_leg_pct).toBeCloseTo(25.3);
+    expect(s.seg_fat_left_leg_pct).toBeCloseTo(25.5);
+    expect(s.arm_muscle_circumference_cm).toBeCloseTo(27.8);
+  });
+
+  it('defaults new numeric columns to null when absent', () => {
+    const s = parseInbodyScan(baseRow);
+    expect(s.soft_lean_mass_kg).toBeNull();
+    expect(s.fat_free_mass_kg).toBeNull();
+    expect(s.seg_fat_right_arm_pct).toBeNull();
+    expect(s.seg_fat_left_arm_pct).toBeNull();
+    expect(s.seg_fat_trunk_pct).toBeNull();
+    expect(s.seg_fat_right_leg_pct).toBeNull();
+    expect(s.seg_fat_left_leg_pct).toBeNull();
+    expect(s.arm_muscle_circumference_cm).toBeNull();
+  });
 });
 
 describe('createInbodyScan', () => {
