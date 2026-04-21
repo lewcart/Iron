@@ -1,5 +1,4 @@
 import Dexie, { type Table } from 'dexie';
-import { apiBase } from '@/lib/api/client';
 
 // ─── Local table types ─────────────────────────────────────────────────────────
 
@@ -148,9 +147,15 @@ export async function setMeta(key: string, value: string | number): Promise<void
   await db._meta.put({ key, value });
 }
 
-// ─── Exercise hydration ────────────────────────────────────────────────────────
-
-const HYDRATE_STALE_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
+// ─── Exercise bootstrap (first-install only) ───────────────────────────────────
+//
+// The exercise catalog is owned by sync pull (see src/lib/sync.ts and
+// src/app/api/sync/pull/route.ts). This function only seeds the bundled
+// JSON catalog on a completely empty Dexie so a brand-new install can render
+// something before the first network sync completes. After that, sync is
+// authoritative — catalog updates (new custom exercises, admin additions,
+// cross-device creations) arrive in the same envelope as the workout_exercises
+// that reference them, so the two can never drift.
 
 type HydrationListener = (ready: boolean) => void;
 const hydrationListeners = new Set<HydrationListener>();
@@ -170,56 +175,23 @@ function setExercisesReady(ready: boolean) {
 export async function hydrateExercises(): Promise<void> {
   try {
     const count = await db.exercises.count();
-    console.log('[hydrate] exercises in IndexedDB:', count);
-
-    // If empty, seed from bundled catalog immediately (no network needed)
-    if (count === 0) {
-      try {
-        const bundledRes = await fetch('/exercises-catalog.json');
-        console.log('[hydrate] bundled catalog fetch:', bundledRes.status);
-        if (bundledRes.ok) {
-          const bundled: LocalExercise[] = await bundledRes.json();
-          console.log('[hydrate] seeding', bundled.length, 'exercises from bundled catalog');
-          // Use Dexie transaction to batch all puts in one IDB transaction
-          await db.transaction('rw', db.exercises, async () => {
-            for (const ex of bundled) {
-              await db.exercises.put(ex);
-            }
-          });
-          await setMeta('exercises_hydrated_at', Date.now());
-          console.log('[hydrate] bundled seed complete');
-        }
-      } catch (e) {
-        console.warn('[hydrate] bundled catalog failed:', e);
-      }
-    }
-
-    const freshCount = await db.exercises.count();
-    if (freshCount > 0) {
+    if (count > 0) {
       setExercisesReady(true);
-      console.log('[hydrate] exercises ready:', freshCount);
-    }
-
-    const lastHydrated = await getMeta('exercises_hydrated_at');
-    if (lastHydrated && Date.now() - Number(lastHydrated) < HYDRATE_STALE_MS) {
-      return; // Fresh enough
-    }
-
-    // Try API for latest data (may include new custom exercises)
-    const res = await fetch(`${apiBase()}/api/exercises?limit=10000`);
-    if (!res.ok) {
-      console.warn('[hydrate] API fetch failed:', res.status);
       return;
     }
 
-    const exercises: LocalExercise[] = await res.json();
-    console.log('[hydrate] API returned', exercises.length, 'exercises');
+    // Empty Dexie — seed from bundled catalog so the UI has something to render
+    // while the first sync pull completes. Sync will overwrite these with fresh
+    // server data on its first successful run.
+    const bundledRes = await fetch('/exercises-catalog.json');
+    if (!bundledRes.ok) {
+      console.warn('[hydrate] bundled catalog fetch failed:', bundledRes.status);
+      return;
+    }
+    const bundled: LocalExercise[] = await bundledRes.json();
     await db.transaction('rw', db.exercises, async () => {
-      for (const ex of exercises) {
-        await db.exercises.put(ex);
-      }
+      for (const ex of bundled) await db.exercises.put(ex);
     });
-    await setMeta('exercises_hydrated_at', Date.now());
     setExercisesReady(true);
   } catch (e) {
     console.warn('[hydrate] error:', e);
