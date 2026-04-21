@@ -38,16 +38,117 @@ export interface HealthSummary {
   recentWorkouts: HealthWorkout[];
 }
 
+// ── Quantity metrics supported by fetchDailyAggregates ───────────────────────
+
+export type QuantityMetric =
+  | 'steps'
+  | 'active_energy'
+  | 'basal_energy'
+  | 'exercise_minutes'
+  | 'heart_rate'
+  | 'hrv'
+  | 'resting_hr'
+  | 'vo2_max';
+
+export const QUANTITY_METRICS: QuantityMetric[] = [
+  'steps', 'active_energy', 'basal_energy', 'exercise_minutes',
+  'heart_rate', 'hrv', 'resting_hr', 'vo2_max',
+];
+
+export interface DailyAggregateRow {
+  metric: QuantityMetric;
+  date: string;            // YYYY-MM-DD
+  value_min?: number;
+  value_max?: number;
+  value_avg?: number;
+  value_sum?: number;
+  count?: number;
+  source_primary?: string;
+}
+
+export interface SleepNight {
+  date: string;            // YYYY-MM-DD (wake date)
+  start_at: number;        // epoch ms
+  end_at: number;          // epoch ms
+  asleep_min: number;
+  rem_min: number;
+  deep_min: number;
+  core_min: number;
+  awake_min: number;
+  in_bed_min: number;
+}
+
+export interface FullHKWorkout {
+  hk_uuid: string;
+  activity_type: string;
+  start_at: number;        // epoch ms
+  end_at: number;          // epoch ms
+  duration_s: number;
+  total_energy_kcal?: number | null;
+  total_distance_m?: number | null;
+  source_name?: string;
+  source_bundle_id?: string;
+  metadata_json?: string;
+  rebirth_workout_uuid?: string;   // if we authored it
+}
+
+export interface WrittenSample {
+  hk_uuid: string;
+  hk_type: string;
+}
+
 interface HealthKitPlugin {
   isAvailable(): Promise<{ available: boolean }>;
   requestPermissions(): Promise<{ granted: boolean }>;
   checkPermissionStatus(): Promise<{ statuses: Record<string, string> }>;
-  saveWorkout(options: SaveWorkoutOptions): Promise<{ saved: boolean }>;
+
+  // Legacy reads (kept for HealthSection compat)
+  saveWorkout(options: SaveWorkoutOptions): Promise<{ saved: boolean; hk_uuid?: string }>;
   getSteps(options: { startTime: number; endTime: number }): Promise<{ value: number }>;
   getActiveCalories(options: { startTime: number; endTime: number }): Promise<{ value: number }>;
   getRecentWorkouts(options: { startTime: number }): Promise<{ workouts: HealthWorkout[] }>;
   getWorkouts(options: { startTime: number; endTime: number }): Promise<{ workouts: WorkoutRecord[] }>;
   getHeartRate(options: { startTime: number; endTime: number }): Promise<{ samples: HeartRateSample[] }>;
+
+  // New anchored / aggregated reads
+  fetchDailyAggregates(options: {
+    metrics: QuantityMetric[];
+    startTime: number;   // epoch ms
+    endTime: number;     // epoch ms
+  }): Promise<{ results: DailyAggregateRow[] }>;
+
+  fetchSleepNights(options: {
+    startTime: number;
+    endTime: number;
+    anchor?: string;     // base64-encoded HKQueryAnchor
+  }): Promise<{ nights: SleepNight[]; deleted: string[]; nextAnchor: string }>;
+
+  fetchWorkouts(options: {
+    startTime: number;
+    endTime: number;
+    anchor?: string;
+  }): Promise<{ workouts: FullHKWorkout[]; deleted: string[]; nextAnchor: string }>;
+
+  // Writes
+  saveNutrition(options: {
+    timestamp: number;   // epoch ms
+    mealUuid: string;
+    kcal?: number;
+    proteinG?: number;
+    carbsG?: number;
+    fatG?: number;
+    waterMl?: number;
+  }): Promise<{ saved: boolean; samples: WrittenSample[] }>;
+
+  saveBodyComposition(options: {
+    timestamp: number;
+    inbodyUuid: string;
+    weightKg?: number;
+    bodyFatPct?: number;
+    leanKg?: number;
+  }): Promise<{ saved: boolean; samples: WrittenSample[] }>;
+
+  deleteSamples(options: { uuids: string[] }): Promise<{ deleted: number; failed: string[] }>;
 }
 
 export const HealthKit = registerPlugin<HealthKitPlugin>('HealthKit');

@@ -113,18 +113,25 @@ class SyncEngine {
         workout_exercises: import('@/db/local').LocalWorkoutExercise[];
         workout_sets: import('@/db/local').LocalWorkoutSet[];
         bodyweight_logs: import('@/db/local').LocalBodyweightLog[];
+        exercises?: import('@/db/local').LocalExercise[];
         deleted: { workouts: string[]; workout_exercises: string[]; workout_sets: string[]; bodyweight_logs: string[] };
         pulled_at: string;
       };
 
-      // Upsert — server wins for conflicts (single-user, server is authoritative)
-      // Use single Dexie transaction to avoid iOS WebKit IndexedDB limits
-      await db.transaction('rw', db.workouts, db.workout_exercises, db.workout_sets, db.bodyweight_logs, async () => {
-        if (data.workouts.length) await db.workouts.bulkPut(data.workouts.map(r => ({ ...r, _synced: true })));
-        if (data.workout_exercises.length) await db.workout_exercises.bulkPut(data.workout_exercises.map(r => ({ ...r, _synced: true })));
-        if (data.workout_sets.length) await db.workout_sets.bulkPut(data.workout_sets.map(r => ({ ...r, _synced: true })));
-        if (data.bodyweight_logs.length) await db.bodyweight_logs.bulkPut(data.bodyweight_logs.map(r => ({ ...r, _synced: true })));
-      });
+      // Upsert — server wins for conflicts (single-user, server is authoritative).
+      // Exercises MUST upsert in the same transaction as workout_exercises so the
+      // catalog can never fall behind the UUIDs that workout rows reference.
+      await db.transaction(
+        'rw',
+        [db.workouts, db.workout_exercises, db.workout_sets, db.bodyweight_logs, db.exercises],
+        async () => {
+          if (data.exercises?.length) await db.exercises.bulkPut(data.exercises);
+          if (data.workouts.length) await db.workouts.bulkPut(data.workouts.map(r => ({ ...r, _synced: true })));
+          if (data.workout_exercises.length) await db.workout_exercises.bulkPut(data.workout_exercises.map(r => ({ ...r, _synced: true })));
+          if (data.workout_sets.length) await db.workout_sets.bulkPut(data.workout_sets.map(r => ({ ...r, _synced: true })));
+          if (data.bodyweight_logs.length) await db.bodyweight_logs.bulkPut(data.bodyweight_logs.map(r => ({ ...r, _synced: true })));
+        },
+      );
 
       // Apply server-side deletes
       if (data.deleted) {

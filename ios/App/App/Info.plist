@@ -79,5 +79,13 @@
 		<string>fetch</string>
 	</array>
 
+	<!-- HealthKit — read/write usage descriptions shown in the iOS permission sheet.
+	     Required for any HealthKit-capable build; App Store Review rejects builds that
+	     request HealthKit access without these keys present. -->
+	<key>NSHealthShareUsageDescription</key>
+	<string>Rebirth reads your workouts, heart rate, HRV, resting heart rate, VO2 max, sleep, and activity so your AI coach can tailor training and recovery guidance to your real data.</string>
+	<key>NSHealthUpdateUsageDescription</key>
+	<string>Rebirth writes your completed workouts, logged meals, and InBody scan results to Health so they count toward your rings and appear alongside data from your other apps and devices.</string>
+
 </dict>
 </plist>
