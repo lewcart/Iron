@@ -1,12 +1,20 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { useMutation } from '@tanstack/react-query';
+import { useState } from 'react';
 import { ChevronLeft, Trash2, Check, X } from 'lucide-react';
 import Link from 'next/link';
-import type { HrtLog, HrtProtocol } from '@/types';
-import { rebirthJsonHeaders } from '@/lib/api/headers';
-import { apiBase } from '@/lib/api/client';
+import type { LocalHrtProtocol } from '@/db/local';
+import { useHrtLogs, useHrtProtocols } from '@/lib/useLocalDB-hrt';
+import {
+  logHrtDose,
+  deleteHrtLog,
+  createHrtProtocol,
+  endHrtProtocol,
+  deleteHrtProtocol,
+} from '@/lib/mutations-hrt';
+
+// Local-first /hrt across three tabs (Today / Protocols / History).
+// Reads via useHrtLogs + useHrtProtocols; writes via mutations-hrt.
 
 type Tab = 'today' | 'protocols' | 'history';
 
@@ -19,70 +27,28 @@ function formatDate(isoStr: string) {
 // ===== Today Tab =====
 
 function TodayTab() {
-  const [logs, setLogs] = useState<HrtLog[]>([]);
-  const [protocols, setProtocols] = useState<HrtProtocol[]>([]);
-  const [loading, setLoading] = useState(true);
+  const logs = useHrtLogs(30);
+  const protocols = useHrtProtocols();
+  const activeProtocol = protocols.find(p => !p.ended_at) ?? null;
   const [taken, setTaken] = useState<boolean>(false);
   const [notes, setNotes] = useState('');
   const [saving, setSaving] = useState(false);
 
-  const activeProtocol = protocols.find(p => !p.ended_at) ?? null;
-
-  const deleteLogMut = useMutation({
-    mutationFn: (uuid: string) =>
-      fetch(`${apiBase()}/api/hrt/${uuid}`, { method: 'DELETE', headers: rebirthJsonHeaders() }).then((r) => {
-        if (!r.ok) throw new Error('Delete failed');
-      }),
-    onMutate: (uuid) => {
-      const prev = logs;
-      setLogs((l) => l.filter((x) => x.uuid !== uuid));
-      return { prev };
-    },
-    onError: (_e, _u, ctx) => {
-      if (ctx?.prev) setLogs(ctx.prev);
-    },
-  });
-
-  useEffect(() => {
-    Promise.all([
-      fetch(`${apiBase()}/api/hrt?limit=30`, { headers: rebirthJsonHeaders() }).then(r => r.json()),
-      fetch(`${apiBase()}/api/hrt/protocols`, { headers: rebirthJsonHeaders() }).then(r => r.json()),
-    ])
-      .then(([logsData, protocolsData]: [HrtLog[], HrtProtocol[]]) => {
-        setLogs(logsData);
-        setProtocols(protocolsData);
-        setLoading(false);
-      })
-      .catch(() => setLoading(false));
-  }, []);
-
   const handleLog = async () => {
     setSaving(true);
     try {
-      const body: Record<string, unknown> = {
+      await logHrtDose({
         medication: activeProtocol?.medication ?? 'estradiol',
         taken,
-        notes: notes || undefined,
-      };
-      if (activeProtocol) body.protocol_uuid = activeProtocol.uuid;
-
-      const res = await fetch(`${apiBase()}/api/hrt`, {
-        method: 'POST',
-        headers: rebirthJsonHeaders(),
-        body: JSON.stringify(body),
+        notes: notes || null,
+        hrt_protocol_uuid: activeProtocol?.uuid ?? null,
       });
-      if (res.ok) {
-        const log: HrtLog = await res.json();
-        setLogs(prev => [log, ...prev]);
-        setNotes('');
-        setTaken(false);
-      }
+      setNotes('');
+      setTaken(false);
     } finally {
       setSaving(false);
     }
   };
-
-  if (loading) return <p className="text-sm text-muted-foreground py-4">Loading…</p>;
 
   return (
     <div className="space-y-4">
@@ -103,7 +69,6 @@ function TodayTab() {
       <div>
         <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1 px-1">Log Today</p>
         <div className="ios-section">
-          {/* Taken toggle */}
           <div className="ios-row justify-between">
             <span className="text-sm font-medium">Taken today</span>
             <button
@@ -115,7 +80,6 @@ function TodayTab() {
               />
             </button>
           </div>
-          {/* Notes */}
           <div className="ios-row">
             <textarea
               placeholder="How is your body responding? (optional)"
@@ -159,7 +123,7 @@ function TodayTab() {
                 </div>
                 <span className="text-xs text-muted-foreground mr-3 shrink-0">{formatDate(log.logged_at)}</span>
                 <button
-                  onClick={() => deleteLogMut.mutate(log.uuid)}
+                  onClick={() => deleteHrtLog(log.uuid)}
                   className="text-red-500 p-1 min-h-[44px] min-w-[44px] flex items-center justify-center shrink-0"
                 >
                   <Trash2 className="h-4 w-4" />
@@ -178,42 +142,18 @@ function TodayTab() {
 const HRT_FORMS = ['gel', 'patch', 'injection', 'oral', 'other'] as const;
 
 function ProtocolsTab() {
-  const [protocols, setProtocols] = useState<HrtProtocol[]>([]);
-  const [loading, setLoading] = useState(true);
+  const protocols = useHrtProtocols();
   const [showForm, setShowForm] = useState(false);
   const [saving, setSaving] = useState(false);
 
-  // Form state
   const [medication, setMedication] = useState('estradiol');
   const [doseDescription, setDoseDescription] = useState('');
-  const [form, setForm] = useState<HrtProtocol['form']>('gel');
+  const [form, setForm] = useState<LocalHrtProtocol['form']>('gel');
   const [startedAt, setStartedAt] = useState('');
   const [endedAt, setEndedAt] = useState('');
   const [includeBlocker, setIncludeBlocker] = useState(false);
   const [blockerName, setBlockerName] = useState('');
   const [notes, setNotes] = useState('');
-
-  const deleteProtocolMut = useMutation({
-    mutationFn: (uuid: string) =>
-      fetch(`${apiBase()}/api/hrt/protocols/${uuid}`, { method: 'DELETE', headers: rebirthJsonHeaders() }).then((r) => {
-        if (!r.ok) throw new Error('Delete failed');
-      }),
-    onMutate: (uuid) => {
-      const prev = protocols;
-      setProtocols((p) => p.filter((x) => x.uuid !== uuid));
-      return { prev };
-    },
-    onError: (_e, _u, ctx) => {
-      if (ctx?.prev) setProtocols(ctx.prev);
-    },
-  });
-
-  useEffect(() => {
-    fetch(`${apiBase()}/api/hrt/protocols`, { headers: rebirthJsonHeaders() })
-      .then(r => r.json())
-      .then((data: HrtProtocol[]) => { setProtocols(data); setLoading(false); })
-      .catch(() => setLoading(false));
-  }, []);
 
   const resetForm = () => {
     setMedication('estradiol');
@@ -231,51 +171,27 @@ function ProtocolsTab() {
     if (!medication || !doseDescription || !startedAt) return;
     setSaving(true);
     try {
-      const res = await fetch(`${apiBase()}/api/hrt/protocols`, {
-        method: 'POST',
-        headers: rebirthJsonHeaders(),
-        body: JSON.stringify({
-          medication,
-          dose_description: doseDescription,
-          form,
-          started_at: startedAt,
-          ended_at: endedAt || null,
-          includes_blocker: includeBlocker,
-          blocker_name: includeBlocker ? (blockerName || null) : null,
-          notes: notes || null,
-        }),
+      await createHrtProtocol({
+        medication,
+        dose_description: doseDescription,
+        form,
+        started_at: startedAt,
+        ended_at: endedAt || null,
+        includes_blocker: includeBlocker,
+        blocker_name: includeBlocker ? (blockerName || null) : null,
+        notes: notes || null,
       });
-      if (res.ok) {
-        const protocol: HrtProtocol = await res.json();
-        setProtocols(prev => [protocol, ...prev]);
-        resetForm();
-      }
+      resetForm();
     } finally {
       setSaving(false);
     }
   };
-
-  const handleEndProtocol = async (protocol: HrtProtocol) => {
-    const today = new Date().toISOString().split('T')[0];
-    const res = await fetch(`${apiBase()}/api/hrt/protocols/${protocol.uuid}`, {
-      method: 'PATCH',
-      headers: rebirthJsonHeaders(),
-      body: JSON.stringify({ ended_at: today }),
-    });
-    if (res.ok) {
-      const updated: HrtProtocol = await res.json();
-      setProtocols(prev => prev.map(p => p.uuid === updated.uuid ? updated : p));
-    }
-  };
-
-  if (loading) return <p className="text-sm text-muted-foreground py-4">Loading…</p>;
 
   const active = protocols.filter(p => !p.ended_at);
   const past = protocols.filter(p => !!p.ended_at);
 
   return (
     <div className="space-y-4">
-      {/* Active protocols */}
       {active.length > 0 && (
         <div>
           <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1 px-1">Active</p>
@@ -295,13 +211,13 @@ function ProtocolsTab() {
                 </div>
                 <div className="flex gap-1 shrink-0">
                   <button
-                    onClick={() => handleEndProtocol(p)}
+                    onClick={() => endHrtProtocol(p.uuid)}
                     className="px-2 py-1 text-xs font-medium rounded-lg bg-secondary text-foreground"
                   >
                     End
                   </button>
                   <button
-                    onClick={() => deleteProtocolMut.mutate(p.uuid)}
+                    onClick={() => deleteHrtProtocol(p.uuid)}
                     className="text-red-500 p-1 min-h-[44px] min-w-[44px] flex items-center justify-center"
                   >
                     <Trash2 className="h-4 w-4" />
@@ -313,7 +229,6 @@ function ProtocolsTab() {
         </div>
       )}
 
-      {/* Add protocol button/form */}
       {!showForm ? (
         <button
           onClick={() => setShowForm(true)}
@@ -347,7 +262,7 @@ function ProtocolsTab() {
               <span className="text-sm font-medium">Form</span>
               <select
                 value={form}
-                onChange={e => setForm(e.target.value as HrtProtocol['form'])}
+                onChange={e => setForm(e.target.value as LocalHrtProtocol['form'])}
                 className="text-sm text-muted-foreground bg-transparent outline-none text-right capitalize"
               >
                 {HRT_FORMS.map(f => (
@@ -423,7 +338,6 @@ function ProtocolsTab() {
         </div>
       )}
 
-      {/* Past protocols */}
       {past.length > 0 && (
         <div>
           <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1 px-1">Past</p>
@@ -440,7 +354,7 @@ function ProtocolsTab() {
                   </p>
                 </div>
                 <button
-                  onClick={() => deleteProtocolMut.mutate(p.uuid)}
+                  onClick={() => deleteHrtProtocol(p.uuid)}
                   className="text-red-500 p-1 min-h-[44px] min-w-[44px] flex items-center justify-center shrink-0"
                 >
                   <Trash2 className="h-4 w-4" />
@@ -461,32 +375,7 @@ function ProtocolsTab() {
 // ===== History Tab =====
 
 function HistoryTab() {
-  const [logs, setLogs] = useState<HrtLog[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  const deleteHistoryLogMut = useMutation({
-    mutationFn: (uuid: string) =>
-      fetch(`${apiBase()}/api/hrt/${uuid}`, { method: 'DELETE', headers: rebirthJsonHeaders() }).then((r) => {
-        if (!r.ok) throw new Error('Delete failed');
-      }),
-    onMutate: (uuid) => {
-      const prev = logs;
-      setLogs((l) => l.filter((x) => x.uuid !== uuid));
-      return { prev };
-    },
-    onError: (_e, _u, ctx) => {
-      if (ctx?.prev) setLogs(ctx.prev);
-    },
-  });
-
-  useEffect(() => {
-    fetch(`${apiBase()}/api/hrt?limit=90`, { headers: rebirthJsonHeaders() })
-      .then(r => r.json())
-      .then((data: HrtLog[]) => { setLogs(data); setLoading(false); })
-      .catch(() => setLoading(false));
-  }, []);
-
-  if (loading) return <p className="text-sm text-muted-foreground py-4">Loading…</p>;
+  const logs = useHrtLogs(90);
 
   if (logs.length === 0) return <p className="text-xs text-muted-foreground px-1">No history yet.</p>;
 
@@ -512,7 +401,7 @@ function HistoryTab() {
           </div>
           <span className="text-xs text-muted-foreground mr-3 shrink-0">{formatDate(log.logged_at)}</span>
           <button
-            onClick={() => deleteHistoryLogMut.mutate(log.uuid)}
+            onClick={() => deleteHrtLog(log.uuid)}
             className="text-red-500 p-1 min-h-[44px] min-w-[44px] flex items-center justify-center shrink-0"
           >
             <Trash2 className="h-4 w-4" />
