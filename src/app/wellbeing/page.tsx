@@ -1,12 +1,28 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useMutation } from '@tanstack/react-query';
 import { ChevronLeft, Trash2 } from 'lucide-react';
 import Link from 'next/link';
-import type { WellbeingLog, DysphoriaLog, ClothesTestLog } from '@/types';
 import { rebirthJsonHeaders } from '@/lib/api/headers';
 import { apiBase } from '@/lib/api/client';
+import { useWellbeingLogs, useDysphoriaLogs, useClothesTestLogs } from '@/lib/useLocalDB-wellbeing';
+import {
+  logWellbeing,
+  deleteWellbeingLog,
+  logDysphoria,
+  deleteDysphoriaLog,
+  logClothesTest,
+  deleteClothesTestLog,
+} from '@/lib/mutations-wellbeing';
+
+// Local-first /wellbeing across three tabs (Daily, Journal, Clothes Test).
+// Each tab reads from a useLiveQuery hook and writes through mutations-wellbeing.
+//
+// Correlation summary (avg mood / energy / workout count for the last 30
+// days) still calls /api/wellbeing/correlation — it's a server-aggregated
+// JOIN against workouts that's not worth porting to client-side aggregation
+// for the secondary visualization. Could move to a client aggregator
+// alongside the feed migration.
 
 type Tab = 'daily' | 'journal' | 'clothes';
 
@@ -58,8 +74,7 @@ function ScalePicker({
 // ===== Daily Tab =====
 
 function DailyTab() {
-  const [logs, setLogs] = useState<WellbeingLog[]>([]);
-  const [loading, setLoading] = useState(true);
+  const logs = useWellbeingLogs(30);
   const [mood, setMood] = useState<number | null>(null);
   const [energy, setEnergy] = useState<number | null>(null);
   const [sleep, setSleep] = useState('');
@@ -71,27 +86,7 @@ function DailyTab() {
     workout_count: number;
   } | null>(null);
 
-  const deleteWellbeingMut = useMutation({
-    mutationFn: (uuid: string) =>
-      fetch(`${apiBase()}/api/wellbeing/${uuid}`, { method: 'DELETE', headers: rebirthJsonHeaders() }).then((r) => {
-        if (!r.ok) throw new Error('Delete failed');
-      }),
-    onMutate: (uuid) => {
-      const prev = logs;
-      setLogs((l) => l.filter((x) => x.uuid !== uuid));
-      return { prev };
-    },
-    onError: (_e, _u, ctx) => {
-      if (ctx?.prev) setLogs(ctx.prev);
-    },
-  });
-
   useEffect(() => {
-    fetch(`${apiBase()}/api/wellbeing?limit=30`, { headers: rebirthJsonHeaders() })
-      .then(r => r.json())
-      .then((data: WellbeingLog[]) => { setLogs(data); setLoading(false); })
-      .catch(() => setLoading(false));
-
     fetch(`${apiBase()}/api/wellbeing/correlation`, { headers: rebirthJsonHeaders() })
       .then(r => r.ok ? r.json() : null)
       .then(data => { if (data) setCorrelation(data); })
@@ -102,24 +97,16 @@ function DailyTab() {
     if (!mood && !energy) return;
     setSaving(true);
     try {
-      const res = await fetch(`${apiBase()}/api/wellbeing`, {
-        method: 'POST',
-        headers: rebirthJsonHeaders(),
-        body: JSON.stringify({
-          mood: mood ?? undefined,
-          energy: energy ?? undefined,
-          sleep_hours: sleep ? parseFloat(sleep) : undefined,
-          notes: notes || undefined,
-        }),
+      await logWellbeing({
+        mood: mood ?? null,
+        energy: energy ?? null,
+        sleep_hours: sleep ? parseFloat(sleep) : null,
+        notes: notes || null,
       });
-      if (res.ok) {
-        const log: WellbeingLog = await res.json();
-        setLogs(prev => [log, ...prev]);
-        setMood(null);
-        setEnergy(null);
-        setSleep('');
-        setNotes('');
-      }
+      setMood(null);
+      setEnergy(null);
+      setSleep('');
+      setNotes('');
     } finally {
       setSaving(false);
     }
@@ -199,7 +186,7 @@ function DailyTab() {
       </div>
 
       {/* History */}
-      {!loading && logs.length > 0 && (
+      {logs.length > 0 && (
         <div>
           <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1 px-1">History</p>
           <div className="ios-section">
@@ -218,7 +205,7 @@ function DailyTab() {
                 </div>
                 <span className="text-xs text-muted-foreground mr-3 shrink-0">{formatDate(log.logged_at)}</span>
                 <button
-                  onClick={() => deleteWellbeingMut.mutate(log.uuid)}
+                  onClick={() => deleteWellbeingLog(log.uuid)}
                   className="text-red-500 p-1 min-h-[44px] min-w-[44px] flex items-center justify-center shrink-0"
                 >
                   <Trash2 className="h-4 w-4" />
@@ -228,7 +215,7 @@ function DailyTab() {
           </div>
         </div>
       )}
-      {!loading && logs.length === 0 && (
+      {logs.length === 0 && (
         <p className="text-xs text-muted-foreground px-1">No entries yet.</p>
       )}
     </div>
@@ -238,49 +225,18 @@ function DailyTab() {
 // ===== Journal Tab (Dysphoria/Euphoria) =====
 
 function JournalTab() {
-  const [logs, setLogs] = useState<DysphoriaLog[]>([]);
-  const [loading, setLoading] = useState(true);
+  const logs = useDysphoriaLogs(60);
   const [scale, setScale] = useState<number | null>(null);
   const [note, setNote] = useState('');
   const [saving, setSaving] = useState(false);
-
-  const deleteDysphoriaMut = useMutation({
-    mutationFn: (uuid: string) =>
-      fetch(`${apiBase()}/api/dysphoria/${uuid}`, { method: 'DELETE', headers: rebirthJsonHeaders() }).then((r) => {
-        if (!r.ok) throw new Error('Delete failed');
-      }),
-    onMutate: (uuid) => {
-      const prev = logs;
-      setLogs((l) => l.filter((x) => x.uuid !== uuid));
-      return { prev };
-    },
-    onError: (_e, _u, ctx) => {
-      if (ctx?.prev) setLogs(ctx.prev);
-    },
-  });
-
-  useEffect(() => {
-    fetch(`${apiBase()}/api/dysphoria?limit=60`, { headers: rebirthJsonHeaders() })
-      .then(r => r.json())
-      .then((data: DysphoriaLog[]) => { setLogs(data); setLoading(false); })
-      .catch(() => setLoading(false));
-  }, []);
 
   const handleLog = async () => {
     if (!scale) return;
     setSaving(true);
     try {
-      const res = await fetch(`${apiBase()}/api/dysphoria`, {
-        method: 'POST',
-        headers: rebirthJsonHeaders(),
-        body: JSON.stringify({ scale, note: note || undefined }),
-      });
-      if (res.ok) {
-        const log: DysphoriaLog = await res.json();
-        setLogs(prev => [log, ...prev]);
-        setScale(null);
-        setNote('');
-      }
+      await logDysphoria({ scale, note: note || null });
+      setScale(null);
+      setNote('');
     } finally {
       setSaving(false);
     }
@@ -316,7 +272,7 @@ function JournalTab() {
         </button>
       </div>
 
-      {!loading && logs.length > 0 && (
+      {logs.length > 0 && (
         <div>
           <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1 px-1">History</p>
           <div className="ios-section">
@@ -334,7 +290,7 @@ function JournalTab() {
                 </div>
                 <span className="text-xs text-muted-foreground mr-3 shrink-0">{formatDate(log.logged_at)}</span>
                 <button
-                  onClick={() => deleteDysphoriaMut.mutate(log.uuid)}
+                  onClick={() => deleteDysphoriaLog(log.uuid)}
                   className="text-red-500 p-1 min-h-[44px] min-w-[44px] flex items-center justify-center shrink-0"
                 >
                   <Trash2 className="h-4 w-4" />
@@ -344,7 +300,7 @@ function JournalTab() {
           </div>
         </div>
       )}
-      {!loading && logs.length === 0 && (
+      {logs.length === 0 && (
         <p className="text-xs text-muted-foreground px-1">No journal entries yet.</p>
       )}
     </div>
@@ -354,58 +310,27 @@ function JournalTab() {
 // ===== Clothes Test Tab =====
 
 function ClothesTestTab() {
-  const [logs, setLogs] = useState<ClothesTestLog[]>([]);
-  const [loading, setLoading] = useState(true);
+  const logs = useClothesTestLogs(50);
   const [outfit, setOutfit] = useState('');
   const [comfort, setComfort] = useState<number | null>(null);
   const [euphoria, setEuphoria] = useState<number | null>(null);
   const [notes, setNotes] = useState('');
   const [saving, setSaving] = useState(false);
 
-  const deleteClothesMut = useMutation({
-    mutationFn: (uuid: string) =>
-      fetch(`${apiBase()}/api/clothes-test/${uuid}`, { method: 'DELETE', headers: rebirthJsonHeaders() }).then((r) => {
-        if (!r.ok) throw new Error('Delete failed');
-      }),
-    onMutate: (uuid) => {
-      const prev = logs;
-      setLogs((l) => l.filter((x) => x.uuid !== uuid));
-      return { prev };
-    },
-    onError: (_e, _u, ctx) => {
-      if (ctx?.prev) setLogs(ctx.prev);
-    },
-  });
-
-  useEffect(() => {
-    fetch(`${apiBase()}/api/clothes-test?limit=50`, { headers: rebirthJsonHeaders() })
-      .then(r => r.json())
-      .then((data: ClothesTestLog[]) => { setLogs(data); setLoading(false); })
-      .catch(() => setLoading(false));
-  }, []);
-
   const handleLog = async () => {
     if (!outfit.trim()) return;
     setSaving(true);
     try {
-      const res = await fetch(`${apiBase()}/api/clothes-test`, {
-        method: 'POST',
-        headers: rebirthJsonHeaders(),
-        body: JSON.stringify({
-          outfit_description: outfit.trim(),
-          comfort_rating: comfort ?? undefined,
-          euphoria_rating: euphoria ?? undefined,
-          notes: notes || undefined,
-        }),
+      await logClothesTest({
+        outfit_description: outfit.trim(),
+        comfort_rating: comfort ?? null,
+        euphoria_rating: euphoria ?? null,
+        notes: notes || null,
       });
-      if (res.ok) {
-        const log: ClothesTestLog = await res.json();
-        setLogs(prev => [log, ...prev]);
-        setOutfit('');
-        setComfort(null);
-        setEuphoria(null);
-        setNotes('');
-      }
+      setOutfit('');
+      setComfort(null);
+      setEuphoria(null);
+      setNotes('');
     } finally {
       setSaving(false);
     }
@@ -455,7 +380,7 @@ function ClothesTestTab() {
         </button>
       </div>
 
-      {!loading && logs.length > 0 && (
+      {logs.length > 0 && (
         <div>
           <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1 px-1">History</p>
           <div className="ios-section">
@@ -474,7 +399,7 @@ function ClothesTestTab() {
                 </div>
                 <span className="text-xs text-muted-foreground mr-3 shrink-0">{formatDate(log.logged_at)}</span>
                 <button
-                  onClick={() => deleteClothesMut.mutate(log.uuid)}
+                  onClick={() => deleteClothesTestLog(log.uuid)}
                   className="text-red-500 p-1 min-h-[44px] min-w-[44px] flex items-center justify-center shrink-0"
                 >
                   <Trash2 className="h-4 w-4" />
@@ -484,7 +409,7 @@ function ClothesTestTab() {
           </div>
         </div>
       )}
-      {!loading && logs.length === 0 && (
+      {logs.length === 0 && (
         <p className="text-xs text-muted-foreground px-1">No clothes tests yet.</p>
       )}
     </div>
