@@ -75,6 +75,7 @@ export interface LocalWorkoutPlan extends SyncMeta {
   uuid: string;
   title: string | null;
   order_index: number;
+  is_active: boolean;
 }
 
 export interface LocalWorkoutRoutine extends SyncMeta {
@@ -395,7 +396,7 @@ export class IronDB extends Dexie {
     // Indexes: every table has _synced + _updated_at so push() can find dirty
     // rows quickly. Domain-relevant indexes (workout_plan_uuid, measured_at,
     // logged_at, taken_at, etc.) so list views sort cheaply.
-    this.version(4).stores({
+    const v4Stores = {
       ...v3Stores,
       workout_plans: 'uuid, order_index, _synced, _updated_at',
       workout_routines: 'uuid, workout_plan_uuid, order_index, _synced, _updated_at',
@@ -415,6 +416,17 @@ export class IronDB extends Dexie {
       dysphoria_logs: 'uuid, logged_at, _synced, _updated_at',
       clothes_test_logs: 'uuid, logged_at, _synced, _updated_at',
       progress_photos: 'uuid, taken_at, pose, _synced, _updated_at',
+    };
+    this.version(4).stores(v4Stores);
+
+    // v5: index workout_plans.is_active for fast active-plan lookup. The
+    // is_active field was always synced (added in migration 006) but wasn't
+    // indexed, forcing a full scan to find the active plan. Schema-only
+    // change — no data transformation, existing rows pick up the index on
+    // upgrade.
+    this.version(5).stores({
+      ...v4Stores,
+      workout_plans: 'uuid, order_index, is_active, _synced, _updated_at',
     });
   }
 }
