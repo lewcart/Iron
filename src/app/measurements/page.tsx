@@ -16,10 +16,11 @@ import { logMeasurement, deleteMeasurement, recordProgressPhoto, deleteProgressP
 import { logBodyweight } from '@/lib/mutations';
 
 const SITES = [
-  { key: 'waist',     label: 'Waist' },
-  { key: 'hips',      label: 'Hips' },
-  { key: 'upper_arm', label: 'Upper Arm' },
-  { key: 'thigh',     label: 'Thigh' },
+  { key: 'shoulder_width', label: 'Shoulder Width' },
+  { key: 'waist',          label: 'Waist' },
+  { key: 'hips',           label: 'Hips' },
+  { key: 'upper_arm',      label: 'Upper Arm' },
+  { key: 'thigh',          label: 'Thigh' },
 ] as const;
 
 type SiteKey = typeof SITES[number]['key'];
@@ -27,10 +28,11 @@ type TabKey = 'measurements' | 'photos' | 'inbody';
 
 // Distinct Tailwind-equivalent colors for multi-site overlay (no --chart-N tokens in globals.css)
 const SITE_COLORS: Record<SiteKey, string> = {
-  waist:     '#3b82f6', // blue-500
-  hips:      '#10b981', // emerald-500
-  thigh:     '#f97316', // orange-500
-  upper_arm: '#a855f7', // purple-500
+  shoulder_width: '#f43f5e', // rose-500
+  waist:          '#3b82f6', // blue-500
+  hips:           '#10b981', // emerald-500
+  thigh:          '#f97316', // orange-500
+  upper_arm:      '#a855f7', // purple-500
 };
 
 // Three writers populate measurement_logs.site with different conventions:
@@ -39,10 +41,11 @@ const SITE_COLORS: Record<SiteKey, string> = {
 // right_arm/left_thigh/right_thigh. The chart/snapshot needs to surface all of
 // them under the matching UI tab.
 const SITE_ALIASES: Record<SiteKey, readonly string[]> = {
-  waist:     ['waist'],
-  hips:      ['hips', 'hip'],
-  upper_arm: ['upper_arm', 'left_arm', 'right_arm', 'left_bicep', 'right_bicep'],
-  thigh:     ['thigh', 'left_thigh', 'right_thigh'],
+  shoulder_width: ['shoulder_width', 'shoulders'],
+  waist:          ['waist'],
+  hips:           ['hips', 'hip'],
+  upper_arm:      ['upper_arm', 'left_arm', 'right_arm', 'left_bicep', 'right_bicep'],
+  thigh:          ['thigh', 'left_thigh', 'right_thigh'],
 };
 
 function siteGroup(rawSite: string): SiteKey | null {

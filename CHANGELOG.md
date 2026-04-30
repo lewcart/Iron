@@ -14,12 +14,22 @@ All notable changes to Rebirth are documented here.
 - **Eight new MCP tools** in `src/lib/mcp/nutrition-tools.ts`: `list_nutrition_logs`, `update_nutrition_log` (named params with field whitelist), `delete_nutrition_log`, `bulk_log_nutrition_meals` (per-item results, partial failures don't abort), `approve_nutrition_day` (idempotent, future-date rejected), `search_nutrition_foods` (3-layer), `get_nutrition_summary` (adherence + streak), and `get_nutrition_rules` (discovery). Uniform error shape with actionable hints.
 - **Sub-nav across `/nutrition/*`** (Today / Week / History / Summary).
 - **Reusable UI primitives** at `src/components/ui/`: `Sheet` (drag-to-dismiss bottom sheet with focus-trap and scroll-lock), `MacroRing` (pure-SVG donut with band-aware colour), `MacroBar` (horizontal % bar), `SearchInput` (debounced wrapper).
-- **Migration 020** adds `approved_status`/`approved_at` columns to `nutrition_day_notes`, a `bands` JSONB column to `nutrition_targets`, the pg_trgm extension + GIN index on `food_name`, and a `nutrition_food_canonical` view (deduped foods with frequency-and-recency ranking).
-- **Local-first plumbing** for the new fields. `LocalNutritionLog` gains `meal_name` / `template_meal_id` / `status` (already on the server). Dexie schema bumps from v5 to v6 with an explicit upgrade callback that backfills existing rows.
+- **Migration 021** adds `approved_status`/`approved_at` columns to `nutrition_day_notes`, a `bands` JSONB column to `nutrition_targets`, the pg_trgm extension + GIN index on `food_name`, and a `nutrition_food_canonical` view (deduped foods with frequency-and-recency ranking).
+- **Local-first plumbing** for the new fields. `LocalNutritionLog` gains `meal_name` / `template_meal_id` / `status` (already on the server). Dexie schema bumps from v6 to v7 with an explicit upgrade callback that backfills existing rows.
 
 ### Changed
 - **Sync push handler for `nutrition_day_notes` now uses `ON CONFLICT (date)`** instead of `ON CONFLICT (uuid)`. The previous behaviour would throw on the date UNIQUE constraint when a page-originated row and an MCP-originated row collided, stalling sync; the new behaviour merges the two paths.
 - **Food search query input is escaped before LIKE concatenation.** Searching for `100%` no longer matches the entire table.
+
+## [0.1.2] - 2026-04-30
+
+### Added
+- **Shoulder Width** is now a tracked measurement on /measurements alongside Waist, Hips, Upper Arm, and Thigh. The input shows up in the log-entry form, the current snapshot, the history list, and the trend chart with its own colour (rose-500). In physique tracking "shoulder width" refers to the tape-over-deltoids measurement (a circumference that grows with training), not biacromial bone-to-bone breadth.
+- One-off backfill script `scripts/backfill-shoulder-width.mjs` imports historical Shoulder Cir values from the Notion "Body" database. Reads from a committed JSON snapshot at `scripts/data/body-measurements.json` (40 entries, 33 valid). Migrates legacy `site='shoulders'` rows to `site='shoulder_width'`, then inserts new ones, skipping date collisions. Idempotent via `source='notion_body_db'` + `source_ref=<notion page_id>`. Run `node scripts/backfill-shoulder-width.mjs` for a dry run, or `--apply` to write.
+- One-off backfill script `scripts/backfill-progress-photos.mjs` for importing progress photos from the same Notion database. Refetches fresh Notion file URLs at run time (Notion signs them with a ~1hr TTL), uploads to Vercel Blob, and records in `progress_photos`. Pose defaults to `'front'` because Notion has no pose tagging — manually re-classify in-app after import. Requires `NOTION_TOKEN` env.
+
+### Changed
+- Renamed the `MeasurementSite` enum value `'shoulders'` to `'shoulder_width'` across the type system, the MCP `update_body_comp` tool schema, and the UI. Existing rows with the legacy `'shoulders'` literal continue to display correctly under the Shoulder Width tab via SITE_ALIASES.
 
 ## [0.1.1] - 2026-04-30
 

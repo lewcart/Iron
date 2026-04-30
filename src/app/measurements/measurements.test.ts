@@ -3,10 +3,11 @@ import { describe, it, expect } from 'vitest';
 // ── Helper functions mirrored from measurements/page.tsx ──────────────────────
 
 const SITES = [
-  { key: 'waist',     label: 'Waist' },
-  { key: 'hips',      label: 'Hips' },
-  { key: 'upper_arm', label: 'Upper Arm' },
-  { key: 'thigh',     label: 'Thigh' },
+  { key: 'shoulder_width', label: 'Shoulder Width' },
+  { key: 'waist',          label: 'Waist' },
+  { key: 'hips',           label: 'Hips' },
+  { key: 'upper_arm',      label: 'Upper Arm' },
+  { key: 'thigh',          label: 'Thigh' },
 ] as const;
 
 type SiteKey = typeof SITES[number]['key'];
@@ -36,12 +37,13 @@ function toDateInputValue(d = new Date()) {
 // ===== SITES =====
 
 describe('SITES', () => {
-  it('contains 4 measurement sites', () => {
-    expect(SITES).toHaveLength(4);
+  it('contains 5 measurement sites', () => {
+    expect(SITES).toHaveLength(5);
   });
 
-  it('includes waist, hips, upper_arm, and thigh', () => {
+  it('includes shoulder_width, waist, hips, upper_arm, and thigh', () => {
     const keys = SITES.map(s => s.key);
+    expect(keys).toContain('shoulder_width');
     expect(keys).toContain('waist');
     expect(keys).toContain('hips');
     expect(keys).toContain('upper_arm');
@@ -214,10 +216,11 @@ describe('chart data derivation', () => {
 
 describe('site alias resolution', () => {
   const SITE_ALIASES: Record<SiteKey, readonly string[]> = {
-    waist:     ['waist'],
-    hips:      ['hips', 'hip'],
-    upper_arm: ['upper_arm', 'left_arm', 'right_arm', 'left_bicep', 'right_bicep'],
-    thigh:     ['thigh', 'left_thigh', 'right_thigh'],
+    shoulder_width: ['shoulder_width', 'shoulders'],
+    waist:          ['waist'],
+    hips:           ['hips', 'hip'],
+    upper_arm:      ['upper_arm', 'left_arm', 'right_arm', 'left_bicep', 'right_bicep'],
+    thigh:          ['thigh', 'left_thigh', 'right_thigh'],
   };
 
   function siteGroup(rawSite: string): SiteKey | null {
@@ -253,7 +256,12 @@ describe('site alias resolution', () => {
     expect(siteGroup('chest')).toBeNull();
     expect(siteGroup('neck')).toBeNull();
     expect(siteGroup('left_calf')).toBeNull();
-    expect(siteGroup('shoulders')).toBeNull();
+    expect(siteGroup('abdomen')).toBeNull();
+  });
+
+  it('maps legacy shoulders site key to shoulder_width tab', () => {
+    expect(siteGroup('shoulder_width')).toBe('shoulder_width');
+    expect(siteGroup('shoulders')).toBe('shoulder_width');
   });
 
   it('chart filter for upper_arm finds left_bicep rows (regression: previously filtered to zero)', () => {

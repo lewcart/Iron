@@ -144,7 +144,7 @@ export type MeasurementSite =
   | 'left_forearm' | 'right_forearm'
   | 'left_thigh' | 'right_thigh'
   | 'left_calf' | 'right_calf'
-  | 'shoulders' | 'abdomen';
+  | 'shoulder_width' | 'abdomen';
 
 export interface MeasurementLog {
   uuid: string;
