@@ -39,8 +39,9 @@ interface PushPayload {
   nutrition_week_meals?: Array<Record<string, unknown>>;
   nutrition_day_notes?: Array<Record<string, unknown>>;
   nutrition_targets?: Array<Record<string, unknown>>;
-  hrt_protocols?: Array<Record<string, unknown>>;
-  hrt_logs?: Array<Record<string, unknown>>;
+  hrt_timeline_periods?: Array<Record<string, unknown>>;
+  lab_draws?: Array<Record<string, unknown>>;
+  lab_results?: Array<Record<string, unknown>>;
   wellbeing_logs?: Array<Record<string, unknown>>;
   dysphoria_logs?: Array<Record<string, unknown>>;
   clothes_test_logs?: Array<Record<string, unknown>>;
@@ -76,8 +77,9 @@ export async function POST(req: Request) {
     for (const r of body.nutrition_day_notes ?? []) await pushNutritionDayNote(r);
     for (const r of body.nutrition_targets ?? []) await pushNutritionTargets(r);
 
-    for (const r of body.hrt_protocols ?? []) await pushHrtProtocol(r);
-    for (const r of body.hrt_logs ?? []) await pushHrtLog(r);
+    for (const r of body.hrt_timeline_periods ?? []) await pushHrtTimelinePeriod(r);
+    for (const r of body.lab_draws ?? []) await pushLabDraw(r);
+    for (const r of body.lab_results ?? []) await pushLabResult(r);
 
     for (const r of body.wellbeing_logs ?? []) await pushWellbeing(r);
     for (const r of body.dysphoria_logs ?? []) await pushDysphoria(r);
@@ -460,39 +462,58 @@ async function pushNutritionTargets(r: Record<string, unknown>): Promise<void> {
   );
 }
 
-// ─── HRT ─────────────────────────────────────────────────────────────────────
+// ─── HRT timeline + Labs ─────────────────────────────────────────────────────
 
-async function pushHrtProtocol(r: Record<string, unknown>): Promise<void> {
+async function pushHrtTimelinePeriod(r: Record<string, unknown>): Promise<void> {
   if (r._deleted) {
-    await query('DELETE FROM hrt_protocols WHERE uuid = $1', [r.uuid]);
+    await query('DELETE FROM hrt_timeline_periods WHERE uuid = $1', [r.uuid]);
     return;
   }
   await query(
-    `INSERT INTO hrt_protocols (uuid, medication, dose_description, form, started_at, ended_at, includes_blocker, blocker_name, notes, updated_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
+    `INSERT INTO hrt_timeline_periods (uuid, name, started_at, ended_at, doses_e, doses_t_blocker, doses_other, notes, updated_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, NOW())
      ON CONFLICT (uuid) DO UPDATE SET
-       medication = EXCLUDED.medication, dose_description = EXCLUDED.dose_description,
-       form = EXCLUDED.form, started_at = EXCLUDED.started_at, ended_at = EXCLUDED.ended_at,
-       includes_blocker = EXCLUDED.includes_blocker, blocker_name = EXCLUDED.blocker_name,
-       notes = EXCLUDED.notes, updated_at = NOW()`,
-    [r.uuid, r.medication, r.dose_description, r.form, r.started_at, r.ended_at, Boolean(r.includes_blocker), r.blocker_name, r.notes],
+       name = EXCLUDED.name, started_at = EXCLUDED.started_at, ended_at = EXCLUDED.ended_at,
+       doses_e = EXCLUDED.doses_e, doses_t_blocker = EXCLUDED.doses_t_blocker,
+       doses_other = EXCLUDED.doses_other, notes = EXCLUDED.notes, updated_at = NOW()`,
+    [
+      r.uuid, r.name, r.started_at, r.ended_at,
+      r.doses_e, r.doses_t_blocker,
+      JSON.stringify(r.doses_other ?? []),
+      r.notes,
+    ],
   );
 }
 
-async function pushHrtLog(r: Record<string, unknown>): Promise<void> {
+async function pushLabDraw(r: Record<string, unknown>): Promise<void> {
   if (r._deleted) {
-    await query('DELETE FROM hrt_logs WHERE uuid = $1', [r.uuid]);
+    // FK CASCADE removes any lab_results pointing at this draw — but they
+    // also push their own _deleted tombstones, which become DELETE-no-ops.
+    await query('DELETE FROM lab_draws WHERE uuid = $1', [r.uuid]);
     return;
   }
   await query(
-    `INSERT INTO hrt_logs (uuid, logged_at, medication, dose_mg, route, notes, taken, hrt_protocol_uuid, updated_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
+    `INSERT INTO lab_draws (uuid, drawn_at, notes, source, updated_at)
+     VALUES ($1, $2, $3, $4, NOW())
      ON CONFLICT (uuid) DO UPDATE SET
-       logged_at = EXCLUDED.logged_at, medication = EXCLUDED.medication,
-       dose_mg = EXCLUDED.dose_mg, route = EXCLUDED.route,
-       notes = EXCLUDED.notes, taken = EXCLUDED.taken,
-       hrt_protocol_uuid = EXCLUDED.hrt_protocol_uuid, updated_at = NOW()`,
-    [r.uuid, r.logged_at, r.medication, r.dose_mg, r.route, r.notes, Boolean(r.taken), r.hrt_protocol_uuid],
+       drawn_at = EXCLUDED.drawn_at, notes = EXCLUDED.notes,
+       source = EXCLUDED.source, updated_at = NOW()`,
+    [r.uuid, r.drawn_at, r.notes, r.source ?? 'manual'],
+  );
+}
+
+async function pushLabResult(r: Record<string, unknown>): Promise<void> {
+  if (r._deleted) {
+    await query('DELETE FROM lab_results WHERE uuid = $1', [r.uuid]);
+    return;
+  }
+  await query(
+    `INSERT INTO lab_results (uuid, draw_uuid, lab_code, value, updated_at)
+     VALUES ($1, $2, $3, $4, NOW())
+     ON CONFLICT (uuid) DO UPDATE SET
+       draw_uuid = EXCLUDED.draw_uuid, lab_code = EXCLUDED.lab_code,
+       value = EXCLUDED.value, updated_at = NOW()`,
+    [r.uuid, r.draw_uuid, r.lab_code, r.value],
   );
 }
 

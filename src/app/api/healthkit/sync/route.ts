@@ -57,11 +57,24 @@ interface SyncStateUpdate {
   last_error?: string | null;
 }
 
+interface MedicationRecord {
+  hk_uuid: string;
+  medication_name: string;
+  dose_string?: string | null;
+  taken_at: number;                  // epoch ms
+  scheduled_at?: number | null;
+  source_name?: string;
+  source_bundle_id?: string;
+  metadata_json?: string;
+}
+
 interface SyncBody {
   daily?: DailyRow[];
   sleep?: SleepNight[];
   workouts?: FullHKWorkout[];
+  medications?: MedicationRecord[];
   deleted_workouts?: string[];       // HK UUIDs that were deleted since last anchor
+  deleted_medications?: string[];    // HK UUIDs deleted since last medications anchor
   state_updates?: SyncStateUpdate[];
 }
 
@@ -107,7 +120,9 @@ export async function POST(request: NextRequest) {
   const daily = body.daily ?? [];
   const sleep = body.sleep ?? [];
   const workouts = body.workouts ?? [];
+  const medications = body.medications ?? [];
   const deletedWorkoutUuids = body.deleted_workouts ?? [];
+  const deletedMedicationUuids = body.deleted_medications ?? [];
   const stateUpdates = body.state_updates ?? [];
 
   // ── Upsert daily aggregates ───────────────────────────────────────────────
@@ -242,6 +257,41 @@ export async function POST(request: NextRequest) {
     });
   }
 
+  // ── Medications: upsert + handle deletions ───────────────────────────────
+  const medicationStatements: Array<{ text: string; params?: unknown[] }> = [];
+
+  if (deletedMedicationUuids.length > 0) {
+    medicationStatements.push({
+      text: `DELETE FROM healthkit_medications WHERE hk_uuid = ANY($1)`,
+      params: [deletedMedicationUuids],
+    });
+  }
+
+  for (const m of medications) {
+    medicationStatements.push({
+      text: `INSERT INTO healthkit_medications
+               (hk_uuid, medication_name, dose_string, taken_at, scheduled_at,
+                source_name, source_bundle_id, metadata_json, updated_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, NOW())
+             ON CONFLICT (hk_uuid) DO UPDATE SET
+               medication_name = EXCLUDED.medication_name,
+               dose_string = EXCLUDED.dose_string,
+               taken_at = EXCLUDED.taken_at,
+               scheduled_at = EXCLUDED.scheduled_at,
+               source_name = EXCLUDED.source_name,
+               source_bundle_id = EXCLUDED.source_bundle_id,
+               metadata_json = EXCLUDED.metadata_json,
+               updated_at = NOW()`,
+      params: [
+        m.hk_uuid, m.medication_name, m.dose_string ?? null,
+        new Date(m.taken_at).toISOString(),
+        m.scheduled_at ? new Date(m.scheduled_at).toISOString() : null,
+        m.source_name ?? null, m.source_bundle_id ?? null,
+        m.metadata_json ?? '{}',
+      ],
+    });
+  }
+
   // ── Sync-state upserts ────────────────────────────────────────────────────
   const stateStatements = stateUpdates.map((s) => ({
     text: `INSERT INTO healthkit_sync_state
@@ -278,6 +328,7 @@ export async function POST(request: NextRequest) {
     ...dailyStatements,
     ...sleepStatements,
     ...workoutStatements,
+    ...medicationStatements,
     ...stateStatements,
   ];
 
@@ -290,6 +341,8 @@ export async function POST(request: NextRequest) {
     sleep_upserted: sleepStatements.length,
     workouts_upserted: workouts.length,
     workouts_deleted: deletedWorkoutUuids.length,
+    medications_upserted: medications.length,
+    medications_deleted: deletedMedicationUuids.length,
     state_updates: stateUpdates.length,
   });
 }

@@ -20,6 +20,7 @@ import {
   type DailyAggregateRow,
   type SleepNight,
   type FullHKWorkout,
+  type MedicationRecord,
   type WrittenSample,
 } from '@/lib/healthkit';
 import { apiBase } from '@/lib/api/client';
@@ -44,6 +45,7 @@ export interface SyncResult {
   metrics_synced: number;
   workouts_synced: number;
   nights_synced: number;
+  medications_synced: number;
   samples_mirrored: number;
   duration_ms: number;
 }
@@ -80,6 +82,7 @@ export async function runForegroundSync(): Promise<SyncResult> {
   const metricsSyncedSet = new Set<string>();
   let workoutsSynced = 0;
   let nightsSynced = 0;
+  let medicationsSynced = 0;
 
   try {
     const { available } = await HealthKit.isAvailable();
@@ -177,11 +180,34 @@ export async function runForegroundSync(): Promise<SyncResult> {
     workoutError = errorMessage(e);
   }
 
+  // ── Medications (anchored, iOS 16.4+ Medications feature) ────────────────
+  let medications: MedicationRecord[] = [];
+  let deletedMedicationUuids: string[] = [];
+  let medicationAnchor: string | null = null;
+  let medicationError: string | null = null;
+  try {
+    const prev = state['medications'];
+    const startMs = prev?.last_anchor ? backfillStart : backfillStart;
+    const { medications: fetched, deleted, nextAnchor } = await HealthKit.fetchMedicationRecords({
+      startTime: startMs,
+      endTime: now,
+      anchor: prev?.last_anchor ?? undefined,
+    });
+    medications = fetched;
+    deletedMedicationUuids = deleted;
+    medicationAnchor = nextAnchor;
+    medicationsSynced = fetched.length;
+    if (fetched.length > 0 || nextAnchor) metricsSyncedSet.add('medications');
+  } catch (e) {
+    medicationError = errorMessage(e);
+  }
+
   // ── POST everything in one sync call ──────────────────────────────────────
   const stateUpdates = [
     ...quantityStateUpdates,
     { metric: 'sleep', last_anchor: sleepAnchor, last_error: sleepError },
     { metric: 'workouts', last_anchor: workoutAnchor, last_error: workoutError },
+    { metric: 'medications', last_anchor: medicationAnchor, last_error: medicationError },
   ];
 
   try {
@@ -192,7 +218,9 @@ export async function runForegroundSync(): Promise<SyncResult> {
         daily: dailyRows,
         sleep,
         workouts,
+        medications,
         deleted_workouts: deletedWorkoutUuids,
+        deleted_medications: deletedMedicationUuids,
         state_updates: stateUpdates,
       }),
     });
@@ -213,6 +241,7 @@ export async function runForegroundSync(): Promise<SyncResult> {
     metrics_synced: metricsSyncedSet.size,
     workouts_synced: workoutsSynced,
     nights_synced: nightsSynced,
+    medications_synced: medicationsSynced,
     samples_mirrored: samplesMirrored,
     duration_ms: Math.round(performance.now() - started),
   };
@@ -333,6 +362,7 @@ function emptyResult(reason: SyncResult['reason'], started: number): SyncResult 
     metrics_synced: 0,
     workouts_synced: 0,
     nights_synced: 0,
+    medications_synced: 0,
     samples_mirrored: 0,
     duration_ms: Math.round(performance.now() - started),
   };
