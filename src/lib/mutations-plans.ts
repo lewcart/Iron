@@ -209,6 +209,11 @@ export async function addRoutineExercise(opts: {
   return id;
 }
 
+export async function updateRoutineExerciseComment(uuid: string, comment: string | null): Promise<void> {
+  await db.workout_routine_exercises.update(uuid, { comment, ...syncMeta() });
+  syncEngine.schedulePush();
+}
+
 export async function removeRoutineExercise(uuid: string): Promise<void> {
   await db.transaction(
     'rw',

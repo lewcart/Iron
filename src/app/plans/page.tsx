@@ -1,21 +1,44 @@
 'use client';
 
-import { useState, useCallback, useMemo } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useState, useMemo } from 'react';
 import { ChevronDown, ChevronRight, ChevronUp, Check, Plus, Search, Star, Trash2, X } from 'lucide-react';
-import type { WorkoutPlan, WorkoutRoutine, WorkoutRoutineExercise, WorkoutRoutineSet, Exercise } from '@/types';
-import { queryKeys } from '@/lib/api/query-keys';
-import { fetchPlansWithRoutines, type PlanWithRoutines } from '@/lib/api/plans';
-import { fetchExerciseCatalog } from '@/lib/api/exercises';
-import { fetchJson } from '@/lib/api/client';
+import type { Exercise } from '@/types';
 import { apiBase } from '@/lib/api/client';
+import { useExercises } from '@/lib/useLocalDB';
+import {
+  usePlansFull,
+  type LocalPlanWithRoutines,
+  type LocalRoutineWithExercises,
+  type LocalRoutineExerciseEntry,
+} from '@/lib/useLocalDB-plans';
+import {
+  createPlan,
+  updatePlanTitle,
+  deletePlan,
+  activatePlan,
+  reorderPlans,
+  createRoutine,
+  deleteRoutine,
+  reorderRoutines,
+  addRoutineExercise,
+  removeRoutineExercise,
+  updateRoutineExerciseComment,
+  addRoutineSet,
+  updateRoutineSet,
+  deleteRoutineSet,
+} from '@/lib/mutations-plans';
+import type { LocalWorkoutRoutineSet } from '@/db/local';
 
-// ─── Types ────────────────────────────────────────────────────────────────────
-
-interface RoutineWithExercises extends WorkoutRoutine {
-  exercises: WorkoutRoutineExercise[];
-  loaded: boolean;
-}
+// Local-first /plans. Reads come from useLiveQuery (Dexie); writes go through
+// mutations-plans.ts which writes to Dexie + scheduleSync. The page renders
+// instantly on mount because Dexie is already populated by the sync engine
+// in the background.
+//
+// Compared to the previous version (PR #14 and earlier):
+// - No useQuery/useMutation, no queryClient invalidation cascades
+// - No `loaded` flags or per-routine fetch — everything is in usePlansFull
+// - Optimistic updates are free (mutations-plans writes Dexie immediately,
+//   useLiveQuery picks up the change on the next tick)
 
 // ─── Exercise selector sheet ──────────────────────────────────────────────────
 
@@ -27,23 +50,16 @@ function ExerciseSelectorSheet({
   onClose: () => void;
 }) {
   const [search, setSearch] = useState('');
-  const { data: exercises = [], isPending: loading } = useQuery({
-    queryKey: queryKeys.exercises.catalog(),
-    queryFn: fetchExerciseCatalog,
-    staleTime: 15 * 60 * 1000,
-  });
+  // useExercises reads from Dexie — no spinner needed beyond the brief
+  // first-render tick where useLiveQuery returns its default [].
+  const exercises = useExercises({ search: search.trim().length >= 2 ? search.trim() : undefined });
 
   const filtered = useMemo(() => {
     if (!search.trim()) return exercises;
-    const q = search.trim().toLowerCase();
-    return exercises.filter(
-      (ex) =>
-        ex.title.toLowerCase().includes(q) ||
-        ex.alias.some((a) => a.toLowerCase().includes(q))
-    );
+    return exercises;
   }, [exercises, search]);
 
-  const grouped: Record<string, Exercise[]> = {};
+  const grouped: Record<string, typeof filtered> = {};
   for (const ex of filtered) {
     const muscle = ex.primary_muscles[0] ?? 'Other';
     if (!grouped[muscle]) grouped[muscle] = [];
@@ -77,9 +93,7 @@ function ExerciseSelectorSheet({
         </div>
       </div>
       <div className="flex-1 overflow-y-auto px-4 py-2 space-y-4">
-        {loading ? (
-          <p className="text-center py-8 text-muted-foreground text-sm">Loading…</p>
-        ) : groups.length === 0 ? (
+        {groups.length === 0 ? (
           <p className="text-center py-8 text-muted-foreground text-sm">No exercises found</p>
         ) : (
           groups.map(([muscle, exs]) => (
@@ -89,7 +103,7 @@ function ExerciseSelectorSheet({
                 {exs.map((ex) => (
                   <button
                     key={ex.uuid}
-                    onClick={() => onAdd(ex)}
+                    onClick={() => onAdd(ex as unknown as Exercise)}
                     className="ios-row w-full text-left gap-3 hover:bg-muted transition-colors"
                   >
                     <div className="flex-1">
@@ -110,7 +124,7 @@ function ExerciseSelectorSheet({
 
 // ─── Routine card ─────────────────────────────────────────────────────────────
 
-function formatSet(s: WorkoutRoutineSet): string {
+function formatSet(s: LocalWorkoutRoutineSet): string {
   if (s.min_repetitions != null && s.max_repetitions != null) {
     return s.min_repetitions === s.max_repetitions
       ? `${s.min_repetitions}`
@@ -123,8 +137,7 @@ function formatSet(s: WorkoutRoutineSet): string {
 
 function RoutineCard({
   planUuid,
-  routine: initialRoutine,
-  onDelete,
+  routine,
   onStartWorkout,
   onMoveUp,
   onMoveDown,
@@ -132,147 +145,75 @@ function RoutineCard({
   isLast,
 }: {
   planUuid: string;
-  routine: WorkoutRoutine;
-  onDelete: () => void;
+  routine: LocalRoutineWithExercises;
   onStartWorkout: () => void;
   onMoveUp?: () => void;
   onMoveDown?: () => void;
   isFirst?: boolean;
   isLast?: boolean;
 }) {
-  const queryClient = useQueryClient();
-  const invalidatePlans = () =>
-    queryClient.invalidateQueries({ queryKey: queryKeys.plans() });
-
-  const [routine, setRoutine] = useState<RoutineWithExercises>({
-    ...initialRoutine,
-    exercises: [],
-    loaded: false,
-  });
   const [expanded, setExpanded] = useState(false);
   const [showExerciseSelector, setShowExerciseSelector] = useState(false);
   const [starting, setStarting] = useState(false);
   const [editingSet, setEditingSet] = useState<{ uuid: string; min: string; max: string } | null>(null);
   const [editingNotes, setEditingNotes] = useState<{ exerciseUuid: string; value: string } | null>(null);
 
-  const setsBase = (routineExerciseUuid: string) =>
-    `${apiBase()}/api/plans/${planUuid}/routines/${initialRoutine.uuid}/exercises/${routineExerciseUuid}/sets`;
-
-  const loadExercises = useCallback(async () => {
-    const res = await fetch(`${apiBase()}/api/plans/${planUuid}/routines/${initialRoutine.uuid}/exercises`);
-    const routineExercises = await res.json();
-    setRoutine(prev => ({ ...prev, exercises: routineExercises, loaded: true }));
-  }, [planUuid, initialRoutine.uuid]);
-
-  const handleExpand = async () => {
-    const next = !expanded;
-    setExpanded(next);
-    if (next && !routine.loaded) {
-      await loadExercises();
-    }
-  };
-
   const handleAddExercise = async (exercise: Exercise) => {
-    await fetch(`${apiBase()}/api/plans/${planUuid}/routines/${initialRoutine.uuid}/exercises`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ exerciseUuid: exercise.uuid }),
+    await addRoutineExercise({
+      workout_routine_uuid: routine.uuid,
+      exercise_uuid: exercise.uuid,
     });
     setShowExerciseSelector(false);
-    await loadExercises();
-    invalidatePlans();
+    // useLiveQuery picks up the new row automatically — no refetch needed.
   };
 
-  const handleRemoveExercise = async (exerciseUuid: string) => {
+  const handleRemoveExercise = async (routineExerciseUuid: string) => {
     if (!confirm('Remove this exercise from the routine?')) return;
-    await fetch(`${apiBase()}/api/plans/${planUuid}/routines/${initialRoutine.uuid}/exercises/${exerciseUuid}`, {
-      method: 'DELETE',
-    });
-    await loadExercises();
-    invalidatePlans();
+    await removeRoutineExercise(routineExerciseUuid);
   };
 
   const handleAddSet = async (routineExerciseUuid: string) => {
-    const res = await fetch(setsBase(routineExerciseUuid), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({}),
-    });
-    const newSet: WorkoutRoutineSet = await res.json();
-    setRoutine(prev => ({
-      ...prev,
-      exercises: prev.exercises.map(ex =>
-        ex.uuid === routineExerciseUuid
-          ? { ...ex, sets: [...(ex.sets ?? []), newSet] }
-          : ex
-      ),
-    }));
-    setEditingSet({ uuid: newSet.uuid, min: '', max: '' });
+    const setUuid = await addRoutineSet({ workout_routine_exercise_uuid: routineExerciseUuid });
+    setEditingSet({ uuid: setUuid, min: '', max: '' });
   };
 
   const handleSaveSet = async () => {
     if (!editingSet) return;
     const minVal = editingSet.min.trim() === '' ? null : Number(editingSet.min);
     const maxVal = editingSet.max.trim() === '' ? null : Number(editingSet.max);
-    // Find which exercise owns this set
-    const ownerEx = routine.exercises.find(ex => ex.sets?.some(s => s.uuid === editingSet.uuid));
-    if (!ownerEx) { setEditingSet(null); return; }
-    const res = await fetch(`${setsBase(ownerEx.uuid)}/${editingSet.uuid}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ minRepetitions: minVal, maxRepetitions: maxVal }),
+    await updateRoutineSet(editingSet.uuid, {
+      min_repetitions: Number.isFinite(minVal) ? minVal : null,
+      max_repetitions: Number.isFinite(maxVal) ? maxVal : null,
     });
-    const updated: WorkoutRoutineSet = await res.json();
-    setRoutine(prev => ({
-      ...prev,
-      exercises: prev.exercises.map(ex =>
-        ex.uuid === ownerEx.uuid
-          ? { ...ex, sets: (ex.sets ?? []).map(s => s.uuid === updated.uuid ? updated : s) }
-          : ex
-      ),
-    }));
     setEditingSet(null);
   };
 
-  const handleDeleteSet = async (routineExerciseUuid: string, setUuid: string) => {
-    await fetch(`${setsBase(routineExerciseUuid)}/${setUuid}`, { method: 'DELETE' });
-    setRoutine(prev => ({
-      ...prev,
-      exercises: prev.exercises.map(ex =>
-        ex.uuid === routineExerciseUuid
-          ? { ...ex, sets: (ex.sets ?? []).filter(s => s.uuid !== setUuid) }
-          : ex
-      ),
-    }));
+  const handleDeleteSet = async (setUuid: string) => {
+    await deleteRoutineSet(setUuid);
     if (editingSet?.uuid === setUuid) setEditingSet(null);
   };
 
   const handleSaveNotes = async () => {
     if (!editingNotes) return;
     const { exerciseUuid, value } = editingNotes;
-    const comment = value.trim() || null;
-    await fetch(`${apiBase()}/api/plans/${planUuid}/routines/${initialRoutine.uuid}/exercises/${exerciseUuid}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ comment }),
-    });
-    setRoutine(prev => ({
-      ...prev,
-      exercises: prev.exercises.map(ex =>
-        ex.uuid === exerciseUuid ? { ...ex, comment } : ex
-      ),
-    }));
+    await updateRoutineExerciseComment(exerciseUuid, value.trim() || null);
     setEditingNotes(null);
   };
 
+  // Start-from-routine still goes through the API for now — that route
+  // creates the workout + exercises + sets server-side and runs PB lookup.
+  // Local-first port deferred to a follow-up since it duplicates the
+  // existing logic in workout/page.tsx startWorkoutFromRoutine.
   const handleStartWorkout = async () => {
     setStarting(true);
-    const res = await fetch(`${apiBase()}/api/plans/${planUuid}/routines/${initialRoutine.uuid}/start`, {
-      method: 'POST',
-    });
-    await res.json();
-    setStarting(false);
-    invalidatePlans();
+    try {
+      const res = await fetch(`${apiBase()}/api/plans/${planUuid}/routines/${routine.uuid}/start`, {
+        method: 'POST',
+      });
+      await res.json();
+    } finally {
+      setStarting(false);
+    }
     onStartWorkout();
   };
 
@@ -282,7 +223,7 @@ function RoutineCard({
         {/* Routine header */}
         <div className="flex items-center px-4 py-3">
           <button
-            onClick={handleExpand}
+            onClick={() => setExpanded(e => !e)}
             className="flex-1 flex items-center gap-2 text-left"
           >
             {expanded
@@ -290,13 +231,11 @@ function RoutineCard({
               : <ChevronRight className="h-4 w-4 text-muted-foreground flex-shrink-0" />
             }
             <span className="font-medium text-sm text-foreground">
-              {initialRoutine.title ?? 'Untitled Routine'}
+              {routine.title ?? 'Untitled Routine'}
             </span>
-            {routine.loaded && (
-              <span className="text-xs text-muted-foreground ml-1">
-                ({routine.exercises.length} exercise{routine.exercises.length !== 1 ? 's' : ''})
-              </span>
-            )}
+            <span className="text-xs text-muted-foreground ml-1">
+              ({routine.exercises.length} exercise{routine.exercises.length !== 1 ? 's' : ''})
+            </span>
           </button>
           <div className="flex items-center gap-1">
             <button
@@ -323,7 +262,9 @@ function RoutineCard({
               {starting ? 'Starting…' : 'Start'}
             </button>
             <button
-              onClick={() => { if (confirm('Delete this routine?')) onDelete(); }}
+              onClick={() => {
+                if (confirm('Delete this routine?')) deleteRoutine(routine.uuid);
+              }}
               className="text-muted-foreground hover:text-destructive transition-colors p-1"
             >
               <Trash2 className="h-4 w-4" />
@@ -334,18 +275,16 @@ function RoutineCard({
         {/* Expanded exercises */}
         {expanded && (
           <div className="border-t border-border">
-            {!routine.loaded ? (
-              <p className="px-4 py-3 text-sm text-muted-foreground">Loading…</p>
-            ) : routine.exercises.length === 0 ? (
+            {routine.exercises.length === 0 ? (
               <p className="px-4 py-3 text-sm text-muted-foreground">No exercises yet</p>
             ) : (
               <div className="divide-y divide-border">
-                {routine.exercises.map((re) => (
+                {routine.exercises.map((re: LocalRoutineExerciseEntry) => (
                   <div key={re.uuid}>
                     {/* Exercise row */}
                     <div className="flex items-start px-4 py-2.5 gap-3">
                       <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium text-foreground">{re.exercise_title ?? 'Unknown'}</p>
+                        <p className="text-sm font-medium text-foreground">{re.exercise?.title ?? ''}</p>
                         {editingNotes?.exerciseUuid === re.uuid ? (
                           <div className="flex items-center gap-1.5 mt-1">
                             <input
@@ -377,7 +316,7 @@ function RoutineCard({
                         )}
                       </div>
                       <button
-                        onClick={() => handleRemoveExercise(re.exercise_uuid)}
+                        onClick={() => handleRemoveExercise(re.uuid)}
                         className="text-muted-foreground hover:text-destructive transition-colors p-1 flex-shrink-0"
                         aria-label="Remove exercise"
                       >
@@ -385,7 +324,7 @@ function RoutineCard({
                       </button>
                     </div>
                     {/* Set rows */}
-                    {(re.sets ?? []).map((set, si) => (
+                    {re.sets.map((set, si) => (
                       <div key={set.uuid} className="flex items-center pl-8 pr-3 py-1.5 gap-2 bg-muted/30">
                         <span className="text-xs text-muted-foreground w-10 flex-shrink-0">Set {si + 1}</span>
                         {editingSet?.uuid === set.uuid ? (
@@ -421,13 +360,17 @@ function RoutineCard({
                         ) : (
                           <>
                             <button
-                              onClick={() => setEditingSet({ uuid: set.uuid, min: set.min_repetitions != null ? String(set.min_repetitions) : '', max: set.max_repetitions != null ? String(set.max_repetitions) : '' })}
+                              onClick={() => setEditingSet({
+                                uuid: set.uuid,
+                                min: set.min_repetitions != null ? String(set.min_repetitions) : '',
+                                max: set.max_repetitions != null ? String(set.max_repetitions) : '',
+                              })}
                               className="flex-1 text-left text-sm text-foreground"
                             >
                               {formatSet(set)} reps
                             </button>
                             <button
-                              onClick={() => handleDeleteSet(re.uuid, set.uuid)}
+                              onClick={() => handleDeleteSet(set.uuid)}
                               className="text-muted-foreground hover:text-destructive transition-colors p-1"
                               aria-label="Delete set"
                             >
@@ -473,93 +416,45 @@ function RoutineCard({
 // ─── Plan card ────────────────────────────────────────────────────────────────
 
 function PlanCard({
-  plan: initialPlan,
-  onDelete,
+  plan,
   onStartWorkout,
   onMoveUp,
   onMoveDown,
-  onActivate,
   isFirst,
   isLast,
 }: {
-  plan: PlanWithRoutines;
-  onDelete: () => void;
+  plan: LocalPlanWithRoutines;
   onStartWorkout: () => void;
   onMoveUp?: () => void;
   onMoveDown?: () => void;
-  onActivate?: () => void;
   isFirst?: boolean;
   isLast?: boolean;
 }) {
-  const queryClient = useQueryClient();
-  const invalidatePlans = () =>
-    queryClient.invalidateQueries({ queryKey: queryKeys.plans() });
-
-  const [plan, setPlan] = useState(initialPlan);
   const [expanded, setExpanded] = useState(false);
   const [editingTitle, setEditingTitle] = useState(false);
-  const [titleValue, setTitleValue] = useState(initialPlan.title ?? '');
+  const [titleValue, setTitleValue] = useState(plan.title ?? '');
   const [addingRoutine, setAddingRoutine] = useState(false);
   const [newRoutineTitle, setNewRoutineTitle] = useState('');
 
   const saveTitle = async () => {
     if (!titleValue.trim()) { setEditingTitle(false); return; }
-    const res = await fetch(`${apiBase()}/api/plans/${plan.uuid}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ title: titleValue.trim() }),
-    });
-    const updated = await res.json();
-    setPlan(prev => ({ ...prev, title: updated.title }));
+    await updatePlanTitle(plan.uuid, titleValue.trim());
     setEditingTitle(false);
-    invalidatePlans();
-  };
-
-  const refreshPlan = async () => {
-    const res = await fetch(`${apiBase()}/api/plans/${plan.uuid}`);
-    const data = await res.json();
-    setPlan(data);
   };
 
   const handleAddRoutine = async () => {
     if (!newRoutineTitle.trim()) return;
-    await fetch(`${apiBase()}/api/plans/${plan.uuid}/routines`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ title: newRoutineTitle.trim() }),
-    });
+    await createRoutine({ workout_plan_uuid: plan.uuid, title: newRoutineTitle.trim() });
     setNewRoutineTitle('');
     setAddingRoutine(false);
-    await refreshPlan();
-    invalidatePlans();
-  };
-
-  const handleDeleteRoutine = async (routineUuid: string) => {
-    await fetch(`${apiBase()}/api/plans/${plan.uuid}/routines/${routineUuid}`, { method: 'DELETE' });
-    await refreshPlan();
-    invalidatePlans();
   };
 
   const handleMoveRoutine = async (index: number, direction: 'up' | 'down') => {
     const swapIndex = direction === 'up' ? index - 1 : index + 1;
     if (swapIndex < 0 || swapIndex >= plan.routines.length) return;
-    const a = plan.routines[index];
-    const b = plan.routines[swapIndex];
-    // Swap order_index values
-    await Promise.all([
-      fetch(`${apiBase()}/api/plans/${plan.uuid}/routines/${a.uuid}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ orderIndex: b.order_index }),
-      }),
-      fetch(`${apiBase()}/api/plans/${plan.uuid}/routines/${b.uuid}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ orderIndex: a.order_index }),
-      }),
-    ]);
-    await refreshPlan();
-    invalidatePlans();
+    const reordered = [...plan.routines];
+    [reordered[index], reordered[swapIndex]] = [reordered[swapIndex], reordered[index]];
+    await reorderRoutines(plan.uuid, reordered.map(r => r.uuid));
   };
 
   return (
@@ -603,7 +498,7 @@ function PlanCard({
           {plan.routines.length} routine{plan.routines.length !== 1 ? 's' : ''}
         </span>
         <button
-          onClick={(e) => { e.stopPropagation(); onActivate?.(); }}
+          onClick={(e) => { e.stopPropagation(); if (!plan.is_active) activatePlan(plan.uuid); }}
           disabled={plan.is_active}
           className="text-muted-foreground hover:text-primary transition-colors p-1 disabled:opacity-30 disabled:hover:text-muted-foreground"
           aria-label={plan.is_active ? 'Active plan' : 'Make active plan'}
@@ -628,7 +523,7 @@ function PlanCard({
           <ChevronDown className="h-4 w-4" />
         </button>
         <button
-          onClick={() => { if (confirm(`Delete "${plan.title ?? 'this plan'}"?`)) onDelete(); }}
+          onClick={() => { if (confirm(`Delete "${plan.title ?? 'this plan'}"?`)) deletePlan(plan.uuid); }}
           className="text-muted-foreground hover:text-destructive transition-colors p-1"
         >
           <Trash2 className="h-4 w-4" />
@@ -647,7 +542,6 @@ function PlanCard({
               key={routine.uuid}
               planUuid={plan.uuid}
               routine={routine}
-              onDelete={() => handleDeleteRoutine(routine.uuid)}
               onStartWorkout={onStartWorkout}
               onMoveUp={() => handleMoveRoutine(i, 'up')}
               onMoveDown={() => handleMoveRoutine(i, 'down')}
@@ -697,131 +591,28 @@ function PlanCard({
 
 // ─── Main page ────────────────────────────────────────────────────────────────
 
-function PlansListSkeleton() {
-  return (
-    <div className="space-y-3 animate-pulse px-4" aria-hidden>
-      <div className="h-32 rounded-2xl bg-muted/60 border border-border" />
-      <div className="h-32 rounded-2xl bg-muted/60 border border-border" />
-    </div>
-  );
-}
-
 export default function PlansPage() {
-  const queryClient = useQueryClient();
+  const plans = usePlansFull();
   const [creatingPlan, setCreatingPlan] = useState(false);
   const [newPlanTitle, setNewPlanTitle] = useState('');
 
-  const { data: plans = [], isPending, isPlaceholderData } = useQuery({
-    queryKey: queryKeys.plans(),
-    queryFn: fetchPlansWithRoutines,
-    staleTime: 120_000,
-    placeholderData: (p) => p,
-  });
-
-  const createPlanMut = useMutation({
-    mutationFn: (title: string) =>
-      fetchJson<WorkoutPlan>('/api/plans', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title }),
-      }),
-    onMutate: async (title) => {
-      await queryClient.cancelQueries({ queryKey: queryKeys.plans() });
-      const prev = queryClient.getQueryData<PlanWithRoutines[]>(queryKeys.plans());
-      const optimistic: PlanWithRoutines = {
-        uuid: `optimistic-${Date.now()}`,
-        title: title.trim(),
-        order_index: (prev?.length ?? 0),
-        is_active: false,
-        routines: [],
-      };
-      queryClient.setQueryData<PlanWithRoutines[]>(queryKeys.plans(), (old) => [
-        ...(old ?? []),
-        optimistic,
-      ]);
-      return { prev };
-    },
-    onError: (_err, _title, ctx) => {
-      if (ctx?.prev) queryClient.setQueryData(queryKeys.plans(), ctx.prev);
-    },
-    onSettled: () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.plans() });
-    },
-  });
-
-  const deletePlanMut = useMutation({
-    mutationFn: (uuid: string) => fetch(`${apiBase()}/api/plans/${uuid}`, { method: 'DELETE' }).then((r) => {
-      if (!r.ok) throw new Error('Delete failed');
-    }),
-    onMutate: async (uuid) => {
-      await queryClient.cancelQueries({ queryKey: queryKeys.plans() });
-      const prev = queryClient.getQueryData<PlanWithRoutines[]>(queryKeys.plans());
-      queryClient.setQueryData<PlanWithRoutines[]>(
-        queryKeys.plans(),
-        (old) => (old ?? []).filter((p) => p.uuid !== uuid)
-      );
-      return { prev };
-    },
-    onError: (_err, _uuid, ctx) => {
-      if (ctx?.prev) queryClient.setQueryData(queryKeys.plans(), ctx.prev);
-    },
-    onSettled: () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.plans() });
-    },
-  });
-
-  const handleCreatePlan = () => {
+  const handleCreatePlan = async () => {
     if (!newPlanTitle.trim()) return;
-    createPlanMut.mutate(newPlanTitle.trim(), {
-      onSuccess: () => {
-        setNewPlanTitle('');
-        setCreatingPlan(false);
-      },
-    });
+    await createPlan({ title: newPlanTitle.trim() });
+    setNewPlanTitle('');
+    setCreatingPlan(false);
   };
-
-  const handleDeletePlan = (uuid: string) => {
-    deletePlanMut.mutate(uuid);
-  };
-
-  const loading = isPending && plans.length === 0;
 
   const handleMovePlan = async (index: number, direction: 'up' | 'down') => {
     const swapIndex = direction === 'up' ? index - 1 : index + 1;
     if (swapIndex < 0 || swapIndex >= plans.length) return;
     const reordered = [...plans];
     [reordered[index], reordered[swapIndex]] = [reordered[swapIndex], reordered[index]];
-    queryClient.setQueryData<PlanWithRoutines[]>(
-      queryKeys.plans(),
-      reordered.map((p, i) => ({ ...p, order_index: i }))
-    );
-    await Promise.all(
-      reordered.map((p, i) =>
-        fetch(`${apiBase()}/api/plans/${p.uuid}`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ orderIndex: i }),
-        })
-      )
-    );
-    await queryClient.invalidateQueries({ queryKey: queryKeys.plans() });
-  };
-
-  const handleActivatePlan = async (uuid: string) => {
-    queryClient.setQueryData<PlanWithRoutines[]>(
-      queryKeys.plans(),
-      (old) => (old ?? []).map((p) => ({ ...p, is_active: p.uuid === uuid }))
-    );
-    await fetch(`${apiBase()}/api/plans/${uuid}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ isActive: true }),
-    });
-    await queryClient.invalidateQueries({ queryKey: queryKeys.plans() });
+    await reorderPlans(reordered.map(p => p.uuid));
   };
 
   const handleStartWorkout = () => {
-    window.location.href = `/workout`;
+    window.location.href = '/workout';
   };
 
   return (
@@ -864,9 +655,7 @@ export default function PlansPage() {
           </div>
         )}
 
-        {loading ? (
-          <PlansListSkeleton />
-        ) : plans.length === 0 ? (
+        {plans.length === 0 ? (
           <div className="text-center py-12">
             <p className="text-muted-foreground text-sm mb-4">No plans yet</p>
             <p className="text-muted-foreground text-xs">Create a plan to organise your workout routines</p>
@@ -877,20 +666,15 @@ export default function PlansPage() {
               <PlanCard
                 key={plan.uuid}
                 plan={plan}
-                onDelete={() => handleDeletePlan(plan.uuid)}
                 onStartWorkout={handleStartWorkout}
                 onMoveUp={() => handleMovePlan(i, 'up')}
                 onMoveDown={() => handleMovePlan(i, 'down')}
-                onActivate={() => handleActivatePlan(plan.uuid)}
                 isFirst={i === 0}
                 isLast={i === plans.length - 1}
               />
             ))}
           </div>
         )}
-        {isPlaceholderData && plans.length > 0 ? (
-          <p className="text-center text-[11px] text-muted-foreground mt-2">Cached plans · refreshing</p>
-        ) : null}
       </div>
     </main>
   );
