@@ -43,6 +43,7 @@ const mockExercise = {
   is_custom: false,
   is_hidden: false,
   movement_pattern: null,
+  tracking_mode: 'reps' as const,
 };
 
 const mockWorkout = {
@@ -75,6 +76,7 @@ const mockSet = {
   is_completed: false,
   is_pr: false,
   order_index: 0,
+  duration_seconds: null,
 };
 
 // ===== GET /api/exercises =====

@@ -160,7 +160,7 @@ async function fetchRows(table: SyncedTable, uuids: string[]): Promise<Array<Rec
         .map(r => ({ ...r, exercise_uuid: String(r.exercise_uuid).toLowerCase() }));
     case 'workout_routine_sets':
       return query<Record<string, unknown>>(
-        'SELECT uuid, workout_routine_exercise_uuid, min_repetitions, max_repetitions, tag, comment, order_index FROM workout_routine_sets WHERE uuid = ANY($1::text[])', [uuids]);
+        'SELECT uuid, workout_routine_exercise_uuid, min_repetitions, max_repetitions, tag, comment, order_index, target_duration_seconds FROM workout_routine_sets WHERE uuid = ANY($1::text[])', [uuids]);
     case 'bodyweight_logs':
       return (await query<Record<string, unknown>>(
         'SELECT * FROM bodyweight_logs WHERE uuid = ANY($1::text[])', [uuids]))
@@ -290,6 +290,7 @@ function mapWorkoutSet(r: Record<string, unknown>) {
     is_completed: Boolean(r.is_completed),
     is_pr: Boolean(r.is_pr),
     order_index: Number(r.order_index),
+    duration_seconds: nullableNumber(r.duration_seconds),
   };
 }
 
@@ -319,6 +320,7 @@ function mapExercise(r: Record<string, unknown>) {
     is_custom: Boolean(r.is_custom),
     is_hidden: Boolean(r.is_hidden),
     movement_pattern: (r.movement_pattern as string | null) ?? null,
+    tracking_mode: (r.tracking_mode === 'time' ? 'time' : 'reps') as 'reps' | 'time',
   };
 }
 

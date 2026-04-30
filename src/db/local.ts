@@ -27,6 +27,11 @@ export interface LocalExercise {
   is_custom: boolean;
   is_hidden: boolean;
   movement_pattern: string | null;
+  /** How sets for this exercise are tracked: 'reps' (weight × repetitions)
+   *  or 'time' (held duration_seconds). Defaults to 'reps'. Defensive
+   *  callers should coerce undefined → 'reps' for rows that arrived from
+   *  a Dexie v5 store before the v6 schema bump. */
+  tracking_mode: 'reps' | 'time';
 }
 
 export interface LocalWorkout extends SyncMeta {
@@ -60,6 +65,9 @@ export interface LocalWorkoutSet extends SyncMeta {
   is_completed: boolean;
   is_pr: boolean;
   order_index: number;
+  /** Held duration in seconds. Populated only for time-mode exercise sets;
+   *  null for reps-mode sets (which use weight + repetitions instead). */
+  duration_seconds: number | null;
 }
 
 export interface LocalBodyweightLog extends SyncMeta {
@@ -102,6 +110,9 @@ export interface LocalWorkoutRoutineSet extends SyncMeta {
   tag: 'dropSet' | null;
   comment: string | null;
   order_index: number;
+  /** Routine template target hold in seconds. Populated only for time-mode
+   *  exercises. Mirrors min_repetitions/max_repetitions for the rep case. */
+  target_duration_seconds: number | null;
 }
 
 // ─── Body spec / measurements / inbody / goals ───────────────────────────────
@@ -424,10 +435,18 @@ export class IronDB extends Dexie {
     // indexed, forcing a full scan to find the active plan. Schema-only
     // change — no data transformation, existing rows pick up the index on
     // upgrade.
-    this.version(5).stores({
+    const v5Stores = {
       ...v4Stores,
       workout_plans: 'uuid, order_index, is_active, _synced, _updated_at',
-    });
+    };
+    this.version(5).stores(v5Stores);
+
+    // v6: time-based exercises (mirrors Postgres migration 020).
+    // tracking_mode lives on exercises; duration_seconds on workout_sets;
+    // target_duration_seconds on workout_routine_sets. All additive — Dexie
+    // tolerates missing fields on existing rows, and read sites coerce
+    // undefined → 'reps' / null defensively. No upgrade hook needed.
+    this.version(6).stores(v5Stores);
   }
 }
 
@@ -510,6 +529,7 @@ export async function hydrateExercises(): Promise<void> {
           is_custom: ex.is_custom ?? false,
           is_hidden: ex.is_hidden ?? false,
           movement_pattern: ex.movement_pattern ?? null,
+          tracking_mode: ex.tracking_mode ?? 'reps',
         });
       }
     });

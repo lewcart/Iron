@@ -890,12 +890,14 @@ export async function exportWorkouts(): Promise<Array<{
     uuid: string;
     exercise_uuid: string;
     exercise_title: string;
+    tracking_mode: 'reps' | 'time';
     order_index: number;
     sets: Array<{
       uuid: string;
       order_index: number;
       weight: number | null;
       repetitions: number | null;
+      duration_seconds: number | null;
       rpe: number | null;
       tag: string | null;
       is_completed: boolean;
@@ -912,7 +914,7 @@ export async function exportWorkouts(): Promise<Array<{
   const results = [];
   for (const w of workoutRows) {
     const exerciseRows = await query<DbRow>(`
-      SELECT we.uuid, we.exercise_uuid, we.order_index, e.title as exercise_title
+      SELECT we.uuid, we.exercise_uuid, we.order_index, e.title as exercise_title, e.tracking_mode
       FROM workout_exercises we
       JOIN exercises e ON we.exercise_uuid = e.uuid
       WHERE we.workout_uuid = $1
@@ -922,7 +924,7 @@ export async function exportWorkouts(): Promise<Array<{
     const exercises = [];
     for (const we of exerciseRows) {
       const setRows = await query<DbRow>(`
-        SELECT uuid, order_index, weight, repetitions, rpe, tag, is_completed
+        SELECT uuid, order_index, weight, repetitions, duration_seconds, rpe, tag, is_completed
         FROM workout_sets WHERE workout_exercise_uuid = $1 ORDER BY order_index
       `, [we.uuid as string]);
 
@@ -930,12 +932,14 @@ export async function exportWorkouts(): Promise<Array<{
         uuid: we.uuid as string,
         exercise_uuid: we.exercise_uuid as string,
         exercise_title: we.exercise_title as string,
+        tracking_mode: (we.tracking_mode === 'time' ? 'time' : 'reps') as 'reps' | 'time',
         order_index: we.order_index as number,
         sets: setRows.map(s => ({
           uuid: s.uuid as string,
           order_index: s.order_index as number,
           weight: s.weight ? parseFloat(s.weight as string) : null,
           repetitions: s.repetitions as number | null,
+          duration_seconds: (s.duration_seconds as number | null) ?? null,
           rpe: s.rpe ? parseFloat(s.rpe as string) : null,
           tag: s.tag as string | null,
           is_completed: Boolean(s.is_completed),
@@ -1154,6 +1158,7 @@ export function parseExercise(row: DbRow): Exercise {
     is_custom: Boolean(row.is_custom),
     is_hidden: Boolean(row.is_hidden),
     movement_pattern: (row.movement_pattern as string | null) ?? null,
+    tracking_mode: (row.tracking_mode === 'time' ? 'time' : 'reps') as 'reps' | 'time',
   };
 }
 
@@ -1192,6 +1197,7 @@ export function parseWorkoutSet(row: DbRow): WorkoutSet {
     is_completed: Boolean(row.is_completed),
     is_pr: Boolean(row.is_pr),
     order_index: row.order_index as number,
+    duration_seconds: (row.duration_seconds as number | null) ?? null,
   };
 }
 
@@ -1234,6 +1240,7 @@ export function parseRoutineSet(row: DbRow): WorkoutRoutineSet {
     tag: row.tag as 'dropSet' | null,
     comment: row.comment as string | null,
     order_index: row.order_index as number,
+    target_duration_seconds: (row.target_duration_seconds as number | null) ?? null,
   };
 }
 
