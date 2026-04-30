@@ -1,12 +1,10 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
 import { ChevronRight, Plus, Search, X } from 'lucide-react';
 import type { Exercise } from '@/types';
 import { exerciseMatchesMuscleGroup } from '@/lib/muscle-groups';
-import { queryKeys } from '@/lib/api/query-keys';
-import { fetchExerciseCatalog } from '@/lib/api/exercises';
+import { useExercises } from '@/lib/useLocalDB';
 import ExerciseDetail from './ExerciseDetail';
 import CreateExerciseForm from './CreateExerciseForm';
 
@@ -51,13 +49,9 @@ function ExercisesIndexSkeleton() {
 }
 
 export default function ExercisesPage() {
-  const { data: allExercises = [], isPending, isPlaceholderData } = useQuery({
-    queryKey: queryKeys.exercises.catalog(),
-    queryFn: fetchExerciseCatalog,
-    staleTime: 15 * 60 * 1000,
-    gcTime: 60 * 60 * 1000,
-    placeholderData: (previousData) => previousData,
-  });
+  // Reads the exercise catalog from Dexie. Hidden exercises (is_hidden=true)
+  // are excluded by the hook itself.
+  const allExercises = useExercises({}) as unknown as Exercise[];
 
   const [search, setSearch] = useState('');
   const [selectedExercise, setSelectedExercise] = useState<Exercise | null>(null);
@@ -103,7 +97,10 @@ export default function ExercisesPage() {
       e.equipment.some((eq) => eq.toLowerCase().includes(equipment))
     ).length;
 
-  const loading = isPending && allExercises.length === 0;
+  // Skeleton only on the very first tick — Dexie reads return synchronously
+  // after the first useLiveQuery yield. Once allExercises is populated we
+  // never show the skeleton again.
+  const loading = allExercises.length === 0;
 
   if (selectedExercise) {
     return (
@@ -226,9 +223,6 @@ export default function ExercisesPage() {
           <ExercisesIndexSkeleton />
         ) : (
           <>
-            {isPlaceholderData && allExercises.length > 0 ? (
-              <p className="text-[11px] text-muted-foreground text-center -mt-1">Cached list · refreshing in background</p>
-            ) : null}
             {search ? (
               <>
                 {searchResults.length === 0 ? (
