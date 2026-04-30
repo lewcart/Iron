@@ -1497,6 +1497,134 @@ async function getBodyNormRangesTool(args: Record<string, unknown>) {
   return toolResult(ranges);
 }
 
+// ── Photo tracking tools ──────────────────────────────────────────────────────
+
+import { put } from '@vercel/blob';
+import {
+  createProgressPhoto as dbCreateProgressPhoto,
+  listProgressPhotos as dbListProgressPhotos,
+  createInspoPhoto as dbCreateInspoPhoto,
+  listInspoPhotos as dbListInspoPhotos,
+} from '@/db/queries';
+
+const MIME_TO_EXT: Record<string, string> = {
+  'image/jpeg': 'jpg',
+  'image/jpg': 'jpg',
+  'image/png': 'png',
+  'image/webp': 'webp',
+  'image/heic': 'heic',
+  'image/heif': 'heif',
+  'image/gif': 'gif',
+};
+
+const EXT_TO_MIME: Record<string, string> = {
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  png: 'image/png',
+  webp: 'image/webp',
+  heic: 'image/heic',
+  heif: 'image/heif',
+  gif: 'image/gif',
+};
+
+async function resolveImageBuffer(
+  args: Record<string, unknown>,
+): Promise<{ buffer: Buffer; contentType: string; ext: string } | { error: string }> {
+  const explicitMime =
+    typeof args.mime_type === 'string' ? args.mime_type.toLowerCase() : undefined;
+  let contentType = explicitMime ?? 'image/jpeg';
+  let buffer: Buffer;
+
+  if (typeof args.image_base64 === 'string' && args.image_base64.length > 0) {
+    let b64 = args.image_base64;
+    const dataMatch = b64.match(/^data:([^;]+);base64,(.+)$/);
+    if (dataMatch) {
+      if (!explicitMime) contentType = dataMatch[1].toLowerCase();
+      b64 = dataMatch[2];
+    }
+    buffer = Buffer.from(b64, 'base64');
+    if (buffer.length === 0) return { error: 'image_base64 decoded to empty buffer' };
+  } else if (typeof args.image_url === 'string' && args.image_url.length > 0) {
+    let res: Response;
+    try {
+      res = await fetch(args.image_url);
+    } catch (e) {
+      return { error: `Failed to fetch image_url: ${e instanceof Error ? e.message : String(e)}` };
+    }
+    if (!res.ok) return { error: `image_url fetch failed: ${res.status} ${res.statusText}` };
+    if (!explicitMime) {
+      const headerType = res.headers.get('content-type')?.split(';')[0]?.trim().toLowerCase();
+      if (headerType && headerType.startsWith('image/')) {
+        contentType = headerType;
+      } else {
+        const m = args.image_url.match(/\.([a-z0-9]+)(?:\?|#|$)/i);
+        const urlExt = m?.[1]?.toLowerCase();
+        if (urlExt && EXT_TO_MIME[urlExt]) contentType = EXT_TO_MIME[urlExt];
+      }
+    }
+    buffer = Buffer.from(await res.arrayBuffer());
+  } else {
+    return { error: 'Provide either image_base64 or image_url' };
+  }
+
+  const ext = MIME_TO_EXT[contentType] ?? 'jpg';
+  return { buffer, contentType, ext };
+}
+
+async function uploadProgressPhotoTool(args: Record<string, unknown>) {
+  const pose = args.pose;
+  if (pose !== 'front' && pose !== 'side' && pose !== 'back') {
+    return toolError('pose must be one of: front, side, back');
+  }
+  const resolved = await resolveImageBuffer(args);
+  if ('error' in resolved) return toolError(resolved.error);
+
+  const pathname = `progress-photos/${crypto.randomUUID()}-${pose}.${resolved.ext}`;
+  const blob = await put(pathname, resolved.buffer, {
+    access: 'public',
+    contentType: resolved.contentType,
+  });
+
+  const photo = await dbCreateProgressPhoto({
+    blob_url: blob.url,
+    pose,
+    notes: typeof args.notes === 'string' ? args.notes : null,
+    taken_at: typeof args.taken_at === 'string' ? args.taken_at : undefined,
+  });
+  return toolResult(photo);
+}
+
+async function uploadInspoPhotoTool(args: Record<string, unknown>) {
+  const resolved = await resolveImageBuffer(args);
+  if ('error' in resolved) return toolError(resolved.error);
+
+  const pathname = `inspo-photos/${crypto.randomUUID()}.${resolved.ext}`;
+  const blob = await put(pathname, resolved.buffer, {
+    access: 'public',
+    contentType: resolved.contentType,
+  });
+
+  const photo = await dbCreateInspoPhoto({
+    blob_url: blob.url,
+    notes: typeof args.notes === 'string' ? args.notes : null,
+    taken_at: typeof args.taken_at === 'string' ? args.taken_at : undefined,
+    burst_group_id: typeof args.burst_group_id === 'string' ? args.burst_group_id : null,
+  });
+  return toolResult(photo);
+}
+
+async function listProgressPhotosTool(args: Record<string, unknown>) {
+  const limit = typeof args.limit === 'number' ? args.limit : 50;
+  const photos = await dbListProgressPhotos(limit);
+  return toolResult(photos);
+}
+
+async function listInspoPhotosTool(args: Record<string, unknown>) {
+  const limit = typeof args.limit === 'number' ? args.limit : 50;
+  const photos = await dbListInspoPhotos(limit);
+  return toolResult(photos);
+}
+
 // ── HealthKit tools ───────────────────────────────────────────────────────────
 
 type HealthKitStatus = 'connected' | 'not_requested' | 'revoked' | 'unavailable';
@@ -2615,6 +2743,79 @@ export const tools: MCPTool[] = [
       required: ['sex'],
     },
     execute: getBodyNormRangesTool,
+  },
+
+  // ── Photo tracking ──────────────────────────────────────────────────────────
+  {
+    name: 'upload_progress_photo',
+    description:
+      'Upload a body progress photo (front/side/back pose) to Vercel Blob and record it in progress_photos. Provide image bytes via image_base64 (raw base64 or data URL) OR image_url (the server fetches and re-hosts). Pose is required. Optional notes and taken_at (ISO).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        pose: { type: 'string', enum: ['front', 'side', 'back'], description: 'Required pose tag' },
+        image_base64: {
+          type: 'string',
+          description: 'Base64-encoded image bytes. Accepts raw base64 or "data:image/...;base64,..." form.',
+        },
+        image_url: {
+          type: 'string',
+          description: 'Public URL of an image to fetch and re-host on Vercel Blob. Use instead of image_base64.',
+        },
+        mime_type: {
+          type: 'string',
+          description: 'Override detected MIME type (e.g. image/jpeg, image/png, image/heic).',
+        },
+        notes: { type: 'string' },
+        taken_at: { type: 'string', description: 'ISO timestamp; defaults to now.' },
+      },
+      required: ['pose'],
+    },
+    execute: uploadProgressPhotoTool,
+  },
+  {
+    name: 'upload_inspo_photo',
+    description:
+      'Upload a physique inspiration photo to Vercel Blob and record it in inspo_photos. Provide image bytes via image_base64 OR image_url. Pass burst_group_id to attach this frame to an existing burst.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        image_base64: {
+          type: 'string',
+          description: 'Base64-encoded image bytes. Accepts raw base64 or "data:image/...;base64,..." form.',
+        },
+        image_url: {
+          type: 'string',
+          description: 'Public URL of an image to fetch and re-host on Vercel Blob.',
+        },
+        mime_type: { type: 'string' },
+        notes: { type: 'string' },
+        taken_at: { type: 'string', description: 'ISO timestamp; defaults to now.' },
+        burst_group_id: {
+          type: 'string',
+          description: 'Optional UUID grouping multiple frames from a single burst capture.',
+        },
+      },
+    },
+    execute: uploadInspoPhotoTool,
+  },
+  {
+    name: 'list_progress_photos',
+    description: 'List progress photos newest first. Returns blob_url, pose, notes, taken_at.',
+    inputSchema: {
+      type: 'object',
+      properties: { limit: { type: 'number', description: 'Default 50.' } },
+    },
+    execute: listProgressPhotosTool,
+  },
+  {
+    name: 'list_inspo_photos',
+    description: 'List inspo photos newest first. Returns blob_url, notes, taken_at, burst_group_id.',
+    inputSchema: {
+      type: 'object',
+      properties: { limit: { type: 'number', description: 'Default 50.' } },
+    },
+    execute: listInspoPhotosTool,
   },
 
   // ── HealthKit tools ─────────────────────────────────────────────────────────
