@@ -1,4 +1,3 @@
-import { MacroRing } from '@/components/ui/macro-ring';
 import { MacroBar } from '@/components/ui/macro-bar';
 import type { MacroBand } from '@/db/local';
 

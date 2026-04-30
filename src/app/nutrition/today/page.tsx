@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { Suspense, useEffect, useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { ChevronLeft, ChevronRight, Calendar, Settings } from 'lucide-react';
 import { useNutritionLogsForDate, useDayNote, useNutritionTargets } from '@/lib/useLocalDB-nutrition';
@@ -32,6 +32,14 @@ const DEFAULT_BANDS: MacroBands = {
 };
 
 export default function NutritionTodayPage() {
+  return (
+    <Suspense fallback={<div className="tab-content max-w-3xl mx-auto px-4 pt-4 text-sm text-muted-foreground">Loading…</div>}>
+      <NutritionTodayContent />
+    </Suspense>
+  );
+}
+
+function NutritionTodayContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const dateParam = searchParams.get('date');
@@ -50,7 +58,8 @@ export default function NutritionTodayPage() {
     return () => clearInterval(interval);
   }, []);
 
-  const logs = useNutritionLogsForDate(date) ?? [];
+  const rawLogs = useNutritionLogsForDate(date);
+  const logs = useMemo(() => rawLogs ?? [], [rawLogs]);
   const dayNote = useDayNote(date);
   const targets = useNutritionTargets();
 
