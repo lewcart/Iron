@@ -260,6 +260,7 @@ export async function addRoutineSet(opts: {
     tag: opts.tag ?? null,
     comment: opts.comment ?? null,
     order_index: max,
+    target_duration_seconds: null,
     ...syncMeta(),
   };
   await db.workout_routine_sets.add(set);

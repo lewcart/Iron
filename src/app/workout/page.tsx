@@ -22,7 +22,8 @@ import {
 import { consumeScheduleTap } from '@/lib/workout-schedule';
 import { HealthSection } from '@/components/HealthSection';
 import Link from 'next/link';
-import { Check, ChevronDown, ChevronRight, ClipboardList, Clock, Dumbbell, GripVertical, Plus, Search, X } from 'lucide-react';
+import { Check, ChevronDown, ChevronRight, ClipboardList, Clock, Dumbbell, GripVertical, Info, Plus, Search, X } from 'lucide-react';
+import { ExerciseDetailModal } from '@/components/ExerciseDetailModal';
 import type { WorkoutPlan, WorkoutRoutine, WorkoutRoutineExercise, WorkoutRoutineSet, Exercise } from '@/types';
 import { formatTime, calcCompletedSets, calcTotalVolume } from './workout-utils';
 import { uuid as genUUID } from '@/lib/uuid';
@@ -890,6 +891,7 @@ function SortableExerciseCard({
   onAddSet,
   onUpdateSet,
   onDeleteSet,
+  onShowInfo,
 }: {
   we: LocalWorkoutExerciseEntry;
   isExpanded: boolean;
@@ -898,6 +900,7 @@ function SortableExerciseCard({
   onAddSet: () => void;
   onUpdateSet: (workoutExerciseUuid: string, setUuid: string, weight: number, reps: number) => Promise<void>;
   onDeleteSet: (uuid: string) => Promise<void>;
+  onShowInfo: () => void;
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: we.uuid });
   const style = {
@@ -953,6 +956,18 @@ function SortableExerciseCard({
                 {completedSets}/{totalSets}
               </span>
             )}
+          </button>
+          {/* Info button — opens the exercise detail modal as a sibling overlay
+              so the underlying workout state (rest timer, scroll, expanded
+              sets) is preserved. stopPropagation prevents the chevron toggle
+              and swipe-to-delete from firing on the same tap. */}
+          <button
+            onClick={(e) => { e.stopPropagation(); onShowInfo(); }}
+            onPointerDown={(e) => e.stopPropagation()}
+            className="px-2 py-2.5 text-muted-foreground hover:text-foreground flex-shrink-0"
+            aria-label={`Show details for ${we.exercise?.title ?? 'exercise'}`}
+          >
+            <Info className="h-4 w-4" />
           </button>
         </div>
       </SwipeToDelete>
@@ -1014,6 +1029,12 @@ export default function WorkoutPage() {
   const [startingRoutine, setStartingRoutine] = useState<string | null>(null);
   const [expandedExercises, setExpandedExercises] = useState<Set<string>>(new Set());
   const [collapsedPlans, setCollapsedPlans] = useState<Set<string>>(new Set());
+  // Info modal state — null = closed. Lifted to the page level so the modal
+  // mount survives re-renders driven by the rest-timer 500ms tick. The modal
+  // itself is React.memo'd so stable props (exercise object, onClose) skip
+  // those re-renders entirely.
+  const [infoExercise, setInfoExercise] = useState<Exercise | null>(null);
+  const closeInfoModal = useCallback(() => setInfoExercise(null), []);
   const headerRef = useRef<HTMLDivElement>(null);
   const [headerHeight, setHeaderHeight] = useState(48);
   const [scheduleTapHighlight, setScheduleTapHighlight] = useState(false);
@@ -1236,6 +1257,7 @@ export default function WorkoutPage() {
               is_completed: false,
               is_pr: false,
               order_index: s.order_index,
+              duration_seconds: null,
               ...syncMeta,
             };
           }),
@@ -1529,6 +1551,7 @@ export default function WorkoutPage() {
                       onAddSet={() => handleAddSet(we)}
                       onUpdateSet={updateSet}
                       onDeleteSet={mutDeleteSet}
+                      onShowInfo={() => setInfoExercise(we.exercise as unknown as Exercise)}
                     />
                   ))}
                 </div>
@@ -1621,6 +1644,11 @@ export default function WorkoutPage() {
           </div>
         </div>
       )}
+
+      {/* Per-exercise info modal — sibling overlay, doesn't unmount workout
+          state when opened. Memoized so 500ms rest-timer ticks in this parent
+          don't re-render the chart-heavy modal subtree. */}
+      <ExerciseDetailModal exercise={infoExercise} onClose={closeInfoModal} />
     </>
   );
 }

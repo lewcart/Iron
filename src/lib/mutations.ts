@@ -140,6 +140,7 @@ export async function addSet(
     is_completed: false,
     is_pr: false,
     order_index,
+    duration_seconds: null,
     ...syncMeta(),
   };
   await db.workout_sets.add(row);

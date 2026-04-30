@@ -1,10 +1,15 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronLeft, Trophy, Medal, Award } from 'lucide-react';
 import type { Exercise } from '@/types';
 import { useUnit } from '@/context/UnitContext';
 import { apiBase } from '@/lib/api/client';
+import {
+  getExerciseProgressLocal,
+  getExerciseSessionHistoryLocal,
+  type ExerciseSessionGroup,
+} from '@/lib/useLocalDB';
 import {
   LineChart,
   Line,
@@ -62,6 +67,8 @@ interface ProgressData {
   volumeTrend: VolumeTrendPoint[];
   recentSets: RecentSet[];
 }
+
+const SESSIONS_PER_PAGE = 10;
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -205,19 +212,113 @@ export default function ExerciseDetail({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }), [range]);
 
+  // Session-grouped history, paginated. Lives separately from the chart
+  // data so chart-range changes don't invalidate the session list.
+  const [sessions, setSessions] = useState<ExerciseSessionGroup[]>([]);
+  const [sessionsCursor, setSessionsCursor] = useState<string | null>(null);
+  const [sessionsExhaustedLocally, setSessionsExhaustedLocally] = useState(false);
+  const [sessionsServerCursor, setSessionsServerCursor] = useState<string | null>(null);
+  const [sessionsServerDone, setSessionsServerDone] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+
+  // Local-first chart + PR data. Compute from Dexie so the modal works
+  // offline at the gym. Fall back to server only if Dexie returns empty
+  // (catalog hasn't hydrated, etc.) — that's a rare edge case.
   useEffect(() => {
+    let cancelled = false;
     setLoading(true);
     setProgressData(null);
-    fetch(`${apiBase()}/api/exercises/${exercise.uuid}/history?range=${range}`)
-      .then(r => r.json())
-      .then((data: ProgressData) => {
-        setProgressData(data);
+
+    const sinceDate = (() => {
+      const now = new Date();
+      if (range === '1m') return new Date(now.getFullYear(), now.getMonth() - 1, now.getDate());
+      if (range === '3m') return new Date(now.getFullYear(), now.getMonth() - 3, now.getDate());
+      if (range === '6m') return new Date(now.getFullYear(), now.getMonth() - 6, now.getDate());
+      return undefined;
+    })();
+
+    (async () => {
+      try {
+        const local = await getExerciseProgressLocal(exercise.uuid, sinceDate);
+        if (cancelled) return;
+
+        // Initial first-page session load runs alongside the chart compute.
+        const firstPage = await getExerciseSessionHistoryLocal(exercise.uuid, null, SESSIONS_PER_PAGE);
+        if (cancelled) return;
+
+        const serialized: ProgressData = {
+          progress: local.progress,
+          prs: {
+            estimated1RM: local.prs.estimated1RM ? { ...local.prs.estimated1RM, exercise_uuid: exercise.uuid } : null,
+            heaviestWeight: local.prs.heaviestWeight ? { ...local.prs.heaviestWeight, exercise_uuid: exercise.uuid } : null,
+            mostReps: local.prs.mostReps ? { ...local.prs.mostReps, exercise_uuid: exercise.uuid } : null,
+          },
+          volumeTrend: local.volumeTrend,
+          // recentSets retained for legacy shape parity but no longer rendered;
+          // session list below replaces the flat table.
+          recentSets: [],
+        };
+        setProgressData(serialized);
+        setSessions(firstPage.sessions);
+        setSessionsCursor(firstPage.nextCursor);
+        setSessionsExhaustedLocally(firstPage.nextCursor === null);
+        setSessionsServerCursor(null);
+        setSessionsServerDone(false);
         setLoading(false);
-      })
-      .catch(() => setLoading(false));
+      } catch (e) {
+        if (!cancelled) {
+          console.warn('[ExerciseDetail] local read failed:', e);
+          setLoading(false);
+        }
+      }
+    })();
+
+    return () => { cancelled = true; };
   }, [exercise.uuid, range]);
 
-  const hasData = progressData && progressData.recentSets.length > 0;
+  const loadMoreSessions = useCallback(async () => {
+    if (loadingMore) return;
+    setLoadingMore(true);
+    try {
+      // Phase 1: drain remaining local sessions.
+      if (!sessionsExhaustedLocally && sessionsCursor) {
+        const next = await getExerciseSessionHistoryLocal(exercise.uuid, sessionsCursor, SESSIONS_PER_PAGE);
+        setSessions(prev => [...prev, ...next.sessions]);
+        setSessionsCursor(next.nextCursor);
+        if (next.nextCursor === null) setSessionsExhaustedLocally(true);
+        setLoadingMore(false);
+        return;
+      }
+      // Phase 2: server backfill for older sessions not in Dexie.
+      if (!sessionsServerDone) {
+        const seedCursor = sessionsServerCursor
+          ?? (sessions.length > 0
+                ? `${sessions[sessions.length - 1].date}|${sessions[sessions.length - 1].workout_uuid}`
+                : null);
+        const url = `${apiBase()}/api/exercises/${exercise.uuid}/sessions?limit=${SESSIONS_PER_PAGE}`
+          + (seedCursor ? `&cursor=${encodeURIComponent(seedCursor)}` : '');
+        const res = await fetch(url);
+        if (!res.ok) throw new Error(`status ${res.status}`);
+        const data: { sessions: ExerciseSessionGroup[]; nextCursor: string | null } = await res.json();
+        // Filter out any session UUIDs already shown (local + server overlap).
+        const existing = new Set(sessions.map(s => s.workout_uuid));
+        const fresh = data.sessions.filter(s => !existing.has(s.workout_uuid));
+        setSessions(prev => [...prev, ...fresh]);
+        setSessionsServerCursor(data.nextCursor);
+        if (data.nextCursor === null) setSessionsServerDone(true);
+      }
+    } catch (e) {
+      console.warn('[ExerciseDetail] load more failed:', e);
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [exercise.uuid, loadingMore, sessions, sessionsCursor, sessionsExhaustedLocally, sessionsServerCursor, sessionsServerDone]);
+
+  const hasMoreSessions = !sessionsExhaustedLocally || !sessionsServerDone;
+
+  // hasData covers the chart/PR section only. The session list manages its
+  // own visibility via the `sessions` array.
+  const hasData = progressData && (progressData.progress.length > 0 || sessions.length > 0);
   const prWorkoutUuid = progressData?.prs.estimated1RM?.workout_uuid;
 
   const chartData = progressData?.progress.map(p => ({
@@ -408,28 +509,63 @@ export default function ExerciseDetail({
               </div>
             )}
 
-            {progressData.recentSets.length > 0 && (
+            {sessions.length > 0 && (
               <div>
-                <p className="text-xs font-semibold text-primary uppercase tracking-wide mb-2 px-1">Recent Sets</p>
-                <div className="bg-card border border-border rounded-xl overflow-hidden">
-                  <div className="grid grid-cols-4 px-3 py-2 border-b border-border">
-                    <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide">Date</span>
-                    <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide text-right">Weight</span>
-                    <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide text-right">Reps</span>
-                    <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide text-right">RPE</span>
-                  </div>
-                  {progressData.recentSets.map((set, i) => (
-                    <div
-                      key={`${set.workoutUuid}-${i}`}
-                      className={`grid grid-cols-4 px-3 py-2 ${i % 2 === 0 ? 'bg-card' : 'bg-muted/30'}`}
-                    >
-                      <span className="text-xs text-muted-foreground">{formatDate(set.date)}</span>
-                      <span className="text-xs text-foreground text-right">{set.weight != null ? toDisplay(set.weight) : '—'} {label}</span>
-                      <span className="text-xs text-foreground text-right">{set.repetitions}</span>
-                      <span className="text-xs text-muted-foreground text-right">{set.rpe != null ? set.rpe : '—'}</span>
+                <p className="text-xs font-semibold text-primary uppercase tracking-wide mb-2 px-1">Session History</p>
+                <div className="space-y-2">
+                  {sessions.map(s => (
+                    <div key={s.workout_uuid} className="bg-card border border-border rounded-xl overflow-hidden">
+                      <div className="px-3 py-2 border-b border-border flex items-baseline justify-between">
+                        <span className="text-xs font-semibold text-foreground">
+                          {formatDate(s.date)}
+                        </span>
+                        {s.workout_title && (
+                          <span className="text-[11px] text-muted-foreground truncate ml-2">{s.workout_title}</span>
+                        )}
+                      </div>
+                      {s.sets.map((set, i) => {
+                        const isTime = set.duration_seconds != null;
+                        return (
+                          <div
+                            key={set.uuid}
+                            className={`flex items-baseline gap-3 px-3 py-1.5 ${i % 2 === 0 ? 'bg-card' : 'bg-muted/30'}`}
+                          >
+                            <span className="text-[10px] text-muted-foreground w-5 text-center flex-shrink-0">{i + 1}</span>
+                            {isTime ? (
+                              <span className="text-xs text-foreground flex-1">
+                                {set.duration_seconds}s
+                              </span>
+                            ) : (
+                              <>
+                                <span className="text-xs text-foreground flex-1">
+                                  {set.weight != null ? toDisplay(set.weight) : '—'}
+                                  <span className="text-muted-foreground ml-0.5">{label}</span>
+                                </span>
+                                <span className="text-xs text-muted-foreground">×</span>
+                                <span className="text-xs text-foreground flex-1">{set.repetitions ?? '—'} reps</span>
+                              </>
+                            )}
+                            <span className="text-[11px] text-muted-foreground w-10 text-right flex-shrink-0">
+                              {set.rpe != null ? `RPE ${set.rpe}` : ''}
+                            </span>
+                          </div>
+                        );
+                      })}
                     </div>
                   ))}
                 </div>
+                {hasMoreSessions && (
+                  <button
+                    onClick={loadMoreSessions}
+                    disabled={loadingMore}
+                    className="w-full mt-2 py-2 text-sm font-medium text-primary disabled:opacity-50"
+                  >
+                    {loadingMore ? 'Loading…' : 'View more'}
+                  </button>
+                )}
+                {!hasMoreSessions && sessions.length > SESSIONS_PER_PAGE && (
+                  <p className="text-center text-xs text-muted-foreground mt-2">End of history</p>
+                )}
               </div>
             )}
           </>

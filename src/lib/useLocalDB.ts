@@ -391,3 +391,285 @@ export async function getAutoFillValues(
 
   return { weight: null, repetitions: null };
 }
+
+// ─── Exercise history (Dexie-side, used by the in-workout [i] modal) ─────────
+//
+// These mirror the server-side queries in src/db/queries.ts but read from
+// IndexedDB so the modal works offline. Server endpoints become an
+// enrichment fallback for sessions that haven't synced down yet.
+//
+// Canonical-key dedup: for catalog exercises (everkinetic_id > 0) we group
+// by everkinetic_id; for custom exercises (everkinetic_id = 0) we fall back
+// to title equality. Mirrors exerciseGroupMatch in queries.ts.
+//
+// Time-mode exclusion: sets attached to time-mode exercises never enter the
+// 1RM/heaviest/most-reps stats. PR-D₂ enables time-mode UI; the filter is
+// already in place here so no later refactor is needed.
+
+export interface ExerciseSessionGroup {
+  workout_uuid: string;
+  date: string;
+  workout_title: string | null;
+  sets: Array<{
+    uuid: string;
+    weight: number | null;
+    repetitions: number | null;
+    duration_seconds: number | null;
+    rpe: number | null;
+    tag: string | null;
+    order_index: number;
+  }>;
+}
+
+export interface ExerciseProgressLocal {
+  progress: Array<{
+    date: string;
+    workoutUuid: string;
+    maxWeight: number;
+    totalVolume: number;
+    estimated1RM: number;
+  }>;
+  prs: {
+    estimated1RM: { weight: number; repetitions: number; estimated_1rm: number; date: string; workout_uuid: string } | null;
+    heaviestWeight: { weight: number; repetitions: number; estimated_1rm: number; date: string; workout_uuid: string } | null;
+    mostReps: { weight: number; repetitions: number; estimated_1rm: number; date: string; workout_uuid: string } | null;
+  };
+  volumeTrend: Array<{ date: string; totalVolume: number }>;
+}
+
+/** Returns the canonical group of exercise UUIDs that match the given UUID,
+ *  per the same dedup rules as the server (everkinetic_id when > 0, title
+ *  fallback otherwise). Filters to rep-mode exercises only. */
+async function resolveCanonicalExerciseUuids(exerciseUuid: string): Promise<Set<string>> {
+  const target = await db.exercises.get(exerciseUuid.toLowerCase());
+  if (!target) return new Set([exerciseUuid.toLowerCase()]);
+
+  const all = await db.exercises.toArray();
+  const out = new Set<string>();
+  for (const e of all) {
+    const mode = e.tracking_mode ?? 'reps';
+    if (mode !== 'reps') continue;
+    if (target.everkinetic_id > 0 && e.everkinetic_id === target.everkinetic_id) {
+      out.add(e.uuid.toLowerCase());
+    } else if (target.everkinetic_id === 0 && e.title === target.title) {
+      out.add(e.uuid.toLowerCase());
+    }
+  }
+  if (out.size === 0) out.add(target.uuid.toLowerCase());
+  return out;
+}
+
+/** Local-first equivalent of getExerciseProgress + getExercisePRs +
+ *  getExerciseVolumeTrend rolled into one bulk read. The modal needs all
+ *  three at once; one Dexie pass beats three. */
+export async function getExerciseProgressLocal(
+  exerciseUuid: string,
+  since?: Date,
+): Promise<ExerciseProgressLocal> {
+  const groupUuids = await resolveCanonicalExerciseUuids(exerciseUuid);
+  if (groupUuids.size === 0) {
+    return {
+      progress: [],
+      prs: { estimated1RM: null, heaviestWeight: null, mostReps: null },
+      volumeTrend: [],
+    };
+  }
+
+  // All workout_exercises that map to any UUID in our canonical group.
+  const allWes = await db.workout_exercises
+    .filter(we => groupUuids.has(we.exercise_uuid.toLowerCase()) && !we._deleted)
+    .toArray();
+  if (allWes.length === 0) {
+    return {
+      progress: [],
+      prs: { estimated1RM: null, heaviestWeight: null, mostReps: null },
+      volumeTrend: [],
+    };
+  }
+
+  const weUuids = allWes.map(we => we.uuid);
+  const allSets = weUuids.length > 0
+    ? await db.workout_sets
+        .where('workout_exercise_uuid')
+        .anyOf(weUuids)
+        .filter(s => s.is_completed && !s._deleted && s.weight != null && s.repetitions != null)
+        .toArray()
+    : [];
+
+  // Index workouts by uuid for joining on workout_uuid.
+  const allWorkouts = await db.workouts.toArray();
+  const workoutByUuid = new Map(allWorkouts.map(w => [w.uuid, w]));
+  const weToWorkout = new Map(allWes.map(we => [we.uuid, we.workout_uuid]));
+
+  const sinceMs = since?.getTime();
+
+  // Annotate each set with its workout context.
+  type AnnotatedSet = {
+    weight: number;
+    repetitions: number;
+    workout_uuid: string;
+    date: string;
+  };
+  const annotated: AnnotatedSet[] = [];
+  for (const s of allSets) {
+    const woUuid = weToWorkout.get(s.workout_exercise_uuid);
+    if (!woUuid) continue;
+    const wo = workoutByUuid.get(woUuid);
+    if (!wo || wo._deleted) continue;
+    if (sinceMs != null && new Date(wo.start_time).getTime() < sinceMs) continue;
+    annotated.push({
+      weight: s.weight!,
+      repetitions: s.repetitions!,
+      workout_uuid: wo.uuid,
+      date: wo.start_time,
+    });
+  }
+
+  // Group by workout for the chart's per-session aggregation.
+  type Bucket = { date: string; workoutUuid: string; sets: AnnotatedSet[] };
+  const byWorkout = new Map<string, Bucket>();
+  for (const s of annotated) {
+    if (!byWorkout.has(s.workout_uuid)) {
+      byWorkout.set(s.workout_uuid, { date: s.date, workoutUuid: s.workout_uuid, sets: [] });
+    }
+    byWorkout.get(s.workout_uuid)!.sets.push(s);
+  }
+
+  const progress = [...byWorkout.values()]
+    .map(b => {
+      const maxWeight = b.sets.reduce((m, s) => Math.max(m, s.weight), 0);
+      const totalVolume = b.sets.reduce((sum, s) => sum + s.weight * s.repetitions, 0);
+      const repsAtMax = b.sets
+        .filter(s => s.weight === maxWeight)
+        .reduce((m, s) => Math.max(m, s.repetitions), 1);
+      return {
+        date: b.date,
+        workoutUuid: b.workoutUuid,
+        maxWeight,
+        totalVolume,
+        estimated1RM: estimate1RM(maxWeight, repsAtMax),
+      };
+    })
+    .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+
+  // PRs across all annotated sets.
+  let best1rm: AnnotatedSet | null = null; let best1rmVal = -Infinity;
+  let heaviest: AnnotatedSet | null = null; let heaviestVal = -Infinity;
+  let mostReps: AnnotatedSet | null = null; let mostRepsVal = -Infinity;
+  for (const s of annotated) {
+    const orm = estimate1RM(s.weight, s.repetitions);
+    if (orm > best1rmVal) { best1rmVal = orm; best1rm = s; }
+    if (s.weight > heaviestVal) { heaviestVal = s.weight; heaviest = s; }
+    if (s.repetitions > mostRepsVal) { mostRepsVal = s.repetitions; mostReps = s; }
+  }
+  const toRecord = (s: AnnotatedSet | null) => s ? {
+    weight: s.weight,
+    repetitions: s.repetitions,
+    estimated_1rm: estimate1RM(s.weight, s.repetitions),
+    date: s.date,
+    workout_uuid: s.workout_uuid,
+  } : null;
+
+  const volumeTrend = progress.map(p => ({ date: p.date, totalVolume: p.totalVolume }));
+
+  return {
+    progress,
+    prs: {
+      estimated1RM: toRecord(best1rm),
+      heaviestWeight: toRecord(heaviest),
+      mostReps: toRecord(mostReps),
+    },
+    volumeTrend,
+  };
+}
+
+/** Local-first paginated session history. Reverse-chrono, keyset cursor.
+ *  When the local store is exhausted, return nextCursor=null so the UI can
+ *  optionally fetch from /api/exercises/[uuid]/sessions for older data. */
+export async function getExerciseSessionHistoryLocal(
+  exerciseUuid: string,
+  cursor: string | null,
+  limit = 10,
+): Promise<{ sessions: ExerciseSessionGroup[]; nextCursor: string | null }> {
+  const groupUuids = await resolveCanonicalExerciseUuids(exerciseUuid);
+  if (groupUuids.size === 0) return { sessions: [], nextCursor: null };
+
+  let cursorTime: number | null = null;
+  let cursorUuid: string | null = null;
+  if (cursor) {
+    const idx = cursor.indexOf('|');
+    if (idx > 0) {
+      cursorTime = new Date(cursor.slice(0, idx)).getTime();
+      cursorUuid = cursor.slice(idx + 1);
+    }
+  }
+
+  const allWes = await db.workout_exercises
+    .filter(we => groupUuids.has(we.exercise_uuid.toLowerCase()) && !we._deleted)
+    .toArray();
+  if (allWes.length === 0) return { sessions: [], nextCursor: null };
+
+  const weUuids = allWes.map(we => we.uuid);
+  const allSets = await db.workout_sets
+    .where('workout_exercise_uuid')
+    .anyOf(weUuids)
+    .filter(s => s.is_completed && !s._deleted)
+    .toArray();
+  if (allSets.length === 0) return { sessions: [], nextCursor: null };
+
+  const allWorkouts = await db.workouts.toArray();
+  const workoutByUuid = new Map(allWorkouts.map(w => [w.uuid, w]));
+  const weToWorkout = new Map(allWes.map(we => [we.uuid, we.workout_uuid]));
+
+  const setsByWorkout = new Map<string, typeof allSets>();
+  for (const s of allSets) {
+    const woUuid = weToWorkout.get(s.workout_exercise_uuid);
+    if (!woUuid) continue;
+    const wo = workoutByUuid.get(woUuid);
+    if (!wo || wo._deleted) continue;
+    if (!setsByWorkout.has(woUuid)) setsByWorkout.set(woUuid, []);
+    setsByWorkout.get(woUuid)!.push(s);
+  }
+
+  // Build reverse-chronological session list, applying cursor.
+  let sessionEntries = [...setsByWorkout.entries()]
+    .map(([woUuid, sets]) => {
+      const wo = workoutByUuid.get(woUuid)!;
+      return {
+        workout_uuid: wo.uuid,
+        date: wo.start_time,
+        workout_title: wo.title,
+        sets: [...sets].sort((a, b) => a.order_index - b.order_index).map(s => ({
+          uuid: s.uuid,
+          weight: s.weight,
+          repetitions: s.repetitions,
+          duration_seconds: s.duration_seconds ?? null,
+          rpe: s.rpe,
+          tag: s.tag,
+          order_index: s.order_index,
+        })),
+      };
+    })
+    .sort((a, b) => {
+      // Reverse chrono with workout_uuid as tiebreaker (matches server keyset).
+      const t = new Date(b.date).getTime() - new Date(a.date).getTime();
+      if (t !== 0) return t;
+      return a.workout_uuid < b.workout_uuid ? 1 : -1;
+    });
+
+  if (cursorTime != null && cursorUuid != null) {
+    sessionEntries = sessionEntries.filter(s => {
+      const t = new Date(s.date).getTime();
+      if (t < cursorTime!) return true;
+      if (t === cursorTime && s.workout_uuid < cursorUuid!) return true;
+      return false;
+    });
+  }
+
+  const page = sessionEntries.slice(0, limit);
+  const nextCursor = page.length === limit
+    ? `${page[page.length - 1].date}|${page[page.length - 1].workout_uuid}`
+    : null;
+
+  return { sessions: page, nextCursor };
+}

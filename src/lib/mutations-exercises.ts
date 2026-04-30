@@ -40,6 +40,7 @@ export async function createCustomExercise(opts: {
     is_custom: true,
     is_hidden: false,
     movement_pattern: opts.movement_pattern ?? null,
+    tracking_mode: 'reps',
   };
   // Push needs to know this is dirty. exercises don't have SyncMeta on the
   // type but the sync engine reads `_synced` field via the `as unknown` path.
