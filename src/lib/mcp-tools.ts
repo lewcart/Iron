@@ -39,6 +39,11 @@ const MEASUREMENT_SITE_MAP: Record<string, string> = {
   hips: 'hips',
   neck: 'neck',
   shoulder_width: 'shoulder_width',
+  // Legacy alias: external MCP callers that still send `shoulders` get
+  // normalized to the canonical site key at write time. Once the alias has
+  // a long-enough zero-hit window, drop this line and tighten the test in
+  // measurements.test.ts.
+  shoulders: 'shoulder_width',
   abdomen: 'abdomen',
   left_arm: 'left_bicep',
   right_arm: 'right_bicep',

@@ -216,7 +216,7 @@ describe('chart data derivation', () => {
 
 describe('site alias resolution', () => {
   const SITE_ALIASES: Record<SiteKey, readonly string[]> = {
-    shoulder_width: ['shoulder_width', 'shoulders'],
+    shoulder_width: ['shoulder_width'],
     waist:          ['waist'],
     hips:           ['hips', 'hip'],
     upper_arm:      ['upper_arm', 'left_arm', 'right_arm', 'left_bicep', 'right_bicep'],
@@ -257,11 +257,15 @@ describe('site alias resolution', () => {
     expect(siteGroup('neck')).toBeNull();
     expect(siteGroup('left_calf')).toBeNull();
     expect(siteGroup('abdomen')).toBeNull();
+    // The legacy 'shoulders' literal was removed from the alias list after
+    // the v0.1.2 backfill renamed all DB rows to 'shoulder_width'. New writes
+    // are normalized at the MCP write boundary, so the read path no longer
+    // needs to recognize the legacy literal.
+    expect(siteGroup('shoulders')).toBeNull();
   });
 
-  it('maps legacy shoulders site key to shoulder_width tab', () => {
+  it('canonical shoulder_width key maps to itself', () => {
     expect(siteGroup('shoulder_width')).toBe('shoulder_width');
-    expect(siteGroup('shoulders')).toBe('shoulder_width');
   });
 
   it('chart filter for upper_arm finds left_bicep rows (regression: previously filtered to zero)', () => {
@@ -349,5 +353,45 @@ describe('site alias resolution', () => {
       .sort((a, b) => a.measured_at.localeCompare(b.measured_at))
       .map(({ sum, count }) => Math.round((sum / count) * 10) / 10);
     expect(points).toEqual([28.0, 30.6]);
+  });
+});
+
+// ===== MEASUREMENT_SITE_MAP write-side normalization =====
+// Mirrors src/lib/mcp-tools.ts:MEASUREMENT_SITE_MAP. The map normalizes
+// incoming MCP `update_body_comp` field names to the canonical site stored
+// in measurement_logs.site. The legacy `shoulders` key is normalized to
+// `shoulder_width` so external callers using the old MCP schema can't
+// reintroduce orphan rows after the v0.1.2 rename.
+
+describe('MEASUREMENT_SITE_MAP write-side normalization', () => {
+  const MEASUREMENT_SITE_MAP: Record<string, string> = {
+    chest: 'chest',
+    waist: 'waist',
+    hips: 'hips',
+    neck: 'neck',
+    shoulder_width: 'shoulder_width',
+    shoulders: 'shoulder_width',
+    abdomen: 'abdomen',
+    left_arm: 'left_bicep',
+    right_arm: 'right_bicep',
+    left_forearm: 'left_forearm',
+    right_forearm: 'right_forearm',
+    left_thigh: 'left_thigh',
+    right_thigh: 'right_thigh',
+    left_calf: 'left_calf',
+    right_calf: 'right_calf',
+  };
+
+  it('normalizes legacy shoulders key to shoulder_width', () => {
+    expect(MEASUREMENT_SITE_MAP.shoulders).toBe('shoulder_width');
+  });
+
+  it('preserves canonical shoulder_width key', () => {
+    expect(MEASUREMENT_SITE_MAP.shoulder_width).toBe('shoulder_width');
+  });
+
+  it('keeps left/right arm keys mapping to bicep convention', () => {
+    expect(MEASUREMENT_SITE_MAP.left_arm).toBe('left_bicep');
+    expect(MEASUREMENT_SITE_MAP.right_arm).toBe('right_bicep');
   });
 });
