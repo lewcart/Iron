@@ -28,6 +28,7 @@ import { formatTime, calcCompletedSets, calcTotalVolume } from './workout-utils'
 import { uuid as genUUID } from '@/lib/uuid';
 import { useUnit } from '@/context/UnitContext';
 import { useCurrentWorkoutFull, useExercises, getAutoFillValues, getAllTimeBest1RM } from '@/lib/useLocalDB';
+import { usePlansFull } from '@/lib/useLocalDB-plans';
 import type { LocalWorkoutExerciseEntry, LocalWorkoutWithExercises } from '@/lib/useLocalDB';
 import { isNewEstimated1RM } from '@/lib/pr';
 import type { LocalWorkoutSet } from '@/db/local';
@@ -997,12 +998,19 @@ function SortableExerciseCard({
 
 // ─── Main page ────────────────────────────────────────────────────────────────
 export default function WorkoutPage() {
-  const workout = useCurrentWorkoutFull(); // undefined = loading, null = no workout
+  const workout = useCurrentWorkoutFull(); // undefined = first-ever load, null = no workout
+  // Plans for the "Start from Routine" panel — read from Dexie. Same shape
+  // as the legacy /api/plans?full=1 response (plan -> routines -> exercises ->
+  // sets) so the rendering JSX below is unchanged. Casts through unknown
+  // because LocalPlanWithRoutines and PlanWithRoutines are structurally
+  // compatible (extra _synced/_updated_at/_deleted fields on local rows
+  // are harmless extras).
+  const plansLocal = usePlansFull();
+  const plans = plansLocal as unknown as PlanWithRoutines[];
   const [showExercises, setShowExercises] = useState(false);
   const [showRestTimer, setShowRestTimer] = useState(false);
   const [showFinishModal, setShowFinishModal] = useState(false);
   const [showCancelModal, setShowCancelModal] = useState(false);
-  const [plans, setPlans] = useState<PlanWithRoutines[] | null>(null);
   const [startingRoutine, setStartingRoutine] = useState<string | null>(null);
   const [expandedExercises, setExpandedExercises] = useState<Set<string>>(new Set());
   const [collapsedPlans, setCollapsedPlans] = useState<Set<string>>(new Set());
@@ -1082,20 +1090,15 @@ export default function WorkoutPage() {
     });
   }, []);
 
-  // Load plans with full routine details on mount (for instant local workout creation)
+  // Collapse all plans except the first one once the local data has loaded.
+  // useLiveQuery returns synchronously after first render, so this effect
+  // runs once with the full plan list — no network round-trip needed.
   useEffect(() => {
-    fetch(`${apiBase()}/api/plans?full=1`)
-      .then(r => r.json())
-      .then(data => {
-        const loaded = data.plans ?? [];
-        setPlans(loaded);
-        // Collapse all plans except the first one
-        if (loaded.length > 1) {
-          setCollapsedPlans(new Set(loaded.slice(1).map((p: PlanWithRoutines) => p.uuid)));
-        }
-      })
-      .catch(() => setPlans([])); // Resolve to empty on failure
-  }, []);
+    if (plans.length > 1 && collapsedPlans.size === 0) {
+      setCollapsedPlans(new Set(plans.slice(1).map((p: PlanWithRoutines) => p.uuid)));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [plans.length]);
 
   const togglePlan = useCallback((uuid: string) => {
     setCollapsedPlans(prev => {
@@ -1369,8 +1372,11 @@ export default function WorkoutPage() {
 
   // ── No active workout ──
   if (!workout) {
-    const plansLoaded = plans !== null;
-    const routinesExist = plansLoaded && plans.some(p => p.routines.length > 0);
+    // usePlansFull returns [] synchronously after first render, so plans
+    // is always a real array here. The "Loading routines…" line below is
+    // only shown for the brief sub-tick before useLiveQuery resolves.
+    const plansLoaded = true;
+    const routinesExist = plans.some(p => p.routines.length > 0);
     return (
       <main className="tab-content bg-background overflow-y-auto">
         <div className="px-4 pt-safe pb-4 flex items-center justify-between">

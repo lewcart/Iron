@@ -15,41 +15,75 @@ export type LocalWorkoutWithExercises = LocalWorkout & {
   exercises: LocalWorkoutExerciseEntry[];
 };
 
-/** Returns the active workout with exercises and sets joined from local DB. */
+// Module-level cache so the hook returns the most recent value as the
+// initial render on every remount. Without this, useLiveQuery returns
+// `undefined` on every remount until Dexie reads complete (~50-200ms),
+// which is what makes /workout flash "Loading…" on every tab switch.
+let _currentWorkoutCache: LocalWorkoutWithExercises | null | undefined = undefined;
+
+/** Returns the active workout with exercises and sets joined from local DB.
+ *
+ * Optimized as a single async block:
+ *   1. Read the active workout (1 round trip)
+ *   2. Read its workout_exercises rows (1 round trip)
+ *   3. In parallel: load the exercise catalog rows AND the set rows
+ *      across all exercises in one bulk anyOf() lookup (1 round trip)
+ *   4. Group sets by workout_exercise in memory
+ *
+ * Total: 3 sequential round trips instead of the previous 4 + N (where
+ * N = exercises). On a 6-exercise workout this is 3 reads instead of 9-10.
+ */
 export function useCurrentWorkoutFull(): LocalWorkoutWithExercises | null | undefined {
-  return useLiveQuery(async () => {
-    const workout = await db.workouts
-      .filter(w => w.is_current === true && !w._deleted)
-      .first();
+  const result = useLiveQuery(
+    async () => {
+      const workout = await db.workouts
+        .filter(w => w.is_current === true && !w._deleted)
+        .first();
 
-    if (!workout) return null;
+      if (!workout) {
+        _currentWorkoutCache = null;
+        return null;
+      }
 
-    const wes = await db.workout_exercises
-      .where('workout_uuid')
-      .equals(workout.uuid)
-      .filter(e => !e._deleted)
-      .sortBy('order_index');
+      const wes = await db.workout_exercises
+        .where('workout_uuid')
+        .equals(workout.uuid)
+        .filter(e => !e._deleted)
+        .sortBy('order_index');
 
-    // Build a map from the exercises table so Dexie observes it for reactivity
-    // (single-key .get() calls aren't tracked by useLiveQuery)
-    const neededUuids = wes.map(we => we.exercise_uuid.toLowerCase());
-    const allExercises = await db.exercises.where('uuid').anyOf(neededUuids).toArray();
-    const exerciseMap = new Map(allExercises.map(e => [e.uuid, e]));
+      const weUuids = wes.map(we => we.uuid);
+      const exerciseUuids = wes.map(we => we.exercise_uuid.toLowerCase());
 
-    const exercises = await Promise.all(
-      wes.map(async we => {
-        const exercise = exerciseMap.get(we.exercise_uuid.toLowerCase());
-        const sets = await db.workout_sets
-          .where('workout_exercise_uuid')
-          .equals(we.uuid)
-          .filter(s => !s._deleted)
-          .sortBy('order_index');
-        return { ...we, exercise: exercise!, sets };
-      }),
-    );
+      const [allExercises, allSets] = await Promise.all([
+        db.exercises.where('uuid').anyOf(exerciseUuids).toArray(),
+        weUuids.length > 0
+          ? db.workout_sets.where('workout_exercise_uuid').anyOf(weUuids).filter(s => !s._deleted).toArray()
+          : Promise.resolve([] as LocalWorkoutSet[]),
+      ]);
 
-    return { ...workout, exercises };
-  });
+      const exerciseMap = new Map(allExercises.map(e => [e.uuid, e]));
+      const setsByWe = new Map<string, LocalWorkoutSet[]>();
+      for (const s of allSets) {
+        if (!setsByWe.has(s.workout_exercise_uuid)) setsByWe.set(s.workout_exercise_uuid, []);
+        setsByWe.get(s.workout_exercise_uuid)!.push(s);
+      }
+      // Sort sets per exercise by order_index in memory.
+      for (const arr of setsByWe.values()) arr.sort((a, b) => a.order_index - b.order_index);
+
+      const exercises = wes.map(we => ({
+        ...we,
+        exercise: exerciseMap.get(we.exercise_uuid.toLowerCase())!,
+        sets: setsByWe.get(we.uuid) ?? [],
+      }));
+
+      const out = { ...workout, exercises };
+      _currentWorkoutCache = out;
+      return out;
+    },
+    [],
+    _currentWorkoutCache,
+  );
+  return result;
 }
 
 // ─── Workouts ──────────────────────────────────────────────────────────────────
