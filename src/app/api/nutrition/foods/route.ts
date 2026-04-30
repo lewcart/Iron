@@ -60,6 +60,11 @@ function escapeLike(s: string): string {
   return s.replace(/[\\%_]/g, (c) => '\\' + c);
 }
 
+// Lower than pg_trgm's default of 0.3 so single-character typos still match
+// foods like "L'Oreal latte" vs "Loreal latte". Tuned per-query rather than
+// session-wide so concurrent searches don't fight over the threshold.
+const TRIGRAM_THRESHOLD = 0.22;
+
 async function searchLayer1(safeQ: string, rawQ: string, limit: number): Promise<FoodResult[]> {
   const rows = await query<CanonicalRow>(
     `SELECT
@@ -75,10 +80,10 @@ async function searchLayer1(safeQ: string, rawQ: string, limit: number): Promise
      FROM nutrition_food_canonical
      WHERE canonical_name LIKE $1 || '%' ESCAPE '\\'
         OR canonical_name LIKE '%' || $1 || '%' ESCAPE '\\'
-        OR canonical_name % $2
+        OR similarity(canonical_name, $2) >= $4
      ORDER BY is_prefix_match DESC, times_logged DESC, last_logged_at DESC
      LIMIT $3`,
-    [safeQ, rawQ.toLowerCase(), limit],
+    [safeQ, rawQ.toLowerCase(), limit, TRIGRAM_THRESHOLD],
   );
 
   return rows.map((r) => ({

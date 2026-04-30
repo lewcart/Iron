@@ -6,7 +6,7 @@ import { cn } from '@/lib/utils';
 
 const TABS = [
   { href: '/nutrition/today', label: 'Today', match: '/nutrition/today' },
-  { href: '/nutrition', label: 'Week', match: '/nutrition' },
+  { href: '/nutrition/week', label: 'Week', match: '/nutrition/week' },
   { href: '/nutrition/history', label: 'History', match: '/nutrition/history' },
   { href: '/nutrition/summary', label: 'Summary', match: '/nutrition/summary' },
 ];
@@ -15,8 +15,6 @@ export function NutritionSubNav() {
   const pathname = usePathname();
 
   function isActive(match: string): boolean {
-    // Exact match for /nutrition (legacy week view); prefix match for nested routes.
-    if (match === '/nutrition') return pathname === '/nutrition';
     return pathname === match || pathname.startsWith(`${match}/`);
   }
 

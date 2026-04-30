@@ -2,6 +2,19 @@
 
 All notable changes to Rebirth are documented here.
 
+## [0.2.1] - 2026-05-01
+
+### Added
+- **Calories burned from Apple Health workouts now subtract from your daily remaining.** The CalorieBalanceCard no longer shows a hardcoded 0 for workouts; new endpoint `/api/nutrition/today-workouts?date=YYYY-MM-DD` aggregates `total_energy_kcal` from `healthkit_workouts` for the local calendar day, consumed by a new `useTodayWorkoutCalories(date)` hook. Refreshes when you change date.
+
+### Changed
+- **`/nutrition` now redirects to `/nutrition/today`.** The legacy 937-line `page.tsx` was preserved at `/nutrition/week` (Week template editor as the primary view; the legacy "Today" subtab is kept inside as a back-door to hydration + day-notes editing until the new Today page absorbs those features). Sub-nav points Week at `/nutrition/week`.
+- **All 15 nutrition MCP tools now live in one place.** The 7 pre-existing tools (`log_nutrition_meal`, `get_active_nutrition_plan`, `get_nutrition_plan`, `set_nutrition_day_notes`, `set_nutrition_targets`, `load_nutrition_plan`, `update_week_meal`) moved out of the 2900-line `mcp-tools.ts` god file into `src/lib/mcp/nutrition-tools.ts` alongside the 8 new tools. Main `mcp-tools.ts` is ~200 lines lighter. Errors now use the uniform `{ error: { code, message, hint } }` shape.
+- **Food search trigram threshold is now explicit per-query (0.22).** Both `/api/nutrition/foods` and `search_nutrition_foods` use `similarity(canonical_name, $q) >= 0.22` instead of the bare `%` operator. The session-wide `pg_trgm.similarity_threshold` default of 0.3 was too strict for branded-food typos (e.g. "Loreal latte" → "L'Oreal latte"). 0.22 keeps single-character typos matching without flooding results with unrelated foods.
+
+### Fixed
+- **Database migration runner now correctly handles `--` line comments and single-quoted strings.** A semicolon inside a comment ("uses the same sync route + state") would cause migrate.ts to split mid-statement, blocking PR #23's HRT migration from applying. The splitter now recognises line comments, block comments (with nesting), and quoted strings — any future migration with rich prose comments works without contortion. Migration `020_hrt_labs_meds.sql` applied cleanly to Neon as a result.
+
 ## [0.2.0] - 2026-04-30
 
 ### Added

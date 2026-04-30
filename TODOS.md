@@ -68,45 +68,53 @@
 
 ## Nutrition upgrade follow-ups (deferred from 2026-04-30 nutrition page upgrade)
 
-- [ ] **Kill the legacy `/nutrition/page.tsx` monolith (937 lines).** The new
-      `/nutrition/today`, `/history`, `/summary` routes live alongside the old
-      page, which still renders both Today and Week tabs internally. The "Week"
-      sub-nav tab points at this legacy page. Extract the Week tab into its own
-      `/nutrition/week/page.tsx` (forced `activeTab=`week``) and replace
-      `/nutrition/page.tsx` with a redirect to `/nutrition/today`. ~30 minutes
-      with CC. Deferred from /ship because the legacy code works and the
-      refactor risk is non-trivial (1000-line component with shared state
-      between two tabs).
+- [x] **Kill the legacy `/nutrition/page.tsx` monolith (937 lines).** Replaced
+      with a server redirect to `/nutrition/today`. The legacy 937-line
+      component lives at `/nutrition/week/page.tsx` (defaults to the Week
+      template editor; the Today subtab inside it remains as a back-door to
+      hydration + day-notes editing until the new Today page absorbs those).
+      Sub-nav now points Week → `/nutrition/week`. **Completed:** v0.2.1 (2026-05-01)
 
-- [ ] **Extract existing nutrition MCP tools from `mcp-tools.ts`.** Migration
-      already started: 8 new nutrition tools live in
-      `src/lib/mcp/nutrition-tools.ts`. The 7 pre-existing nutrition tools
-      (`log_nutrition_meal`, `get_active_nutrition_plan`, `get_nutrition_plan`,
-      `set_nutrition_day_notes`, `set_nutrition_targets`, `load_nutrition_plan`,
-      `update_week_meal`) still live in the 2900-line god file. Move them into
-      `nutrition-tools.ts` so the whole nutrition surface is in one place.
+- [x] **Extract existing nutrition MCP tools from `mcp-tools.ts`.** All 7
+      pre-existing nutrition tools (`log_nutrition_meal`, `get_active_nutrition_plan`,
+      `get_nutrition_plan`, `set_nutrition_day_notes`, `set_nutrition_targets`,
+      `load_nutrition_plan`, `update_week_meal`) plus the DOW_NAMES /
+      parseDayOfWeek helpers now live in `src/lib/mcp/nutrition-tools.ts`
+      alongside the 8 new tools. The whole nutrition MCP surface is in one
+      file. Main `mcp-tools.ts` is ~2200 lines lighter. **Completed:** v0.2.1 (2026-05-01)
+
+- [x] **Workouts subtraction wiring on Today page.** New endpoint
+      `GET /api/nutrition/today-workouts?date=YYYY-MM-DD` aggregates
+      `total_energy_kcal` from `healthkit_workouts` for the local day; new
+      hook `useTodayWorkoutCalories(date)` consumes it; CalorieBalanceCard
+      now shows real burned calories instead of hardcoded 0. **Completed:** v0.2.1 (2026-05-01)
+
+- [x] **Trigram threshold tuning for nutrition food search.** Both the HTTP
+      endpoint (`/api/nutrition/foods`) and the MCP tool
+      (`search_nutrition_foods`) now use `similarity(canonical_name, $q) >= 0.22`
+      explicitly instead of the `%` operator. Per-query threshold beats the
+      session-wide `pg_trgm.similarity_threshold` default of 0.3 — typos in
+      branded foods like "Loreal latte" still match without affecting other
+      queries. **Completed:** v0.2.1 (2026-05-01)
 
 - [ ] **Materialize `nutrition_food_canonical` view.** Currently a regular VIEW
       that does `DISTINCT ON + count() OVER` on every query. Fast enough at
       ~10K-50K rows. After ~200K imports it will start to bite (typing search
       latency). Convert to MATERIALIZED VIEW refreshed nightly by a cron, OR
       denormalize a `food_name_canonical` column on `nutrition_food_entries`
-      with a trigger.
-
-- [ ] **Workouts subtraction wiring on Today page.** The CalorieBalanceCard
-      shows `Workouts: 0 cal` for now. The `health_workouts` table exists and
-      MCP tools already query it. Add a `useTodayWorkoutCalories(date)` hook
-      that reads from local Dexie (or a new API endpoint) and pass it to the
-      card. ~20 minutes.
+      with a trigger. Deferred — current corpus is well below the threshold.
 
 - [ ] **Photo log + AI text parser dock buttons.** The floating EntryDock
       renders camera + Aa buttons that show "coming soon" sheets. Real
-      integrations later: photo → meal-estimation via Claude Vision, text →
-      meal-extraction via Claude. ~half a day each.
+      integrations: photo → meal-estimation via Claude Vision, text →
+      meal-extraction via Claude with structured tool output. ~half a day
+      each — proper prompt engineering + image upload pipeline + structured
+      output validation + error UX. Deferred from this batch.
 
-- [ ] **Trigram threshold tuning for nutrition food search.** `pg_trgm`
-      similarity defaults to 0.3. Test if foods like "L'Oreal latte"
-      vs "Loreal latte" match consistently. May need
-      `SELECT set_limit(0.2)` or per-query `WHERE food_name % $q` with
-      explicit threshold.
+- [ ] **Absorb hydration + day-notes editing into the new
+      `/nutrition/today` page.** The legacy `/nutrition/week` component
+      keeps the legacy "Today" subtab alive as a back-door to hydration logging
+      + free-text day notes. Once those features land properly on the new
+      Today page, the Today subtab inside the Week page can be deleted and
+      that file shrinks from ~937 lines to just the Week template editor.
 
