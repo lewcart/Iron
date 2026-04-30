@@ -41,7 +41,7 @@ const SITE_COLORS: Record<SiteKey, string> = {
 // right_arm/left_thigh/right_thigh. The chart/snapshot needs to surface all of
 // them under the matching UI tab.
 const SITE_ALIASES: Record<SiteKey, readonly string[]> = {
-  shoulder_width: ['shoulder_width', 'shoulders'],
+  shoulder_width: ['shoulder_width'],
   waist:          ['waist'],
   hips:           ['hips', 'hip'],
   upper_arm:      ['upper_arm', 'left_arm', 'right_arm', 'left_bicep', 'right_bicep'],
