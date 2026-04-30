@@ -26,6 +26,11 @@ export const metadata: Metadata = {
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
+  // Pin scale at 1 so WKWebView never zooms on input focus and the user can
+  // never get stuck zoomed-in (WKWebView has no pinch-out gesture once zoomed).
+  // All inputs are sized ≥16px in globals.css so iOS has no reason to auto-zoom.
+  maximumScale: 1,
+  userScalable: false,
   viewportFit: "cover",
   themeColor: "#5BCEFA",
   /** Reduces resize jank when mobile keyboards open (supported browsers). */

@@ -67,12 +67,16 @@
     touch-action: manipulation;
   }
 
-  /* iOS Safari: avoid auto zoom on focus when font-size would be < 16px */
+  /* iOS Safari / WKWebView: avoid auto-zoom on focus by forcing every focusable
+   * input to ≥16px on mobile. Uses !important so Tailwind utility classes
+   * (text-sm = 14px, text-xs = 12px) can't drop the size below 16px on
+   * inputs. Visual scale stays consistent because the viewport is pinned
+   * (see layout.tsx maximumScale: 1, userScalable: false). */
   @media (max-width: 640px) {
     input,
     textarea,
     select {
-      font-size: max(1rem, 100%);
+      font-size: 16px !important;
     }
   }
 }
