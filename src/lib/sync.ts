@@ -51,8 +51,8 @@ const SYNCED_TABLES = [
   'hrt_protocols', 'hrt_logs',
   // Other logs
   'wellbeing_logs', 'dysphoria_logs', 'clothes_test_logs',
-  // Photos
-  'inspo_photos', 'progress_photos',
+  // Photos (inspo_photos is local-only — no server table, no sync)
+  'progress_photos',
 ] as const;
 type SyncedTable = typeof SYNCED_TABLES[number];
 

@@ -32,7 +32,7 @@ const SYNCED_TABLES = [
   'nutrition_logs', 'nutrition_week_meals', 'nutrition_day_notes', 'nutrition_targets',
   'hrt_protocols', 'hrt_logs',
   'wellbeing_logs', 'dysphoria_logs', 'clothes_test_logs',
-  'inspo_photos', 'progress_photos',
+  'progress_photos',
 ] as const;
 
 type SyncedTable = typeof SYNCED_TABLES[number];
@@ -236,10 +236,6 @@ async function fetchRows(table: SyncedTable, uuids: string[]): Promise<Array<Rec
       return (await query<Record<string, unknown>>(
         'SELECT uuid, logged_at, outfit_description, photo_url, comfort_rating, euphoria_rating, notes FROM clothes_test_logs WHERE uuid = ANY($1::text[])', [uuids]))
         .map(r => ({ ...r, logged_at: toIso(r.logged_at) }));
-    case 'inspo_photos':
-      return (await query<Record<string, unknown>>(
-        'SELECT uuid, blob_url, notes, taken_at FROM inspo_photos WHERE uuid = ANY($1::text[])', [uuids]))
-        .map(r => ({ ...r, taken_at: toIso(r.taken_at) }));
     case 'progress_photos':
       return (await query<Record<string, unknown>>(
         'SELECT uuid, blob_url, pose, notes, taken_at FROM progress_photos WHERE uuid = ANY($1::text[])', [uuids]))

@@ -215,7 +215,7 @@ DROP TRIGGER IF EXISTS nutrition_day_notes_change_log ON nutrition_day_notes;
 CREATE TRIGGER nutrition_day_notes_change_log AFTER INSERT OR UPDATE OR DELETE ON nutrition_day_notes
   FOR EACH ROW EXECUTE FUNCTION record_change_uuid();
 
--- nutrition_targets (already has updated_at + trigger; just add CDC)
+-- nutrition_targets (already has updated_at + trigger, just add CDC)
 DROP TRIGGER IF EXISTS nutrition_targets_change_log ON nutrition_targets;
 CREATE TRIGGER nutrition_targets_change_log AFTER INSERT OR UPDATE OR DELETE ON nutrition_targets
   FOR EACH ROW EXECUTE FUNCTION record_change_nutrition_targets();
@@ -275,16 +275,9 @@ DROP TRIGGER IF EXISTS clothes_test_logs_change_log ON clothes_test_logs;
 CREATE TRIGGER clothes_test_logs_change_log AFTER INSERT OR UPDATE OR DELETE ON clothes_test_logs
   FOR EACH ROW EXECUTE FUNCTION record_change_uuid();
 
--- inspo_photos
-ALTER TABLE inspo_photos ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
-UPDATE inspo_photos SET updated_at = COALESCE(taken_at, NOW()) WHERE updated_at IS NULL;
-DROP TRIGGER IF EXISTS inspo_photos_updated_at ON inspo_photos;
-CREATE TRIGGER inspo_photos_updated_at BEFORE UPDATE ON inspo_photos
-  FOR EACH ROW EXECUTE FUNCTION update_updated_at();
-CREATE INDEX IF NOT EXISTS idx_inspo_photos_updated_at ON inspo_photos(updated_at);
-DROP TRIGGER IF EXISTS inspo_photos_change_log ON inspo_photos;
-CREATE TRIGGER inspo_photos_change_log AFTER INSERT OR UPDATE OR DELETE ON inspo_photos
-  FOR EACH ROW EXECUTE FUNCTION record_change_uuid();
+-- inspo_photos: not present on this DB (local-only table, never synced
+-- server-side). Skipping CDC wiring. If inspo_photos ever gets a server
+-- table, add a follow-up migration with the same trigger pattern.
 
 -- progress_photos
 ALTER TABLE progress_photos ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
@@ -297,12 +290,12 @@ DROP TRIGGER IF EXISTS progress_photos_change_log ON progress_photos;
 CREATE TRIGGER progress_photos_change_log AFTER INSERT OR UPDATE OR DELETE ON progress_photos
   FOR EACH ROW EXECUTE FUNCTION record_change_uuid();
 
--- inbody_scans (has updated_at + trigger from migration 012; just add CDC)
+-- inbody_scans (has updated_at + trigger from migration 012, just add CDC)
 DROP TRIGGER IF EXISTS inbody_scans_change_log ON inbody_scans;
 CREATE TRIGGER inbody_scans_change_log AFTER INSERT OR UPDATE OR DELETE ON inbody_scans
   FOR EACH ROW EXECUTE FUNCTION record_change_uuid();
 
--- body_goals (has updated_at + trigger; CDC uses metric_key as row_uuid)
+-- body_goals (has updated_at + trigger, CDC uses metric_key as row_uuid)
 DROP TRIGGER IF EXISTS body_goals_change_log ON body_goals;
 CREATE TRIGGER body_goals_change_log AFTER INSERT OR UPDATE OR DELETE ON body_goals
   FOR EACH ROW EXECUTE FUNCTION record_change_body_goals();
@@ -442,10 +435,7 @@ SELECT 'clothes_test_logs', ct.uuid, 'insert', COALESCE(ct.updated_at, ct.logged
 FROM clothes_test_logs ct
 WHERE NOT EXISTS (SELECT 1 FROM change_log cl WHERE cl.table_name = 'clothes_test_logs' AND cl.row_uuid = ct.uuid);
 
-INSERT INTO change_log (table_name, row_uuid, op, created_at)
-SELECT 'inspo_photos', ip.uuid, 'insert', COALESCE(ip.updated_at, ip.taken_at, NOW())
-FROM inspo_photos ip
-WHERE NOT EXISTS (SELECT 1 FROM change_log cl WHERE cl.table_name = 'inspo_photos' AND cl.row_uuid = ip.uuid);
+-- inspo_photos backfill skipped: table not present on this DB (local-only).
 
 INSERT INTO change_log (table_name, row_uuid, op, created_at)
 SELECT 'progress_photos', pp.uuid, 'insert', COALESCE(pp.updated_at, pp.taken_at, NOW())
