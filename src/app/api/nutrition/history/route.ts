@@ -12,15 +12,10 @@ interface AggRow {
   approved_status: string | null;
 }
 
-export interface HistoryDay {
-  date: string;
-  calories: number | null;
-  protein_g: number | null;
-  carbs_g: number | null;
-  fat_g: number | null;
-  log_count: number;
-  approved_status: 'pending' | 'approved';
-}
+// Re-exported from src/lib/nutrition-history-types.ts so the Capacitor build
+// (which moves src/app/api out of the tree) can still type-import it.
+export type { HistoryDay } from '@/lib/nutrition-history-types';
+import type { HistoryDay } from '@/lib/nutrition-history-types';
 
 function num(v: string | number | null | undefined): number | null {
   if (v == null) return null;

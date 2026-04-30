@@ -60,6 +60,7 @@ xcodebuild \
   -destination "platform=iOS,id=$DEVICE_ID" \
   -derivedDataPath build/ios-device \
   -allowProvisioningUpdates \
+  -allowProvisioningDeviceRegistration \
   -authenticationKeyPath "$KEY_PATH" \
   -authenticationKeyID "$KEY_ID" \
   -authenticationKeyIssuerID "$ISSUER_ID" \
