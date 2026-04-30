@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronLeft, Trophy, Medal, Award } from 'lucide-react';
 import type { Exercise } from '@/types';
 import { useUnit } from '@/context/UnitContext';
@@ -19,16 +19,21 @@ import {
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
+// Matches PersonalRecord shape from src/types.ts — the API at
+// /api/exercises/[uuid]/history returns this snake_case shape via
+// calculatePRs in src/lib/pr.ts.
 interface PRRecord {
-  exerciseUuid: string;
+  exercise_uuid: string;
   weight: number;
   repetitions: number;
-  estimated1RM: number;
+  estimated_1rm: number;
   date: string;
+  workout_uuid: string;
 }
 
 interface ProgressPoint {
   date: string;
+  workoutUuid: string;
   maxWeight: number;
   totalVolume: number;
   estimated1RM: number;
@@ -65,6 +70,16 @@ function formatDate(dateStr: string): string {
   return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' });
 }
 
+/** Read an HSL CSS variable and return it as a usable color string for
+ *  Recharts. The library can't consume CSS vars directly so we materialize
+ *  them at render time, which keeps charts theme-aware. */
+function readCssVarColor(varName: string, fallback: string): string {
+  if (typeof window === 'undefined') return fallback;
+  const raw = getComputedStyle(document.documentElement).getPropertyValue(varName).trim();
+  if (!raw) return fallback;
+  return `hsl(${raw})`;
+}
+
 // ── Sub-components ─────────────────────────────────────────────────────────
 
 function PRBadge({
@@ -79,34 +94,58 @@ function PRBadge({
   sub: string;
 }) {
   return (
-    <div className="flex-1 flex flex-col items-center gap-1 bg-zinc-900 border border-zinc-800 rounded-xl p-3 min-w-0">
-      <div className="text-zinc-400">{icon}</div>
-      <p className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wide text-center">{label}</p>
-      <p className="text-base font-bold text-zinc-100 text-center leading-tight">{value}</p>
-      <p className="text-[10px] text-zinc-500 text-center">{sub}</p>
+    <div className="flex-1 flex flex-col items-center gap-1 bg-card border border-border rounded-xl p-3 min-w-0">
+      <div className="text-muted-foreground">{icon}</div>
+      <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide text-center">{label}</p>
+      <p className="text-base font-bold text-foreground text-center leading-tight">{value}</p>
+      <p className="text-[10px] text-muted-foreground text-center">{sub}</p>
+    </div>
+  );
+}
+
+/** Headline 1RM block — promoted from the 3-up secondary row in the
+ *  previous layout. Shows the naked Epley estimate (no confidence band — see
+ *  /plan-eng-review 2026-04-30 user decision). */
+function OneRMHero({
+  value,
+  unit,
+  date,
+}: {
+  value: string;
+  unit: string;
+  date: string;
+}) {
+  return (
+    <div className="bg-card border border-border rounded-2xl p-4 flex items-baseline gap-3">
+      <div className="flex-1">
+        <p className="text-xs uppercase text-muted-foreground tracking-wide">Personal Best</p>
+        <div className="flex items-baseline gap-1.5 mt-1">
+          <span className="text-3xl font-bold text-foreground">{value}</span>
+          <span className="text-sm text-muted-foreground">{unit}</span>
+        </div>
+        <p className="text-xs text-muted-foreground mt-1">Est. 1RM · {date}</p>
+      </div>
+      <Trophy className="h-8 w-8 text-amber-400/80 flex-shrink-0" />
     </div>
   );
 }
 
 function SkeletonBlock({ className }: { className?: string }) {
   return (
-    <div className={`bg-zinc-800 rounded-lg animate-pulse ${className ?? ''}`} />
+    <div className={`bg-muted rounded-lg animate-pulse ${className ?? ''}`} />
   );
 }
 
 function LoadingSkeleton() {
   return (
     <div className="space-y-4 px-4 py-4">
-      {/* PR badges skeleton */}
+      <SkeletonBlock className="h-24" />
       <div className="flex gap-2">
-        <SkeletonBlock className="flex-1 h-24" />
-        <SkeletonBlock className="flex-1 h-24" />
-        <SkeletonBlock className="flex-1 h-24" />
+        <SkeletonBlock className="flex-1 h-20" />
+        <SkeletonBlock className="flex-1 h-20" />
       </div>
-      {/* Chart skeleton */}
       <SkeletonBlock className="h-48" />
       <SkeletonBlock className="h-48" />
-      {/* Table skeleton */}
       <SkeletonBlock className="h-32" />
     </div>
   );
@@ -115,9 +154,9 @@ function LoadingSkeleton() {
 function EmptyState() {
   return (
     <div className="flex flex-col items-center justify-center py-16 text-center">
-      <Trophy className="h-10 w-10 text-zinc-700 mb-3" />
-      <p className="text-zinc-400 font-medium">No workout data yet</p>
-      <p className="text-zinc-600 text-sm mt-1">Log this exercise to see your progress</p>
+      <Trophy className="h-10 w-10 text-muted-foreground/40 mb-3" />
+      <p className="text-foreground font-medium">No workout data yet</p>
+      <p className="text-muted-foreground text-sm mt-1">Log this exercise to see your progress</p>
     </div>
   );
 }
@@ -135,14 +174,36 @@ const RANGES: { label: string; value: Range }[] = [
 export default function ExerciseDetail({
   exercise,
   onBack,
+  chrome = 'page',
 }: {
   exercise: Exercise;
   onBack: () => void;
+  /** Render mode: 'page' shows the back-button nav bar; 'modal' assumes
+   *  the parent already supplies its own chrome (header bar + close button). */
+  chrome?: 'page' | 'modal';
 }) {
   const { toDisplay, label } = useUnit();
   const [progressData, setProgressData] = useState<ProgressData | null>(null);
   const [loading, setLoading] = useState(true);
   const [range, setRange] = useState<Range>('all');
+
+  // Materialize Recharts colors from CSS vars at render time so charts
+  // adapt to light/dark mode along with everything else. range dep means
+  // a re-fetch trigger refreshes them — and a theme-toggle within the
+  // session would need to also rerender, which existing flows already do.
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const chartTheme = useMemo(() => ({
+    grid: readCssVarColor('--border', '#e5e7eb'),
+    axis: readCssVarColor('--muted-foreground', '#6b7280'),
+    tooltipBg: readCssVarColor('--card', '#ffffff'),
+    tooltipBorder: readCssVarColor('--border', '#e5e7eb'),
+    tooltipText: readCssVarColor('--foreground', '#111827'),
+    line1RM: '#3b82f6',
+    lineWeight: '#10b981',
+    bar: '#3b82f6',
+    pr: '#f59e0b',
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }), [range]);
 
   useEffect(() => {
     setLoading(true);
@@ -157,15 +218,18 @@ export default function ExerciseDetail({
   }, [exercise.uuid, range]);
 
   const hasData = progressData && progressData.recentSets.length > 0;
-
-  const prDate = progressData?.prs.estimated1RM?.date;
+  const prWorkoutUuid = progressData?.prs.estimated1RM?.workout_uuid;
 
   const chartData = progressData?.progress.map(p => ({
     date: formatDate(p.date),
     rawDate: p.date,
+    workoutUuid: p.workoutUuid,
     estimated1RM: Math.round(toDisplay(p.estimated1RM) * 10) / 10,
     maxWeight: Math.round(toDisplay(p.maxWeight) * 10) / 10,
-    isPR: prDate ? new Date(p.date).getTime() === new Date(prDate).getTime() : false,
+    // Compare workout_uuid (stable identity), not date strings — ProgressPoint
+    // and PR record can hold different time formats and string comparison
+    // breaks if either is reformatted.
+    isPR: prWorkoutUuid != null && p.workoutUuid === prWorkoutUuid,
   })) ?? [];
 
   const volumeData = progressData?.volumeTrend.map(v => ({
@@ -175,85 +239,83 @@ export default function ExerciseDetail({
 
   const tooltipStyle = {
     contentStyle: {
-      backgroundColor: '#18181b',
-      border: '1px solid #3f3f46',
+      backgroundColor: chartTheme.tooltipBg,
+      border: `1px solid ${chartTheme.tooltipBorder}`,
       borderRadius: '8px',
       fontSize: 12,
+      color: chartTheme.tooltipText,
     },
-    labelStyle: { color: '#a1a1aa' },
-    itemStyle: { color: '#e4e4e7' },
+    labelStyle: { color: chartTheme.axis },
+    itemStyle: { color: chartTheme.tooltipText },
   };
 
   return (
-    <main className="tab-content bg-background">
-      {/* Nav bar */}
-      <div className="flex items-center gap-2 px-4 pt-safe pb-3 border-b border-border">
-        <button onClick={onBack} className="flex items-center gap-1 text-primary font-medium text-base">
-          <ChevronLeft className="h-5 w-5" />
-          Back
-        </button>
-      </div>
+    <main ref={rootRef} className="tab-content bg-background">
+      {chrome === 'page' && (
+        <div className="flex items-center gap-2 px-4 pt-safe pb-3 border-b border-border">
+          <button onClick={onBack} className="flex items-center gap-1 text-primary font-medium text-base">
+            <ChevronLeft className="h-5 w-5" />
+            Back
+          </button>
+        </div>
+      )}
 
       <div className="px-4 py-4 space-y-5">
-        <h1 className="text-xl font-bold">{exercise.title}</h1>
+        {chrome === 'page' && (
+          <h1 className="text-xl font-bold">{exercise.title}</h1>
+        )}
 
-        {/* ── Progress section ── */}
         {loading ? (
           <LoadingSkeleton />
         ) : !hasData ? (
           <EmptyState />
         ) : (
           <>
-            {/* PR Badges */}
-            <div>
-              <p className="text-xs font-semibold text-primary uppercase tracking-wide mb-2 px-1">Personal Records</p>
-              <div className="flex gap-2">
-                <PRBadge
-                  icon={<Trophy className="h-4 w-4" />}
-                  label="Est. 1RM"
-                  value={
-                    progressData.prs.estimated1RM
-                      ? `${Math.round(toDisplay(progressData.prs.estimated1RM.estimated1RM))} ${label}`
-                      : '—'
-                  }
-                  sub={
-                    progressData.prs.estimated1RM
-                      ? formatDate(progressData.prs.estimated1RM.date)
-                      : 'No data'
-                  }
-                />
-                <PRBadge
-                  icon={<Medal className="h-4 w-4" />}
-                  label="Heaviest"
-                  value={
-                    progressData.prs.heaviestWeight
-                      ? `${toDisplay(progressData.prs.heaviestWeight.weight)} ${label}`
-                      : '—'
-                  }
-                  sub={
-                    progressData.prs.heaviestWeight
-                      ? formatDate(progressData.prs.heaviestWeight.date)
-                      : 'No data'
-                  }
-                />
-                <PRBadge
-                  icon={<Award className="h-4 w-4" />}
-                  label="Most Reps"
-                  value={
-                    progressData.prs.mostReps
-                      ? `${progressData.prs.mostReps.repetitions}`
-                      : '—'
-                  }
-                  sub={
-                    progressData.prs.mostReps
-                      ? `@ ${toDisplay(progressData.prs.mostReps.weight)} ${label}`
-                      : 'No data'
-                  }
-                />
-              </div>
+            <OneRMHero
+              value={
+                progressData.prs.estimated1RM
+                  ? `${Math.round(toDisplay(progressData.prs.estimated1RM.estimated_1rm))}`
+                  : '—'
+              }
+              unit={label}
+              date={
+                progressData.prs.estimated1RM
+                  ? formatDate(progressData.prs.estimated1RM.date)
+                  : 'No data'
+              }
+            />
+
+            <div className="flex gap-2">
+              <PRBadge
+                icon={<Medal className="h-4 w-4" />}
+                label="Heaviest"
+                value={
+                  progressData.prs.heaviestWeight
+                    ? `${toDisplay(progressData.prs.heaviestWeight.weight)} ${label}`
+                    : '—'
+                }
+                sub={
+                  progressData.prs.heaviestWeight
+                    ? formatDate(progressData.prs.heaviestWeight.date)
+                    : 'No data'
+                }
+              />
+              <PRBadge
+                icon={<Award className="h-4 w-4" />}
+                label="Most Reps"
+                value={
+                  progressData.prs.mostReps
+                    ? `${progressData.prs.mostReps.repetitions}`
+                    : '—'
+                }
+                sub={
+                  progressData.prs.mostReps
+                    ? `@ ${toDisplay(progressData.prs.mostReps.weight)} ${label}`
+                    : 'No data'
+                }
+              />
             </div>
 
-            {/* Weight Progress Chart */}
             {chartData.length > 0 && (
               <div>
                 <div className="flex items-center justify-between mb-2 px-1">
@@ -265,8 +327,8 @@ export default function ExerciseDetail({
                         onClick={() => setRange(r.value)}
                         className={`px-2 py-0.5 rounded-full text-[11px] font-semibold transition-colors ${
                           range === r.value
-                            ? 'bg-blue-600 text-white'
-                            : 'text-zinc-400 hover:text-zinc-200'
+                            ? 'bg-primary text-primary-foreground'
+                            : 'text-muted-foreground hover:text-foreground'
                         }`}
                       >
                         {r.label}
@@ -274,26 +336,26 @@ export default function ExerciseDetail({
                     ))}
                   </div>
                 </div>
-                <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-3">
+                <div className="bg-card border border-border rounded-xl p-3">
                   <ResponsiveContainer width="100%" height={200}>
                     <LineChart data={chartData} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#3f3f46" />
-                      <XAxis dataKey="date" stroke="#71717a" fontSize={11} tick={{ fill: '#71717a' }} />
-                      <YAxis stroke="#71717a" fontSize={11} tick={{ fill: '#71717a' }} unit={` ${label}`} />
+                      <CartesianGrid strokeDasharray="3 3" stroke={chartTheme.grid} />
+                      <XAxis dataKey="date" stroke={chartTheme.axis} fontSize={11} tick={{ fill: chartTheme.axis }} />
+                      <YAxis stroke={chartTheme.axis} fontSize={11} tick={{ fill: chartTheme.axis }} unit={` ${label}`} />
                       <Tooltip {...tooltipStyle} />
                       <Line
                         type="monotone"
                         dataKey="estimated1RM"
                         name="Est. 1RM"
-                        stroke="#3b82f6"
+                        stroke={chartTheme.line1RM}
                         strokeWidth={2}
                         dot={(props: { cx?: number; cy?: number; payload?: { isPR?: boolean } }) => {
                           const { cx, cy, payload } = props;
                           if (!payload?.isPR || cx == null || cy == null) return <g key={`dot-${cx}`} />;
                           return (
                             <g key={`pr-dot-${cx}`}>
-                              <circle cx={cx} cy={cy} r={6} fill="#f59e0b" stroke="#18181b" strokeWidth={2} />
-                              <text x={cx} y={cy - 10} textAnchor="middle" fontSize={9} fill="#f59e0b" fontWeight="bold">PR</text>
+                              <circle cx={cx} cy={cy} r={6} fill={chartTheme.pr} stroke={chartTheme.tooltipBg} strokeWidth={2} />
+                              <text x={cx} y={cy - 10} textAnchor="middle" fontSize={9} fill={chartTheme.pr} fontWeight="bold">PR</text>
                             </g>
                           );
                         }}
@@ -303,7 +365,7 @@ export default function ExerciseDetail({
                         type="monotone"
                         dataKey="maxWeight"
                         name="Max Weight"
-                        stroke="#10b981"
+                        stroke={chartTheme.lineWeight}
                         strokeWidth={2}
                         dot={false}
                         activeDot={{ r: 4 }}
@@ -313,62 +375,58 @@ export default function ExerciseDetail({
                   </ResponsiveContainer>
                   <div className="flex gap-4 mt-2 justify-center">
                     <div className="flex items-center gap-1.5">
-                      <div className="w-4 h-0.5 bg-blue-500 rounded" />
-                      <span className="text-[10px] text-zinc-500">Est. 1RM</span>
+                      <div className="w-4 h-0.5 rounded" style={{ background: chartTheme.line1RM }} />
+                      <span className="text-[10px] text-muted-foreground">Est. 1RM</span>
                     </div>
                     <div className="flex items-center gap-1.5">
-                      <div className="w-4 h-0.5 bg-emerald-500 rounded" />
-                      <span className="text-[10px] text-zinc-500">Max Weight</span>
+                      <div className="w-4 h-0.5 rounded" style={{ background: chartTheme.lineWeight }} />
+                      <span className="text-[10px] text-muted-foreground">Max Weight</span>
                     </div>
                     <div className="flex items-center gap-1.5">
-                      <div className="w-2.5 h-2.5 rounded-full bg-amber-400" />
-                      <span className="text-[10px] text-zinc-500">PR</span>
+                      <div className="w-2.5 h-2.5 rounded-full" style={{ background: chartTheme.pr }} />
+                      <span className="text-[10px] text-muted-foreground">PR</span>
                     </div>
                   </div>
                 </div>
               </div>
             )}
 
-            {/* Volume Trend Chart */}
             {volumeData.length > 0 && (
               <div>
                 <p className="text-xs font-semibold text-primary uppercase tracking-wide mb-2 px-1">Volume Trend</p>
-                <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-3">
+                <div className="bg-card border border-border rounded-xl p-3">
                   <ResponsiveContainer width="100%" height={180}>
                     <BarChart data={volumeData} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#3f3f46" vertical={false} />
-                      <XAxis dataKey="date" stroke="#71717a" fontSize={11} tick={{ fill: '#71717a' }} />
-                      <YAxis stroke="#71717a" fontSize={11} tick={{ fill: '#71717a' }} />
+                      <CartesianGrid strokeDasharray="3 3" stroke={chartTheme.grid} vertical={false} />
+                      <XAxis dataKey="date" stroke={chartTheme.axis} fontSize={11} tick={{ fill: chartTheme.axis }} />
+                      <YAxis stroke={chartTheme.axis} fontSize={11} tick={{ fill: chartTheme.axis }} />
                       <Tooltip {...tooltipStyle} />
-                      <Bar dataKey="totalVolume" name={`Volume (${label})`} fill="#3b82f6" radius={[3, 3, 0, 0]} />
+                      <Bar dataKey="totalVolume" name={`Volume (${label})`} fill={chartTheme.bar} radius={[3, 3, 0, 0]} />
                     </BarChart>
                   </ResponsiveContainer>
                 </div>
               </div>
             )}
 
-            {/* Recent Sets Table */}
             {progressData.recentSets.length > 0 && (
               <div>
                 <p className="text-xs font-semibold text-primary uppercase tracking-wide mb-2 px-1">Recent Sets</p>
-                <div className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden">
-                  {/* Header */}
-                  <div className="grid grid-cols-4 px-3 py-2 border-b border-zinc-800">
-                    <span className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wide">Date</span>
-                    <span className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wide text-right">Weight</span>
-                    <span className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wide text-right">Reps</span>
-                    <span className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wide text-right">RPE</span>
+                <div className="bg-card border border-border rounded-xl overflow-hidden">
+                  <div className="grid grid-cols-4 px-3 py-2 border-b border-border">
+                    <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide">Date</span>
+                    <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide text-right">Weight</span>
+                    <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide text-right">Reps</span>
+                    <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide text-right">RPE</span>
                   </div>
-                  {/* Rows */}
                   {progressData.recentSets.map((set, i) => (
                     <div
                       key={`${set.workoutUuid}-${i}`}
-                      className={`grid grid-cols-4 px-3 py-2 ${i % 2 === 0 ? 'bg-zinc-900' : 'bg-zinc-950'}`}
+                      className={`grid grid-cols-4 px-3 py-2 ${i % 2 === 0 ? 'bg-card' : 'bg-muted/30'}`}
                     >
-                      <span className="text-xs text-zinc-400">{formatDate(set.date)}</span>
-                      <span className="text-xs text-zinc-200 text-right">{set.weight != null ? toDisplay(set.weight) : '—'} {label}</span>
-                      <span className="text-xs text-zinc-200 text-right">{set.repetitions}</span>
-                      <span className="text-xs text-zinc-400 text-right">{set.rpe != null ? set.rpe : '—'}</span>
+                      <span className="text-xs text-muted-foreground">{formatDate(set.date)}</span>
+                      <span className="text-xs text-foreground text-right">{set.weight != null ? toDisplay(set.weight) : '—'} {label}</span>
+                      <span className="text-xs text-foreground text-right">{set.repetitions}</span>
+                      <span className="text-xs text-muted-foreground text-right">{set.rpe != null ? set.rpe : '—'}</span>
                     </div>
                   ))}
                 </div>
@@ -377,7 +435,6 @@ export default function ExerciseDetail({
           </>
         )}
 
-        {/* Description */}
         {exercise.description && (
           <div>
             <p className="text-xs font-semibold text-primary uppercase tracking-wide mb-1 px-1">About</p>
@@ -387,7 +444,6 @@ export default function ExerciseDetail({
           </div>
         )}
 
-        {/* Muscles */}
         {(exercise.primary_muscles.length > 0 || exercise.secondary_muscles.length > 0) && (
           <div>
             <p className="text-xs font-semibold text-primary uppercase tracking-wide mb-1 px-1">Muscles</p>
@@ -408,7 +464,6 @@ export default function ExerciseDetail({
           </div>
         )}
 
-        {/* Equipment */}
         {exercise.equipment.length > 0 && (
           <div>
             <p className="text-xs font-semibold text-primary uppercase tracking-wide mb-1 px-1">Equipment</p>
@@ -422,7 +477,6 @@ export default function ExerciseDetail({
           </div>
         )}
 
-        {/* Steps */}
         {exercise.steps.length > 0 && (
           <div>
             <p className="text-xs font-semibold text-primary uppercase tracking-wide mb-1 px-1">Steps</p>
@@ -437,7 +491,6 @@ export default function ExerciseDetail({
           </div>
         )}
 
-        {/* Tips */}
         {exercise.tips.length > 0 && (
           <div>
             <p className="text-xs font-semibold text-primary uppercase tracking-wide mb-1 px-1">Tips</p>
@@ -451,7 +504,6 @@ export default function ExerciseDetail({
           </div>
         )}
 
-        {/* Also known as */}
         {exercise.alias.length > 0 && (
           <div>
             <p className="text-xs font-semibold text-primary uppercase tracking-wide mb-1 px-1">Also Known As</p>

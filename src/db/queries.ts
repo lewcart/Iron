@@ -439,6 +439,7 @@ export async function getHistoricalBestsForExercise(
 
 export async function getExerciseProgress(exerciseUuid: string, since?: Date): Promise<Array<{
   date: string;
+  workoutUuid: string;
   maxWeight: number;
   totalVolume: number;
   estimated1RM: number;
@@ -448,6 +449,7 @@ export async function getExerciseProgress(exerciseUuid: string, since?: Date): P
 
   const rows = await query<{
     date: string;
+    workout_uuid: string;
     max_weight: string;
     total_volume: string;
     max_reps_at_max_weight: number;
@@ -473,6 +475,7 @@ export async function getExerciseProgress(exerciseUuid: string, since?: Date): P
         ${sinceClause}
     )
     SELECT
+      workout_uuid,
       date,
       MAX(weight) AS max_weight,
       SUM(weight * repetitions) AS total_volume,
@@ -489,6 +492,7 @@ export async function getExerciseProgress(exerciseUuid: string, since?: Date): P
     const estimated1RM = estimate1RM(maxWeight, reps);
     return {
       date: row.date,
+      workoutUuid: row.workout_uuid,
       maxWeight,
       totalVolume,
       estimated1RM,
