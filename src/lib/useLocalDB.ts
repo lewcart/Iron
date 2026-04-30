@@ -36,17 +36,6 @@ export function useCurrentWorkoutFull(): LocalWorkoutWithExercises | null | unde
     const allExercises = await db.exercises.where('uuid').anyOf(neededUuids).toArray();
     const exerciseMap = new Map(allExercises.map(e => [e.uuid, e]));
 
-    const totalExCount = await db.exercises.count();
-    const missing = neededUuids.filter(u => !exerciseMap.has(u));
-    if (missing.length > 0) {
-      console.warn('[workout] Missing exercises:', missing, '| exerciseMap size:', exerciseMap.size, '| total in DB:', totalExCount);
-      // Debug: try direct get for first missing
-      for (const m of missing) {
-        const direct = await db.exercises.get(m);
-        console.warn('[workout] direct get', m, '->', direct?.title ?? 'NOT FOUND');
-      }
-    }
-
     const exercises = await Promise.all(
       wes.map(async we => {
         const exercise = exerciseMap.get(we.exercise_uuid.toLowerCase());

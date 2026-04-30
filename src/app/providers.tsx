@@ -10,6 +10,8 @@ import { LocalNotifications } from '@capacitor/local-notifications';
 import { markScheduleTap } from '@/lib/workout-schedule';
 import { werePermissionsRequested } from '@/features/health/healthService';
 import { runForegroundSync } from '@/features/health/healthSync';
+import { hydrateExercises } from '@/db/local';
+import { syncEngine } from '@/lib/sync';
 
 function makeQueryClient() {
   return new QueryClient({
@@ -51,38 +53,75 @@ function NotificationRouter() {
   return null;
 }
 
-// Kicks off a HealthKit foreground sync on app launch + on app resume, if the
-// user has previously connected HealthKit. Rate-limited to once every 2 minutes
-// to avoid thrashing when iOS rapid-fires appStateChange events.
+// Boots Dexie hydration + sync engine on mount, and consolidates all
+// foreground-sync triggers (HealthKit + main sync engine) into a single
+// listener so we don't run two parallel resume-sync layers.
+//
+// Rate-limit: HealthKit sync at most once every 2 minutes to avoid iOS
+// rapid-firing appStateChange. The main sync engine has its own internal
+// guards (`_pulling`, `_pushing`) and is cheap (15s polling already), so it
+// fires on every visible/active event.
 const HEALTHKIT_SYNC_MIN_INTERVAL_MS = 2 * 60 * 1000;
 
-function HealthKitResumeSync() {
-  const lastSyncAt = useRef(0);
+function AppBootstrap() {
+  const lastHealthkitSyncAt = useRef(0);
 
   useEffect(() => {
-    if (!Capacitor.isNativePlatform()) return;
+    // Hydrate the exercise catalog so the workout view never shows
+    // "Unknown Exercise" on cold start. Idempotent.
+    hydrateExercises();
 
-    const trigger = () => {
-      // Skip sync on boot if we've never connected — the Settings-side probe
-      // will discover the real state via server lookup if localStorage was wiped.
-      if (!werePermissionsRequested()) return;
-      const now = Date.now();
-      if (now - lastSyncAt.current < HEALTHKIT_SYNC_MIN_INTERVAL_MS) return;
-      lastSyncAt.current = now;
-      runForegroundSync().catch(() => undefined);
+    // Start the sync engine. Idempotent — safe under React StrictMode
+    // remount and route remounts.
+    syncEngine.start();
+
+    // Consolidated foreground sync trigger.
+    const triggerForegroundSync = () => {
+      if (!navigator.onLine) return;
+
+      // Main app sync runs every time we come to foreground (no cooldown
+      // beyond the engine's internal `_pulling` guard). MCP-driven changes
+      // appear within a single 15s tick at worst, instantly when returning
+      // from background.
+      syncEngine.sync();
+
+      // HealthKit sync is more expensive (HKQueryDescriptors round-trip
+      // through native bridge); throttle to 2 min minimum.
+      if (Capacitor.isNativePlatform() && werePermissionsRequested()) {
+        const now = Date.now();
+        if (now - lastHealthkitSyncAt.current >= HEALTHKIT_SYNC_MIN_INTERVAL_MS) {
+          lastHealthkitSyncAt.current = now;
+          runForegroundSync().catch(() => undefined);
+        }
+      }
     };
 
-    // Initial on mount
-    trigger();
+    // visibilitychange catches tab/PWA web-side visibility transitions.
+    const onVisible = () => { if (!document.hidden) triggerForegroundSync(); };
+    document.addEventListener('visibilitychange', onVisible);
 
-    let cleanup: (() => void) | undefined;
-    App.addListener('appStateChange', ({ isActive }) => {
-      if (isActive) trigger();
-    }).then(handle => {
-      cleanup = () => handle.remove();
-    });
+    // App.appStateChange catches Capacitor native foreground/background.
+    let capCleanup: (() => void) | undefined;
+    if (Capacitor.isNativePlatform()) {
+      App.addListener('appStateChange', ({ isActive }) => {
+        if (isActive) triggerForegroundSync();
+      }).then(handle => {
+        capCleanup = () => handle.remove();
+      });
+    }
 
-    return () => cleanup?.();
+    // Initial trigger on mount (catches the case where the app was already
+    // open in the background when JS booted).
+    if (Capacitor.isNativePlatform() && werePermissionsRequested()) {
+      lastHealthkitSyncAt.current = Date.now();
+      runForegroundSync().catch(() => undefined);
+    }
+
+    return () => {
+      document.removeEventListener('visibilitychange', onVisible);
+      capCleanup?.();
+      // Don't stop syncEngine — it's a singleton across the app lifetime.
+    };
   }, []);
 
   return null;
@@ -94,7 +133,7 @@ export function AppProviders({ children }: { children: ReactNode }) {
   return (
     <QueryClientProvider client={queryClient}>
       <NotificationRouter />
-      <HealthKitResumeSync />
+      <AppBootstrap />
       {children}
       {process.env.NODE_ENV === 'development' ? (
         <ReactQueryDevtools buttonPosition="bottom-left" />

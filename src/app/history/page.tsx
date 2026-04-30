@@ -59,15 +59,13 @@ export default function HistoryPage() {
 
   const grouped = groupWorkouts(workouts, groupMode);
 
-  // Show skeleton while initial sync is in progress and no local data exists yet
+  // useLiveQuery returns [] synchronously on first call, then the actual rows
+  // a tick later — so we only show the skeleton if we genuinely have no rows
+  // AND a sync is in flight. Returning users with populated Dexie skip the
+  // skeleton entirely and render instantly.
   const [syncStatus, setSyncStatus] = useState<SyncStatus>(syncEngine.status);
   useEffect(() => syncEngine.subscribe(setSyncStatus), []);
-  const [initialLoad, setInitialLoad] = useState(true);
-  useEffect(() => {
-    const t = setTimeout(() => setInitialLoad(false), 500);
-    return () => clearTimeout(t);
-  }, []);
-  const loading = initialLoad || (workouts.length === 0 && syncStatus === 'syncing');
+  const loading = workouts.length === 0 && syncStatus === 'syncing';
 
   if (selected) {
     return <WorkoutDetail workout={selected} onBack={() => setSelected(null)} />;
