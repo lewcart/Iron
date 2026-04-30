@@ -1,10 +1,17 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { ChevronLeft, Trophy, Medal, Award } from 'lucide-react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { ChevronLeft, Trophy, Medal, Award, Timer } from 'lucide-react';
 import type { Exercise } from '@/types';
 import { useUnit } from '@/context/UnitContext';
 import { apiBase } from '@/lib/api/client';
+import {
+  getExerciseProgressLocal,
+  getExerciseSessionHistoryLocal,
+  getExerciseTimePRsLocal,
+  type ExerciseSessionGroup,
+  type ExerciseTimePRsLocal,
+} from '@/lib/useLocalDB';
 import {
   LineChart,
   Line,
@@ -19,16 +26,21 @@ import {
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
+// Matches PersonalRecord shape from src/types.ts — the API at
+// /api/exercises/[uuid]/history returns this snake_case shape via
+// calculatePRs in src/lib/pr.ts.
 interface PRRecord {
-  exerciseUuid: string;
+  exercise_uuid: string;
   weight: number;
   repetitions: number;
-  estimated1RM: number;
+  estimated_1rm: number;
   date: string;
+  workout_uuid: string;
 }
 
 interface ProgressPoint {
   date: string;
+  workoutUuid: string;
   maxWeight: number;
   totalVolume: number;
   estimated1RM: number;
@@ -58,11 +70,23 @@ interface ProgressData {
   recentSets: RecentSet[];
 }
 
+const SESSIONS_PER_PAGE = 10;
+
 // ── Helpers ────────────────────────────────────────────────────────────────
 
 function formatDate(dateStr: string): string {
   const d = new Date(dateStr);
   return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' });
+}
+
+/** Read an HSL CSS variable and return it as a usable color string for
+ *  Recharts. The library can't consume CSS vars directly so we materialize
+ *  them at render time, which keeps charts theme-aware. */
+function readCssVarColor(varName: string, fallback: string): string {
+  if (typeof window === 'undefined') return fallback;
+  const raw = getComputedStyle(document.documentElement).getPropertyValue(varName).trim();
+  if (!raw) return fallback;
+  return `hsl(${raw})`;
 }
 
 // ── Sub-components ─────────────────────────────────────────────────────────
@@ -79,34 +103,104 @@ function PRBadge({
   sub: string;
 }) {
   return (
-    <div className="flex-1 flex flex-col items-center gap-1 bg-zinc-900 border border-zinc-800 rounded-xl p-3 min-w-0">
-      <div className="text-zinc-400">{icon}</div>
-      <p className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wide text-center">{label}</p>
-      <p className="text-base font-bold text-zinc-100 text-center leading-tight">{value}</p>
-      <p className="text-[10px] text-zinc-500 text-center">{sub}</p>
+    <div className="flex-1 flex flex-col items-center gap-1 bg-card border border-border rounded-xl p-3 min-w-0">
+      <div className="text-muted-foreground">{icon}</div>
+      <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide text-center">{label}</p>
+      <p className="text-base font-bold text-foreground text-center leading-tight">{value}</p>
+      <p className="text-[10px] text-muted-foreground text-center">{sub}</p>
     </div>
   );
 }
 
+/** Headline 1RM block — promoted from the 3-up secondary row in the
+ *  previous layout. Shows the naked Epley estimate (no confidence band — see
+ *  /plan-eng-review 2026-04-30 user decision). */
+function OneRMHero({
+  value,
+  unit,
+  date,
+}: {
+  value: string;
+  unit: string;
+  date: string;
+}) {
+  return (
+    <div className="bg-card border border-border rounded-2xl p-4 flex items-baseline gap-3">
+      <div className="flex-1">
+        <p className="text-xs uppercase text-muted-foreground tracking-wide">Personal Best</p>
+        <div className="flex items-baseline gap-1.5 mt-1">
+          <span className="text-3xl font-bold text-foreground">{value}</span>
+          <span className="text-sm text-muted-foreground">{unit}</span>
+        </div>
+        <p className="text-xs text-muted-foreground mt-1">Est. 1RM · {date}</p>
+      </div>
+      <Trophy className="h-8 w-8 text-amber-400/80 flex-shrink-0" />
+    </div>
+  );
+}
+
+/** Time-mode counterpart to OneRMHero. Headline number is the longest hold,
+ *  date is when it was set. Total time across all sessions appears as a
+ *  secondary inline stat — useful as a "tonnage" analogue for time-mode. */
+function LongestHoldHero({
+  longestSeconds,
+  longestDate,
+  totalSeconds,
+}: {
+  longestSeconds: number | null;
+  longestDate: string;
+  totalSeconds: number;
+}) {
+  return (
+    <div className="bg-card border border-border rounded-2xl p-4 flex items-baseline gap-3">
+      <div className="flex-1">
+        <p className="text-xs uppercase text-muted-foreground tracking-wide">Personal Best</p>
+        <div className="flex items-baseline gap-1.5 mt-1">
+          <span className="text-3xl font-bold text-foreground">
+            {longestSeconds != null ? formatDuration(longestSeconds) : '—'}
+          </span>
+        </div>
+        <p className="text-xs text-muted-foreground mt-1">
+          Longest Hold · {longestDate}
+          {totalSeconds > 0 && (
+            <span className="ml-2 text-muted-foreground/70">
+              · {formatDuration(totalSeconds)} total
+            </span>
+          )}
+        </p>
+      </div>
+      <Timer className="h-8 w-8 text-amber-400/80 flex-shrink-0" />
+    </div>
+  );
+}
+
+/** Format a seconds count as the most compact human-readable string.
+ *  60 → "1:00", 75 → "1:15", 3600 → "1:00:00", 9 → "9s". */
+function formatDuration(totalSeconds: number): string {
+  if (totalSeconds < 60) return `${totalSeconds}s`;
+  const h = Math.floor(totalSeconds / 3600);
+  const m = Math.floor((totalSeconds % 3600) / 60);
+  const s = totalSeconds % 60;
+  if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+  return `${m}:${String(s).padStart(2, '0')}`;
+}
+
 function SkeletonBlock({ className }: { className?: string }) {
   return (
-    <div className={`bg-zinc-800 rounded-lg animate-pulse ${className ?? ''}`} />
+    <div className={`bg-muted rounded-lg animate-pulse ${className ?? ''}`} />
   );
 }
 
 function LoadingSkeleton() {
   return (
     <div className="space-y-4 px-4 py-4">
-      {/* PR badges skeleton */}
+      <SkeletonBlock className="h-24" />
       <div className="flex gap-2">
-        <SkeletonBlock className="flex-1 h-24" />
-        <SkeletonBlock className="flex-1 h-24" />
-        <SkeletonBlock className="flex-1 h-24" />
+        <SkeletonBlock className="flex-1 h-20" />
+        <SkeletonBlock className="flex-1 h-20" />
       </div>
-      {/* Chart skeleton */}
       <SkeletonBlock className="h-48" />
       <SkeletonBlock className="h-48" />
-      {/* Table skeleton */}
       <SkeletonBlock className="h-32" />
     </div>
   );
@@ -115,9 +209,9 @@ function LoadingSkeleton() {
 function EmptyState() {
   return (
     <div className="flex flex-col items-center justify-center py-16 text-center">
-      <Trophy className="h-10 w-10 text-zinc-700 mb-3" />
-      <p className="text-zinc-400 font-medium">No workout data yet</p>
-      <p className="text-zinc-600 text-sm mt-1">Log this exercise to see your progress</p>
+      <Trophy className="h-10 w-10 text-muted-foreground/40 mb-3" />
+      <p className="text-foreground font-medium">No workout data yet</p>
+      <p className="text-muted-foreground text-sm mt-1">Log this exercise to see your progress</p>
     </div>
   );
 }
@@ -135,37 +229,174 @@ const RANGES: { label: string; value: Range }[] = [
 export default function ExerciseDetail({
   exercise,
   onBack,
+  chrome = 'page',
 }: {
   exercise: Exercise;
   onBack: () => void;
+  /** Render mode: 'page' shows the back-button nav bar; 'modal' assumes
+   *  the parent already supplies its own chrome (header bar + close button). */
+  chrome?: 'page' | 'modal';
 }) {
   const { toDisplay, label } = useUnit();
   const [progressData, setProgressData] = useState<ProgressData | null>(null);
   const [loading, setLoading] = useState(true);
   const [range, setRange] = useState<Range>('all');
 
+  // Materialize Recharts colors from CSS vars on every render so charts
+  // pick up theme switches immediately. Cheap: getComputedStyle is sub-ms
+  // and there's no need to memoize against a stale dep — the previous
+  // [range]-keyed memo missed dark/light toggles, since theme changes
+  // don't trigger range to update.
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const chartTheme = {
+    grid: readCssVarColor('--border', '#e5e7eb'),
+    axis: readCssVarColor('--muted-foreground', '#6b7280'),
+    tooltipBg: readCssVarColor('--card', '#ffffff'),
+    tooltipBorder: readCssVarColor('--border', '#e5e7eb'),
+    tooltipText: readCssVarColor('--foreground', '#111827'),
+    line1RM: '#3b82f6',
+    lineWeight: '#10b981',
+    bar: '#3b82f6',
+    pr: '#f59e0b',
+  };
+
+  // Session-grouped history, paginated. Lives separately from the chart
+  // data so chart-range changes don't invalidate the session list.
+  const [sessions, setSessions] = useState<ExerciseSessionGroup[]>([]);
+  const [sessionsCursor, setSessionsCursor] = useState<string | null>(null);
+  const [sessionsExhaustedLocally, setSessionsExhaustedLocally] = useState(false);
+  const [sessionsServerCursor, setSessionsServerCursor] = useState<string | null>(null);
+  const [sessionsServerDone, setSessionsServerDone] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+
+  // Time-mode PR — only populated for time-mode exercises. Drives the
+  // LongestHoldHero block in place of OneRMHero.
+  const [timePRs, setTimePRs] = useState<ExerciseTimePRsLocal | null>(null);
+
+  const trackingMode = exercise.tracking_mode ?? 'reps';
+  const isTimeMode = trackingMode === 'time';
+
+  // Local-first chart + PR data. Compute from Dexie so the modal works
+  // offline at the gym. Fall back to server only if Dexie returns empty
+  // (catalog hasn't hydrated, etc.) — that's a rare edge case.
   useEffect(() => {
+    let cancelled = false;
     setLoading(true);
     setProgressData(null);
-    fetch(`${apiBase()}/api/exercises/${exercise.uuid}/history?range=${range}`)
-      .then(r => r.json())
-      .then((data: ProgressData) => {
-        setProgressData(data);
+
+    const sinceDate = (() => {
+      const now = new Date();
+      if (range === '1m') return new Date(now.getFullYear(), now.getMonth() - 1, now.getDate());
+      if (range === '3m') return new Date(now.getFullYear(), now.getMonth() - 3, now.getDate());
+      if (range === '6m') return new Date(now.getFullYear(), now.getMonth() - 6, now.getDate());
+      return undefined;
+    })();
+
+    (async () => {
+      try {
+        // Branch by mode: rep-mode reads chart + 1RM PRs; time-mode reads
+        // longest-hold PRs. Session list is mode-agnostic and runs in both.
+        const [local, firstPage, time] = await Promise.all([
+          isTimeMode ? Promise.resolve(null) : getExerciseProgressLocal(exercise.uuid, sinceDate),
+          getExerciseSessionHistoryLocal(exercise.uuid, null, SESSIONS_PER_PAGE),
+          isTimeMode ? getExerciseTimePRsLocal(exercise.uuid, sinceDate) : Promise.resolve(null),
+        ]);
+        if (cancelled) return;
+
+        const serialized: ProgressData = local ? {
+          progress: local.progress,
+          prs: {
+            estimated1RM: local.prs.estimated1RM ? { ...local.prs.estimated1RM, exercise_uuid: exercise.uuid } : null,
+            heaviestWeight: local.prs.heaviestWeight ? { ...local.prs.heaviestWeight, exercise_uuid: exercise.uuid } : null,
+            mostReps: local.prs.mostReps ? { ...local.prs.mostReps, exercise_uuid: exercise.uuid } : null,
+          },
+          volumeTrend: local.volumeTrend,
+          recentSets: [],
+        } : {
+          // Time-mode: empty rep-shaped fields. The hero + chart branches
+          // off `isTimeMode` so this empty payload never gets rendered.
+          progress: [],
+          prs: { estimated1RM: null, heaviestWeight: null, mostReps: null },
+          volumeTrend: [],
+          recentSets: [],
+        };
+        setProgressData(serialized);
+        setTimePRs(time);
+        setSessions(firstPage.sessions);
+        setSessionsCursor(firstPage.nextCursor);
+        setSessionsExhaustedLocally(firstPage.nextCursor === null);
+        setSessionsServerCursor(null);
+        setSessionsServerDone(false);
         setLoading(false);
-      })
-      .catch(() => setLoading(false));
-  }, [exercise.uuid, range]);
+      } catch (e) {
+        if (!cancelled) {
+          console.warn('[ExerciseDetail] local read failed:', e);
+          setLoading(false);
+        }
+      }
+    })();
 
-  const hasData = progressData && progressData.recentSets.length > 0;
+    return () => { cancelled = true; };
+  }, [exercise.uuid, range, isTimeMode]);
 
-  const prDate = progressData?.prs.estimated1RM?.date;
+  const loadMoreSessions = useCallback(async () => {
+    if (loadingMore) return;
+    setLoadingMore(true);
+    try {
+      // Phase 1: drain remaining local sessions.
+      if (!sessionsExhaustedLocally && sessionsCursor) {
+        const next = await getExerciseSessionHistoryLocal(exercise.uuid, sessionsCursor, SESSIONS_PER_PAGE);
+        setSessions(prev => [...prev, ...next.sessions]);
+        setSessionsCursor(next.nextCursor);
+        if (next.nextCursor === null) setSessionsExhaustedLocally(true);
+        setLoadingMore(false);
+        return;
+      }
+      // Phase 2: server backfill for older sessions not in Dexie.
+      if (!sessionsServerDone) {
+        const seedCursor = sessionsServerCursor
+          ?? (sessions.length > 0
+                ? `${sessions[sessions.length - 1].date}|${sessions[sessions.length - 1].workout_uuid}`
+                : null);
+        const url = `${apiBase()}/api/exercises/${exercise.uuid}/sessions?limit=${SESSIONS_PER_PAGE}`
+          + (seedCursor ? `&cursor=${encodeURIComponent(seedCursor)}` : '');
+        const res = await fetch(url);
+        if (!res.ok) throw new Error(`status ${res.status}`);
+        const data: { sessions: ExerciseSessionGroup[]; nextCursor: string | null } = await res.json();
+        // Filter out any session UUIDs already shown (local + server overlap).
+        const existing = new Set(sessions.map(s => s.workout_uuid));
+        const fresh = data.sessions.filter(s => !existing.has(s.workout_uuid));
+        setSessions(prev => [...prev, ...fresh]);
+        setSessionsServerCursor(data.nextCursor);
+        if (data.nextCursor === null) setSessionsServerDone(true);
+      }
+    } catch (e) {
+      console.warn('[ExerciseDetail] load more failed:', e);
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [exercise.uuid, loadingMore, sessions, sessionsCursor, sessionsExhaustedLocally, sessionsServerCursor, sessionsServerDone]);
+
+  const hasMoreSessions = !sessionsExhaustedLocally || !sessionsServerDone;
+
+  // hasData covers the chart/PR section only. The session list manages its
+  // own visibility via the `sessions` array. Time-mode uses a different
+  // primary-data shape (timePRs.progress) but the same session-list condition.
+  const hasData = isTimeMode
+    ? ((timePRs?.progress.length ?? 0) > 0 || sessions.length > 0)
+    : (progressData != null && (progressData.progress.length > 0 || sessions.length > 0));
+  const prWorkoutUuid = progressData?.prs.estimated1RM?.workout_uuid;
 
   const chartData = progressData?.progress.map(p => ({
     date: formatDate(p.date),
     rawDate: p.date,
+    workoutUuid: p.workoutUuid,
     estimated1RM: Math.round(toDisplay(p.estimated1RM) * 10) / 10,
     maxWeight: Math.round(toDisplay(p.maxWeight) * 10) / 10,
-    isPR: prDate ? new Date(p.date).getTime() === new Date(prDate).getTime() : false,
+    // Compare workout_uuid (stable identity), not date strings — ProgressPoint
+    // and PR record can hold different time formats and string comparison
+    // breaks if either is reformatted.
+    isPR: prWorkoutUuid != null && p.workoutUuid === prWorkoutUuid,
   })) ?? [];
 
   const volumeData = progressData?.volumeTrend.map(v => ({
@@ -175,86 +406,96 @@ export default function ExerciseDetail({
 
   const tooltipStyle = {
     contentStyle: {
-      backgroundColor: '#18181b',
-      border: '1px solid #3f3f46',
+      backgroundColor: chartTheme.tooltipBg,
+      border: `1px solid ${chartTheme.tooltipBorder}`,
       borderRadius: '8px',
       fontSize: 12,
+      color: chartTheme.tooltipText,
     },
-    labelStyle: { color: '#a1a1aa' },
-    itemStyle: { color: '#e4e4e7' },
+    labelStyle: { color: chartTheme.axis },
+    itemStyle: { color: chartTheme.tooltipText },
   };
 
   return (
-    <main className="tab-content bg-background">
-      {/* Nav bar */}
-      <div className="flex items-center gap-2 px-4 pt-safe pb-3 border-b border-border">
-        <button onClick={onBack} className="flex items-center gap-1 text-primary font-medium text-base">
-          <ChevronLeft className="h-5 w-5" />
-          Back
-        </button>
-      </div>
+    <main ref={rootRef} className="tab-content bg-background">
+      {chrome === 'page' && (
+        <div className="flex items-center gap-2 px-4 pt-safe pb-3 border-b border-border">
+          <button onClick={onBack} className="flex items-center gap-1 text-primary font-medium text-base">
+            <ChevronLeft className="h-5 w-5" />
+            Back
+          </button>
+        </div>
+      )}
 
       <div className="px-4 py-4 space-y-5">
-        <h1 className="text-xl font-bold">{exercise.title}</h1>
+        {chrome === 'page' && (
+          <h1 className="text-xl font-bold">{exercise.title}</h1>
+        )}
 
-        {/* ── Progress section ── */}
         {loading ? (
           <LoadingSkeleton />
         ) : !hasData ? (
           <EmptyState />
         ) : (
           <>
-            {/* PR Badges */}
-            <div>
-              <p className="text-xs font-semibold text-primary uppercase tracking-wide mb-2 px-1">Personal Records</p>
-              <div className="flex gap-2">
-                <PRBadge
-                  icon={<Trophy className="h-4 w-4" />}
-                  label="Est. 1RM"
-                  value={
-                    progressData.prs.estimated1RM
-                      ? `${Math.round(toDisplay(progressData.prs.estimated1RM.estimated1RM))} ${label}`
-                      : '—'
-                  }
-                  sub={
-                    progressData.prs.estimated1RM
-                      ? formatDate(progressData.prs.estimated1RM.date)
-                      : 'No data'
-                  }
-                />
-                <PRBadge
-                  icon={<Medal className="h-4 w-4" />}
-                  label="Heaviest"
-                  value={
-                    progressData.prs.heaviestWeight
-                      ? `${toDisplay(progressData.prs.heaviestWeight.weight)} ${label}`
-                      : '—'
-                  }
-                  sub={
-                    progressData.prs.heaviestWeight
-                      ? formatDate(progressData.prs.heaviestWeight.date)
-                      : 'No data'
-                  }
-                />
-                <PRBadge
-                  icon={<Award className="h-4 w-4" />}
-                  label="Most Reps"
-                  value={
-                    progressData.prs.mostReps
-                      ? `${progressData.prs.mostReps.repetitions}`
-                      : '—'
-                  }
-                  sub={
-                    progressData.prs.mostReps
-                      ? `@ ${toDisplay(progressData.prs.mostReps.weight)} ${label}`
-                      : 'No data'
-                  }
-                />
-              </div>
-            </div>
+            {isTimeMode ? (
+              <LongestHoldHero
+                longestSeconds={timePRs?.longestHold?.duration_seconds ?? null}
+                longestDate={
+                  timePRs?.longestHold
+                    ? formatDate(timePRs.longestHold.date)
+                    : 'No data'
+                }
+                totalSeconds={timePRs?.totalSeconds ?? 0}
+              />
+            ) : (<>
+            <OneRMHero
+              value={
+                progressData != null && progressData.prs.estimated1RM
+                  ? `${Math.round(toDisplay(progressData.prs.estimated1RM.estimated_1rm))}`
+                  : '—'
+              }
+              unit={label}
+              date={
+                progressData != null && progressData.prs.estimated1RM
+                  ? formatDate(progressData.prs.estimated1RM.date)
+                  : 'No data'
+              }
+            />
 
-            {/* Weight Progress Chart */}
-            {chartData.length > 0 && (
+            <div className="flex gap-2">
+              <PRBadge
+                icon={<Medal className="h-4 w-4" />}
+                label="Heaviest"
+                value={
+                  progressData != null && progressData.prs.heaviestWeight
+                    ? `${toDisplay(progressData.prs.heaviestWeight.weight)} ${label}`
+                    : '—'
+                }
+                sub={
+                  progressData != null && progressData.prs.heaviestWeight
+                    ? formatDate(progressData.prs.heaviestWeight.date)
+                    : 'No data'
+                }
+              />
+              <PRBadge
+                icon={<Award className="h-4 w-4" />}
+                label="Most Reps"
+                value={
+                  progressData != null && progressData.prs.mostReps
+                    ? `${progressData.prs.mostReps.repetitions}`
+                    : '—'
+                }
+                sub={
+                  progressData != null && progressData.prs.mostReps
+                    ? `@ ${toDisplay(progressData.prs.mostReps.weight)} ${label}`
+                    : 'No data'
+                }
+              />
+            </div>
+            </>)}
+
+            {!isTimeMode && chartData.length > 0 && (
               <div>
                 <div className="flex items-center justify-between mb-2 px-1">
                   <p className="text-xs font-semibold text-primary uppercase tracking-wide">Weight Progress</p>
@@ -265,8 +506,8 @@ export default function ExerciseDetail({
                         onClick={() => setRange(r.value)}
                         className={`px-2 py-0.5 rounded-full text-[11px] font-semibold transition-colors ${
                           range === r.value
-                            ? 'bg-blue-600 text-white'
-                            : 'text-zinc-400 hover:text-zinc-200'
+                            ? 'bg-primary text-primary-foreground'
+                            : 'text-muted-foreground hover:text-foreground'
                         }`}
                       >
                         {r.label}
@@ -274,26 +515,26 @@ export default function ExerciseDetail({
                     ))}
                   </div>
                 </div>
-                <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-3">
+                <div className="bg-card border border-border rounded-xl p-3">
                   <ResponsiveContainer width="100%" height={200}>
                     <LineChart data={chartData} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#3f3f46" />
-                      <XAxis dataKey="date" stroke="#71717a" fontSize={11} tick={{ fill: '#71717a' }} />
-                      <YAxis stroke="#71717a" fontSize={11} tick={{ fill: '#71717a' }} unit={` ${label}`} />
+                      <CartesianGrid strokeDasharray="3 3" stroke={chartTheme.grid} />
+                      <XAxis dataKey="date" stroke={chartTheme.axis} fontSize={11} tick={{ fill: chartTheme.axis }} />
+                      <YAxis stroke={chartTheme.axis} fontSize={11} tick={{ fill: chartTheme.axis }} unit={` ${label}`} />
                       <Tooltip {...tooltipStyle} />
                       <Line
                         type="monotone"
                         dataKey="estimated1RM"
                         name="Est. 1RM"
-                        stroke="#3b82f6"
+                        stroke={chartTheme.line1RM}
                         strokeWidth={2}
                         dot={(props: { cx?: number; cy?: number; payload?: { isPR?: boolean } }) => {
                           const { cx, cy, payload } = props;
                           if (!payload?.isPR || cx == null || cy == null) return <g key={`dot-${cx}`} />;
                           return (
                             <g key={`pr-dot-${cx}`}>
-                              <circle cx={cx} cy={cy} r={6} fill="#f59e0b" stroke="#18181b" strokeWidth={2} />
-                              <text x={cx} y={cy - 10} textAnchor="middle" fontSize={9} fill="#f59e0b" fontWeight="bold">PR</text>
+                              <circle cx={cx} cy={cy} r={6} fill={chartTheme.pr} stroke={chartTheme.tooltipBg} strokeWidth={2} />
+                              <text x={cx} y={cy - 10} textAnchor="middle" fontSize={9} fill={chartTheme.pr} fontWeight="bold">PR</text>
                             </g>
                           );
                         }}
@@ -303,7 +544,7 @@ export default function ExerciseDetail({
                         type="monotone"
                         dataKey="maxWeight"
                         name="Max Weight"
-                        stroke="#10b981"
+                        stroke={chartTheme.lineWeight}
                         strokeWidth={2}
                         dot={false}
                         activeDot={{ r: 4 }}
@@ -313,71 +554,101 @@ export default function ExerciseDetail({
                   </ResponsiveContainer>
                   <div className="flex gap-4 mt-2 justify-center">
                     <div className="flex items-center gap-1.5">
-                      <div className="w-4 h-0.5 bg-blue-500 rounded" />
-                      <span className="text-[10px] text-zinc-500">Est. 1RM</span>
+                      <div className="w-4 h-0.5 rounded" style={{ background: chartTheme.line1RM }} />
+                      <span className="text-[10px] text-muted-foreground">Est. 1RM</span>
                     </div>
                     <div className="flex items-center gap-1.5">
-                      <div className="w-4 h-0.5 bg-emerald-500 rounded" />
-                      <span className="text-[10px] text-zinc-500">Max Weight</span>
+                      <div className="w-4 h-0.5 rounded" style={{ background: chartTheme.lineWeight }} />
+                      <span className="text-[10px] text-muted-foreground">Max Weight</span>
                     </div>
                     <div className="flex items-center gap-1.5">
-                      <div className="w-2.5 h-2.5 rounded-full bg-amber-400" />
-                      <span className="text-[10px] text-zinc-500">PR</span>
+                      <div className="w-2.5 h-2.5 rounded-full" style={{ background: chartTheme.pr }} />
+                      <span className="text-[10px] text-muted-foreground">PR</span>
                     </div>
                   </div>
                 </div>
               </div>
             )}
 
-            {/* Volume Trend Chart */}
-            {volumeData.length > 0 && (
+            {!isTimeMode && volumeData.length > 0 && (
               <div>
                 <p className="text-xs font-semibold text-primary uppercase tracking-wide mb-2 px-1">Volume Trend</p>
-                <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-3">
+                <div className="bg-card border border-border rounded-xl p-3">
                   <ResponsiveContainer width="100%" height={180}>
                     <BarChart data={volumeData} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#3f3f46" vertical={false} />
-                      <XAxis dataKey="date" stroke="#71717a" fontSize={11} tick={{ fill: '#71717a' }} />
-                      <YAxis stroke="#71717a" fontSize={11} tick={{ fill: '#71717a' }} />
+                      <CartesianGrid strokeDasharray="3 3" stroke={chartTheme.grid} vertical={false} />
+                      <XAxis dataKey="date" stroke={chartTheme.axis} fontSize={11} tick={{ fill: chartTheme.axis }} />
+                      <YAxis stroke={chartTheme.axis} fontSize={11} tick={{ fill: chartTheme.axis }} />
                       <Tooltip {...tooltipStyle} />
-                      <Bar dataKey="totalVolume" name={`Volume (${label})`} fill="#3b82f6" radius={[3, 3, 0, 0]} />
+                      <Bar dataKey="totalVolume" name={`Volume (${label})`} fill={chartTheme.bar} radius={[3, 3, 0, 0]} />
                     </BarChart>
                   </ResponsiveContainer>
                 </div>
               </div>
             )}
 
-            {/* Recent Sets Table */}
-            {progressData.recentSets.length > 0 && (
+            {sessions.length > 0 && (
               <div>
-                <p className="text-xs font-semibold text-primary uppercase tracking-wide mb-2 px-1">Recent Sets</p>
-                <div className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden">
-                  {/* Header */}
-                  <div className="grid grid-cols-4 px-3 py-2 border-b border-zinc-800">
-                    <span className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wide">Date</span>
-                    <span className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wide text-right">Weight</span>
-                    <span className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wide text-right">Reps</span>
-                    <span className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wide text-right">RPE</span>
-                  </div>
-                  {/* Rows */}
-                  {progressData.recentSets.map((set, i) => (
-                    <div
-                      key={`${set.workoutUuid}-${i}`}
-                      className={`grid grid-cols-4 px-3 py-2 ${i % 2 === 0 ? 'bg-zinc-900' : 'bg-zinc-950'}`}
-                    >
-                      <span className="text-xs text-zinc-400">{formatDate(set.date)}</span>
-                      <span className="text-xs text-zinc-200 text-right">{set.weight != null ? toDisplay(set.weight) : '—'} {label}</span>
-                      <span className="text-xs text-zinc-200 text-right">{set.repetitions}</span>
-                      <span className="text-xs text-zinc-400 text-right">{set.rpe != null ? set.rpe : '—'}</span>
+                <p className="text-xs font-semibold text-primary uppercase tracking-wide mb-2 px-1">Session History</p>
+                <div className="space-y-2">
+                  {sessions.map(s => (
+                    <div key={s.workout_uuid} className="bg-card border border-border rounded-xl overflow-hidden">
+                      <div className="px-3 py-2 border-b border-border flex items-baseline justify-between">
+                        <span className="text-xs font-semibold text-foreground">
+                          {formatDate(s.date)}
+                        </span>
+                        {s.workout_title && (
+                          <span className="text-[11px] text-muted-foreground truncate ml-2">{s.workout_title}</span>
+                        )}
+                      </div>
+                      {s.sets.map((set, i) => {
+                        const isTime = set.duration_seconds != null;
+                        return (
+                          <div
+                            key={set.uuid}
+                            className={`flex items-baseline gap-3 px-3 py-1.5 ${i % 2 === 0 ? 'bg-card' : 'bg-muted/30'}`}
+                          >
+                            <span className="text-[10px] text-muted-foreground w-5 text-center flex-shrink-0">{i + 1}</span>
+                            {isTime ? (
+                              <span className="text-xs text-foreground flex-1">
+                                {set.duration_seconds}s
+                              </span>
+                            ) : (
+                              <>
+                                <span className="text-xs text-foreground flex-1">
+                                  {set.weight != null ? toDisplay(set.weight) : '—'}
+                                  <span className="text-muted-foreground ml-0.5">{label}</span>
+                                </span>
+                                <span className="text-xs text-muted-foreground">×</span>
+                                <span className="text-xs text-foreground flex-1">{set.repetitions ?? '—'} reps</span>
+                              </>
+                            )}
+                            <span className="text-[11px] text-muted-foreground w-10 text-right flex-shrink-0">
+                              {set.rpe != null ? `RPE ${set.rpe}` : ''}
+                            </span>
+                          </div>
+                        );
+                      })}
                     </div>
                   ))}
                 </div>
+                {hasMoreSessions && (
+                  <button
+                    onClick={loadMoreSessions}
+                    disabled={loadingMore}
+                    className="w-full mt-2 py-2 text-sm font-medium text-primary disabled:opacity-50"
+                  >
+                    {loadingMore ? 'Loading…' : 'View more'}
+                  </button>
+                )}
+                {!hasMoreSessions && sessions.length > SESSIONS_PER_PAGE && (
+                  <p className="text-center text-xs text-muted-foreground mt-2">End of history</p>
+                )}
               </div>
             )}
           </>
         )}
 
-        {/* Description */}
         {exercise.description && (
           <div>
             <p className="text-xs font-semibold text-primary uppercase tracking-wide mb-1 px-1">About</p>
@@ -387,7 +658,6 @@ export default function ExerciseDetail({
           </div>
         )}
 
-        {/* Muscles */}
         {(exercise.primary_muscles.length > 0 || exercise.secondary_muscles.length > 0) && (
           <div>
             <p className="text-xs font-semibold text-primary uppercase tracking-wide mb-1 px-1">Muscles</p>
@@ -408,7 +678,6 @@ export default function ExerciseDetail({
           </div>
         )}
 
-        {/* Equipment */}
         {exercise.equipment.length > 0 && (
           <div>
             <p className="text-xs font-semibold text-primary uppercase tracking-wide mb-1 px-1">Equipment</p>
@@ -422,7 +691,6 @@ export default function ExerciseDetail({
           </div>
         )}
 
-        {/* Steps */}
         {exercise.steps.length > 0 && (
           <div>
             <p className="text-xs font-semibold text-primary uppercase tracking-wide mb-1 px-1">Steps</p>
@@ -437,7 +705,6 @@ export default function ExerciseDetail({
           </div>
         )}
 
-        {/* Tips */}
         {exercise.tips.length > 0 && (
           <div>
             <p className="text-xs font-semibold text-primary uppercase tracking-wide mb-1 px-1">Tips</p>
@@ -451,7 +718,6 @@ export default function ExerciseDetail({
           </div>
         )}
 
-        {/* Also known as */}
         {exercise.alias.length > 0 && (
           <div>
             <p className="text-xs font-semibold text-primary uppercase tracking-wide mb-1 px-1">Also Known As</p>

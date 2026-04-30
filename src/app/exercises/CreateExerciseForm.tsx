@@ -115,6 +115,7 @@ export default function CreateExerciseForm({ onClose, onCreated }: Props) {
   const [equipment, setEquipment] = useState<string[]>([]);
   const [movementPattern, setMovementPattern] = useState('');
   const [description, setDescription] = useState('');
+  const [trackingMode, setTrackingMode] = useState<'reps' | 'time'>('reps');
   const [submitting, setSubmitting] = useState(false);
 
   const canSubmit = title.trim().length > 0 && primaryMuscles.length > 0;
@@ -131,6 +132,7 @@ export default function CreateExerciseForm({ onClose, onCreated }: Props) {
         equipment: equipment.length > 0 ? equipment : undefined,
         movement_pattern: movementPattern || undefined,
         description: description.trim() || undefined,
+        tracking_mode: trackingMode,
       });
       onCreated();
     } finally {
@@ -193,6 +195,33 @@ export default function CreateExerciseForm({ onClose, onCreated }: Props) {
             onChange={setEquipment}
             placeholder="e.g. barbell"
           />
+
+          {/* Tracking mode — reps × weight vs held duration */}
+          <div>
+            <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+              Tracking
+            </label>
+            <div className="mt-1 flex gap-2 bg-secondary rounded-lg p-1">
+              <button
+                type="button"
+                onClick={() => setTrackingMode('reps')}
+                className={`flex-1 py-1.5 rounded-md text-sm font-medium transition-colors ${
+                  trackingMode === 'reps' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground'
+                }`}
+              >
+                Reps × Weight
+              </button>
+              <button
+                type="button"
+                onClick={() => setTrackingMode('time')}
+                className={`flex-1 py-1.5 rounded-md text-sm font-medium transition-colors ${
+                  trackingMode === 'time' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground'
+                }`}
+              >
+                Time (held)
+              </button>
+            </div>
+          </div>
 
           {/* Movement pattern */}
           <div>

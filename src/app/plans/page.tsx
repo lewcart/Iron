@@ -124,7 +124,13 @@ function ExerciseSelectorSheet({
 
 // ─── Routine card ─────────────────────────────────────────────────────────────
 
-function formatSet(s: LocalWorkoutRoutineSet): string {
+function formatSet(s: LocalWorkoutRoutineSet, trackingMode: 'reps' | 'time' = 'reps'): string {
+  if (trackingMode === 'time') {
+    const d = s.target_duration_seconds;
+    if (d == null || d <= 0) return '—';
+    if (d < 60) return `${d}s`;
+    return `${Math.floor(d / 60)}:${String(d % 60).padStart(2, '0')}`;
+  }
   if (s.min_repetitions != null && s.max_repetitions != null) {
     return s.min_repetitions === s.max_repetitions
       ? `${s.min_repetitions}`
@@ -155,7 +161,17 @@ function RoutineCard({
   const [expanded, setExpanded] = useState(false);
   const [showExerciseSelector, setShowExerciseSelector] = useState(false);
   const [starting, setStarting] = useState(false);
-  const [editingSet, setEditingSet] = useState<{ uuid: string; min: string; max: string } | null>(null);
+  // editingSet drives the inline-edit UI for a routine set. `mode` is
+  // captured at edit-start time from the parent exercise so a mid-edit
+  // mode flip (vanishingly unlikely in single-user) doesn't strand a stale
+  // input shape. min/max are used for reps mode; durationSeconds for time mode.
+  const [editingSet, setEditingSet] = useState<{
+    uuid: string;
+    mode: 'reps' | 'time';
+    min: string;
+    max: string;
+    durationSeconds: string;
+  } | null>(null);
   const [editingNotes, setEditingNotes] = useState<{ exerciseUuid: string; value: string } | null>(null);
 
   const handleAddExercise = async (exercise: Exercise) => {
@@ -172,19 +188,32 @@ function RoutineCard({
     await removeRoutineExercise(routineExerciseUuid);
   };
 
-  const handleAddSet = async (routineExerciseUuid: string) => {
+  const handleAddSet = async (routineExerciseUuid: string, mode: 'reps' | 'time') => {
     const setUuid = await addRoutineSet({ workout_routine_exercise_uuid: routineExerciseUuid });
-    setEditingSet({ uuid: setUuid, min: '', max: '' });
+    setEditingSet({ uuid: setUuid, mode, min: '', max: '', durationSeconds: '' });
   };
 
   const handleSaveSet = async () => {
     if (!editingSet) return;
-    const minVal = editingSet.min.trim() === '' ? null : Number(editingSet.min);
-    const maxVal = editingSet.max.trim() === '' ? null : Number(editingSet.max);
-    await updateRoutineSet(editingSet.uuid, {
-      min_repetitions: Number.isFinite(minVal) ? minVal : null,
-      max_repetitions: Number.isFinite(maxVal) ? maxVal : null,
-    });
+    if (editingSet.mode === 'time') {
+      const dRaw = editingSet.durationSeconds.trim();
+      const dVal = dRaw === '' ? null : Number(dRaw);
+      await updateRoutineSet(editingSet.uuid, {
+        target_duration_seconds: Number.isFinite(dVal) && dVal !== null && dVal > 0 ? dVal : null,
+        // Defensively null reps fields so a mode flip doesn't leave stale rep
+        // numbers visible alongside the new duration target.
+        min_repetitions: null,
+        max_repetitions: null,
+      });
+    } else {
+      const minVal = editingSet.min.trim() === '' ? null : Number(editingSet.min);
+      const maxVal = editingSet.max.trim() === '' ? null : Number(editingSet.max);
+      await updateRoutineSet(editingSet.uuid, {
+        min_repetitions: Number.isFinite(minVal) ? minVal : null,
+        max_repetitions: Number.isFinite(maxVal) ? maxVal : null,
+        target_duration_seconds: null,
+      });
+    }
     setEditingSet(null);
   };
 
@@ -323,51 +352,81 @@ function RoutineCard({
                         <X className="h-4 w-4" />
                       </button>
                     </div>
-                    {/* Set rows */}
-                    {re.sets.map((set, si) => (
+                    {/* Set rows. Branches by exercise.tracking_mode: time-mode
+                        renders a single seconds input; reps stay min/max. */}
+                    {(() => {
+                      const exerciseMode = (re.exercise?.tracking_mode ?? 'reps') as 'reps' | 'time';
+                      return (<>
+                      {re.sets.map((set, si) => (
                       <div key={set.uuid} className="flex items-center pl-8 pr-3 py-1.5 gap-2 bg-muted/30">
                         <span className="text-xs text-muted-foreground w-10 flex-shrink-0">Set {si + 1}</span>
                         {editingSet?.uuid === set.uuid ? (
-                          <>
-                            <input
-                              autoFocus
-                              type="number"
-                              min={1}
-                              placeholder="min"
-                              value={editingSet.min}
-                              onChange={e => setEditingSet(prev => prev ? { ...prev, min: e.target.value } : prev)}
-                              onKeyDown={e => { if (e.key === 'Enter') handleSaveSet(); if (e.key === 'Escape') setEditingSet(null); }}
-                              className="w-14 bg-background border border-input rounded px-2 py-0.5 text-sm text-center outline-none focus:border-primary"
-                            />
-                            <span className="text-xs text-muted-foreground">–</span>
-                            <input
-                              type="number"
-                              min={1}
-                              placeholder="max"
-                              value={editingSet.max}
-                              onChange={e => setEditingSet(prev => prev ? { ...prev, max: e.target.value } : prev)}
-                              onKeyDown={e => { if (e.key === 'Enter') handleSaveSet(); if (e.key === 'Escape') setEditingSet(null); }}
-                              className="w-14 bg-background border border-input rounded px-2 py-0.5 text-sm text-center outline-none focus:border-primary"
-                            />
-                            <span className="text-xs text-muted-foreground flex-1">reps</span>
-                            <button onClick={handleSaveSet} className="text-primary p-1" aria-label="Save">
-                              <Check className="h-3.5 w-3.5" />
-                            </button>
-                            <button onClick={() => setEditingSet(null)} className="text-muted-foreground p-1" aria-label="Cancel">
-                              <X className="h-3.5 w-3.5" />
-                            </button>
-                          </>
+                          editingSet.mode === 'time' ? (
+                            <>
+                              <input
+                                autoFocus
+                                type="number"
+                                min={1}
+                                placeholder="seconds"
+                                value={editingSet.durationSeconds}
+                                onChange={e => setEditingSet(prev => prev ? { ...prev, durationSeconds: e.target.value } : prev)}
+                                onKeyDown={e => { if (e.key === 'Enter') handleSaveSet(); if (e.key === 'Escape') setEditingSet(null); }}
+                                className="w-20 bg-background border border-input rounded px-2 py-0.5 text-sm text-center outline-none focus:border-primary"
+                              />
+                              <span className="text-xs text-muted-foreground flex-1">sec</span>
+                              <button onClick={handleSaveSet} className="text-primary p-1" aria-label="Save">
+                                <Check className="h-3.5 w-3.5" />
+                              </button>
+                              <button onClick={() => setEditingSet(null)} className="text-muted-foreground p-1" aria-label="Cancel">
+                                <X className="h-3.5 w-3.5" />
+                              </button>
+                            </>
+                          ) : (
+                            <>
+                              <input
+                                autoFocus
+                                type="number"
+                                min={1}
+                                placeholder="min"
+                                value={editingSet.min}
+                                onChange={e => setEditingSet(prev => prev ? { ...prev, min: e.target.value } : prev)}
+                                onKeyDown={e => { if (e.key === 'Enter') handleSaveSet(); if (e.key === 'Escape') setEditingSet(null); }}
+                                className="w-14 bg-background border border-input rounded px-2 py-0.5 text-sm text-center outline-none focus:border-primary"
+                              />
+                              <span className="text-xs text-muted-foreground">–</span>
+                              <input
+                                type="number"
+                                min={1}
+                                placeholder="max"
+                                value={editingSet.max}
+                                onChange={e => setEditingSet(prev => prev ? { ...prev, max: e.target.value } : prev)}
+                                onKeyDown={e => { if (e.key === 'Enter') handleSaveSet(); if (e.key === 'Escape') setEditingSet(null); }}
+                                className="w-14 bg-background border border-input rounded px-2 py-0.5 text-sm text-center outline-none focus:border-primary"
+                              />
+                              <span className="text-xs text-muted-foreground flex-1">reps</span>
+                              <button onClick={handleSaveSet} className="text-primary p-1" aria-label="Save">
+                                <Check className="h-3.5 w-3.5" />
+                              </button>
+                              <button onClick={() => setEditingSet(null)} className="text-muted-foreground p-1" aria-label="Cancel">
+                                <X className="h-3.5 w-3.5" />
+                              </button>
+                            </>
+                          )
                         ) : (
                           <>
                             <button
                               onClick={() => setEditingSet({
                                 uuid: set.uuid,
+                                mode: exerciseMode,
                                 min: set.min_repetitions != null ? String(set.min_repetitions) : '',
                                 max: set.max_repetitions != null ? String(set.max_repetitions) : '',
+                                durationSeconds: set.target_duration_seconds != null ? String(set.target_duration_seconds) : '',
                               })}
                               className="flex-1 text-left text-sm text-foreground"
                             >
-                              {formatSet(set)} reps
+                              {exerciseMode === 'time'
+                                ? `${formatSet(set, 'time')}${formatSet(set, 'time') === '—' ? '' : ' hold'}`
+                                : `${formatSet(set)} reps`}
                             </button>
                             <button
                               onClick={() => handleDeleteSet(set.uuid)}
@@ -382,12 +441,14 @@ function RoutineCard({
                     ))}
                     {/* Add set */}
                     <button
-                      onClick={() => handleAddSet(re.uuid)}
+                      onClick={() => handleAddSet(re.uuid, exerciseMode)}
                       className="flex items-center gap-1.5 pl-8 pr-4 py-1.5 text-primary text-xs font-medium w-full bg-muted/30"
                     >
                       <Plus className="h-3 w-3" />
                       Add set
                     </button>
+                      </>);
+                    })()}
                   </div>
                 ))}
               </div>

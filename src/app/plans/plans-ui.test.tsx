@@ -348,7 +348,7 @@ describe('addExerciseToRoutine', () => {
 
 // ─── formatSetsReps ───────────────────────────────────────────────────────────
 
-function makeSet(min: number | null, max: number | null): WorkoutRoutineSet {
+function makeSet(min: number | null, max: number | null, durationSeconds: number | null = null): WorkoutRoutineSet {
   return {
     uuid: 'set-uuid',
     workout_routine_exercise_uuid: 're-uuid',
@@ -357,6 +357,7 @@ function makeSet(min: number | null, max: number | null): WorkoutRoutineSet {
     tag: null,
     comment: null,
     order_index: 0,
+    target_duration_seconds: durationSeconds,
   };
 }
 
@@ -392,5 +393,25 @@ describe('formatSetsReps', () => {
   it('handles mix of null and defined reps', () => {
     const sets = [makeSet(null, null), makeSet(8, 12)];
     expect(formatSetsReps(sets)).toBe('2 × 8–12');
+  });
+
+  it('time mode: single duration shows MM:SS', () => {
+    const sets = [makeSet(null, null, 90), makeSet(null, null, 90), makeSet(null, null, 90)];
+    expect(formatSetsReps(sets, 'time')).toBe('3 × 1:30');
+  });
+
+  it('time mode: sub-minute duration shows seconds', () => {
+    const sets = [makeSet(null, null, 30), makeSet(null, null, 30)];
+    expect(formatSetsReps(sets, 'time')).toBe('2 × 30s');
+  });
+
+  it('time mode: range when durations vary', () => {
+    const sets = [makeSet(null, null, 30), makeSet(null, null, 60), makeSet(null, null, 90)];
+    expect(formatSetsReps(sets, 'time')).toBe('3 × 30s–1:30');
+  });
+
+  it('time mode: returns count-only when no durations set', () => {
+    const sets = [makeSet(null, null), makeSet(null, null)];
+    expect(formatSetsReps(sets, 'time')).toBe('2 sets');
   });
 });

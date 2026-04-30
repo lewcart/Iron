@@ -14,6 +14,9 @@ export interface Exercise {
   is_custom: boolean;
   is_hidden: boolean;
   movement_pattern: string | null;
+  /** How sets are tracked: 'reps' uses weight + repetitions; 'time' uses
+   *  duration_seconds on the set. Defaults to 'reps' for legacy data. */
+  tracking_mode: 'reps' | 'time';
 }
 
 export interface Workout {
@@ -46,6 +49,8 @@ export interface WorkoutSet {
   is_completed: boolean;
   is_pr: boolean;
   order_index: number;
+  /** Held duration in seconds — set on time-mode exercise sets only. */
+  duration_seconds: number | null;
 }
 
 export interface WorkoutPlan {
@@ -83,6 +88,8 @@ export interface WorkoutRoutineSet {
   tag: 'dropSet' | null;
   comment: string | null;
   order_index: number;
+  /** Routine target hold in seconds — set on time-mode exercise routines only. */
+  target_duration_seconds: number | null;
 }
 
 // Helper types

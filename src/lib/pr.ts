@@ -93,3 +93,70 @@ export function calculatePRs(
     mostReps: mostRepsSet ? toPersonalRecord(mostRepsSet) : null,
   };
 }
+
+// ─── Time-mode PRs (held duration) ──────────────────────────────────────────
+
+export interface TimePRSet {
+  duration_seconds: number;
+  date: string;
+  workout_uuid?: string;
+  exercise_uuid?: string;
+}
+
+export interface TimePR {
+  exercise_uuid: string;
+  duration_seconds: number;
+  date: string;
+  workout_uuid: string;
+}
+
+export interface TimePRResult {
+  longestHold: TimePR | null;
+  /** Sum across all completed time-mode sets. Useful as a secondary stat. */
+  totalSeconds: number;
+}
+
+/**
+ * Calculate personal records for a time-mode exercise (e.g. plank held for
+ * 60s). Mode-agnostic at the type level — callers must pre-filter to
+ * time-mode sets, since exercise-level mode lives on the exercise row.
+ */
+export function calculateTimePRs(sets: TimePRSet[]): TimePRResult {
+  if (sets.length === 0) return { longestHold: null, totalSeconds: 0 };
+
+  let longestSet: TimePRSet | null = null;
+  let longestValue = -Infinity;
+  let total = 0;
+
+  for (const set of sets) {
+    // Zero / negative durations don't qualify as "holds" — skip them so a
+    // logged-but-immediately-cancelled set doesn't show up as a PB.
+    if (set.duration_seconds <= 0) continue;
+    if (set.duration_seconds > longestValue) {
+      longestValue = set.duration_seconds;
+      longestSet = set;
+    }
+    total += set.duration_seconds;
+  }
+
+  if (!longestSet) return { longestHold: null, totalSeconds: total };
+
+  return {
+    longestHold: {
+      exercise_uuid: longestSet.exercise_uuid ?? '',
+      duration_seconds: longestSet.duration_seconds,
+      date: longestSet.date,
+      workout_uuid: longestSet.workout_uuid ?? '',
+    },
+    totalSeconds: total,
+  };
+}
+
+/** Returns true if the given duration would set a new longest-hold record. */
+export function isNewLongestHold(
+  durationSeconds: number,
+  allTimeLongestSeconds: number,
+): boolean {
+  if (durationSeconds <= 0) return false;
+  return durationSeconds > allTimeLongestSeconds;
+}

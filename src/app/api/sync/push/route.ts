@@ -133,15 +133,16 @@ async function pushWorkoutSet(r: Record<string, unknown>): Promise<void> {
     return;
   }
   await query(
-    `INSERT INTO workout_sets (uuid, workout_exercise_uuid, weight, repetitions, min_target_reps, max_target_reps, rpe, tag, comment, is_completed, is_pr, order_index, updated_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW())
+    `INSERT INTO workout_sets (uuid, workout_exercise_uuid, weight, repetitions, min_target_reps, max_target_reps, rpe, tag, comment, is_completed, is_pr, order_index, duration_seconds, updated_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, NOW())
      ON CONFLICT (uuid) DO UPDATE SET
        weight = EXCLUDED.weight, repetitions = EXCLUDED.repetitions,
        min_target_reps = EXCLUDED.min_target_reps, max_target_reps = EXCLUDED.max_target_reps,
        rpe = EXCLUDED.rpe, tag = EXCLUDED.tag, comment = EXCLUDED.comment,
        is_completed = EXCLUDED.is_completed, is_pr = EXCLUDED.is_pr,
-       order_index = EXCLUDED.order_index, updated_at = NOW()`,
-    [r.uuid, r.workout_exercise_uuid, r.weight, r.repetitions, r.min_target_reps, r.max_target_reps, r.rpe, r.tag, r.comment, r.is_completed, r.is_pr, r.order_index],
+       order_index = EXCLUDED.order_index,
+       duration_seconds = EXCLUDED.duration_seconds, updated_at = NOW()`,
+    [r.uuid, r.workout_exercise_uuid, r.weight, r.repetitions, r.min_target_reps, r.max_target_reps, r.rpe, r.tag, r.comment, r.is_completed, r.is_pr, r.order_index, r.duration_seconds ?? null],
   );
 }
 
@@ -169,20 +170,22 @@ async function pushExercise(r: Record<string, unknown>): Promise<void> {
     return;
   }
   await query(
-    `INSERT INTO exercises (uuid, everkinetic_id, title, alias, description, primary_muscles, secondary_muscles, equipment, steps, tips, is_custom, is_hidden, movement_pattern, updated_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, NOW())
+    `INSERT INTO exercises (uuid, everkinetic_id, title, alias, description, primary_muscles, secondary_muscles, equipment, steps, tips, is_custom, is_hidden, movement_pattern, tracking_mode, updated_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW())
      ON CONFLICT (uuid) DO UPDATE SET
        title = EXCLUDED.title, alias = EXCLUDED.alias, description = EXCLUDED.description,
        primary_muscles = EXCLUDED.primary_muscles, secondary_muscles = EXCLUDED.secondary_muscles,
        equipment = EXCLUDED.equipment, steps = EXCLUDED.steps, tips = EXCLUDED.tips,
        is_custom = EXCLUDED.is_custom, is_hidden = EXCLUDED.is_hidden,
-       movement_pattern = EXCLUDED.movement_pattern, updated_at = NOW()`,
+       movement_pattern = EXCLUDED.movement_pattern,
+       tracking_mode = EXCLUDED.tracking_mode, updated_at = NOW()`,
     [
       String(r.uuid).toLowerCase(), r.everkinetic_id, r.title,
       JSON.stringify(r.alias ?? []), r.description,
       JSON.stringify(r.primary_muscles ?? []), JSON.stringify(r.secondary_muscles ?? []),
       JSON.stringify(r.equipment ?? []), JSON.stringify(r.steps ?? []), JSON.stringify(r.tips ?? []),
       Boolean(r.is_custom), Boolean(r.is_hidden), r.movement_pattern,
+      r.tracking_mode ?? 'reps',
     ],
   );
 }
@@ -245,13 +248,14 @@ async function pushWorkoutRoutineSet(r: Record<string, unknown>): Promise<void> 
     return;
   }
   await query(
-    `INSERT INTO workout_routine_sets (uuid, workout_routine_exercise_uuid, min_repetitions, max_repetitions, tag, comment, order_index, updated_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
+    `INSERT INTO workout_routine_sets (uuid, workout_routine_exercise_uuid, min_repetitions, max_repetitions, tag, comment, order_index, target_duration_seconds, updated_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
      ON CONFLICT (uuid) DO UPDATE SET
        min_repetitions = EXCLUDED.min_repetitions, max_repetitions = EXCLUDED.max_repetitions,
        tag = EXCLUDED.tag, comment = EXCLUDED.comment,
-       order_index = EXCLUDED.order_index, updated_at = NOW()`,
-    [r.uuid, r.workout_routine_exercise_uuid, r.min_repetitions, r.max_repetitions, r.tag, r.comment, r.order_index],
+       order_index = EXCLUDED.order_index,
+       target_duration_seconds = EXCLUDED.target_duration_seconds, updated_at = NOW()`,
+    [r.uuid, r.workout_routine_exercise_uuid, r.min_repetitions, r.max_repetitions, r.tag, r.comment, r.order_index, r.target_duration_seconds ?? null],
   );
 }
 

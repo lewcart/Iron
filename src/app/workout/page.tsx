@@ -22,7 +22,8 @@ import {
 import { consumeScheduleTap } from '@/lib/workout-schedule';
 import { HealthSection } from '@/components/HealthSection';
 import Link from 'next/link';
-import { Check, ChevronDown, ChevronRight, ClipboardList, Clock, Dumbbell, GripVertical, Plus, Search, X } from 'lucide-react';
+import { Check, ChevronDown, ChevronRight, ClipboardList, Clock, Dumbbell, GripVertical, Info, Plus, Search, X } from 'lucide-react';
+import { ExerciseDetailModal } from '@/components/ExerciseDetailModal';
 import type { WorkoutPlan, WorkoutRoutine, WorkoutRoutineExercise, WorkoutRoutineSet, Exercise } from '@/types';
 import { formatTime, calcCompletedSets, calcTotalVolume } from './workout-utils';
 import { uuid as genUUID } from '@/lib/uuid';
@@ -758,14 +759,18 @@ function SetRow({
   setNumber,
   set,
   workoutExerciseUuid,
+  trackingMode,
   onUpdate,
+  onUpdateDuration,
   onDelete,
   allTimeBest1RM,
 }: {
   setNumber: number;
   set: LocalWorkoutSet;
   workoutExerciseUuid: string;
+  trackingMode: 'reps' | 'time';
   onUpdate: (weUuid: string, setUuid: string, weight: number, reps: number) => Promise<void>;
+  onUpdateDuration: (weUuid: string, setUuid: string, durationSeconds: number) => Promise<void>;
   onDelete: (setUuid: string) => Promise<void>;
   allTimeBest1RM?: number | null;
 }) {
@@ -774,20 +779,30 @@ function SetRow({
     set.weight != null ? toDisplay(set.weight).toString() : ''
   );
   const [reps, setReps] = useState(set.repetitions?.toString() ?? '');
+  const [duration, setDuration] = useState(
+    set.duration_seconds != null ? String(set.duration_seconds) : ''
+  );
   const [saving, setSaving] = useState(false);
 
   // Live PD detection — compare current estimated 1RM against all-time best.
   // No is_completed guard: badge persists naturally after completion since
-  // weight/reps values don't change once the set is ticked off.
+  // weight/reps values don't change once the set is ticked off. Only meaningful
+  // for rep-mode; time-mode uses isNewLongestHold checked elsewhere.
   const currentWeightKg = fromInput(parseFloat(weight) || 0);
   const currentReps = parseInt(reps) || 0;
-  const isLivePD = allTimeBest1RM != null && isNewEstimated1RM(currentWeightKg, currentReps, allTimeBest1RM);
+  const isLivePD = trackingMode === 'reps'
+    && allTimeBest1RM != null
+    && isNewEstimated1RM(currentWeightKg, currentReps, allTimeBest1RM);
 
   const handleComplete = async () => {
     setSaving(true);
-    // Convert display unit value back to kg for storage
-    const weightKg = fromInput(parseFloat(weight) || 0);
-    await onUpdate(workoutExerciseUuid, set.uuid, weightKg, parseInt(reps) || 0);
+    if (trackingMode === 'time') {
+      const seconds = parseInt(duration) || 0;
+      await onUpdateDuration(workoutExerciseUuid, set.uuid, seconds);
+    } else {
+      const weightKg = fromInput(parseFloat(weight) || 0);
+      await onUpdate(workoutExerciseUuid, set.uuid, weightKg, parseInt(reps) || 0);
+    }
     setSaving(false);
   };
 
@@ -806,40 +821,53 @@ function SetRow({
 
   const inner = (
     <div className={`flex items-center gap-2 py-1.5 px-3 border-b border-border last:border-0 ${completed ? 'opacity-60' : ''}`}>
-      {/* Set number */}
       <div className="w-5 text-center text-xs font-semibold text-muted-foreground">{setNumber}</div>
 
-      {/* Weight */}
-      <div className="flex-1 flex items-center gap-1">
-        <input
-          type="number"
-          inputMode="decimal"
-          placeholder="—"
-          value={weight}
-          onChange={e => setWeight(e.target.value)}
-          onFocus={e => { e.target.scrollIntoView({ behavior: 'smooth', block: 'center' }); e.target.select(); }}
-          className="w-full text-right text-sm font-medium bg-transparent outline-none min-h-[36px]"
-        />
-        <span className="text-[10px] text-muted-foreground">{label}</span>
-      </div>
+      {trackingMode === 'time' ? (
+        <div className="flex-1 flex items-center gap-1">
+          <input
+            type="number"
+            inputMode="numeric"
+            placeholder="60"
+            value={duration}
+            onChange={e => setDuration(e.target.value)}
+            onFocus={e => { e.target.scrollIntoView({ behavior: 'smooth', block: 'center' }); e.target.select(); }}
+            className="w-full text-right text-sm font-medium bg-transparent outline-none min-h-[36px]"
+          />
+          <span className="text-[10px] text-muted-foreground">sec</span>
+        </div>
+      ) : (
+        <>
+          <div className="flex-1 flex items-center gap-1">
+            <input
+              type="number"
+              inputMode="decimal"
+              placeholder="—"
+              value={weight}
+              onChange={e => setWeight(e.target.value)}
+              onFocus={e => { e.target.scrollIntoView({ behavior: 'smooth', block: 'center' }); e.target.select(); }}
+              className="w-full text-right text-sm font-medium bg-transparent outline-none min-h-[36px]"
+            />
+            <span className="text-[10px] text-muted-foreground">{label}</span>
+          </div>
 
-      <span className="text-muted-foreground text-xs">×</span>
+          <span className="text-muted-foreground text-xs">×</span>
 
-      {/* Reps */}
-      <div className="flex-1 flex items-center gap-1">
-        <input
-          type="number"
-          inputMode="numeric"
-          placeholder={repsPlaceholder}
-          value={reps}
-          onChange={e => setReps(e.target.value)}
-          onFocus={e => { e.target.scrollIntoView({ behavior: 'smooth', block: 'center' }); e.target.select(); }}
-          className="w-full text-right text-sm font-medium bg-transparent outline-none min-h-[36px]"
-        />
-        <span className="text-[10px] text-muted-foreground">reps</span>
-      </div>
+          <div className="flex-1 flex items-center gap-1">
+            <input
+              type="number"
+              inputMode="numeric"
+              placeholder={repsPlaceholder}
+              value={reps}
+              onChange={e => setReps(e.target.value)}
+              onFocus={e => { e.target.scrollIntoView({ behavior: 'smooth', block: 'center' }); e.target.select(); }}
+              className="w-full text-right text-sm font-medium bg-transparent outline-none min-h-[36px]"
+            />
+            <span className="text-[10px] text-muted-foreground">reps</span>
+          </div>
+        </>
+      )}
 
-      {/* Complete button — PR badge overlaid to keep column widths stable */}
       <div className="relative flex-shrink-0">
         <button
           onClick={handleComplete}
@@ -889,7 +917,9 @@ function SortableExerciseCard({
   onRemove,
   onAddSet,
   onUpdateSet,
+  onUpdateSetDuration,
   onDeleteSet,
+  onShowInfo,
 }: {
   we: LocalWorkoutExerciseEntry;
   isExpanded: boolean;
@@ -897,7 +927,9 @@ function SortableExerciseCard({
   onRemove: () => void;
   onAddSet: () => void;
   onUpdateSet: (workoutExerciseUuid: string, setUuid: string, weight: number, reps: number) => Promise<void>;
+  onUpdateSetDuration: (workoutExerciseUuid: string, setUuid: string, durationSeconds: number) => Promise<void>;
   onDeleteSet: (uuid: string) => Promise<void>;
+  onShowInfo: () => void;
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: we.uuid });
   const style = {
@@ -954,18 +986,37 @@ function SortableExerciseCard({
               </span>
             )}
           </button>
+          {/* Info button — opens the exercise detail modal as a sibling overlay
+              so the underlying workout state (rest timer, scroll, expanded
+              sets) is preserved. stopPropagation prevents the chevron toggle
+              and swipe-to-delete from firing on the same tap. */}
+          <button
+            onClick={(e) => { e.stopPropagation(); onShowInfo(); }}
+            onPointerDown={(e) => e.stopPropagation()}
+            className="px-2 py-2.5 text-muted-foreground hover:text-foreground flex-shrink-0"
+            aria-label={`Show details for ${we.exercise?.title ?? 'exercise'}`}
+          >
+            <Info className="h-4 w-4" />
+          </button>
         </div>
       </SwipeToDelete>
 
       {/* Collapsible sets */}
       {isExpanded && (
         <>
-          {/* Column headers — mirrors SetRow layout exactly */}
+          {/* Column headers — mirrors SetRow layout exactly. Branches on
+              tracking_mode so time-mode shows a single 'Time (sec)' column. */}
           <div className="flex items-center gap-2 px-3 py-1 border-t border-b border-border bg-secondary/30">
             <div className="w-5 text-center text-[10px] font-medium text-muted-foreground">Set</div>
-            <div className="flex-1 text-right text-[10px] font-medium text-muted-foreground">Weight</div>
-            <div className="w-3" />
-            <div className="flex-1 text-right text-[10px] font-medium text-muted-foreground">Reps</div>
+            {(we.exercise?.tracking_mode ?? 'reps') === 'time' ? (
+              <div className="flex-1 text-right text-[10px] font-medium text-muted-foreground">Time (sec)</div>
+            ) : (
+              <>
+                <div className="flex-1 text-right text-[10px] font-medium text-muted-foreground">Weight</div>
+                <div className="w-3" />
+                <div className="flex-1 text-right text-[10px] font-medium text-muted-foreground">Reps</div>
+              </>
+            )}
             <div className="w-8 flex-shrink-0" />
           </div>
 
@@ -976,7 +1027,9 @@ function SortableExerciseCard({
               setNumber={idx + 1}
               set={set}
               workoutExerciseUuid={we.uuid}
+              trackingMode={we.exercise?.tracking_mode ?? 'reps'}
               onUpdate={onUpdateSet}
+              onUpdateDuration={onUpdateSetDuration}
               onDelete={onDeleteSet}
               allTimeBest1RM={allTimeBest1RM}
             />
@@ -1014,6 +1067,12 @@ export default function WorkoutPage() {
   const [startingRoutine, setStartingRoutine] = useState<string | null>(null);
   const [expandedExercises, setExpandedExercises] = useState<Set<string>>(new Set());
   const [collapsedPlans, setCollapsedPlans] = useState<Set<string>>(new Set());
+  // Info modal state — null = closed. Lifted to the page level so the modal
+  // mount survives re-renders driven by the rest-timer 500ms tick. The modal
+  // itself is React.memo'd so stable props (exercise object, onClose) skip
+  // those re-renders entirely.
+  const [infoExercise, setInfoExercise] = useState<Exercise | null>(null);
+  const closeInfoModal = useCallback(() => setInfoExercise(null), []);
   const headerRef = useRef<HTMLDivElement>(null);
   const [headerHeight, setHeaderHeight] = useState(48);
   const [scheduleTapHighlight, setScheduleTapHighlight] = useState(false);
@@ -1236,6 +1295,7 @@ export default function WorkoutPage() {
               is_completed: false,
               is_pr: false,
               order_index: s.order_index,
+              duration_seconds: null,
               ...syncMeta,
             };
           }),
@@ -1341,6 +1401,22 @@ export default function WorkoutPage() {
       restTimer.start(defaultRest, { exerciseName, setNumber });
     }
     // Note: PR detection happens server-side after sync; is_pr updates via pull
+  };
+
+  // Time-mode counterpart. Writes duration_seconds; weight + repetitions
+  // stay null. Same auto-rest-timer behavior so workflow is consistent.
+  const updateSetDuration = async (workoutExerciseUuid: string, setUuid: string, durationSeconds: number) => {
+    await mutUpdateSet(setUuid, { duration_seconds: durationSeconds, is_completed: true });
+
+    const { defaultRest, autoStart } = getRestSettings();
+    if (autoStart) {
+      const we = workout?.exercises.find(e => e.uuid === workoutExerciseUuid);
+      const exerciseName = we?.exercise?.title;
+      const setNumber = we
+        ? we.sets.filter(s => !s._deleted).findIndex(s => s.uuid === setUuid) + 1
+        : undefined;
+      restTimer.start(defaultRest, { exerciseName, setNumber });
+    }
   };
 
   const handleAddSet = async (we: LocalWorkoutExerciseEntry) => {
@@ -1528,7 +1604,9 @@ export default function WorkoutPage() {
                       onRemove={() => handleRemoveExercise(we.uuid)}
                       onAddSet={() => handleAddSet(we)}
                       onUpdateSet={updateSet}
+                      onUpdateSetDuration={updateSetDuration}
                       onDeleteSet={mutDeleteSet}
+                      onShowInfo={() => setInfoExercise(we.exercise as unknown as Exercise)}
                     />
                   ))}
                 </div>
@@ -1621,6 +1699,11 @@ export default function WorkoutPage() {
           </div>
         </div>
       )}
+
+      {/* Per-exercise info modal — sibling overlay, doesn't unmount workout
+          state when opened. Memoized so 500ms rest-timer ticks in this parent
+          don't re-render the chart-heavy modal subtree. */}
+      <ExerciseDetailModal exercise={infoExercise} onClose={closeInfoModal} />
     </>
   );
 }

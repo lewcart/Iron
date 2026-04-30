@@ -25,7 +25,7 @@ import type {
   BodyNormRange,
   BodyBalance,
 } from '../types';
-import { calculatePRs } from '../lib/pr';
+import { calculatePRs, estimate1RM } from '../lib/pr';
 import { muscleGroupSearchTerms } from '../lib/muscle-groups';
 
 export type DbRow = Record<string, unknown>;
@@ -410,11 +410,11 @@ export async function getHistoricalBestsForExercise(
   exerciseUuid: string,
   excludeWorkoutUuid: string,
 ): Promise<{ best1RM: number }> {
-  const row = await queryOne<{
-    best_1rm: string | null;
+  const rows = await query<{
+    weight: string;
+    repetitions: number;
   }>(`
-    SELECT
-      MAX(ws.weight * (1 + ws.repetitions::float / 30)) AS best_1rm
+    SELECT ws.weight, ws.repetitions
     FROM workout_sets ws
     JOIN workout_exercises we ON ws.workout_exercise_uuid = we.uuid
     JOIN workouts w ON we.workout_uuid = w.uuid
@@ -425,15 +425,52 @@ export async function getHistoricalBestsForExercise(
       AND ws.repetitions IS NOT NULL
   `, [exerciseUuid, excludeWorkoutUuid]);
 
-  return {
-    best1RM: row?.best_1rm ? parseFloat(row.best_1rm) : 0,
-  };
+  let best = 0;
+  for (const row of rows) {
+    const orm = estimate1RM(parseFloat(row.weight), row.repetitions);
+    if (orm > best) best = orm;
+  }
+  return { best1RM: best };
 }
 
 // ===== EXERCISE PROGRESS & PRs =====
+//
+// All queries below operate on the "eligible sets" set for a given exercise:
+//   - Sets for any exercise that's a "canonical match" of the input UUID
+//     (same everkinetic_id when both are catalog rows; same title for
+//     custom exercises with everkinetic_id = 0).
+//   - Only completed sets with non-null weight + repetitions.
+//   - Only sets attached to rep-mode exercises (time-mode planks etc are
+//     excluded from any 1RM-style stat — see PR-D₁ schema migration 020).
+//
+// The dedup-and-mode filter logic lives in two helpers below so all six
+// query call sites compose them and changes ripple through one edit.
+
+/**
+ * Returns a SQL fragment that resolves to the set of canonical exercise UUIDs
+ * matching the input UUID. Use as: `we.exercise_uuid IN (${exerciseGroupMatch(...)})`
+ *
+ *   - Catalog exercises (everkinetic_id > 0) match by everkinetic_id, so any
+ *     duplicate "Bench Press" rows merge stats correctly.
+ *   - Custom exercises (everkinetic_id = 0) fall back to title-equivalence,
+ *     preserving prior behavior for user-created exercises.
+ */
+function exerciseGroupMatch(uuidParamIdx: number): string {
+  return `
+    SELECT e2.uuid FROM exercises e1
+    JOIN exercises e2 ON
+      (e2.everkinetic_id = e1.everkinetic_id AND e1.everkinetic_id > 0)
+      OR (e1.everkinetic_id = 0 AND e2.title = e1.title)
+    WHERE e1.uuid = $${uuidParamIdx}
+      AND e2.tracking_mode = 'reps'
+  `;
+}
+
+
 
 export async function getExerciseProgress(exerciseUuid: string, since?: Date): Promise<Array<{
   date: string;
+  workoutUuid: string;
   maxWeight: number;
   totalVolume: number;
   estimated1RM: number;
@@ -443,6 +480,7 @@ export async function getExerciseProgress(exerciseUuid: string, since?: Date): P
 
   const rows = await query<{
     date: string;
+    workout_uuid: string;
     max_weight: string;
     total_volume: string;
     max_reps_at_max_weight: number;
@@ -457,17 +495,14 @@ export async function getExerciseProgress(exerciseUuid: string, since?: Date): P
       FROM workout_sets ws
       JOIN workout_exercises we ON ws.workout_exercise_uuid = we.uuid
       JOIN workouts w ON we.workout_uuid = w.uuid
-      WHERE we.exercise_uuid IN (
-          SELECT e2.uuid FROM exercises e1
-          JOIN exercises e2 ON e2.title = e1.title
-          WHERE e1.uuid = $1
-        )
+      WHERE we.exercise_uuid IN (${exerciseGroupMatch(1)})
         AND ws.is_completed = true
         AND ws.weight IS NOT NULL
         AND ws.repetitions IS NOT NULL
         ${sinceClause}
     )
     SELECT
+      workout_uuid,
       date,
       MAX(weight) AS max_weight,
       SUM(weight * repetitions) AS total_volume,
@@ -481,9 +516,10 @@ export async function getExerciseProgress(exerciseUuid: string, since?: Date): P
     const maxWeight = parseFloat(row.max_weight) || 0;
     const totalVolume = parseFloat(row.total_volume) || 0;
     const reps = row.max_reps_at_max_weight || 1;
-    const estimated1RM = maxWeight * (1 + reps / 30);
+    const estimated1RM = estimate1RM(maxWeight, reps);
     return {
       date: row.date,
+      workoutUuid: row.workout_uuid,
       maxWeight,
       totalVolume,
       estimated1RM,
@@ -510,11 +546,7 @@ export async function getExercisePRs(exerciseUuid: string): Promise<{
     FROM workout_sets ws
     JOIN workout_exercises we ON ws.workout_exercise_uuid = we.uuid
     JOIN workouts w ON we.workout_uuid = w.uuid
-    WHERE we.exercise_uuid IN (
-        SELECT e2.uuid FROM exercises e1
-        JOIN exercises e2 ON e2.title = e1.title
-        WHERE e1.uuid = $1
-      )
+    WHERE we.exercise_uuid IN (${exerciseGroupMatch(1)})
       AND ws.is_completed = true
       AND ws.weight IS NOT NULL
       AND ws.repetitions IS NOT NULL
@@ -549,11 +581,7 @@ export async function getExerciseVolumeTrend(exerciseUuid: string, since?: Date)
     FROM workout_sets ws
     JOIN workout_exercises we ON ws.workout_exercise_uuid = we.uuid
     JOIN workouts w ON we.workout_uuid = w.uuid
-    WHERE we.exercise_uuid IN (
-        SELECT e2.uuid FROM exercises e1
-        JOIN exercises e2 ON e2.title = e1.title
-        WHERE e1.uuid = $1
-      )
+    WHERE we.exercise_uuid IN (${exerciseGroupMatch(1)})
       AND ws.is_completed = true
       AND ws.weight IS NOT NULL
       AND ws.repetitions IS NOT NULL
@@ -594,11 +622,7 @@ export async function getExerciseRecentSets(
     FROM workout_sets ws
     JOIN workout_exercises we ON ws.workout_exercise_uuid = we.uuid
     JOIN workouts w ON we.workout_uuid = w.uuid
-    WHERE we.exercise_uuid IN (
-        SELECT e2.uuid FROM exercises e1
-        JOIN exercises e2 ON e2.title = e1.title
-        WHERE e1.uuid = $1
-      )
+    WHERE we.exercise_uuid IN (${exerciseGroupMatch(1)})
       AND ws.is_completed = true
       AND ws.weight IS NOT NULL
       AND ws.repetitions IS NOT NULL
@@ -633,11 +657,7 @@ export async function getExercisePBPerSet(
       ws.repetitions
     FROM workout_sets ws
     JOIN workout_exercises we ON ws.workout_exercise_uuid = we.uuid
-    WHERE we.exercise_uuid IN (
-        SELECT e2.uuid FROM exercises e1
-        JOIN exercises e2 ON e2.title = e1.title
-        WHERE e1.uuid = $1
-      )
+    WHERE we.exercise_uuid IN (${exerciseGroupMatch(1)})
       AND ws.is_completed = true
       AND ws.weight IS NOT NULL
       AND ws.repetitions IS NOT NULL
@@ -649,6 +669,152 @@ export async function getExercisePBPerSet(
     weight: parseFloat(row.weight),
     repetitions: row.repetitions,
   }));
+}
+
+/** Session-grouped paginated history for an exercise.
+ *
+ * Reverse-chronological. Cursor is keyset-based — `(start_time, workout_uuid)`
+ * — so insertion or deletion of sessions during a paginated read can't shift
+ * pages or duplicate rows. Cursor format: `${startTimeIso}|${workoutUuid}`.
+ *
+ *   - Page 1: cursor=null → newest `limit` sessions.
+ *   - Page N: cursor=last-session-key from page N-1.
+ *   - Returns `nextCursor: null` when fewer rows than requested came back.
+ */
+export async function getExerciseSessionHistoryPaged(
+  exerciseUuid: string,
+  cursor: string | null,
+  limit = 10,
+): Promise<{
+  sessions: Array<{
+    workout_uuid: string;
+    date: string;
+    workout_title: string | null;
+    sets: Array<{
+      uuid: string;
+      weight: number | null;
+      repetitions: number | null;
+      duration_seconds: number | null;
+      rpe: number | null;
+      tag: string | null;
+      order_index: number;
+    }>;
+  }>;
+  nextCursor: string | null;
+}> {
+  // Decode cursor (lenient — tolerate malformed input by treating as null).
+  let cursorTime: string | null = null;
+  let cursorUuid: string | null = null;
+  if (cursor) {
+    const idx = cursor.indexOf('|');
+    if (idx > 0) {
+      cursorTime = cursor.slice(0, idx);
+      cursorUuid = cursor.slice(idx + 1);
+    }
+  }
+
+  const params: unknown[] = [exerciseUuid];
+  let cursorClause = '';
+  if (cursorTime && cursorUuid) {
+    params.push(cursorTime, cursorUuid);
+    // Keyset: rows strictly older than (cursorTime, cursorUuid). Tuple
+    // comparison gives us a stable lexicographic order that matches the
+    // ORDER BY below.
+    cursorClause = `AND (w.start_time, w.uuid) < ($${params.length - 1}, $${params.length})`;
+  }
+  params.push(limit);
+  const limitParamIdx = params.length;
+
+  const sessionRows = await query<{
+    workout_uuid: string;
+    date: string;
+    workout_title: string | null;
+  }>(`
+    SELECT DISTINCT
+      w.uuid AS workout_uuid,
+      w.start_time AS date,
+      w.title AS workout_title
+    FROM workout_sets ws
+    JOIN workout_exercises we ON ws.workout_exercise_uuid = we.uuid
+    JOIN workouts w ON we.workout_uuid = w.uuid
+    WHERE we.exercise_uuid IN (${exerciseGroupMatch(1)})
+      AND ws.is_completed = true
+      ${cursorClause}
+    ORDER BY w.start_time DESC, w.uuid DESC
+    LIMIT $${limitParamIdx}
+  `, params);
+
+  if (sessionRows.length === 0) {
+    return { sessions: [], nextCursor: null };
+  }
+
+  const workoutUuids = sessionRows.map(r => r.workout_uuid);
+  const setRows = await query<{
+    workout_uuid: string;
+    set_uuid: string;
+    weight: string | null;
+    repetitions: number | null;
+    duration_seconds: number | null;
+    rpe: string | null;
+    tag: string | null;
+    order_index: number;
+  }>(`
+    SELECT
+      w.uuid AS workout_uuid,
+      ws.uuid AS set_uuid,
+      ws.weight,
+      ws.repetitions,
+      ws.duration_seconds,
+      ws.rpe,
+      ws.tag,
+      ws.order_index
+    FROM workout_sets ws
+    JOIN workout_exercises we ON ws.workout_exercise_uuid = we.uuid
+    JOIN workouts w ON we.workout_uuid = w.uuid
+    WHERE we.exercise_uuid IN (${exerciseGroupMatch(1)})
+      AND w.uuid = ANY($2::text[])
+      AND ws.is_completed = true
+    ORDER BY w.start_time DESC, ws.order_index ASC
+  `, [exerciseUuid, workoutUuids]);
+
+  type SessionSet = {
+    uuid: string;
+    weight: number | null;
+    repetitions: number | null;
+    duration_seconds: number | null;
+    rpe: number | null;
+    tag: string | null;
+    order_index: number;
+  };
+  const setsByWorkout = new Map<string, SessionSet[]>();
+  for (const s of setRows) {
+    if (!setsByWorkout.has(s.workout_uuid)) setsByWorkout.set(s.workout_uuid, []);
+    setsByWorkout.get(s.workout_uuid)!.push({
+      uuid: s.set_uuid,
+      weight: s.weight ? parseFloat(s.weight) : null,
+      repetitions: s.repetitions,
+      duration_seconds: s.duration_seconds,
+      rpe: s.rpe ? parseFloat(s.rpe) : null,
+      tag: s.tag,
+      order_index: s.order_index,
+    });
+  }
+
+  const sessions = sessionRows.map(r => ({
+    workout_uuid: r.workout_uuid,
+    date: r.date,
+    workout_title: r.workout_title,
+    sets: setsByWorkout.get(r.workout_uuid) ?? [],
+  }));
+
+  // If we got a full page, there might be more. Encode the cursor from the
+  // last session. Otherwise: end of history.
+  const last = sessionRows[sessionRows.length - 1];
+  const nextCursor = sessionRows.length === limit
+    ? `${last.date}|${last.workout_uuid}`
+    : null;
+
+  return { sessions, nextCursor };
 }
 
 // ===== WORKOUT PLANS =====
@@ -885,12 +1051,14 @@ export async function exportWorkouts(): Promise<Array<{
     uuid: string;
     exercise_uuid: string;
     exercise_title: string;
+    tracking_mode: 'reps' | 'time';
     order_index: number;
     sets: Array<{
       uuid: string;
       order_index: number;
       weight: number | null;
       repetitions: number | null;
+      duration_seconds: number | null;
       rpe: number | null;
       tag: string | null;
       is_completed: boolean;
@@ -907,7 +1075,7 @@ export async function exportWorkouts(): Promise<Array<{
   const results = [];
   for (const w of workoutRows) {
     const exerciseRows = await query<DbRow>(`
-      SELECT we.uuid, we.exercise_uuid, we.order_index, e.title as exercise_title
+      SELECT we.uuid, we.exercise_uuid, we.order_index, e.title as exercise_title, e.tracking_mode
       FROM workout_exercises we
       JOIN exercises e ON we.exercise_uuid = e.uuid
       WHERE we.workout_uuid = $1
@@ -917,7 +1085,7 @@ export async function exportWorkouts(): Promise<Array<{
     const exercises = [];
     for (const we of exerciseRows) {
       const setRows = await query<DbRow>(`
-        SELECT uuid, order_index, weight, repetitions, rpe, tag, is_completed
+        SELECT uuid, order_index, weight, repetitions, duration_seconds, rpe, tag, is_completed
         FROM workout_sets WHERE workout_exercise_uuid = $1 ORDER BY order_index
       `, [we.uuid as string]);
 
@@ -925,12 +1093,14 @@ export async function exportWorkouts(): Promise<Array<{
         uuid: we.uuid as string,
         exercise_uuid: we.exercise_uuid as string,
         exercise_title: we.exercise_title as string,
+        tracking_mode: (we.tracking_mode === 'time' ? 'time' : 'reps') as 'reps' | 'time',
         order_index: we.order_index as number,
         sets: setRows.map(s => ({
           uuid: s.uuid as string,
           order_index: s.order_index as number,
           weight: s.weight ? parseFloat(s.weight as string) : null,
           repetitions: s.repetitions as number | null,
+          duration_seconds: (s.duration_seconds as number | null) ?? null,
           rpe: s.rpe ? parseFloat(s.rpe as string) : null,
           tag: s.tag as string | null,
           is_completed: Boolean(s.is_completed),
@@ -1006,6 +1176,7 @@ export async function startWorkoutFromRoutine(routineUuid: string): Promise<Star
           is_completed: false,
           is_pr: false,
           order_index: routineSet.order_index,
+          duration_seconds: null,
         });
       }
     } else {
@@ -1028,6 +1199,7 @@ export async function startWorkoutFromRoutine(routineUuid: string): Promise<Star
           is_completed: false,
           is_pr: false,
           order_index: i,
+          duration_seconds: null,
         });
       }
     }
@@ -1149,6 +1321,7 @@ export function parseExercise(row: DbRow): Exercise {
     is_custom: Boolean(row.is_custom),
     is_hidden: Boolean(row.is_hidden),
     movement_pattern: (row.movement_pattern as string | null) ?? null,
+    tracking_mode: (row.tracking_mode === 'time' ? 'time' : 'reps') as 'reps' | 'time',
   };
 }
 
@@ -1187,6 +1360,7 @@ export function parseWorkoutSet(row: DbRow): WorkoutSet {
     is_completed: Boolean(row.is_completed),
     is_pr: Boolean(row.is_pr),
     order_index: row.order_index as number,
+    duration_seconds: (row.duration_seconds as number | null) ?? null,
   };
 }
 
@@ -1229,6 +1403,7 @@ export function parseRoutineSet(row: DbRow): WorkoutRoutineSet {
     tag: row.tag as 'dropSet' | null,
     comment: row.comment as string | null,
     order_index: row.order_index as number,
+    target_duration_seconds: (row.target_duration_seconds as number | null) ?? null,
   };
 }
 
