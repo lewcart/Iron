@@ -337,6 +337,9 @@ function mapExercise(r: Record<string, unknown>) {
     is_hidden: Boolean(r.is_hidden),
     movement_pattern: (r.movement_pattern as string | null) ?? null,
     tracking_mode: (r.tracking_mode === 'time' ? 'time' : 'reps') as 'reps' | 'time',
+    image_count: typeof r.image_count === 'number' ? r.image_count : 0,
+    youtube_url: (r.youtube_url as string | null) ?? null,
+    image_urls: Array.isArray(r.image_urls) ? r.image_urls as string[] : null,
   };
 }
 

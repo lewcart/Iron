@@ -32,6 +32,15 @@ export interface LocalExercise {
    *  callers should coerce undefined → 'reps' for rows that arrived from
    *  a Dexie v5 store before the v6 schema bump. */
   tracking_mode: 'reps' | 'time';
+  /** Number of demo image frames available (0-3). Source-of-truth for
+   *  whether the demo strip renders. Frames addressed by exercise.uuid
+   *  at public/exercise-images/{uuid}/{01,02,03}.jpg. */
+  image_count: number;
+  /** Optional YouTube reference URL with start-time embedded. */
+  youtube_url: string | null;
+  /** Optional Vercel Blob URLs for AI-generated in-app demo images.
+   *  When set, takes precedence over the bundled public/ path. */
+  image_urls: string[] | null;
 }
 
 export interface LocalWorkout extends SyncMeta {
@@ -515,6 +524,19 @@ export class IronDB extends Dexie {
     // tolerates missing fields on existing rows, and read sites coerce
     // undefined → 'reps' / null defensively. No upgrade hook needed.
     this.version(8).stores(v6Stores);
+
+    // v9: exercise demo assets (mirrors Postgres migration 023).
+    // image_count (0-3), youtube_url (nullable), image_urls (Blob URLs for
+    // AI-generated in-app images). All additive. Backfill defaults so old
+    // rows pushed via sync don't fail the server-side NOT NULL constraint
+    // on image_count.
+    this.version(9).stores(v6Stores).upgrade(async tx => {
+      await tx.table('exercises').toCollection().modify(row => {
+        if (row.image_count === undefined) row.image_count = 0;
+        if (row.youtube_url === undefined) row.youtube_url = null;
+        if (row.image_urls === undefined) row.image_urls = null;
+      });
+    });
   }
 }
 
@@ -598,6 +620,9 @@ export async function hydrateExercises(): Promise<void> {
           is_hidden: ex.is_hidden ?? false,
           movement_pattern: ex.movement_pattern ?? null,
           tracking_mode: ex.tracking_mode ?? 'reps',
+          image_count: ex.image_count ?? 0,
+          youtube_url: ex.youtube_url ?? null,
+          image_urls: ex.image_urls ?? null,
         });
       }
     });

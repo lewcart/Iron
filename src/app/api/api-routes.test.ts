@@ -194,6 +194,10 @@ describe('POST /api/exercises', () => {
       equipment: ['dumbbell'],
       movementPattern: 'hinge',
       description: 'Hip hinge with dumbbells',
+      steps: [],
+      tips: [],
+      trackingMode: 'reps',
+      youtubeUrl: null,
     });
   });
 

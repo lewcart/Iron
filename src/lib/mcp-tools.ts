@@ -587,6 +587,11 @@ async function createExercise(args: Record<string, unknown>) {
     equipment,
     description,
     alias,
+    steps,
+    tips,
+    movement_pattern,
+    tracking_mode,
+    youtube_url,
   } = args as {
     title: string;
     primary_muscles: string[];
@@ -594,6 +599,11 @@ async function createExercise(args: Record<string, unknown>) {
     equipment?: string[];
     description?: string;
     alias?: string[];
+    steps?: string[];
+    tips?: string[];
+    movement_pattern?: string;
+    tracking_mode?: 'reps' | 'time';
+    youtube_url?: string;
   };
 
   if (!title?.trim()) return toolError('title is required');
@@ -601,12 +611,25 @@ async function createExercise(args: Record<string, unknown>) {
     return toolError('primary_muscles must be a non-empty array');
   }
 
+  // Server-side YouTube validation. MCP/import paths can't bypass this
+  // because we never trust the raw input.
+  let ytClean: string | null = null;
+  if (typeof youtube_url === 'string' && youtube_url.trim().length > 0) {
+    if (/^https?:\/\/(www\.)?(youtube\.com|youtu\.be)\//i.test(youtube_url.trim())) {
+      ytClean = youtube_url.trim();
+    } else {
+      return toolError('youtube_url must be a youtube.com or youtu.be URL');
+    }
+  }
+
   const uuid = crypto.randomUUID();
   const row = await queryOne(
     `INSERT INTO exercises
-       (uuid, everkinetic_id, title, alias, description, primary_muscles, secondary_muscles, equipment, is_custom)
-     VALUES ($1, 0, $2, $3, $4, $5, $6, $7, true)
-     RETURNING uuid, title, primary_muscles, secondary_muscles, equipment, description`,
+       (uuid, everkinetic_id, title, alias, description, primary_muscles, secondary_muscles, equipment,
+        steps, tips, is_custom, movement_pattern, tracking_mode, youtube_url, image_count)
+     VALUES ($1, 0, $2, $3, $4, $5, $6, $7, $8, $9, true, $10, $11, $12, 0)
+     RETURNING uuid, title, primary_muscles, secondary_muscles, equipment, description,
+               steps, tips, tracking_mode, youtube_url, image_count`,
     [
       uuid,
       title.trim(),
@@ -615,9 +638,80 @@ async function createExercise(args: Record<string, unknown>) {
       JSON.stringify(primary_muscles),
       JSON.stringify(secondary_muscles ?? []),
       JSON.stringify(equipment ?? []),
+      JSON.stringify(steps ?? []),
+      JSON.stringify(tips ?? []),
+      movement_pattern ?? null,
+      tracking_mode === 'time' ? 'time' : 'reps',
+      ytClean,
     ]
   );
 
+  return toolResult(row);
+}
+
+/** Update any exercise row (catalog or custom) — text fields, equipment,
+ *  movement pattern, tracking mode, YouTube URL. Server validates youtube_url
+ *  and rejects garbage. */
+async function updateExercise(args: Record<string, unknown>) {
+  const { uuid, ...patch } = args as {
+    uuid: string;
+    title?: string;
+    description?: string | null;
+    steps?: string[];
+    tips?: string[];
+    equipment?: string[];
+    primary_muscles?: string[];
+    secondary_muscles?: string[];
+    movement_pattern?: string | null;
+    tracking_mode?: 'reps' | 'time';
+    youtube_url?: string | null;
+  };
+
+  if (!uuid) return toolError('uuid is required');
+  const existing = await queryOne<{ uuid: string }>(
+    'SELECT uuid FROM exercises WHERE uuid = $1',
+    [uuid.toLowerCase()],
+  );
+  if (!existing) return toolError(`Exercise ${uuid} not found`);
+
+  // Build SET clause dynamically — only update fields the caller passed.
+  const updates: string[] = [];
+  const values: unknown[] = [];
+  let i = 1;
+  const push = (col: string, val: unknown) => {
+    updates.push(`${col} = $${i++}`);
+    values.push(val);
+  };
+
+  if (patch.title !== undefined) push('title', patch.title);
+  if (patch.description !== undefined) push('description', patch.description);
+  if (patch.steps !== undefined) push('steps', JSON.stringify(patch.steps));
+  if (patch.tips !== undefined) push('tips', JSON.stringify(patch.tips));
+  if (patch.equipment !== undefined) push('equipment', JSON.stringify(patch.equipment));
+  if (patch.primary_muscles !== undefined) push('primary_muscles', JSON.stringify(patch.primary_muscles));
+  if (patch.secondary_muscles !== undefined) push('secondary_muscles', JSON.stringify(patch.secondary_muscles));
+  if (patch.movement_pattern !== undefined) push('movement_pattern', patch.movement_pattern);
+  if (patch.tracking_mode !== undefined) {
+    push('tracking_mode', patch.tracking_mode === 'time' ? 'time' : 'reps');
+  }
+  if (patch.youtube_url !== undefined) {
+    if (patch.youtube_url === null || patch.youtube_url === '') {
+      push('youtube_url', null);
+    } else if (/^https?:\/\/(www\.)?(youtube\.com|youtu\.be)\//i.test(patch.youtube_url)) {
+      push('youtube_url', patch.youtube_url);
+    } else {
+      return toolError('youtube_url must be a youtube.com or youtu.be URL');
+    }
+  }
+
+  if (updates.length === 0) return toolError('No fields to update');
+
+  updates.push(`updated_at = NOW()`);
+  values.push(uuid.toLowerCase());
+  const row = await queryOne(
+    `UPDATE exercises SET ${updates.join(', ')} WHERE uuid = $${i} RETURNING *`,
+    values,
+  );
   return toolResult(row);
 }
 
@@ -2231,10 +2325,63 @@ export const tools: MCPTool[] = [
           items: { type: 'string' },
           description: 'Alternative names for fuzzy search matching',
         },
+        steps: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Numbered steps describing how to perform the exercise',
+        },
+        tips: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Coaching tips and things to watch out for',
+        },
+        movement_pattern: { type: 'string', description: 'Movement pattern (push, pull, hinge, squat, etc.)' },
+        tracking_mode: {
+          type: 'string',
+          enum: ['reps', 'time'],
+          description: 'How sets are tracked. "reps" = weight × repetitions (default). "time" = duration_seconds.',
+        },
+        youtube_url: {
+          type: 'string',
+          description: 'Optional YouTube reference URL with start time embedded (e.g. ?t=42). Validated server-side.',
+        },
       },
       required: ['title', 'primary_muscles'],
     },
     execute: createExercise,
+  },
+  {
+    name: 'update_exercise',
+    description: 'Updates an existing exercise (catalog or custom). Pass uuid + only the fields you want to change. Server validates youtube_url format and rejects garbage.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        uuid: { type: 'string', description: 'UUID of the exercise to update' },
+        title: { type: 'string' },
+        description: { type: 'string', description: 'About text. Pass null to clear.' },
+        steps: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Replace the full steps list',
+        },
+        tips: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Replace the full tips list',
+        },
+        equipment: { type: 'array', items: { type: 'string' } },
+        primary_muscles: { type: 'array', items: { type: 'string' } },
+        secondary_muscles: { type: 'array', items: { type: 'string' } },
+        movement_pattern: { type: 'string' },
+        tracking_mode: { type: 'string', enum: ['reps', 'time'] },
+        youtube_url: {
+          type: 'string',
+          description: 'YouTube URL with optional ?t=N start. Pass null or empty string to clear.',
+        },
+      },
+      required: ['uuid'],
+    },
+    execute: updateExercise,
   },
   {
     name: 'create_routine',
