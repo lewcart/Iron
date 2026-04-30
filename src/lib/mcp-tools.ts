@@ -1950,7 +1950,10 @@ async function getHealthWorkoutsTool(args: Record<string, unknown>) {
 
 // ── Tool registry ─────────────────────────────────────────────────────────────
 
+import { nutritionTools } from './mcp/nutrition-tools';
+
 export const tools: MCPTool[] = [
+  ...nutritionTools,
   {
     name: 'ping',
     description: 'Health check — confirms the MCP server is reachable.',
