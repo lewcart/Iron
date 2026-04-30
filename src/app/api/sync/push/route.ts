@@ -192,12 +192,19 @@ async function pushWorkoutPlan(r: Record<string, unknown>): Promise<void> {
     await query('DELETE FROM workout_plans WHERE uuid = $1', [r.uuid]);
     return;
   }
+  // is_active has a UNIQUE INDEX WHERE is_active = true (migration 006), so
+  // setting one plan active means deactivating all others. Do that in a
+  // transaction-equivalent: pre-clear if this plan is becoming active.
+  if (r.is_active) {
+    await query('UPDATE workout_plans SET is_active = false, updated_at = NOW() WHERE is_active = true AND uuid <> $1', [r.uuid]);
+  }
   await query(
-    `INSERT INTO workout_plans (uuid, title, order_index, updated_at)
-     VALUES ($1, $2, $3, NOW())
+    `INSERT INTO workout_plans (uuid, title, order_index, is_active, updated_at)
+     VALUES ($1, $2, $3, $4, NOW())
      ON CONFLICT (uuid) DO UPDATE SET
-       title = EXCLUDED.title, order_index = EXCLUDED.order_index, updated_at = NOW()`,
-    [r.uuid, r.title, r.order_index ?? 0],
+       title = EXCLUDED.title, order_index = EXCLUDED.order_index,
+       is_active = EXCLUDED.is_active, updated_at = NOW()`,
+    [r.uuid, r.title, r.order_index ?? 0, Boolean(r.is_active)],
   );
 }
 

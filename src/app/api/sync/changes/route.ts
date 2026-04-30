@@ -148,8 +148,9 @@ async function fetchRows(table: SyncedTable, uuids: string[]): Promise<Array<Rec
       return r.map(mapWorkoutSet);
     }
     case 'workout_plans':
-      return query<Record<string, unknown>>(
-        'SELECT uuid, title, COALESCE(order_index, 0) AS order_index FROM workout_plans WHERE uuid = ANY($1::text[])', [uuids]);
+      return (await query<Record<string, unknown>>(
+        'SELECT uuid, title, COALESCE(order_index, 0) AS order_index, COALESCE(is_active, false) AS is_active FROM workout_plans WHERE uuid = ANY($1::text[])', [uuids]))
+        .map(r => ({ ...r, is_active: Boolean(r.is_active) }));
     case 'workout_routines':
       return query<Record<string, unknown>>(
         'SELECT uuid, workout_plan_uuid, title, comment, order_index FROM workout_routines WHERE uuid = ANY($1::text[])', [uuids]);
