@@ -937,7 +937,7 @@ function SortableExerciseCard({
             }
             <span className="flex-1 min-w-0">
               <span className={`block font-semibold text-sm truncate ${allDone ? 'text-muted-foreground' : ''}`}>
-                {we.exercise?.title ?? 'Unknown Exercise'}
+                {we.exercise?.title ?? ''}
               </span>
               {we.comment && (
                 <span className="block text-xs text-muted-foreground italic truncate">{we.comment}</span>

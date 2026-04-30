@@ -128,7 +128,7 @@ export default function WorkoutDetail({ workout, onBack }: { workout: { uuid: st
                     <div key={we.uuid} className="ios-section">
                       <div className="px-4 py-3 border-b border-border">
                         <div className="flex items-center gap-2">
-                          <p className="font-semibold text-sm flex-1">{we.exercise?.title ?? 'Unknown Exercise'}</p>
+                          <p className="font-semibold text-sm flex-1">{we.exercise?.title ?? ''}</p>
                           {prCount > 0 && (
                             <span className="text-[10px] font-bold text-amber-400 bg-amber-400/15 border border-amber-400/30 px-1.5 py-0.5 rounded-full">
                               {prCount} PR{prCount > 1 ? 's' : ''}

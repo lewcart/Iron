@@ -18,6 +18,8 @@ const metadata = {
 const viewport = {
   width: 'device-width',
   initialScale: 1,
+  maximumScale: 1,
+  userScalable: false,
   viewportFit: 'cover',
   themeColor: '#5BCEFA',
   interactiveWidget: 'resizes-content',
@@ -67,5 +69,18 @@ describe('layout viewport', () => {
 
   it('uses resizes-content for mobile keyboard / widget sizing', () => {
     expect(viewport.interactiveWidget).toBe('resizes-content');
+  });
+
+  // Regression: WKWebView must NEVER zoom on input focus, and the user must
+  // never be able to pinch-zoom (because WKWebView has no pinch-out gesture
+  // once zoomed and they'd be permanently stuck). All inputs are 16px on
+  // mobile (see globals.css) so iOS has no reason to auto-zoom in the first
+  // place, and these flags make it explicit.
+  it('pins maximumScale to 1 to prevent iOS WKWebView zoom', () => {
+    expect(viewport.maximumScale).toBe(1);
+  });
+
+  it('disables userScalable so pinch-zoom never strands the user', () => {
+    expect(viewport.userScalable).toBe(false);
   });
 });

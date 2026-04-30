@@ -2,14 +2,131 @@
 
 import { db, getMeta, setMeta } from '@/db/local';
 import { apiBase } from '@/lib/api/client';
+import type {
+  LocalWorkout,
+  LocalWorkoutExercise,
+  LocalWorkoutSet,
+  LocalBodyweightLog,
+  LocalExercise,
+  LocalWorkoutPlan,
+  LocalWorkoutRoutine,
+  LocalWorkoutRoutineExercise,
+  LocalWorkoutRoutineSet,
+  LocalBodySpecLog,
+  LocalMeasurementLog,
+  LocalInbodyScan,
+  LocalBodyGoal,
+  LocalNutritionLog,
+  LocalNutritionWeekMeal,
+  LocalNutritionDayNote,
+  LocalNutritionTarget,
+  LocalHrtProtocol,
+  LocalHrtLog,
+  LocalWellbeingLog,
+  LocalDysphoriaLog,
+  LocalClothesTestLog,
+  LocalProgressPhoto,
+} from '@/db/local';
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
 export type SyncStatus = 'idle' | 'syncing' | 'offline' | 'error';
-
 type SyncStatusListener = (status: SyncStatus) => void;
 
+/** Names of every Dexie table that participates in change_log sync. Order is
+ * load-bearing on push: parents before children so foreign keys never reference
+ * a not-yet-pushed row. */
+const SYNCED_TABLES = [
+  // Catalogs (parent of references)
+  'exercises',
+  // Workouts hierarchy
+  'workouts', 'workout_exercises', 'workout_sets',
+  // Plans hierarchy
+  'workout_plans', 'workout_routines', 'workout_routine_exercises', 'workout_routine_sets',
+  // Body
+  'bodyweight_logs', 'body_spec_logs', 'measurement_logs', 'inbody_scans', 'body_goals',
+  // Nutrition
+  'nutrition_logs', 'nutrition_week_meals', 'nutrition_day_notes', 'nutrition_targets',
+  // HRT (protocols before logs — logs reference hrt_protocol_uuid)
+  'hrt_protocols', 'hrt_logs',
+  // Other logs
+  'wellbeing_logs', 'dysphoria_logs', 'clothes_test_logs',
+  // Photos
+  'inspo_photos', 'progress_photos',
+] as const;
+type SyncedTable = typeof SYNCED_TABLES[number];
+
+interface ChangeLogEntry {
+  seq: number;
+  table_name: SyncedTable;
+  row_uuid: string;
+  op: 'insert' | 'update' | 'delete';
+}
+
+interface ChangesResponse {
+  changes: ChangeLogEntry[];
+  rows: Partial<Record<SyncedTable, Array<Record<string, unknown>>>>;
+  max_seq: number;
+  has_more: boolean;
+}
+
+interface PushPayload {
+  workouts?: LocalWorkout[];
+  workout_exercises?: LocalWorkoutExercise[];
+  workout_sets?: LocalWorkoutSet[];
+  bodyweight_logs?: LocalBodyweightLog[];
+  exercises?: LocalExercise[];
+  workout_plans?: LocalWorkoutPlan[];
+  workout_routines?: LocalWorkoutRoutine[];
+  workout_routine_exercises?: LocalWorkoutRoutineExercise[];
+  workout_routine_sets?: LocalWorkoutRoutineSet[];
+  body_spec_logs?: LocalBodySpecLog[];
+  measurement_logs?: LocalMeasurementLog[];
+  inbody_scans?: LocalInbodyScan[];
+  body_goals?: LocalBodyGoal[];
+  nutrition_logs?: LocalNutritionLog[];
+  nutrition_week_meals?: LocalNutritionWeekMeal[];
+  nutrition_day_notes?: LocalNutritionDayNote[];
+  nutrition_targets?: LocalNutritionTarget[];
+  hrt_protocols?: LocalHrtProtocol[];
+  hrt_logs?: LocalHrtLog[];
+  wellbeing_logs?: LocalWellbeingLog[];
+  dysphoria_logs?: LocalDysphoriaLog[];
+  clothes_test_logs?: LocalClothesTestLog[];
+  progress_photos?: LocalProgressPhoto[];
+}
+
+const PAGE_SIZE = 1000;
+const POLL_INTERVAL_MS = 15_000;
+
 // ─── Sync Engine ───────────────────────────────────────────────────────────────
+//
+// Architecture:
+//
+//   Postgres                            Client (Capacitor / web)
+//   ──────────────────                  ───────────────────────────
+//   change_log (BIGSERIAL seq)  ◀────┐
+//   per-table CDC triggers           │
+//                                    │  pull(): GET /api/sync/changes?since=
+//                                    │    → fetch change_log rows + joined row data
+//                                    │    → bulkPut/bulkDelete in Dexie tx
+//                                    │    → setMeta('last_seq', max_seq)
+//                                    │
+//                                    │  push(): POST /api/sync/push
+//                                    │    → send rows where _synced=false
+//                                    │    → server upserts (CDC triggers fire,
+//                                    │      bumping change_log)
+//                                    │    → mark _synced=true locally
+//                                    │
+//                                    └─ visibilitychange + Capacitor
+//                                       appStateChange = trigger pull
+//                                       (consolidated in providers.tsx with
+//                                        HealthKitResumeSync)
+//
+// Idempotent start(): no-op if already running. This matters because React
+// StrictMode and route remounts can re-invoke start() — without idempotency
+// we'd accumulate duplicate intervals and listeners, multiplying network
+// traffic for every remount.
 
 class SyncEngine {
   private _status: SyncStatus = 'idle';
@@ -17,17 +134,18 @@ class SyncEngine {
   private _listeners = new Set<SyncStatusListener>();
   private _pushDebounceTimer: ReturnType<typeof setTimeout> | null = null;
   private _periodicTimer: ReturnType<typeof setInterval> | null = null;
-  // Keep refs so we can remove them on stop()
-  private _onOnline = () => { this.setStatus('syncing'); this.sync(); };
+  private _started = false;
+  private _pulling = false;
+  private _pushing = false;
+
+  private _onOnline = () => { if (!document.hidden) this.sync(); };
   private _onOffline = () => this.setStatus('offline');
+  private _onVisibility = () => {
+    if (!document.hidden && navigator.onLine) this.sync();
+  };
 
-  get status(): SyncStatus {
-    return this._status;
-  }
-
-  get lastError(): string | null {
-    return this._lastError;
-  }
+  get status(): SyncStatus { return this._status; }
+  get lastError(): string | null { return this._lastError; }
 
   private setStatus(s: SyncStatus) {
     this._status = s;
@@ -42,28 +160,40 @@ class SyncEngine {
   // ─── Push: send unsynced local changes to server ──────────────────────────
 
   async push(): Promise<void> {
-    if (!navigator.onLine) {
-      this.setStatus('offline');
-      return;
-    }
+    if (this._pushing) return;
+    if (!navigator.onLine) { this.setStatus('offline'); return; }
 
-    const [workouts, workout_exercises, workout_sets, bodyweight_logs] = await Promise.all([
-      db.workouts.filter(r => !r._synced).toArray(),
-      db.workout_exercises.filter(r => !r._synced).toArray(),
-      db.workout_sets.filter(r => !r._synced).toArray(),
-      db.bodyweight_logs.filter(r => !r._synced).toArray(),
-    ]);
-
-    const hasChanges =
-      workouts.length + workout_exercises.length + workout_sets.length + bodyweight_logs.length > 0;
-    if (!hasChanges) return;
-
-    this.setStatus('syncing');
+    this._pushing = true;
     try {
+      // Read every dirty row across all synced tables in parallel.
+      // _synced filter is a full-table scan (Dexie doesn't index booleans
+      // well) but rows-per-table is small enough that this is sub-ms.
+      const dirty = await Promise.all(
+        SYNCED_TABLES.map(async name => {
+          const rows = await (db as unknown as Record<string, { filter: (fn: (r: { _synced: boolean }) => boolean) => { toArray: () => Promise<Array<{ uuid?: string; metric_key?: string; id?: number }>> } }>)[name]
+            .filter((r) => !r._synced)
+            .toArray();
+          return [name, rows] as const;
+        }),
+      );
+
+      const payload: PushPayload = {};
+      let total = 0;
+      for (const [name, rows] of dirty) {
+        if (rows.length > 0) {
+          (payload as unknown as Record<string, unknown[]>)[name] = rows;
+          total += rows.length;
+        }
+      }
+
+      if (total === 0) return;
+
+      this.setStatus('syncing');
+
       const res = await fetch(`${apiBase()}/api/sync/push`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ workouts, workout_exercises, workout_sets, bodyweight_logs }),
+        body: JSON.stringify(payload),
       });
 
       if (!res.ok) {
@@ -71,79 +201,74 @@ class SyncEngine {
         throw new Error(`HTTP ${res.status}: ${body.slice(0, 200)}`);
       }
 
-      // Mark all as synced
+      // Mark all pushed rows as synced. Hard-purge soft-deleted ones now that
+      // the server has accepted the delete.
       const now = Date.now();
-      await Promise.all([
-        db.workouts.bulkUpdate(workouts.map(r => ({ key: r.uuid, changes: { _synced: true, _updated_at: now } }))),
-        db.workout_exercises.bulkUpdate(workout_exercises.map(r => ({ key: r.uuid, changes: { _synced: true, _updated_at: now } }))),
-        db.workout_sets.bulkUpdate(workout_sets.map(r => ({ key: r.uuid, changes: { _synced: true, _updated_at: now } }))),
-        db.bodyweight_logs.bulkUpdate(bodyweight_logs.map(r => ({ key: r.uuid, changes: { _synced: true, _updated_at: now } }))),
-      ]);
+      await db.transaction('rw', SYNCED_TABLES.map(t => (db as unknown as Record<string, unknown>)[t]) as never, async () => {
+        for (const [name, rows] of dirty) {
+          if (rows.length === 0) continue;
+          const table = (db as unknown as Record<string, { bulkUpdate: (patches: Array<{ key: string | number; changes: unknown }>) => Promise<unknown>; bulkDelete: (keys: Array<string | number>) => Promise<unknown> }>)[name];
+          const keyOf = (r: { uuid?: string; metric_key?: string; id?: number }) =>
+            r.uuid ?? r.metric_key ?? r.id!;
+          const tombstones = rows.filter(r => (r as unknown as { _deleted: boolean })._deleted);
+          const survivors = rows.filter(r => !(r as unknown as { _deleted: boolean })._deleted);
+          if (tombstones.length > 0) {
+            await table.bulkDelete(tombstones.map(keyOf));
+          }
+          if (survivors.length > 0) {
+            await table.bulkUpdate(
+              survivors.map(r => ({ key: keyOf(r), changes: { _synced: true, _updated_at: now } })),
+            );
+          }
+        }
+      });
 
+      this._lastError = null;
       this.setStatus('idle');
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       this._lastError = `push: ${msg}`;
       console.error('[sync] push error:', err);
       this.setStatus(navigator.onLine ? 'error' : 'offline');
+    } finally {
+      this._pushing = false;
     }
   }
 
-  // ─── Pull: fetch server changes since last pull ───────────────────────────
+  // ─── Pull: fetch server changes since last seq ────────────────────────────
 
   async pull(): Promise<void> {
-    if (!navigator.onLine) {
-      this.setStatus('offline');
-      return;
-    }
+    if (this._pulling) return;
+    if (!navigator.onLine) { this.setStatus('offline'); return; }
 
-    const since = await getMeta('last_pull_at');
-    const base = apiBase();
-    const url = since ? `${base}/api/sync/pull?since=${encodeURIComponent(String(since))}` : `${base}/api/sync/pull`;
-
+    this._pulling = true;
     try {
-      const res = await fetch(url);
-      if (!res.ok) {
-        const body = await res.text().catch(() => '');
-        throw new Error(`HTTP ${res.status}: ${body.slice(0, 200)}`);
+      let cursor = Number(await getMeta('last_seq') ?? 0);
+      let pages = 0;
+      const MAX_PAGES = 100; // safety cap — 100 pages × 1000 rows = 100k changes per pull
+
+      while (pages < MAX_PAGES) {
+        this.setStatus('syncing');
+        const url = `${apiBase()}/api/sync/changes?since=${cursor}&limit=${PAGE_SIZE}`;
+        const res = await fetch(url);
+        if (!res.ok) {
+          const body = await res.text().catch(() => '');
+          throw new Error(`HTTP ${res.status}: ${body.slice(0, 200)}`);
+        }
+
+        const data = await res.json() as ChangesResponse;
+
+        if (data.changes.length === 0) break;
+
+        await this.applyChanges(data);
+
+        cursor = data.max_seq;
+        await setMeta('last_seq', cursor);
+
+        if (!data.has_more) break;
+        pages++;
       }
 
-      const data = await res.json() as {
-        workouts: import('@/db/local').LocalWorkout[];
-        workout_exercises: import('@/db/local').LocalWorkoutExercise[];
-        workout_sets: import('@/db/local').LocalWorkoutSet[];
-        bodyweight_logs: import('@/db/local').LocalBodyweightLog[];
-        exercises?: import('@/db/local').LocalExercise[];
-        deleted: { workouts: string[]; workout_exercises: string[]; workout_sets: string[]; bodyweight_logs: string[] };
-        pulled_at: string;
-      };
-
-      // Upsert — server wins for conflicts (single-user, server is authoritative).
-      // Exercises MUST upsert in the same transaction as workout_exercises so the
-      // catalog can never fall behind the UUIDs that workout rows reference.
-      await db.transaction(
-        'rw',
-        [db.workouts, db.workout_exercises, db.workout_sets, db.bodyweight_logs, db.exercises],
-        async () => {
-          if (data.exercises?.length) await db.exercises.bulkPut(data.exercises);
-          if (data.workouts.length) await db.workouts.bulkPut(data.workouts.map(r => ({ ...r, _synced: true })));
-          if (data.workout_exercises.length) await db.workout_exercises.bulkPut(data.workout_exercises.map(r => ({ ...r, _synced: true })));
-          if (data.workout_sets.length) await db.workout_sets.bulkPut(data.workout_sets.map(r => ({ ...r, _synced: true })));
-          if (data.bodyweight_logs.length) await db.bodyweight_logs.bulkPut(data.bodyweight_logs.map(r => ({ ...r, _synced: true })));
-        },
-      );
-
-      // Apply server-side deletes
-      if (data.deleted) {
-        await Promise.all([
-          data.deleted.workouts?.length && db.workouts.bulkDelete(data.deleted.workouts),
-          data.deleted.workout_exercises?.length && db.workout_exercises.bulkDelete(data.deleted.workout_exercises),
-          data.deleted.workout_sets?.length && db.workout_sets.bulkDelete(data.deleted.workout_sets),
-          data.deleted.bodyweight_logs?.length && db.bodyweight_logs.bulkDelete(data.deleted.bodyweight_logs),
-        ]);
-      }
-
-      await setMeta('last_pull_at', data.pulled_at);
       this._lastError = null;
       this.setStatus('idle');
     } catch (err) {
@@ -151,19 +276,65 @@ class SyncEngine {
       this._lastError = `pull: ${msg}`;
       console.error('[sync] pull error:', err);
       this.setStatus(navigator.onLine ? 'error' : 'offline');
+    } finally {
+      this._pulling = false;
     }
   }
 
-  // ─── Full sync: push then pull ────────────────────────────────────────────
+  /** Apply one page of change_log entries + joined row data atomically. */
+  private async applyChanges(data: ChangesResponse): Promise<void> {
+    // Group changes by table → set of UUIDs to delete vs upsert.
+    const deletes: Partial<Record<SyncedTable, Set<string>>> = {};
+    for (const c of data.changes) {
+      if (c.op === 'delete') {
+        if (!deletes[c.table_name]) deletes[c.table_name] = new Set();
+        deletes[c.table_name]!.add(c.row_uuid);
+      }
+    }
+
+    // Apply in one transaction per table group so a crash mid-apply doesn't
+    // produce a half-applied page (cursor only advances after this returns).
+    const tableHandles = SYNCED_TABLES.map(t => (db as unknown as Record<string, unknown>)[t]) as never;
+    await db.transaction('rw', tableHandles, async () => {
+      for (const tableName of SYNCED_TABLES) {
+        const table = (db as unknown as Record<string, { bulkPut: (rows: unknown[]) => Promise<unknown>; bulkDelete: (keys: Array<string | number>) => Promise<unknown> }>)[tableName];
+
+        // Server-supplied rows (insert/update). Server already filters
+        // tombstoned rows out — we only see live data here.
+        const rows = data.rows[tableName];
+        if (rows && rows.length > 0) {
+          const stamped = rows.map(r => ({
+            ...r,
+            // Lowercase exercise_uuid references for case-stable lookups.
+            ...(tableName === 'workout_exercises' || tableName === 'workout_routine_exercises'
+              ? { exercise_uuid: String((r as { exercise_uuid: string }).exercise_uuid).toLowerCase() }
+              : {}),
+            // Lowercase exercises.uuid itself.
+            ...(tableName === 'exercises'
+              ? { uuid: String((r as { uuid: string }).uuid).toLowerCase() }
+              : {}),
+            _synced: true,
+            _updated_at: Date.now(),
+            _deleted: false,
+          }));
+          await table.bulkPut(stamped);
+        }
+
+        // Apply hard deletes from change_log.
+        const dels = deletes[tableName];
+        if (dels && dels.size > 0) {
+          await table.bulkDelete([...dels]);
+        }
+      }
+    });
+  }
+
+  // ─── Full sync ────────────────────────────────────────────────────────────
 
   async sync(): Promise<void> {
-    if (!navigator.onLine) {
-      this.setStatus('offline');
-      return;
-    }
+    if (!navigator.onLine) { this.setStatus('offline'); return; }
     this.setStatus('syncing');
     await this.push();
-    // Don't let a successful pull mask a push error
     const statusAfterPush = this._status;
     await this.pull();
     if (statusAfterPush === 'error' && this._status === 'idle') {
@@ -171,32 +342,47 @@ class SyncEngine {
     }
   }
 
-  // ─── Debounced push (called after mutations) ──────────────────────────────
+  // ─── Debounced push ──────────────────────────────────────────────────────
 
   schedulePush(delayMs = 500): void {
     if (this._pushDebounceTimer) clearTimeout(this._pushDebounceTimer);
     this._pushDebounceTimer = setTimeout(() => this.push(), delayMs);
   }
 
-  // ─── Start periodic sync + network event listeners ────────────────────────
+  // ─── Lifecycle (idempotent) ──────────────────────────────────────────────
 
   start(): void {
-    // Sync on app load
+    if (this._started) return;
+    this._started = true;
+
     this.sync();
 
-    // Periodic pull (every 60s while app is open)
+    // Poll every 15s, but only when document is visible — backgrounded tabs
+    // shouldn't burn cellular data. visibilitychange listener picks up the
+    // catch-up sync when the user returns to the app.
     this._periodicTimer = setInterval(() => {
-      if (navigator.onLine) this.pull();
-    }, 60_000);
+      if (navigator.onLine && !document.hidden) this.pull();
+    }, POLL_INTERVAL_MS);
 
     window.addEventListener('online', this._onOnline);
     window.addEventListener('offline', this._onOffline);
+    document.addEventListener('visibilitychange', this._onVisibility);
   }
 
   stop(): void {
-    if (this._periodicTimer) clearInterval(this._periodicTimer);
+    if (!this._started) return;
+    this._started = false;
+    if (this._periodicTimer) {
+      clearInterval(this._periodicTimer);
+      this._periodicTimer = null;
+    }
+    if (this._pushDebounceTimer) {
+      clearTimeout(this._pushDebounceTimer);
+      this._pushDebounceTimer = null;
+    }
     window.removeEventListener('online', this._onOnline);
     window.removeEventListener('offline', this._onOffline);
+    document.removeEventListener('visibilitychange', this._onVisibility);
   }
 }
 
