@@ -2,6 +2,25 @@
 
 All notable changes to Rebirth are documented here.
 
+## [0.2.0] - 2026-04-30
+
+### Added
+- **FitBee-style Today page at `/nutrition/today`.** Calorie ring with remaining/consumed/workouts split, horizontal-scroll macro cards (protein/carbs/fat/steps), four meal sections (breakfast/lunch/dinner/snack) with collapsing-when-empty behavior, swipe-to-delete + tap-to-edit on each food row, smart-repeat suggestion ("Log Dinner from yesterday"), and a single bottom-anchored "Mark day reviewed" CTA. Floating dock with `+` (works), camera and text buttons (coming soon stubs).
+- **Three-layer food search.** Type a food name in the Add sheet and it searches your own logged history first (instant), then Open Food Facts (free public DB, no key, ~3M branded products), then USDA FoodData Central (free with API key, ~2M foods including raw ingredients). Selecting a result from the public DBs seeds it into your local history so the next search is instant. Graceful degradation: if a remote DB times out or returns empty, your local history still works.
+- **Goals editor (`/nutrition/goals`).** Gear icon on Today opens a sheet with four macro inputs, three preset chips (Cut / Maintain / Bulk), and a collapsible advanced section for per-macro adherence bands. Bands are asymmetric by default — protein under-shoot misses but over-shoot is fine, calories over is the harder fail.
+- **History view (`/nutrition/history`).** Day-by-day list with macro adherence bars, badge ("Reviewed" / "Logged" / "no data"), filter chip (7d / 30d / 90d / all). Tap a day to open it in the Today view for full editing.
+- **Summary view (`/nutrition/summary`).** Week / month / all segmented control. Adherence percent (days within band), current streak, approval counts, daily macros line chart with goal as reference line, macro averages grid.
+- **Day approval semantics.** Today shows "Today" badge until you tap the CTA, then "Reviewed". Past days that were never reviewed display as "Logged" automatically — no nag, no scolding. The label is derived in the app layer; the database only stores `pending` or `approved`, eliminating writes-under-read and CDC fanout.
+- **Eight new MCP tools** in `src/lib/mcp/nutrition-tools.ts`: `list_nutrition_logs`, `update_nutrition_log` (named params with field whitelist), `delete_nutrition_log`, `bulk_log_nutrition_meals` (per-item results, partial failures don't abort), `approve_nutrition_day` (idempotent, future-date rejected), `search_nutrition_foods` (3-layer), `get_nutrition_summary` (adherence + streak), and `get_nutrition_rules` (discovery). Uniform error shape with actionable hints.
+- **Sub-nav across `/nutrition/*`** (Today / Week / History / Summary).
+- **Reusable UI primitives** at `src/components/ui/`: `Sheet` (drag-to-dismiss bottom sheet with focus-trap and scroll-lock), `MacroRing` (pure-SVG donut with band-aware colour), `MacroBar` (horizontal % bar), `SearchInput` (debounced wrapper).
+- **Migration 020** adds `approved_status`/`approved_at` columns to `nutrition_day_notes`, a `bands` JSONB column to `nutrition_targets`, the pg_trgm extension + GIN index on `food_name`, and a `nutrition_food_canonical` view (deduped foods with frequency-and-recency ranking).
+- **Local-first plumbing** for the new fields. `LocalNutritionLog` gains `meal_name` / `template_meal_id` / `status` (already on the server). Dexie schema bumps from v5 to v6 with an explicit upgrade callback that backfills existing rows.
+
+### Changed
+- **Sync push handler for `nutrition_day_notes` now uses `ON CONFLICT (date)`** instead of `ON CONFLICT (uuid)`. The previous behaviour would throw on the date UNIQUE constraint when a page-originated row and an MCP-originated row collided, stalling sync; the new behaviour merges the two paths.
+- **Food search query input is escaped before LIKE concatenation.** Searching for `100%` no longer matches the entire table.
+
 ## [0.1.1] - 2026-04-30
 
 ### Fixed
