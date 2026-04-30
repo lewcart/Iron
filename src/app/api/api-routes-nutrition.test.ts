@@ -37,6 +37,9 @@ const mockDayNote = {
   date: '2026-03-26',
   hydration_ml: 2000,
   notes: 'Felt good today',
+  approved_status: 'pending' as const,
+  approved_at: null,
+  updated_at: '2026-03-26T10:00:00.000Z',
 };
 
 const mockWeekMeal = {
