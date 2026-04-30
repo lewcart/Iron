@@ -114,6 +114,7 @@ export function InspoCaptureButton() {
             blob_url: null,
             uploaded: '0',
             created_at: takenAt,
+            notes: null,
           });
         } catch (err) {
           console.warn('[inspo] local save failed:', err);
