@@ -56,10 +56,13 @@ export async function getTimelineEntries(days: number, limit: number): Promise<T
        FROM nutrition_logs WHERE logged_at >= $1 ORDER BY logged_at DESC`,
       [sinceIso]
     ),
-    query<{ uuid: string; logged_at: string; medication: string; dose_mg: number | null; taken: boolean }>(
-      `SELECT uuid, logged_at, medication, dose_mg, taken
-       FROM hrt_logs WHERE logged_at >= $1 ORDER BY logged_at DESC`,
-      [sinceIso]
+    query<{ uuid: string; started_at: string; ended_at: string | null; name: string; doses_e: string | null }>(
+      // Period-based timeline now (migration 020 dropped per-dose hrt_logs).
+      // Each period yields ONE entry on the activity timeline at its
+      // started_at date — the "began protocol X" event.
+      `SELECT uuid, started_at, ended_at, name, doses_e
+       FROM hrt_timeline_periods WHERE started_at >= $1 ORDER BY started_at DESC`,
+      [sinceIso.slice(0, 10)]
     ),
     query<{ uuid: string; measured_at: string; site: string; value_cm: number }>(
       `SELECT uuid, measured_at, site, value_cm
@@ -128,13 +131,15 @@ export async function getTimelineEntries(days: number, limit: number): Promise<T
   }
 
   for (const h of hrtRows) {
-    const dose = h.dose_mg ? ` ${h.dose_mg}mg` : '';
+    const dose = h.doses_e ? ` · ${h.doses_e}` : '';
     entries.push({
       id: h.uuid,
       module: 'hrt',
       icon: 'pill',
-      timestamp: h.logged_at,
-      summary: `${h.medication}${dose} · ${h.taken ? 'taken' : 'skipped'}`,
+      // Treat the period start as the timeline event timestamp. Convert
+      // YYYY-MM-DD → ISO so the global sort with workouts/etc still works.
+      timestamp: new Date(h.started_at + 'T00:00:00Z').toISOString(),
+      summary: `Protocol started: ${h.name}${dose}`,
     });
   }
 

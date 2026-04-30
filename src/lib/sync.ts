@@ -20,8 +20,9 @@ import type {
   LocalNutritionWeekMeal,
   LocalNutritionDayNote,
   LocalNutritionTarget,
-  LocalHrtProtocol,
-  LocalHrtLog,
+  LocalHrtTimelinePeriod,
+  LocalLabDraw,
+  LocalLabResult,
   LocalWellbeingLog,
   LocalDysphoriaLog,
   LocalClothesTestLog,
@@ -47,8 +48,10 @@ const SYNCED_TABLES = [
   'bodyweight_logs', 'body_spec_logs', 'measurement_logs', 'inbody_scans', 'body_goals',
   // Nutrition
   'nutrition_logs', 'nutrition_week_meals', 'nutrition_day_notes', 'nutrition_targets',
-  // HRT (protocols before logs — logs reference hrt_protocol_uuid)
-  'hrt_protocols', 'hrt_logs',
+  // HRT timeline periods
+  'hrt_timeline_periods',
+  // Labs (draws before results — results reference draw_uuid)
+  'lab_draws', 'lab_results',
   // Other logs
   'wellbeing_logs', 'dysphoria_logs', 'clothes_test_logs',
   // Photos (inspo_photos is local-only — no server table, no sync)
@@ -88,8 +91,9 @@ interface PushPayload {
   nutrition_week_meals?: LocalNutritionWeekMeal[];
   nutrition_day_notes?: LocalNutritionDayNote[];
   nutrition_targets?: LocalNutritionTarget[];
-  hrt_protocols?: LocalHrtProtocol[];
-  hrt_logs?: LocalHrtLog[];
+  hrt_timeline_periods?: LocalHrtTimelinePeriod[];
+  lab_draws?: LocalLabDraw[];
+  lab_results?: LocalLabResult[];
   wellbeing_logs?: LocalWellbeingLog[];
   dysphoria_logs?: LocalDysphoriaLog[];
   clothes_test_logs?: LocalClothesTestLog[];

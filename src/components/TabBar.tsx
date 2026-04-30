@@ -3,13 +3,14 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useQueryClient } from '@tanstack/react-query';
-import { BarChart2, Plus, Dumbbell, Utensils } from 'lucide-react';
+import { BarChart2, Plus, Pill, Ruler, Utensils } from 'lucide-react';
 import { prefetchMainTabData } from '@/lib/api/prefetch';
 
 const tabs = [
   { href: '/feed', label: 'Feed', icon: BarChart2 },
+  { href: '/hrt', label: 'HRT', icon: Pill },
   { href: '/workout', label: 'Workout', icon: Plus },
-  { href: '/exercises', label: 'Exercises', icon: Dumbbell },
+  { href: '/measurements', label: 'Measure', icon: Ruler },
   { href: '/nutrition', label: 'Nutrition', icon: Utensils },
 ];
 

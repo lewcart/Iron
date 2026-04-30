@@ -30,7 +30,8 @@ const SYNCED_TABLES = [
   'workout_plans', 'workout_routines', 'workout_routine_exercises', 'workout_routine_sets',
   'bodyweight_logs', 'body_spec_logs', 'measurement_logs', 'inbody_scans', 'body_goals',
   'nutrition_logs', 'nutrition_week_meals', 'nutrition_day_notes', 'nutrition_targets',
-  'hrt_protocols', 'hrt_logs',
+  'hrt_timeline_periods',
+  'lab_draws', 'lab_results',
   'wellbeing_logs', 'dysphoria_logs', 'clothes_test_logs',
   'progress_photos',
 ] as const;
@@ -219,18 +220,26 @@ async function fetchRows(table: SyncedTable, uuids: string[]): Promise<Array<Rec
         `SELECT id, calories, protein_g, carbs_g, fat_g, bands
          FROM nutrition_targets WHERE id::TEXT = ANY($1::text[])`, [uuids]))
         .map(r => ({ ...r, id: Number(r.id) }));
-    case 'hrt_protocols':
+    case 'hrt_timeline_periods':
       return (await query<Record<string, unknown>>(
-        'SELECT uuid, medication, dose_description, form, started_at, ended_at, includes_blocker, blocker_name, notes FROM hrt_protocols WHERE uuid = ANY($1::text[])', [uuids]))
+        'SELECT uuid, name, started_at, ended_at, doses_e, doses_t_blocker, doses_other, notes FROM hrt_timeline_periods WHERE uuid = ANY($1::text[])', [uuids]))
         .map(r => ({
           ...r,
-          started_at: toIso(r.started_at),
-          ended_at: r.ended_at ? toIso(r.ended_at) : null,
+          started_at: toIso(r.started_at).slice(0, 10),
+          ended_at: r.ended_at ? toIso(r.ended_at).slice(0, 10) : null,
+          doses_other: Array.isArray(r.doses_other) ? r.doses_other : [],
         }));
-    case 'hrt_logs':
+    case 'lab_draws':
       return (await query<Record<string, unknown>>(
-        'SELECT uuid, logged_at, medication, dose_mg, route, notes, taken, hrt_protocol_uuid FROM hrt_logs WHERE uuid = ANY($1::text[])', [uuids]))
-        .map(r => ({ ...r, logged_at: toIso(r.logged_at), taken: Boolean(r.taken) }));
+        'SELECT uuid, drawn_at, notes, source FROM lab_draws WHERE uuid = ANY($1::text[])', [uuids]))
+        .map(r => ({
+          ...r,
+          drawn_at: toIso(r.drawn_at).slice(0, 10),
+        }));
+    case 'lab_results':
+      return (await query<Record<string, unknown>>(
+        'SELECT uuid, draw_uuid, lab_code, value FROM lab_results WHERE uuid = ANY($1::text[])', [uuids]))
+        .map(r => ({ ...r, value: Number(r.value) }));
     case 'wellbeing_logs':
       return (await query<Record<string, unknown>>(
         'SELECT uuid, logged_at, mood, energy, sleep_hours, sleep_quality, stress, notes FROM wellbeing_logs WHERE uuid = ANY($1::text[])', [uuids]))
