@@ -172,16 +172,36 @@ async function pushExercise(r: Record<string, unknown>): Promise<void> {
     return;
   }
 
-  // Validate youtube_url shape — null, empty string, or a real youtube link.
-  // Anything else gets coerced to null rather than throwing, so a sync push
-  // can't be denied-of-service by a single bad row.
+  // Validate youtube_url shape using the same regex the client helper does
+  // (looksLikeYouTubeUrl). MCP/import paths can't bypass — anything that
+  // doesn't look like a youtube host gets coerced to null. Single source
+  // of truth would be ideal but server importing client-side helper is
+  // awkward; the regex is duplicated and easy to keep in sync.
   const ytRaw = r.youtube_url;
   let ytClean: string | null = null;
   if (typeof ytRaw === 'string' && ytRaw.trim().length > 0) {
-    if (/^https?:\/\/(www\.)?(youtube\.com|youtu\.be)\//i.test(ytRaw.trim())) {
+    if (/^(?:https?:\/\/)?(?:[a-z0-9-]+\.)?(?:youtube\.com|youtu\.be)\//i.test(ytRaw.trim())) {
       ytClean = ytRaw.trim();
     }
+  } else if (ytRaw === null) {
+    ytClean = null;
   }
+
+  // image_urls is owned by the AI-gen endpoint, NOT routine client pushes.
+  // If the client explicitly sent an array, accept it. If absent (undefined)
+  // we use COALESCE in the upsert to preserve whatever the server already
+  // had — otherwise a stale-Dexie sync push would null out fresh AI URLs.
+  // image_count gets the same treatment: if the client doesn't supply it,
+  // we keep the server's existing value. This is critical because the AI
+  // generation flow updates these two columns directly via SQL, bypassing
+  // the client → sync layer.
+  const clientSentImageCount = typeof r.image_count === 'number';
+  const imageUrlsArr = Array.isArray(r.image_urls) ? r.image_urls as unknown[] : null;
+  const clientSentImageUrls = imageUrlsArr !== null;
+  const imageUrlsParam = imageUrlsArr !== null
+    ? (imageUrlsArr.length > 0 ? imageUrlsArr : null)
+    : null; // sentinel: the SQL branch on clientSentImageUrls preserves existing value
+  const imageCountParam = clientSentImageCount ? r.image_count : 0;
 
   await query(
     `INSERT INTO exercises (uuid, everkinetic_id, title, alias, description, primary_muscles, secondary_muscles, equipment, steps, tips, is_custom, is_hidden, movement_pattern, tracking_mode, image_count, youtube_url, image_urls, updated_at)
@@ -193,9 +213,9 @@ async function pushExercise(r: Record<string, unknown>): Promise<void> {
        is_custom = EXCLUDED.is_custom, is_hidden = EXCLUDED.is_hidden,
        movement_pattern = EXCLUDED.movement_pattern,
        tracking_mode = EXCLUDED.tracking_mode,
-       image_count = EXCLUDED.image_count,
+       image_count = ${clientSentImageCount ? 'EXCLUDED.image_count' : 'exercises.image_count'},
        youtube_url = EXCLUDED.youtube_url,
-       image_urls = EXCLUDED.image_urls,
+       image_urls = ${clientSentImageUrls ? 'EXCLUDED.image_urls' : 'exercises.image_urls'},
        updated_at = NOW()`,
     [
       String(r.uuid).toLowerCase(), r.everkinetic_id, r.title,
@@ -204,9 +224,9 @@ async function pushExercise(r: Record<string, unknown>): Promise<void> {
       JSON.stringify(r.equipment ?? []), JSON.stringify(r.steps ?? []), JSON.stringify(r.tips ?? []),
       Boolean(r.is_custom), Boolean(r.is_hidden), r.movement_pattern,
       r.tracking_mode ?? 'reps',
-      typeof r.image_count === 'number' ? r.image_count : 0,
+      imageCountParam,
       ytClean,
-      Array.isArray(r.image_urls) && r.image_urls.length > 0 ? r.image_urls : null,
+      imageUrlsParam,
     ],
   );
 }

@@ -1,9 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { put } from '@vercel/blob';
+import { put, del } from '@vercel/blob';
 import { getExercise } from '@/db/queries';
 import { query } from '@/db/db';
+import { requireApiKey } from '@/lib/api-auth';
 import { buildExerciseImagePrompt } from '@/lib/exercise-image-prompt';
 import { splitThreePanel } from '@/lib/split-three-panel';
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 // POST /api/exercises/[uuid]/generate-images
 //
@@ -21,6 +24,12 @@ export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ uuid: string }> },
 ) {
+  // Auth gate first — this endpoint costs ~$0.19/call against an external
+  // billed API. No anonymous access, even with REBIRTH_API_KEY unset locally
+  // (in that case it's already permissive).
+  const denied = requireApiKey(request);
+  if (denied) return denied;
+
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
     return NextResponse.json(
@@ -30,10 +39,20 @@ export async function POST(
   }
 
   const { uuid } = await params;
+  // Reject malformed UUIDs before any DB or Blob call so a crafted path
+  // can't fan-out into weird blob keys (`exercise-images/../foo/`).
+  if (!UUID_RE.test(uuid)) {
+    return NextResponse.json({ error: 'Invalid uuid' }, { status: 400 });
+  }
+
   const exercise = await getExercise(uuid);
   if (!exercise) {
     return NextResponse.json({ error: 'Exercise not found' }, { status: 404 });
   }
+  // Note on concurrency: the UI disables the button while a request is in
+  // flight, so spam-protection is at the client layer. The auth gate above
+  // bounds external abuse. Single-user single-device makes a server-side
+  // lock not worth the schema column it'd cost.
 
   const prompt = buildExerciseImagePrompt({
     title: exercise.title,
@@ -111,11 +130,25 @@ export async function POST(
   }
 
   // Persist to Postgres. image_urls = the three Blob URLs in order.
-  // Sync push will roll the row out to other clients via change_log.
-  await query(
-    'UPDATE exercises SET image_count = $1, image_urls = $2, updated_at = NOW() WHERE uuid = $3',
-    [3, urls, uuid.toLowerCase()],
-  );
+  // If the UPDATE fails, clean up the just-uploaded blobs so we don't
+  // accumulate orphan storage on retries.
+  try {
+    await query(
+      'UPDATE exercises SET image_count = $1, image_urls = $2, updated_at = NOW() WHERE uuid = $3',
+      [3, urls, uuid.toLowerCase()],
+    );
+  } catch (err) {
+    // Best-effort cleanup. Don't fail the response over cleanup errors —
+    // the blobs are still orphan but the user already has the original
+    // failure context.
+    await Promise.allSettled(urls.map(u => del(u)));
+    const msg = err instanceof Error ? err.message : 'unknown';
+    console.error('[generate-images] DB update failed; orphan blobs cleaned:', err);
+    return NextResponse.json(
+      { error: `Failed to persist images: ${msg}` },
+      { status: 500 },
+    );
+  }
 
   return NextResponse.json({ image_count: 3, image_urls: urls });
 }

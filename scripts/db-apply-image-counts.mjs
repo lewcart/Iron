@@ -38,6 +38,18 @@ console.log(`Applying ${entries.length} image_count updates...`);
 
 const sql = neon(url);
 
+// Preflight: confirm migration 023 has been applied before running. Without
+// it, the first UPDATE throws "column image_count does not exist" mid-flight.
+const cols = await sql`
+  SELECT column_name FROM information_schema.columns
+  WHERE table_name = 'exercises' AND column_name IN ('image_count', 'image_urls', 'youtube_url')
+`;
+if (cols.length < 3) {
+  console.error('ERROR: migration 023 not applied yet. Run `npm run db:migrate` first.');
+  console.error(`  found ${cols.length}/3 expected columns`);
+  process.exit(1);
+}
+
 let pgUpdated = 0;
 for (const [uuid, count] of entries) {
   const rows = await sql`
