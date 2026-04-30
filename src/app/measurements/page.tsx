@@ -33,6 +33,34 @@ const SITE_COLORS: Record<SiteKey, string> = {
   upper_arm: '#a855f7', // purple-500
 };
 
+// Three writers populate measurement_logs.site with different conventions:
+// the UI input form uses these SITE keys; InBody auto-insert writes left_bicep/
+// right_bicep/left_thigh/right_thigh; MCP update_body_comp writes left_arm/
+// right_arm/left_thigh/right_thigh. The chart/snapshot needs to surface all of
+// them under the matching UI tab.
+const SITE_ALIASES: Record<SiteKey, readonly string[]> = {
+  waist:     ['waist'],
+  hips:      ['hips', 'hip'],
+  upper_arm: ['upper_arm', 'left_arm', 'right_arm', 'left_bicep', 'right_bicep'],
+  thigh:     ['thigh', 'left_thigh', 'right_thigh'],
+};
+
+function siteGroup(rawSite: string): SiteKey | null {
+  for (const s of SITES) {
+    if (SITE_ALIASES[s.key].includes(rawSite)) return s.key;
+  }
+  return null;
+}
+
+function humanizeSite(rawSite: string): string {
+  const known = SITES.find(s => s.key === rawSite);
+  if (known) return known.label;
+  return rawSite
+    .split('_')
+    .map(w => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(' ');
+}
+
 // InBody metric key used for trend chart reference lines.
 // PBF% is the headline metric most users track; reference-line enrichment targets it.
 const INBODY_TREND_METRIC: keyof InbodyScan = 'pbf_pct';
@@ -163,38 +191,80 @@ function MeasurementsInner() {
     await deleteProgressPhoto(uuid);
   };
 
-  // Single-site chart data (mobile + iPad portrait)
-  const chartData = logs
-    .filter(l => l.site === chartSite)
-    .slice(0, 30)
-    .reverse()
-    .map(l => ({
-      date: formatChartDate(l.measured_at),
-      value: parseFloat(String(l.value_cm)),
-    }));
-
-  // Multi-site chart data (lg:+) — one row per measured_at, with all 4 sites as keys
-  const multiSiteChartData = (() => {
-    const byDate = new Map<string, { date: string } & Partial<Record<SiteKey, number>>>();
-    // walk logs oldest-to-newest so Map retains chronological insertion order
-    for (const log of [...logs].reverse()) {
-      const s = log.site as SiteKey;
-      if (!SITES.find(si => si.key === s)) continue;
-      const dateKey = formatChartDate(log.measured_at);
-      const existing = byDate.get(dateKey) ?? { date: dateKey };
-      existing[s] = parseFloat(String(log.value_cm));
-      byDate.set(dateKey, existing);
+  // Single-site chart data (mobile + iPad portrait). Group by calendar day
+  // and average across aliases — left_bicep + right_bicep on the same InBody
+  // scan day average to one upper-arm point. Single-entry days pass through
+  // unchanged (avg of one is the value).
+  const chartData = (() => {
+    const byDay = new Map<string, { measured_at: string; sum: number; count: number }>();
+    for (const l of logs) {
+      if (!SITE_ALIASES[chartSite].includes(l.site)) continue;
+      const day = l.measured_at.slice(0, 10);
+      const existing = byDay.get(day) ?? { measured_at: l.measured_at, sum: 0, count: 0 };
+      existing.sum += parseFloat(String(l.value_cm));
+      existing.count += 1;
+      if (l.measured_at > existing.measured_at) existing.measured_at = l.measured_at;
+      byDay.set(day, existing);
     }
-    return Array.from(byDate.values()).slice(-30);
+    return Array.from(byDay.values())
+      .sort((a, b) => a.measured_at.localeCompare(b.measured_at))
+      .slice(-30)
+      .map(({ measured_at, sum, count }) => ({
+        date: formatChartDate(measured_at),
+        value: Math.round((sum / count) * 10) / 10,
+      }));
   })();
 
-  // Most recent value per site (for snapshot row)
-  const latestBySite: Partial<Record<SiteKey, MeasurementLog>> = {};
-  for (const log of logs) {
-    const s = log.site as SiteKey;
-    if (SITES.find(si => si.key === s) && !latestBySite[s]) {
-      latestBySite[s] = log;
+  // Multi-site chart data (lg:+) — one row per calendar day, with each UI
+  // site averaged across its aliases for that day.
+  const multiSiteChartData = (() => {
+    type Bucket = {
+      measured_at: string;
+      sums: Partial<Record<SiteKey, { sum: number; count: number }>>;
+    };
+    const byDay = new Map<string, Bucket>();
+    for (const log of logs) {
+      const group = siteGroup(log.site);
+      if (!group) continue;
+      const day = log.measured_at.slice(0, 10);
+      const bucket = byDay.get(day) ?? { measured_at: log.measured_at, sums: {} };
+      const cur = bucket.sums[group] ?? { sum: 0, count: 0 };
+      cur.sum += parseFloat(String(log.value_cm));
+      cur.count += 1;
+      bucket.sums[group] = cur;
+      if (log.measured_at > bucket.measured_at) bucket.measured_at = log.measured_at;
+      byDay.set(day, bucket);
     }
+    return Array.from(byDay.values())
+      .sort((a, b) => a.measured_at.localeCompare(b.measured_at))
+      .slice(-30)
+      .map(({ measured_at, sums }) => {
+        const row: { date: string } & Partial<Record<SiteKey, number>> = {
+          date: formatChartDate(measured_at),
+        };
+        for (const s of SITES) {
+          const agg = sums[s.key];
+          if (agg) row[s.key] = Math.round((agg.sum / agg.count) * 10) / 10;
+        }
+        return row;
+      });
+  })();
+
+  // Most recent value per site (for snapshot row). For each UI site, find the
+  // most-recent calendar day with any aliased entry, then average all rows
+  // from that day. `logs` is sorted desc by measured_at, so logs[0] within a
+  // group identifies the latest day.
+  const latestBySite: Partial<Record<SiteKey, { value_cm: number; measured_at: string }>> = {};
+  for (const site of SITES) {
+    const matched = logs.filter(l => SITE_ALIASES[site.key].includes(l.site));
+    if (matched.length === 0) continue;
+    const latestDay = matched[0].measured_at.slice(0, 10);
+    const sameDay = matched.filter(l => l.measured_at.slice(0, 10) === latestDay);
+    const avg = sameDay.reduce((acc, l) => acc + parseFloat(String(l.value_cm)), 0) / sameDay.length;
+    latestBySite[site.key] = {
+      value_cm: Math.round(avg * 10) / 10,
+      measured_at: matched[0].measured_at,
+    };
   }
 
   const hasInput = SITES.some(s => inputs[s.key]) || !!weightInput;
@@ -427,7 +497,7 @@ function MeasurementsInner() {
               >
                 <div className="flex-1 min-w-0">
                   <span className="text-sm font-medium">
-                    {SITES.find(s => s.key === log.site)?.label ?? log.site}
+                    {humanizeSite(log.site)}
                   </span>
                   <span className="text-sm text-muted-foreground ml-2">{log.value_cm} cm</span>
                 </div>

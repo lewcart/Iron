@@ -203,3 +203,143 @@ describe('chart data derivation', () => {
     expect(latestBySite.upper_arm).toBeUndefined();
   });
 });
+
+// ===== site alias resolution =====
+// Mirrors SITE_ALIASES + siteGroup() in measurements/page.tsx. Three writers
+// populate measurement_logs.site with different conventions: UI input form
+// (waist/hips/upper_arm/thigh), InBody auto-insert (left_bicep/right_bicep/
+// left_thigh/right_thigh), and MCP update_body_comp (left_arm/right_arm/
+// left_thigh/right_thigh). The chart and snapshot must surface all of them
+// under the matching UI tab.
+
+describe('site alias resolution', () => {
+  const SITE_ALIASES: Record<SiteKey, readonly string[]> = {
+    waist:     ['waist'],
+    hips:      ['hips', 'hip'],
+    upper_arm: ['upper_arm', 'left_arm', 'right_arm', 'left_bicep', 'right_bicep'],
+    thigh:     ['thigh', 'left_thigh', 'right_thigh'],
+  };
+
+  function siteGroup(rawSite: string): SiteKey | null {
+    for (const s of SITES) {
+      if (SITE_ALIASES[s.key].includes(rawSite)) return s.key;
+    }
+    return null;
+  }
+
+  it('maps InBody-sourced bicep keys to the upper_arm tab', () => {
+    expect(siteGroup('left_bicep')).toBe('upper_arm');
+    expect(siteGroup('right_bicep')).toBe('upper_arm');
+  });
+
+  it('maps MCP-sourced arm keys to the upper_arm tab', () => {
+    expect(siteGroup('left_arm')).toBe('upper_arm');
+    expect(siteGroup('right_arm')).toBe('upper_arm');
+  });
+
+  it('maps InBody-sourced thigh keys to the thigh tab', () => {
+    expect(siteGroup('left_thigh')).toBe('thigh');
+    expect(siteGroup('right_thigh')).toBe('thigh');
+  });
+
+  it('keeps direct UI keys mapped to themselves', () => {
+    expect(siteGroup('waist')).toBe('waist');
+    expect(siteGroup('hips')).toBe('hips');
+    expect(siteGroup('upper_arm')).toBe('upper_arm');
+    expect(siteGroup('thigh')).toBe('thigh');
+  });
+
+  it('returns null for sites the UI does not surface (chest, neck, calf, etc.)', () => {
+    expect(siteGroup('chest')).toBeNull();
+    expect(siteGroup('neck')).toBeNull();
+    expect(siteGroup('left_calf')).toBeNull();
+    expect(siteGroup('shoulders')).toBeNull();
+  });
+
+  it('chart filter for upper_arm finds left_bicep rows (regression: previously filtered to zero)', () => {
+    const inbodyLogs = [
+      { uuid: 'i1', site: 'left_bicep',  value_cm: 30.8, measured_at: '2026-04-15T00:00:00.000Z' },
+      { uuid: 'i2', site: 'right_bicep', value_cm: 30.5, measured_at: '2026-04-15T00:00:00.000Z' },
+      { uuid: 'i3', site: 'left_bicep',  value_cm: 30.2, measured_at: '2026-03-01T00:00:00.000Z' },
+    ];
+    const chartSite: SiteKey = 'upper_arm';
+    const matching = inbodyLogs.filter(l => SITE_ALIASES[chartSite].includes(l.site));
+    expect(matching.length).toBe(3);
+  });
+
+  // Mirrors the latestBySite computation in measurements/page.tsx — for each
+  // UI site, pick the most-recent calendar day and average aliased rows on
+  // that day.
+  function latestBySite(logs: { site: string; value_cm: number; measured_at: string }[]) {
+    // logs assumed sorted desc by measured_at (matches useMeasurements)
+    const out: Partial<Record<SiteKey, { value_cm: number; measured_at: string }>> = {};
+    for (const site of SITES) {
+      const matched = logs.filter(l => SITE_ALIASES[site.key].includes(l.site));
+      if (matched.length === 0) continue;
+      const latestDay = matched[0].measured_at.slice(0, 10);
+      const sameDay = matched.filter(l => l.measured_at.slice(0, 10) === latestDay);
+      const avg = sameDay.reduce((acc, l) => acc + l.value_cm, 0) / sameDay.length;
+      out[site.key] = {
+        value_cm: Math.round(avg * 10) / 10,
+        measured_at: matched[0].measured_at,
+      };
+    }
+    return out;
+  }
+
+  it('latestBySite resolves upper_arm/thigh from a single InBody-sourced row', () => {
+    const logs = [
+      { uuid: 'i1', site: 'left_bicep', value_cm: 30.8, measured_at: '2026-04-15T00:00:00.000Z' },
+      { uuid: 'i2', site: 'left_thigh', value_cm: 51.0, measured_at: '2026-04-15T00:00:00.000Z' },
+    ];
+    const out = latestBySite(logs);
+    expect(out.upper_arm?.value_cm).toBe(30.8);
+    expect(out.thigh?.value_cm).toBe(51.0);
+  });
+
+  it('latestBySite averages left + right when both are logged on the same day', () => {
+    const logs = [
+      { uuid: 'i1', site: 'left_bicep',  value_cm: 30.8, measured_at: '2026-04-15T00:00:00.000Z' },
+      { uuid: 'i2', site: 'right_bicep', value_cm: 30.4, measured_at: '2026-04-15T00:00:00.000Z' },
+      { uuid: 'i3', site: 'left_thigh',  value_cm: 51.0, measured_at: '2026-04-15T00:00:00.000Z' },
+      { uuid: 'i4', site: 'right_thigh', value_cm: 50.6, measured_at: '2026-04-15T00:00:00.000Z' },
+    ];
+    const out = latestBySite(logs);
+    expect(out.upper_arm?.value_cm).toBe(30.6);
+    expect(out.thigh?.value_cm).toBe(50.8);
+  });
+
+  it('latestBySite uses only the most-recent day when older logs exist', () => {
+    const logs = [
+      { uuid: 'a', site: 'left_bicep',  value_cm: 30.8, measured_at: '2026-04-15T00:00:00.000Z' },
+      { uuid: 'b', site: 'right_bicep', value_cm: 30.4, measured_at: '2026-04-15T00:00:00.000Z' },
+      { uuid: 'c', site: 'left_bicep',  value_cm: 28.0, measured_at: '2026-01-15T00:00:00.000Z' },
+    ];
+    const out = latestBySite(logs);
+    // Should average only April 15 entries (30.8 + 30.4) / 2 = 30.6
+    expect(out.upper_arm?.value_cm).toBe(30.6);
+  });
+
+  it('chart data averages left + right per day', () => {
+    const logs = [
+      { uuid: 'i1', site: 'left_bicep',  value_cm: 30.8, measured_at: '2026-04-15T00:00:00.000Z' },
+      { uuid: 'i2', site: 'right_bicep', value_cm: 30.4, measured_at: '2026-04-15T00:00:00.000Z' },
+      { uuid: 'i3', site: 'left_bicep',  value_cm: 28.0, measured_at: '2026-01-15T00:00:00.000Z' },
+    ];
+    const chartSite: SiteKey = 'upper_arm';
+    const byDay = new Map<string, { measured_at: string; sum: number; count: number }>();
+    for (const l of logs) {
+      if (!SITE_ALIASES[chartSite].includes(l.site)) continue;
+      const day = l.measured_at.slice(0, 10);
+      const existing = byDay.get(day) ?? { measured_at: l.measured_at, sum: 0, count: 0 };
+      existing.sum += l.value_cm;
+      existing.count += 1;
+      if (l.measured_at > existing.measured_at) existing.measured_at = l.measured_at;
+      byDay.set(day, existing);
+    }
+    const points = Array.from(byDay.values())
+      .sort((a, b) => a.measured_at.localeCompare(b.measured_at))
+      .map(({ sum, count }) => Math.round((sum / count) * 10) / 10);
+    expect(points).toEqual([28.0, 30.6]);
+  });
+});
