@@ -25,6 +25,7 @@ export async function createCustomExercise(opts: {
   steps?: string[];
   tips?: string[];
   movement_pattern?: string | null;
+  tracking_mode?: 'reps' | 'time';
 }): Promise<LocalExercise> {
   const ex: LocalExercise = {
     uuid: genUUID().toLowerCase(),
@@ -40,7 +41,7 @@ export async function createCustomExercise(opts: {
     is_custom: true,
     is_hidden: false,
     movement_pattern: opts.movement_pattern ?? null,
-    tracking_mode: 'reps',
+    tracking_mode: opts.tracking_mode ?? 'reps',
   };
   // Push needs to know this is dirty. exercises don't have SyncMeta on the
   // type but the sync engine reads `_synced` field via the `as unknown` path.

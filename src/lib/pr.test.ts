@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import { estimate1RM, calculatePRs, isNewEstimated1RM } from './pr';
+import {
+  estimate1RM,
+  calculatePRs,
+  isNewEstimated1RM,
+  calculateTimePRs,
+  isNewLongestHold,
+} from './pr';
 
 // ===== estimate1RM =====
 
@@ -154,5 +160,77 @@ describe('calculatePRs', () => {
     const result = calculatePRs(sets);
     // First set wins (strict greater-than comparison)
     expect(result.heaviestWeight?.date).toBe('2026-01-01');
+  });
+});
+
+// ===== calculateTimePRs =====
+
+describe('calculateTimePRs', () => {
+  it('returns null + 0 for empty array', () => {
+    const result = calculateTimePRs([]);
+    expect(result.longestHold).toBeNull();
+    expect(result.totalSeconds).toBe(0);
+  });
+
+  it('picks the single set when only one provided', () => {
+    const result = calculateTimePRs([{ duration_seconds: 60, date: '2026-01-01' }]);
+    expect(result.longestHold?.duration_seconds).toBe(60);
+    expect(result.totalSeconds).toBe(60);
+  });
+
+  it('picks the longest hold across multiple sets', () => {
+    const sets = [
+      { duration_seconds: 30, date: '2026-01-01' },
+      { duration_seconds: 90, date: '2026-01-02' },
+      { duration_seconds: 60, date: '2026-01-03' },
+    ];
+    const result = calculateTimePRs(sets);
+    expect(result.longestHold?.duration_seconds).toBe(90);
+    expect(result.longestHold?.date).toBe('2026-01-02');
+    expect(result.totalSeconds).toBe(180);
+  });
+
+  it('preserves workout_uuid + exercise_uuid on the record', () => {
+    const sets = [{
+      duration_seconds: 75,
+      date: '2026-03-15',
+      workout_uuid: 'wo-time-1',
+      exercise_uuid: 'plank-uuid',
+    }];
+    const result = calculateTimePRs(sets);
+    expect(result.longestHold?.workout_uuid).toBe('wo-time-1');
+    expect(result.longestHold?.exercise_uuid).toBe('plank-uuid');
+  });
+
+  it('first-encountered wins on tie (strict greater-than)', () => {
+    const sets = [
+      { duration_seconds: 60, date: '2026-01-01' },
+      { duration_seconds: 60, date: '2026-01-02' },
+    ];
+    expect(calculateTimePRs(sets).longestHold?.date).toBe('2026-01-01');
+  });
+});
+
+// ===== isNewLongestHold =====
+
+describe('isNewLongestHold', () => {
+  it('returns true when duration exceeds all-time best', () => {
+    expect(isNewLongestHold(120, 90)).toBe(true);
+  });
+
+  it('returns false when duration equals all-time best', () => {
+    expect(isNewLongestHold(90, 90)).toBe(false);
+  });
+
+  it('returns false when duration is below all-time best', () => {
+    expect(isNewLongestHold(60, 90)).toBe(false);
+  });
+
+  it('returns false when duration is 0', () => {
+    expect(isNewLongestHold(0, 0)).toBe(false);
+  });
+
+  it('returns true against zero all-time best (first ever set)', () => {
+    expect(isNewLongestHold(30, 0)).toBe(true);
   });
 });
