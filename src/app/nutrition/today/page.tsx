@@ -21,6 +21,7 @@ import { EditFoodSheet } from './EditFoodSheet';
 import { ApproveDayButton } from './ApproveDayButton';
 import { SmartRepeatSuggestion } from './SmartRepeatSuggestion';
 import { EntryDock } from './EntryDock';
+import { DayNoteSection } from './DayNoteSection';
 import { GoalsSheet } from '../goals/GoalsSheet';
 
 const SLOTS: MealSlot[] = ['breakfast', 'lunch', 'dinner', 'snack'];
@@ -198,6 +199,8 @@ function NutritionTodayContent() {
           </div>
         );
       })}
+
+      <DayNoteSection date={date} dayNote={dayNote} />
 
       <div className="mt-6">
         <ApproveDayButton date={date} status={status} />

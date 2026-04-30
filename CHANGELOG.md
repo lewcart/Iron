@@ -2,6 +2,14 @@
 
 All notable changes to Rebirth are documented here.
 
+## [0.2.2] - 2026-05-01
+
+### Added
+- **Hydration + day-notes editing on `/nutrition/today`.** New section above the "Mark day reviewed" CTA shows your hydration in ml (with +250 / +500 / +750 quick-add buttons sized to common pours) and a free-text notes textarea. Both auto-save with a 600ms debounce — no Save button to remember. Lives on the same `nutrition_day_notes` row that the legacy page wrote to, so existing data shows up automatically.
+
+### Changed
+- **`/nutrition/week` is now Week-only.** The legacy 937-line component had a "Today" subtab that was acting as a back-door to hydration / day-notes editing. With those features now native to `/nutrition/today`, the subtab + all its state (deviation editing, planned-meal logging, protein-target localStorage, dayBundle query) is deleted. The file is 398 lines and only does the Week template editor.
+
 ## [0.2.1] - 2026-05-01
 
 ### Added

@@ -111,10 +111,12 @@
       each — proper prompt engineering + image upload pipeline + structured
       output validation + error UX. Deferred from this batch.
 
-- [ ] **Absorb hydration + day-notes editing into the new
-      `/nutrition/today` page.** The legacy `/nutrition/week` component
-      keeps the legacy "Today" subtab alive as a back-door to hydration logging
-      + free-text day notes. Once those features land properly on the new
-      Today page, the Today subtab inside the Week page can be deleted and
-      that file shrinks from ~937 lines to just the Week template editor.
+- [x] **Absorb hydration + day-notes editing into the new
+      `/nutrition/today` page.** New `DayNoteSection` component on Today
+      shows hydration in ml with +250/+500/+750 quick-add buttons, plus a
+      day-notes textarea. Both auto-save (600ms debounce) via the existing
+      `setDayNote` local-first mutation. The legacy `/nutrition/week` page
+      shrinks from 937 lines to 398 — the Today subtab and all its state
+      have been deleted; the file is now just the Week template editor.
+      **Completed:** v0.2.2 (2026-05-01)
 
