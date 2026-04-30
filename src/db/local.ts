@@ -219,11 +219,14 @@ export interface LocalNutritionLog extends SyncMeta {
   uuid: string;
   logged_at: string;
   meal_type: 'breakfast' | 'lunch' | 'dinner' | 'snack' | 'other' | null;
+  meal_name: string | null;
   calories: number | null;
   protein_g: number | null;
   carbs_g: number | null;
   fat_g: number | null;
   notes: string | null;
+  template_meal_id: string | null;
+  status: 'planned' | 'deviation' | 'added' | null;
 }
 
 export interface LocalNutritionWeekMeal extends SyncMeta {
@@ -232,6 +235,8 @@ export interface LocalNutritionWeekMeal extends SyncMeta {
   meal_slot: string;
   meal_name: string;
   protein_g: number | null;
+  carbs_g: number | null;
+  fat_g: number | null;
   calories: number | null;
   quality_rating: number | null;
   sort_order: number;
@@ -242,6 +247,20 @@ export interface LocalNutritionDayNote extends SyncMeta {
   date: string;
   hydration_ml: number | null;
   notes: string | null;
+  approved_status: 'pending' | 'approved';
+  approved_at: string | null;
+}
+
+export interface MacroBand {
+  low: number;
+  high: number | null;
+}
+
+export interface MacroBands {
+  cal?: MacroBand;
+  pro?: MacroBand;
+  carb?: MacroBand;
+  fat?: MacroBand;
 }
 
 /** Singleton — keyed by id=1 in Dexie too. */
@@ -251,31 +270,41 @@ export interface LocalNutritionTarget extends SyncMeta {
   protein_g: number | null;
   carbs_g: number | null;
   fat_g: number | null;
+  bands: MacroBands | null;
 }
 
 // ─── HRT ──────────────────────────────────────────────────────────────────────
+//
+// Period-based timeline (mirrors Notion HRT Timeline DB). Each row is a
+// protocol period with start date + optional end date + the doses taken
+// across that span. Adherence ("taken today") is intentionally not tracked
+// here — Lewis logs adherence in a separate medications app.
 
-export interface LocalHrtProtocol extends SyncMeta {
+export interface LocalHrtTimelinePeriod extends SyncMeta {
   uuid: string;
-  medication: string;
-  dose_description: string;
-  form: 'gel' | 'patch' | 'injection' | 'oral' | 'other';
-  started_at: string;
-  ended_at: string | null;
-  includes_blocker: boolean;
-  blocker_name: string | null;
+  name: string;
+  started_at: string;            // YYYY-MM-DD
+  ended_at: string | null;       // YYYY-MM-DD; null = current
+  doses_e: string | null;        // e.g. "Estrogel 1.5mg estradiol"
+  doses_t_blocker: string | null;
+  doses_other: string[];         // multi-select
   notes: string | null;
 }
 
-export interface LocalHrtLog extends SyncMeta {
+// ─── Labs ─────────────────────────────────────────────────────────────────────
+
+export interface LocalLabDraw extends SyncMeta {
   uuid: string;
-  logged_at: string;
-  medication: string;
-  dose_mg: number | null;
-  route: 'injection' | 'topical' | 'oral' | 'patch' | 'other' | null;
+  drawn_at: string;              // YYYY-MM-DD
   notes: string | null;
-  taken: boolean;
-  hrt_protocol_uuid: string | null;
+  source: string;                // 'manual' | 'notion_import' | etc.
+}
+
+export interface LocalLabResult extends SyncMeta {
+  uuid: string;
+  draw_uuid: string;
+  lab_code: string;
+  value: number;
 }
 
 // ─── Wellbeing / dysphoria / clothes ──────────────────────────────────────────
@@ -365,8 +394,9 @@ export class IronDB extends Dexie {
   nutrition_week_meals!: Table<LocalNutritionWeekMeal, string>;
   nutrition_day_notes!: Table<LocalNutritionDayNote, string>;
   nutrition_targets!: Table<LocalNutritionTarget, number>;
-  hrt_protocols!: Table<LocalHrtProtocol, string>;
-  hrt_logs!: Table<LocalHrtLog, string>;
+  hrt_timeline_periods!: Table<LocalHrtTimelinePeriod, string>;
+  lab_draws!: Table<LocalLabDraw, string>;
+  lab_results!: Table<LocalLabResult, string>;
   wellbeing_logs!: Table<LocalWellbeingLog, string>;
   dysphoria_logs!: Table<LocalDysphoriaLog, string>;
   clothes_test_logs!: Table<LocalClothesTestLog, string>;
@@ -441,12 +471,50 @@ export class IronDB extends Dexie {
     };
     this.version(5).stores(v5Stores);
 
-    // v6: time-based exercises (mirrors Postgres migration 020).
+    // v6: HRT timeline + labs replace the old adherence model. Drop the
+    // hrt_protocols + hrt_logs Dexie tables (server-side equivalents are
+    // dropped in main's migration 020); add hrt_timeline_periods,
+    // lab_draws, lab_results.
+    const v6Stores = {
+      ...v5Stores,
+      hrt_protocols: null,
+      hrt_logs: null,
+      hrt_timeline_periods: 'uuid, started_at, ended_at, _synced, _updated_at',
+      lab_draws: 'uuid, drawn_at, _synced, _updated_at',
+      lab_results: 'uuid, draw_uuid, lab_code, _synced, _updated_at',
+    };
+    this.version(6).stores(v6Stores);
+
+    // v7: nutrition upgrade — extend log/week/day-note/target rows with new
+    // fields (meal_name, template_meal_id, status on logs; carbs_g/fat_g on
+    // week_meals; approved_status/approved_at on day_notes; bands on
+    // targets). Existing rows backfilled with safe defaults via upgrade tx.
+    // No new indexed fields — none of the new columns are queried by index.
+    this.version(7).stores(v6Stores).upgrade(async tx => {
+      await tx.table('nutrition_logs').toCollection().modify(row => {
+        if (row.meal_name === undefined) row.meal_name = null;
+        if (row.template_meal_id === undefined) row.template_meal_id = null;
+        if (row.status === undefined) row.status = null;
+      });
+      await tx.table('nutrition_week_meals').toCollection().modify(row => {
+        if (row.carbs_g === undefined) row.carbs_g = null;
+        if (row.fat_g === undefined) row.fat_g = null;
+      });
+      await tx.table('nutrition_day_notes').toCollection().modify(row => {
+        if (row.approved_status === undefined) row.approved_status = 'pending';
+        if (row.approved_at === undefined) row.approved_at = null;
+      });
+      await tx.table('nutrition_targets').toCollection().modify(row => {
+        if (row.bands === undefined) row.bands = null;
+      });
+    });
+
+    // v8: time-based exercises (mirrors Postgres migration 022).
     // tracking_mode lives on exercises; duration_seconds on workout_sets;
     // target_duration_seconds on workout_routine_sets. All additive — Dexie
     // tolerates missing fields on existing rows, and read sites coerce
     // undefined → 'reps' / null defensively. No upgrade hook needed.
-    this.version(6).stores(v5Stores);
+    this.version(8).stores(v6Stores);
   }
 }
 

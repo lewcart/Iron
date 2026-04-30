@@ -8,6 +8,7 @@
 
 import { query, queryOne, transaction } from '@/db/db';
 import { estimate1RM } from '@/lib/pr';
+import { LAB_DEFINITIONS_BY_CODE, evaluateLabRange } from '@/lib/lab-definitions';
 
 // ── Result helpers ────────────────────────────────────────────────────────────
 
@@ -37,7 +38,7 @@ const MEASUREMENT_SITE_MAP: Record<string, string> = {
   waist: 'waist',
   hips: 'hips',
   neck: 'neck',
-  shoulders: 'shoulders',
+  shoulder_width: 'shoulder_width',
   abdomen: 'abdomen',
   left_arm: 'left_bicep',
   right_arm: 'right_bicep',
@@ -2008,9 +2009,332 @@ async function getHealthWorkoutsTool(args: Record<string, unknown>) {
   return toolResult(rows);
 }
 
+// ── HRT Timeline tools ────────────────────────────────────────────────────────
+
+interface HrtTimelinePeriodRow {
+  uuid: string;
+  name: string;
+  started_at: string;
+  ended_at: string | null;
+  doses_e: string | null;
+  doses_t_blocker: string | null;
+  doses_other: string[];
+  notes: string | null;
+}
+
+async function listHrtTimeline(args: Record<string, unknown>) {
+  const limit = Math.min(Number(args.limit ?? 100), 500);
+  const rows = await query<HrtTimelinePeriodRow>(
+    `SELECT uuid, name,
+            to_char(started_at, 'YYYY-MM-DD') AS started_at,
+            CASE WHEN ended_at IS NULL THEN NULL ELSE to_char(ended_at, 'YYYY-MM-DD') END AS ended_at,
+            doses_e, doses_t_blocker, doses_other, notes
+       FROM hrt_timeline_periods
+      ORDER BY started_at DESC
+      LIMIT $1`,
+    [limit],
+  );
+  return toolResult(rows);
+}
+
+async function createHrtTimelinePeriod(args: Record<string, unknown>) {
+  const { name, started_at } = args;
+  if (typeof name !== 'string' || !name.trim()) return toolError('name is required');
+  if (typeof started_at !== 'string') return toolError('started_at is required (YYYY-MM-DD)');
+
+  const dosesOther = Array.isArray(args.doses_other) ? args.doses_other : [];
+
+  const row = await queryOne(
+    `INSERT INTO hrt_timeline_periods
+       (uuid, name, started_at, ended_at, doses_e, doses_t_blocker, doses_other, notes)
+     VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8)
+     RETURNING uuid, name,
+       to_char(started_at, 'YYYY-MM-DD') AS started_at,
+       CASE WHEN ended_at IS NULL THEN NULL ELSE to_char(ended_at, 'YYYY-MM-DD') END AS ended_at,
+       doses_e, doses_t_blocker, doses_other, notes`,
+    [
+      crypto.randomUUID(),
+      name.trim(),
+      started_at,
+      typeof args.ended_at === 'string' ? args.ended_at : null,
+      typeof args.doses_e === 'string' ? args.doses_e : null,
+      typeof args.doses_t_blocker === 'string' ? args.doses_t_blocker : null,
+      JSON.stringify(dosesOther),
+      typeof args.notes === 'string' ? args.notes : null,
+    ],
+  );
+  return toolResult(row);
+}
+
+async function updateHrtTimelinePeriod(args: Record<string, unknown>) {
+  const { uuid } = args;
+  if (typeof uuid !== 'string') return toolError('uuid is required');
+
+  const fields: string[] = [];
+  const params: unknown[] = [];
+  let p = 0;
+
+  if (typeof args.name === 'string') { fields.push(`name = $${++p}`); params.push(args.name); }
+  if (typeof args.started_at === 'string') { fields.push(`started_at = $${++p}`); params.push(args.started_at); }
+  if (args.ended_at !== undefined) { fields.push(`ended_at = $${++p}`); params.push(args.ended_at ?? null); }
+  if (args.doses_e !== undefined) { fields.push(`doses_e = $${++p}`); params.push(args.doses_e ?? null); }
+  if (args.doses_t_blocker !== undefined) { fields.push(`doses_t_blocker = $${++p}`); params.push(args.doses_t_blocker ?? null); }
+  if (Array.isArray(args.doses_other)) { fields.push(`doses_other = $${++p}::jsonb`); params.push(JSON.stringify(args.doses_other)); }
+  if (args.notes !== undefined) { fields.push(`notes = $${++p}`); params.push(args.notes ?? null); }
+
+  if (fields.length === 0) return toolError('No fields to update');
+
+  params.push(uuid);
+  const row = await queryOne(
+    `UPDATE hrt_timeline_periods SET ${fields.join(', ')} WHERE uuid = $${++p}
+     RETURNING uuid, name,
+       to_char(started_at, 'YYYY-MM-DD') AS started_at,
+       CASE WHEN ended_at IS NULL THEN NULL ELSE to_char(ended_at, 'YYYY-MM-DD') END AS ended_at,
+       doses_e, doses_t_blocker, doses_other, notes`,
+    params,
+  );
+  return row ? toolResult(row) : toolError('HRT timeline period not found');
+}
+
+async function deleteHrtTimelinePeriod(args: Record<string, unknown>) {
+  const { uuid } = args;
+  if (typeof uuid !== 'string') return toolError('uuid is required');
+  await query(`DELETE FROM hrt_timeline_periods WHERE uuid = $1`, [uuid]);
+  return toolResult({ deleted: uuid });
+}
+
+// ── Lab tools ─────────────────────────────────────────────────────────────────
+
+async function listLabDefinitions() {
+  // Mirrors the static constant. Returned with the same shape MCP callers
+  // would get from a DB read so server-side coaching tools don't need to
+  // know the data is compile-time.
+  return toolResult(Object.values(LAB_DEFINITIONS_BY_CODE).sort((a, b) => a.sort_order - b.sort_order));
+}
+
+interface LabDrawWithResultsRow {
+  uuid: string;
+  drawn_at: string;
+  notes: string | null;
+  source: string;
+  results: Array<{ lab_code: string; value: number; in_range: boolean | null; status: string }>;
+}
+
+async function listLabDraws(args: Record<string, unknown>) {
+  const limit = Math.min(Number(args.limit ?? 50), 500);
+  const includeResults = args.include_results !== false;     // default true
+  const sex: 'female' | 'male' = args.sex === 'male' ? 'male' : 'female';
+
+  const draws = await query<{ uuid: string; drawn_at: string; notes: string | null; source: string }>(
+    `SELECT uuid, to_char(drawn_at, 'YYYY-MM-DD') AS drawn_at, notes, source
+       FROM lab_draws
+       ORDER BY drawn_at DESC
+       LIMIT $1`,
+    [limit],
+  );
+
+  if (!includeResults || draws.length === 0) {
+    return toolResult(draws.map(d => ({ ...d, results: [] })));
+  }
+
+  const drawUuids = draws.map(d => d.uuid);
+  const results = await query<{ draw_uuid: string; lab_code: string; value: number }>(
+    `SELECT draw_uuid, lab_code, value
+       FROM lab_results
+      WHERE draw_uuid = ANY($1::text[])`,
+    [drawUuids],
+  );
+
+  const byDraw = new Map<string, LabDrawWithResultsRow['results']>();
+  for (const r of results) {
+    const def = LAB_DEFINITIONS_BY_CODE[r.lab_code];
+    const value = Number(r.value);
+    const status = def ? evaluateLabRange(def, value, sex) : 'unknown';
+    const entry = byDraw.get(r.draw_uuid) ?? [];
+    entry.push({
+      lab_code: r.lab_code,
+      value,
+      in_range: status === 'unknown' ? null : status === 'in_range',
+      status,
+    });
+    byDraw.set(r.draw_uuid, entry);
+  }
+
+  return toolResult(draws.map(d => ({ ...d, results: byDraw.get(d.uuid) ?? [] })));
+}
+
+async function getLabSeries(args: Record<string, unknown>) {
+  const { lab_code } = args;
+  if (typeof lab_code !== 'string') return toolError('lab_code is required');
+
+  const limit = Math.min(Number(args.limit ?? 50), 500);
+  const rows = await query<{ drawn_at: string; value: number }>(
+    `SELECT to_char(d.drawn_at, 'YYYY-MM-DD') AS drawn_at, r.value
+       FROM lab_results r
+       JOIN lab_draws d ON d.uuid = r.draw_uuid
+      WHERE r.lab_code = $1
+      ORDER BY d.drawn_at ASC
+      LIMIT $2`,
+    [lab_code, limit],
+  );
+
+  const def = LAB_DEFINITIONS_BY_CODE[lab_code];
+  if (!def) return toolError(`Unknown lab_code: ${lab_code}`);
+
+  const sex: 'female' | 'male' = args.sex === 'male' ? 'male' : 'female';
+  const series = rows.map(r => {
+    const value = Number(r.value);
+    const status = evaluateLabRange(def, value, sex);
+    return { drawn_at: r.drawn_at, value, status };
+  });
+
+  return toolResult({ lab_code, label: def.label, unit: def.unit, series });
+}
+
+async function createLabDraw(args: Record<string, unknown>) {
+  const { drawn_at } = args;
+  if (typeof drawn_at !== 'string') return toolError('drawn_at is required (YYYY-MM-DD)');
+
+  const results = Array.isArray(args.results) ? args.results : [];
+  // Validate each result's lab_code matches a known definition before any DB write.
+  for (const r of results as Array<{ lab_code?: unknown; value?: unknown }>) {
+    if (typeof r?.lab_code !== 'string' || !LAB_DEFINITIONS_BY_CODE[r.lab_code]) {
+      return toolError(`Unknown lab_code in results: ${String(r?.lab_code)}`);
+    }
+    if (typeof r?.value !== 'number' || !Number.isFinite(r.value)) {
+      return toolError(`Invalid value for ${r.lab_code}`);
+    }
+  }
+
+  const drawUuid = crypto.randomUUID();
+  const statements: Array<{ text: string; params?: unknown[] }> = [
+    {
+      text: `INSERT INTO lab_draws (uuid, drawn_at, notes, source) VALUES ($1, $2, $3, $4)`,
+      params: [
+        drawUuid, drawn_at,
+        typeof args.notes === 'string' ? args.notes : null,
+        typeof args.source === 'string' ? args.source : 'mcp',
+      ],
+    },
+  ];
+
+  for (const r of results as Array<{ lab_code: string; value: number }>) {
+    statements.push({
+      text: `INSERT INTO lab_results (uuid, draw_uuid, lab_code, value)
+             VALUES ($1, $2, $3, $4)
+             ON CONFLICT (draw_uuid, lab_code) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()`,
+      params: [crypto.randomUUID(), drawUuid, r.lab_code, r.value],
+    });
+  }
+
+  await transaction(statements);
+
+  const row = await queryOne(
+    `SELECT uuid, to_char(drawn_at, 'YYYY-MM-DD') AS drawn_at, notes, source
+       FROM lab_draws WHERE uuid = $1`,
+    [drawUuid],
+  );
+  return toolResult({ ...(row ?? {}), results_imported: results.length });
+}
+
+async function deleteLabDraw(args: Record<string, unknown>) {
+  const { uuid } = args;
+  if (typeof uuid !== 'string') return toolError('uuid is required');
+  await query(`DELETE FROM lab_draws WHERE uuid = $1`, [uuid]);
+  return toolResult({ deleted: uuid });
+}
+
+async function upsertLabResults(args: Record<string, unknown>) {
+  const { draw_uuid } = args;
+  if (typeof draw_uuid !== 'string') return toolError('draw_uuid is required');
+
+  const results = Array.isArray(args.results) ? args.results : [];
+  if (results.length === 0) return toolError('results array is required');
+
+  for (const r of results as Array<{ lab_code?: unknown; value?: unknown }>) {
+    if (typeof r?.lab_code !== 'string' || !LAB_DEFINITIONS_BY_CODE[r.lab_code]) {
+      return toolError(`Unknown lab_code: ${String(r?.lab_code)}`);
+    }
+    if (typeof r?.value !== 'number' || !Number.isFinite(r.value)) {
+      return toolError(`Invalid value for ${r.lab_code}`);
+    }
+  }
+
+  const draw = await queryOne(`SELECT uuid FROM lab_draws WHERE uuid = $1`, [draw_uuid]);
+  if (!draw) return toolError(`Draw not found: ${draw_uuid}`);
+
+  const statements = (results as Array<{ lab_code: string; value: number }>).map(r => ({
+    text: `INSERT INTO lab_results (uuid, draw_uuid, lab_code, value)
+           VALUES ($1, $2, $3, $4)
+           ON CONFLICT (draw_uuid, lab_code) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()`,
+    params: [crypto.randomUUID(), draw_uuid, r.lab_code, r.value],
+  }));
+
+  await transaction(statements);
+
+  return toolResult({ draw_uuid, upserted: results.length });
+}
+
+// ── Apple Health medications (read-only) ──────────────────────────────────────
+
+async function getHkMedications(args: Record<string, unknown>) {
+  const days = Math.min(Math.max(Number(args.days ?? 30), 1), 365);
+  const medication = typeof args.medication === 'string' ? args.medication : null;
+
+  const params: unknown[] = [days];
+  let where = `taken_at >= NOW() - ($1 || ' days')::interval`;
+  if (medication) {
+    params.push(`%${medication}%`);
+    where += ` AND medication_name ILIKE $${params.length}`;
+  }
+
+  const rows = await query<{
+    hk_uuid: string;
+    medication_name: string;
+    dose_string: string | null;
+    taken_at: string;
+    scheduled_at: string | null;
+    source_name: string | null;
+  }>(
+    `SELECT hk_uuid, medication_name, dose_string,
+            to_char(taken_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS taken_at,
+            CASE WHEN scheduled_at IS NULL THEN NULL
+                 ELSE to_char(scheduled_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') END AS scheduled_at,
+            source_name
+       FROM healthkit_medications
+      WHERE ${where}
+      ORDER BY taken_at DESC
+      LIMIT 1000`,
+    params,
+  );
+  return toolResult(rows);
+}
+
+async function getHkMedicationSummary(args: Record<string, unknown>) {
+  const days = Math.min(Math.max(Number(args.days ?? 7), 1), 90);
+  const rows = await query<{
+    medication_name: string;
+    doses_in_window: number;
+    last_taken_at: string;
+  }>(
+    `SELECT medication_name,
+            COUNT(*)::int AS doses_in_window,
+            to_char(MAX(taken_at) AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS last_taken_at
+       FROM healthkit_medications
+      WHERE taken_at >= NOW() - ($1 || ' days')::interval
+      GROUP BY medication_name
+      ORDER BY doses_in_window DESC`,
+    [days],
+  );
+  return toolResult({ window_days: days, medications: rows });
+}
+
 // ── Tool registry ─────────────────────────────────────────────────────────────
 
+import { nutritionTools } from './mcp/nutrition-tools';
+
 export const tools: MCPTool[] = [
+  ...nutritionTools,
   {
     name: 'ping',
     description: 'Health check — confirms the MCP server is reachable.',
@@ -2089,13 +2413,13 @@ export const tools: MCPTool[] = [
         height_cm: { type: 'number' },
         measurements: {
           type: 'object',
-          description: 'Circumference measurements in cm (any subset)',
+          description: 'Body measurements in cm — circumferences plus shoulder_width (tape over widest deltoid point). Any subset.',
           properties: {
             chest: { type: 'number' },
             waist: { type: 'number' },
             hips: { type: 'number' },
             neck: { type: 'number' },
-            shoulders: { type: 'number' },
+            shoulder_width: { type: 'number' },
             abdomen: { type: 'number' },
             left_arm: { type: 'number' },
             right_arm: { type: 'number' },
@@ -2941,6 +3265,194 @@ export const tools: MCPTool[] = [
       required: ['from'],
     },
     execute: getHealthWorkoutsTool,
+  },
+
+  // ── HRT Timeline tools ──────────────────────────────────────────────────────
+  {
+    name: 'list_hrt_timeline',
+    description:
+      'List HRT protocol periods newest first. Each row has name, started_at, ended_at (null = current), doses_e (estrogen), doses_t_blocker, doses_other (array). Use to answer "what protocol was Lewis on during X period" or "show the timeline of all HRT changes."',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        limit: { type: 'number', description: 'Default 100, max 500.' },
+      },
+    },
+    execute: listHrtTimeline,
+  },
+  {
+    name: 'create_hrt_timeline_period',
+    description:
+      'Create a new HRT timeline period. name + started_at (YYYY-MM-DD) required; ended_at optional (omit/null = "current"). doses_e + doses_t_blocker are display strings (e.g. "Sandrena Gel 2mg/day", "Cyproterone 12.5mg/day"); doses_other is an array of multi-select tags.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: 'Display name (e.g. "Estrogel + Cypro Q2 2026").' },
+        started_at: { type: 'string', description: 'YYYY-MM-DD.' },
+        ended_at: { type: 'string', description: 'YYYY-MM-DD; omit for current.' },
+        doses_e: { type: 'string', description: 'Estrogen dose, e.g. "Estrogel 1.5mg estradiol".' },
+        doses_t_blocker: { type: 'string', description: 'T-blocker, e.g. "Cyproterone 12.5mg/day" or "None".' },
+        doses_other: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Other concurrent meds, e.g. ["1 Tablet Ralovista/day"].',
+        },
+        notes: { type: 'string' },
+      },
+      required: ['name', 'started_at'],
+    },
+    execute: createHrtTimelinePeriod,
+  },
+  {
+    name: 'update_hrt_timeline_period',
+    description: 'Update fields on an existing HRT timeline period by uuid. Pass only fields to change.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        uuid: { type: 'string' },
+        name: { type: 'string' },
+        started_at: { type: 'string' },
+        ended_at: { type: 'string' },
+        doses_e: { type: 'string' },
+        doses_t_blocker: { type: 'string' },
+        doses_other: { type: 'array', items: { type: 'string' } },
+        notes: { type: 'string' },
+      },
+      required: ['uuid'],
+    },
+    execute: updateHrtTimelinePeriod,
+  },
+  {
+    name: 'delete_hrt_timeline_period',
+    description: 'Delete an HRT timeline period by uuid.',
+    inputSchema: {
+      type: 'object',
+      properties: { uuid: { type: 'string' } },
+      required: ['uuid'],
+    },
+    execute: deleteHrtTimelinePeriod,
+  },
+
+  // ── Lab tools ───────────────────────────────────────────────────────────────
+  {
+    name: 'list_lab_definitions',
+    description:
+      'List the canonical lab catalog: lab_code, label, unit, reference ranges, category. Use this before calling create_lab_draw to confirm which lab_codes are valid (e.g. "e2", "testosterone", "hb").',
+    inputSchema: { type: 'object', properties: {} },
+    execute: listLabDefinitions,
+  },
+  {
+    name: 'list_lab_draws',
+    description:
+      'List blood draws newest first, optionally with their results inlined. Each result includes the in/out-of-range status (uses female reference ranges by default — pass sex="male" to flip).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        limit: { type: 'number', description: 'Default 50, max 500.' },
+        include_results: { type: 'boolean', description: 'Default true.' },
+        sex: { type: 'string', enum: ['female', 'male'], description: 'Reference range to evaluate against. Default female.' },
+      },
+    },
+    execute: listLabDraws,
+  },
+  {
+    name: 'get_lab_series',
+    description:
+      'Time-series for one lab: every recorded value across draws, oldest → newest. Pairs with list_hrt_timeline so coaching can correlate lab trends with protocol changes.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        lab_code: { type: 'string', description: 'e.g. "e2", "testosterone", "hb". Use list_lab_definitions for the catalog.' },
+        limit: { type: 'number', description: 'Default 50.' },
+        sex: { type: 'string', enum: ['female', 'male'] },
+      },
+      required: ['lab_code'],
+    },
+    execute: getLabSeries,
+  },
+  {
+    name: 'create_lab_draw',
+    description:
+      'Create a new blood draw with one transaction-of inserts: a draw row plus each lab result. drawn_at is YYYY-MM-DD; results is an array of {lab_code, value}. Use this for bulk-importing a Notion blood-test row.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        drawn_at: { type: 'string', description: 'YYYY-MM-DD.' },
+        notes: { type: 'string' },
+        source: { type: 'string', description: 'Where this came from. Default "mcp".' },
+        results: {
+          type: 'array',
+          description: 'Array of measurements at this draw.',
+          items: {
+            type: 'object',
+            properties: {
+              lab_code: { type: 'string' },
+              value: { type: 'number' },
+            },
+            required: ['lab_code', 'value'],
+          },
+        },
+      },
+      required: ['drawn_at'],
+    },
+    execute: createLabDraw,
+  },
+  {
+    name: 'upsert_lab_results',
+    description: 'Add or update lab values on an existing draw. Same shape as create_lab_draw.results; uses (draw_uuid, lab_code) for idempotency.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        draw_uuid: { type: 'string' },
+        results: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: { lab_code: { type: 'string' }, value: { type: 'number' } },
+            required: ['lab_code', 'value'],
+          },
+        },
+      },
+      required: ['draw_uuid', 'results'],
+    },
+    execute: upsertLabResults,
+  },
+  {
+    name: 'delete_lab_draw',
+    description: 'Delete a lab draw and (via FK CASCADE) all of its results.',
+    inputSchema: {
+      type: 'object',
+      properties: { uuid: { type: 'string' } },
+      required: ['uuid'],
+    },
+    execute: deleteLabDraw,
+  },
+
+  // ── Apple Health Medications (read-only) ────────────────────────────────────
+  {
+    name: 'get_hk_medications',
+    description:
+      'List medication records logged in the iOS Health app, newest first. These are NOT user-entered in Rebirth — they come from Apple Health "Medications" (HKCategoryTypeIdentifierMedicationRecord). Use to verify what Lewis actually took vs his prescribed protocol from list_hrt_timeline.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        days: { type: 'number', description: 'Look-back window. Default 30, max 365.' },
+        medication: { type: 'string', description: 'Optional ILIKE filter on medication_name.' },
+      },
+    },
+    execute: getHkMedications,
+  },
+  {
+    name: 'get_hk_medication_summary',
+    description:
+      'Aggregate counts per medication over a window — "doses_in_window" + last_taken_at per medication_name. Use this for trend questions like "how often has Lewis taken X this week?"',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        days: { type: 'number', description: 'Window in days. Default 7, max 90.' },
+      },
+    },
+    execute: getHkMedicationSummary,
   },
 ];
 

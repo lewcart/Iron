@@ -65,3 +65,48 @@
       who wins between (a) local Dexie write, (b) HealthKit→Postgres mirror
       write, (c) MCP write. Currently implicit; document and test.
 
+
+## Nutrition upgrade follow-ups (deferred from 2026-04-30 nutrition page upgrade)
+
+- [ ] **Kill the legacy `/nutrition/page.tsx` monolith (937 lines).** The new
+      `/nutrition/today`, `/history`, `/summary` routes live alongside the old
+      page, which still renders both Today and Week tabs internally. The "Week"
+      sub-nav tab points at this legacy page. Extract the Week tab into its own
+      `/nutrition/week/page.tsx` (forced `activeTab=`week``) and replace
+      `/nutrition/page.tsx` with a redirect to `/nutrition/today`. ~30 minutes
+      with CC. Deferred from /ship because the legacy code works and the
+      refactor risk is non-trivial (1000-line component with shared state
+      between two tabs).
+
+- [ ] **Extract existing nutrition MCP tools from `mcp-tools.ts`.** Migration
+      already started: 8 new nutrition tools live in
+      `src/lib/mcp/nutrition-tools.ts`. The 7 pre-existing nutrition tools
+      (`log_nutrition_meal`, `get_active_nutrition_plan`, `get_nutrition_plan`,
+      `set_nutrition_day_notes`, `set_nutrition_targets`, `load_nutrition_plan`,
+      `update_week_meal`) still live in the 2900-line god file. Move them into
+      `nutrition-tools.ts` so the whole nutrition surface is in one place.
+
+- [ ] **Materialize `nutrition_food_canonical` view.** Currently a regular VIEW
+      that does `DISTINCT ON + count() OVER` on every query. Fast enough at
+      ~10K-50K rows. After ~200K imports it will start to bite (typing search
+      latency). Convert to MATERIALIZED VIEW refreshed nightly by a cron, OR
+      denormalize a `food_name_canonical` column on `nutrition_food_entries`
+      with a trigger.
+
+- [ ] **Workouts subtraction wiring on Today page.** The CalorieBalanceCard
+      shows `Workouts: 0 cal` for now. The `health_workouts` table exists and
+      MCP tools already query it. Add a `useTodayWorkoutCalories(date)` hook
+      that reads from local Dexie (or a new API endpoint) and pass it to the
+      card. ~20 minutes.
+
+- [ ] **Photo log + AI text parser dock buttons.** The floating EntryDock
+      renders camera + Aa buttons that show "coming soon" sheets. Real
+      integrations later: photo → meal-estimation via Claude Vision, text →
+      meal-extraction via Claude. ~half a day each.
+
+- [ ] **Trigram threshold tuning for nutrition food search.** `pg_trgm`
+      similarity defaults to 0.3. Test if foods like "L'Oreal latte"
+      vs "Loreal latte" match consistently. May need
+      `SELECT set_limit(0.2)` or per-query `WHERE food_name % $q` with
+      explicit threshold.
+
