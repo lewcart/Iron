@@ -8,9 +8,9 @@ import { describe, it, expect } from 'vitest';
 /** Main dock tabs (settings is a separate control above the row in TabBar.tsx). */
 const tabs = [
   { href: '/feed', label: 'Feed' },
-  { href: '/history', label: 'History' },
+  { href: '/hrt', label: 'HRT' },
   { href: '/workout', label: 'Workout' },
-  { href: '/exercises', label: 'Exercises' },
+  { href: '/measurements', label: 'Measure' },
   { href: '/nutrition', label: 'Nutrition' },
 ];
 
@@ -32,9 +32,9 @@ describe('tabs configuration', () => {
   it('includes all required top-level routes', () => {
     const hrefs = tabs.map(t => t.href);
     expect(hrefs).toContain('/feed');
-    expect(hrefs).toContain('/history');
+    expect(hrefs).toContain('/hrt');
     expect(hrefs).toContain('/workout');
-    expect(hrefs).toContain('/exercises');
+    expect(hrefs).toContain('/measurements');
     expect(hrefs).toContain('/nutrition');
   });
 
