@@ -22,7 +22,7 @@ import {
 import { consumeScheduleTap } from '@/lib/workout-schedule';
 import { HealthSection } from '@/components/HealthSection';
 import Link from 'next/link';
-import { Check, ChevronDown, ChevronRight, Clock, GripVertical, Plus, Search, Settings, X } from 'lucide-react';
+import { Check, ChevronDown, ChevronRight, ClipboardList, Clock, Dumbbell, GripVertical, Plus, Search, X } from 'lucide-react';
 import type { WorkoutPlan, WorkoutRoutine, WorkoutRoutineExercise, WorkoutRoutineSet, Exercise } from '@/types';
 import { formatTime, calcCompletedSets, calcTotalVolume } from './workout-utils';
 import { uuid as genUUID } from '@/lib/uuid';
@@ -1381,7 +1381,7 @@ export default function WorkoutPage() {
       <main className="tab-content bg-background overflow-y-auto">
         <div className="px-4 pt-safe pb-4 flex items-center justify-between">
           <h1 className="text-2xl font-bold">Workout</h1>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-1">
             <Link
               href="/history"
               className="flex items-center justify-center text-muted-foreground min-h-[44px] min-w-[44px]"
@@ -1390,11 +1390,18 @@ export default function WorkoutPage() {
               <Clock className="h-5 w-5" strokeWidth={1.75} />
             </Link>
             <Link
-              href="/plans"
-              className="flex items-center gap-1.5 text-sm text-primary font-medium min-h-[44px]"
+              href="/exercises"
+              className="flex items-center justify-center text-muted-foreground min-h-[44px] min-w-[44px]"
+              aria-label="Exercises"
             >
-              <Settings className="h-4 w-4" />
-              Manage
+              <Dumbbell className="h-5 w-5" strokeWidth={1.75} />
+            </Link>
+            <Link
+              href="/plans"
+              className="flex items-center justify-center text-muted-foreground min-h-[44px] min-w-[44px]"
+              aria-label="Manage routines"
+            >
+              <ClipboardList className="h-5 w-5" strokeWidth={1.75} />
             </Link>
           </div>
         </div>
