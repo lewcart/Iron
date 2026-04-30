@@ -1,17 +1,19 @@
 'use client';
 
-import { Suspense, useEffect, useState, useRef } from 'react';
+import { Suspense, useState, useRef } from 'react';
 import { ChevronLeft, Trash2, Camera, ImageIcon, Activity, Target, Plus } from 'lucide-react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
-import { useQuery } from '@tanstack/react-query';
 import { useUnit } from '@/context/UnitContext';
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   ReferenceLine, Legend,
 } from 'recharts';
-import type { MeasurementLog, ProgressPhoto, InbodyScan, BodyGoal } from '@/types';
+import type { InbodyScan, MeasurementLog, ProgressPhoto } from '@/types';
 import { apiBase } from '@/lib/api/client';
+import { useMeasurements, useProgressPhotos, useInbodyScans, useBodyGoal } from '@/lib/useLocalDB-measurements';
+import { logMeasurement, deleteMeasurement, recordProgressPhoto, deleteProgressPhoto } from '@/lib/mutations-measurements';
+import { logBodyweight } from '@/lib/mutations';
 
 const SITES = [
   { key: 'waist',     label: 'Waist' },
@@ -34,13 +36,6 @@ const SITE_COLORS: Record<SiteKey, string> = {
 // InBody metric key used for trend chart reference lines.
 // PBF% is the headline metric most users track; reference-line enrichment targets it.
 const INBODY_TREND_METRIC: keyof InbodyScan = 'pbf_pct';
-
-function apiHeaders(): HeadersInit {
-  const key = process.env.NEXT_PUBLIC_REBIRTH_API_KEY;
-  return key
-    ? { 'Content-Type': 'application/json', 'X-Api-Key': key }
-    : { 'Content-Type': 'application/json' };
-}
 
 function apiHeadersNoContentType(): HeadersInit {
   const key = process.env.NEXT_PUBLIC_REBIRTH_API_KEY;
@@ -74,56 +69,31 @@ function MeasurementsInner() {
   const searchParams = useSearchParams();
   const initialTab = (searchParams?.get('tab') as TabKey | null) ?? 'measurements';
   const [activeTab, setActiveTab] = useState<TabKey>(initialTab);
-  const [inbodyScans, setInbodyScans] = useState<InbodyScan[]>([]);
-  const [inbodyLoading, setInbodyLoading] = useState(true);
+
+  // All reads come from Dexie via useLiveQuery — no spinner needed beyond
+  // the brief first-tick before useLiveQuery resolves. The local types are
+  // structurally compatible with the @/types server types (extra _synced /
+  // _updated_at / _deleted fields on local rows are harmless extras).
+  const logs = useMeasurements({ limit: 90 }) as unknown as MeasurementLog[];
+  const photos = useProgressPhotos(50) as unknown as ProgressPhoto[];
+  const inbodyScans = useInbodyScans(50) as unknown as InbodyScan[];
+  const inbodyGoal = useBodyGoal(INBODY_TREND_METRIC);
+  const loading = false;
+  const photosLoading = false;
+  const inbodyLoading = false;
 
   // Measurements state
   const [date, setDate] = useState(toDateInputValue);
   const [inputs, setInputs] = useState<Partial<Record<SiteKey, string>>>({});
   const [weightInput, setWeightInput] = useState('');
-  const [logs, setLogs] = useState<MeasurementLog[]>([]);
-  const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [chartSite, setChartSite] = useState<SiteKey>('waist');
 
   // Photos state
-  const [photos, setPhotos] = useState<ProgressPhoto[]>([]);
-  const [photosLoading, setPhotosLoading] = useState(true);
   const [selectedPose, setSelectedPose] = useState<'front' | 'side' | 'back'>('front');
   const [photoNote, setPhotoNote] = useState('');
   const [uploading, setUploading] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
-
-  // Active goal for the selected trend metric (InBody trend enrichment)
-  const { data: inbodyGoal } = useQuery<BodyGoal | null>({
-    queryKey: ['body-goal', INBODY_TREND_METRIC],
-    queryFn: async () => {
-      const r = await fetch(`${apiBase()}/api/body-goals/${INBODY_TREND_METRIC}`, { headers: apiHeaders() });
-      if (!r.ok) return null;
-      return r.json() as Promise<BodyGoal>;
-    },
-  });
-
-  useEffect(() => {
-    fetch(`${apiBase()}/api/measurements?limit=90`, { headers: apiHeaders() })
-      .then(r => { if (!r.ok) throw new Error('Failed'); return r.json(); })
-      .then((data: MeasurementLog[]) => { setLogs(Array.isArray(data) ? data : []); setLoading(false); })
-      .catch(() => setLoading(false));
-  }, []);
-
-  useEffect(() => {
-    fetch(`${apiBase()}/api/progress-photos?limit=50`, { headers: apiHeaders() })
-      .then(r => { if (!r.ok) throw new Error('Failed'); return r.json(); })
-      .then((data: ProgressPhoto[]) => { setPhotos(Array.isArray(data) ? data : []); setPhotosLoading(false); })
-      .catch(() => setPhotosLoading(false));
-  }, []);
-
-  useEffect(() => {
-    fetch(`${apiBase()}/api/measurements/inbody?limit=50`, { headers: apiHeaders() })
-      .then(r => { if (!r.ok) throw new Error('Failed'); return r.json(); })
-      .then((data: InbodyScan[]) => { setInbodyScans(Array.isArray(data) ? data : []); setInbodyLoading(false); })
-      .catch(() => setInbodyLoading(false));
-  }, []);
 
   const handleSaveMeasurements = async () => {
     const hasAny = SITES.some(s => inputs[s.key]) || !!weightInput;
@@ -131,42 +101,22 @@ function MeasurementsInner() {
     setSaving(true);
     try {
       const measured_at = date ? new Date(date).toISOString() : undefined;
-      const promises: Promise<Response>[] = [];
+      const writes: Promise<unknown>[] = [];
 
       for (const site of SITES) {
         const val = inputs[site.key];
         if (val) {
-          promises.push(fetch(`${apiBase()}/api/measurements`, {
-            method: 'POST',
-            headers: apiHeaders(),
-            body: JSON.stringify({ site: site.key, value_cm: parseFloat(val), measured_at }),
-          }));
+          writes.push(logMeasurement({ site: site.key, value_cm: parseFloat(val), measured_at }));
         }
       }
 
       if (weightInput) {
-        promises.push(fetch(`${apiBase()}/api/bodyweight`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ weight_kg: fromInput(parseFloat(weightInput)) }),
-        }));
+        writes.push(logBodyweight(fromInput(parseFloat(weightInput))));
       }
 
-      const responses = await Promise.all(promises);
-      const newLogs: MeasurementLog[] = [];
-      for (const res of responses) {
-        if (res.ok) {
-          const ct = res.headers.get('content-type') ?? '';
-          if (ct.includes('application/json')) {
-            const data = await res.json();
-            if (data.site) newLogs.push(data as MeasurementLog);
-          }
-        }
-      }
+      await Promise.all(writes);
 
-      if (newLogs.length > 0) {
-        setLogs(prev => [...newLogs, ...prev]);
-      }
+      // useLiveQuery picks up the new rows automatically — no manual setLogs.
       setInputs({});
       setWeightInput('');
       setDate(toDateInputValue());
@@ -176,13 +126,16 @@ function MeasurementsInner() {
   };
 
   const handleDeleteMeasurement = async (uuid: string) => {
-    await fetch(`${apiBase()}/api/measurements/${uuid}`, { method: 'DELETE', headers: apiHeaders() });
-    setLogs(prev => prev.filter(l => l.uuid !== uuid));
+    await deleteMeasurement(uuid);
   };
 
   const handlePhotoUpload = async (file: File) => {
     setUploading(true);
     try {
+      // Photo binary still uploads through /api/progress-photos/upload to
+      // Vercel Blob — Dexie holds metadata only (per the local-first plan,
+      // PR #14). Once uploaded, recordProgressPhoto writes the URL +
+      // metadata to local Dexie and pushes through sync.
       const formData = new FormData();
       formData.append('file', file);
       formData.append('pose', selectedPose);
@@ -195,24 +148,19 @@ function MeasurementsInner() {
       if (!uploadRes.ok) return;
       const { url } = await uploadRes.json();
 
-      const res = await fetch(`${apiBase()}/api/progress-photos`, {
-        method: 'POST',
-        headers: apiHeaders(),
-        body: JSON.stringify({ blob_url: url, pose: selectedPose, notes: photoNote || null }),
+      await recordProgressPhoto({
+        blob_url: url,
+        pose: selectedPose,
+        notes: photoNote || null,
       });
-      if (res.ok) {
-        const photo: ProgressPhoto = await res.json();
-        setPhotos(prev => [photo, ...prev]);
-        setPhotoNote('');
-      }
+      setPhotoNote('');
     } finally {
       setUploading(false);
     }
   };
 
   const handleDeletePhoto = async (uuid: string) => {
-    await fetch(`${apiBase()}/api/progress-photos/${uuid}`, { method: 'DELETE', headers: apiHeaders() });
-    setPhotos(prev => prev.filter(p => p.uuid !== uuid));
+    await deleteProgressPhoto(uuid);
   };
 
   // Single-site chart data (mobile + iPad portrait)
