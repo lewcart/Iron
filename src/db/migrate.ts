@@ -24,8 +24,17 @@ const BASELINE_MIGRATIONS = [
 ];
 
 /**
- * Splits a SQL string on `;` while respecting dollar-quoted blocks ($$...$$),
- * so PL/pgSQL function bodies are not broken up.
+ * Splits a SQL string on `;`, while leaving statement terminators inside the
+ * following constructs intact:
+ *   - dollar-quoted blocks (`$$...$$` or `$tag$...$tag$`) — PL/pgSQL bodies
+ *   - single-quoted string literals (`'...'`, with `''` as escaped quote)
+ *   - line comments (`-- ... \n`) — semicolons inside prose comments are NOT
+ *     statement terminators
+ *   - block comments (`/* ... *\/`) — same reasoning, supports nesting
+ *
+ * Without these guards, an innocuous comment like "uses the same route;"
+ * would split a migration mid-statement and cause cryptic Postgres syntax
+ * errors. Migrations with rich comments are common and worth supporting.
  */
 function splitSqlStatements(sql: string): string[] {
   const statements: string[] = [];
@@ -33,7 +42,42 @@ function splitSqlStatements(sql: string): string[] {
   let i = 0;
 
   while (i < sql.length) {
-    if (sql[i] === '$') {
+    const ch = sql[i];
+    const next = sql[i + 1];
+
+    // Line comment: `-- ... \n` — copy verbatim, terminator inside is harmless.
+    if (ch === '-' && next === '-') {
+      const newlineIdx = sql.indexOf('\n', i);
+      const end = newlineIdx === -1 ? sql.length : newlineIdx + 1;
+      current += sql.slice(i, end);
+      i = end;
+      continue;
+    }
+
+    // Block comment: `/* ... */` with nesting support (Postgres allows it).
+    if (ch === '/' && next === '*') {
+      let depth = 1;
+      current += sql.slice(i, i + 2);
+      i += 2;
+      while (i < sql.length && depth > 0) {
+        if (sql[i] === '/' && sql[i + 1] === '*') {
+          depth++;
+          current += sql.slice(i, i + 2);
+          i += 2;
+        } else if (sql[i] === '*' && sql[i + 1] === '/') {
+          depth--;
+          current += sql.slice(i, i + 2);
+          i += 2;
+        } else {
+          current += sql[i];
+          i++;
+        }
+      }
+      continue;
+    }
+
+    // Dollar-quoted block: $tag$ ... $tag$
+    if (ch === '$') {
       const tagMatch = sql.slice(i).match(/^\$[^$]*\$/);
       if (tagMatch) {
         const tag = tagMatch[0];
@@ -46,13 +90,36 @@ function splitSqlStatements(sql: string): string[] {
       }
     }
 
-    if (sql[i] === ';') {
+    // Single-quoted string literal: '...' (escape with '')
+    if (ch === "'") {
+      current += ch;
+      i++;
+      while (i < sql.length) {
+        if (sql[i] === "'" && sql[i + 1] === "'") {
+          current += "''";
+          i += 2;
+          continue;
+        }
+        if (sql[i] === "'") {
+          current += "'";
+          i++;
+          break;
+        }
+        current += sql[i];
+        i++;
+      }
+      continue;
+    }
+
+    if (ch === ';') {
       const stmt = current.trim();
       if (stmt) statements.push(stmt);
       current = '';
-    } else {
-      current += sql[i];
+      i++;
+      continue;
     }
+
+    current += ch;
     i++;
   }
 
