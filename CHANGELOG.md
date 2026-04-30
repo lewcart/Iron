@@ -2,6 +2,16 @@
 
 All notable changes to Rebirth are documented here.
 
+## [0.1.2] - 2026-04-30
+
+### Added
+- **Shoulder Width** is now a tracked measurement on /measurements alongside Waist, Hips, Upper Arm, and Thigh. The input shows up in the log-entry form, the current snapshot, the history list, and the trend chart with its own colour (rose-500). In physique tracking "shoulder width" refers to the tape-over-deltoids measurement (a circumference that grows with training), not biacromial bone-to-bone breadth.
+- One-off backfill script `scripts/backfill-shoulder-width.mjs` imports historical Shoulder Cir values from the Notion "Body" database. Reads from a committed JSON snapshot at `scripts/data/body-measurements.json` (40 entries, 33 valid). Migrates legacy `site='shoulders'` rows to `site='shoulder_width'`, then inserts new ones, skipping date collisions. Idempotent via `source='notion_body_db'` + `source_ref=<notion page_id>`. Run `node scripts/backfill-shoulder-width.mjs` for a dry run, or `--apply` to write.
+- One-off backfill script `scripts/backfill-progress-photos.mjs` for importing progress photos from the same Notion database. Refetches fresh Notion file URLs at run time (Notion signs them with a ~1hr TTL), uploads to Vercel Blob, and records in `progress_photos`. Pose defaults to `'front'` because Notion has no pose tagging — manually re-classify in-app after import. Requires `NOTION_TOKEN` env.
+
+### Changed
+- Renamed the `MeasurementSite` enum value `'shoulders'` to `'shoulder_width'` across the type system, the MCP `update_body_comp` tool schema, and the UI. Existing rows with the legacy `'shoulders'` literal continue to display correctly under the Shoulder Width tab via SITE_ALIASES.
+
 ## [0.1.1] - 2026-04-30
 
 ### Fixed
