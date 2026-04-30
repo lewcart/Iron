@@ -1,10 +1,8 @@
 'use client';
 
 import { useState } from 'react';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { X } from 'lucide-react';
-import { createExercise } from '@/lib/api/exercises';
-import { queryKeys } from '@/lib/api/query-keys';
+import { createCustomExercise } from '@/lib/mutations-exercises';
 
 const MUSCLE_OPTIONS = [
   'chest', 'pectoralis',
@@ -111,36 +109,33 @@ function TagInput({
 }
 
 export default function CreateExerciseForm({ onClose, onCreated }: Props) {
-  const queryClient = useQueryClient();
-
   const [title, setTitle] = useState('');
   const [primaryMuscles, setPrimaryMuscles] = useState<string[]>([]);
   const [secondaryMuscles, setSecondaryMuscles] = useState<string[]>([]);
   const [equipment, setEquipment] = useState<string[]>([]);
   const [movementPattern, setMovementPattern] = useState('');
   const [description, setDescription] = useState('');
-
-  const mutation = useMutation({
-    mutationFn: createExercise,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.exercises.catalog() });
-      onCreated();
-    },
-  });
+  const [submitting, setSubmitting] = useState(false);
 
   const canSubmit = title.trim().length > 0 && primaryMuscles.length > 0;
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!canSubmit) return;
-    mutation.mutate({
-      title: title.trim(),
-      primary_muscles: primaryMuscles,
-      secondary_muscles: secondaryMuscles.length > 0 ? secondaryMuscles : undefined,
-      equipment: equipment.length > 0 ? equipment : undefined,
-      movement_pattern: movementPattern || undefined,
-      description: description.trim() || undefined,
-    });
+    if (!canSubmit || submitting) return;
+    setSubmitting(true);
+    try {
+      await createCustomExercise({
+        title: title.trim(),
+        primary_muscles: primaryMuscles,
+        secondary_muscles: secondaryMuscles.length > 0 ? secondaryMuscles : undefined,
+        equipment: equipment.length > 0 ? equipment : undefined,
+        movement_pattern: movementPattern || undefined,
+        description: description.trim() || undefined,
+      });
+      onCreated();
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -232,11 +227,6 @@ export default function CreateExerciseForm({ onClose, onCreated }: Props) {
             />
           </div>
 
-          {mutation.isError && (
-            <p className="text-sm text-destructive">
-              Failed to create exercise. Please try again.
-            </p>
-          )}
         </form>
 
         {/* Footer */}
@@ -244,10 +234,10 @@ export default function CreateExerciseForm({ onClose, onCreated }: Props) {
           <button
             type="submit"
             onClick={handleSubmit}
-            disabled={!canSubmit || mutation.isPending}
+            disabled={!canSubmit || submitting}
             className="w-full py-3 bg-primary text-primary-foreground font-semibold rounded-xl text-sm disabled:opacity-40 transition-opacity"
           >
-            {mutation.isPending ? 'Creating…' : 'Create Exercise'}
+            {submitting ? 'Creating…' : 'Create Exercise'}
           </button>
         </div>
       </div>

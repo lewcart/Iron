@@ -1,13 +1,14 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { useMutation } from '@tanstack/react-query';
+import { useState } from 'react';
 import { Trash2, ChevronLeft } from 'lucide-react';
 import Link from 'next/link';
 import { useUnit } from '@/context/UnitContext';
-import type { BodySpecLog } from '@/types';
-import { rebirthJsonHeaders } from '@/lib/api/headers';
-import { apiBase } from '@/lib/api/client';
+import { useBodySpecLogs } from '@/lib/useLocalDB-measurements';
+import { logBodySpec, deleteBodySpec } from '@/lib/mutations-measurements';
+
+// Local-first /body-spec. Reads via useBodySpecLogs(30); writes via
+// logBodySpec / deleteBodySpec. Renders instantly from Dexie.
 
 function formatDate(isoStr: string) {
   return new Date(isoStr).toLocaleDateString('en-GB', {
@@ -24,9 +25,7 @@ function toDateInputValue(isoStr?: string): string {
 
 export default function BodySpecPage() {
   const { toDisplay, fromInput, label } = useUnit();
-
-  const [logs, setLogs] = useState<BodySpecLog[]>([]);
-  const [loading, setLoading] = useState(true);
+  const logs = useBodySpecLogs(30);
   const [saving, setSaving] = useState(false);
 
   // Form fields
@@ -37,61 +36,25 @@ export default function BodySpecPage() {
   const [notes, setNotes] = useState('');
   const [measuredAt, setMeasuredAt] = useState(() => toDateInputValue());
 
-  const deleteBodySpecMut = useMutation({
-    mutationFn: (uuid: string) =>
-      fetch(`${apiBase()}/api/body-spec/${uuid}`, { method: 'DELETE', headers: rebirthJsonHeaders() }).then((r) => {
-        if (!r.ok) throw new Error('Delete failed');
-      }),
-    onMutate: (uuid) => {
-      const prev = logs;
-      setLogs((l) => l.filter((x) => x.uuid !== uuid));
-      return { prev };
-    },
-    onError: (_e, _u, ctx) => {
-      if (ctx?.prev) setLogs(ctx.prev);
-    },
-  });
-
-  useEffect(() => {
-    const headers = rebirthJsonHeaders();
-    fetch(`${apiBase()}/api/body-spec?limit=30`, { headers })
-      .then(r => r.json())
-      .then((data: BodySpecLog[]) => {
-        setLogs(data);
-        setLoading(false);
-      })
-      .catch(() => setLoading(false));
-  }, []);
-
   const handleSave = async () => {
     const hasAnyValue = heightInput || weightInput || bodyFatInput || leanMassInput || notes;
     if (!hasAnyValue) return;
     setSaving(true);
     try {
-      const payload: Record<string, unknown> = {
+      await logBodySpec({
         measured_at: measuredAt ? new Date(measuredAt).toISOString() : undefined,
         notes: notes || null,
-      };
-      if (heightInput) payload.height_cm = parseFloat(heightInput);
-      if (weightInput) payload.weight_kg = fromInput(parseFloat(weightInput));
-      if (bodyFatInput) payload.body_fat_pct = parseFloat(bodyFatInput);
-      if (leanMassInput) payload.lean_mass_kg = fromInput(parseFloat(leanMassInput));
-
-      const res = await fetch(`${apiBase()}/api/body-spec`, {
-        method: 'POST',
-        headers: rebirthJsonHeaders(),
-        body: JSON.stringify(payload),
+        height_cm: heightInput ? parseFloat(heightInput) : null,
+        weight_kg: weightInput ? fromInput(parseFloat(weightInput)) : null,
+        body_fat_pct: bodyFatInput ? parseFloat(bodyFatInput) : null,
+        lean_mass_kg: leanMassInput ? fromInput(parseFloat(leanMassInput)) : null,
       });
-      if (res.ok) {
-        const log: BodySpecLog = await res.json();
-        setLogs(prev => [log, ...prev]);
-        setHeightInput('');
-        setWeightInput('');
-        setBodyFatInput('');
-        setLeanMassInput('');
-        setNotes('');
-        setMeasuredAt(toDateInputValue());
-      }
+      setHeightInput('');
+      setWeightInput('');
+      setBodyFatInput('');
+      setLeanMassInput('');
+      setNotes('');
+      setMeasuredAt(toDateInputValue());
     } finally {
       setSaving(false);
     }
@@ -182,7 +145,7 @@ export default function BodySpecPage() {
         </div>
 
         {/* History — right column on md:+ (spans 2/3) */}
-        {!loading && logs.length > 0 && (
+        {logs.length > 0 && (
           <div className="md:col-span-2">
             <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1 px-1">History</p>
             <div className="ios-section">
@@ -201,7 +164,7 @@ export default function BodySpecPage() {
                         )}
                       </div>
                       <button
-                        onClick={() => deleteBodySpecMut.mutate(log.uuid)}
+                        onClick={() => deleteBodySpec(log.uuid)}
                         className="text-red-500 p-1 min-h-[44px] min-w-[44px] flex items-center justify-center"
                       >
                         <Trash2 className="h-4 w-4" />
@@ -231,7 +194,7 @@ export default function BodySpecPage() {
           </div>
         )}
 
-        {!loading && logs.length === 0 && (
+        {logs.length === 0 && (
           <p className="text-xs text-muted-foreground px-1 md:col-span-2">No body spec entries yet.</p>
         )}
 
