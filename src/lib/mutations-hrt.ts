@@ -4,102 +4,142 @@ import { db } from '@/db/local';
 import { syncEngine } from '@/lib/sync';
 import { uuid as genUUID } from '@/lib/uuid';
 import type {
-  LocalHrtLog,
-  LocalHrtProtocol,
+  LocalHrtTimelinePeriod,
+  LocalLabDraw,
+  LocalLabResult,
 } from '@/db/local';
-
-// Mutations for HRT tracking:
-// - hrt_logs (individual dose-takings, optionally linked to a protocol)
-// - hrt_protocols (active medication regimen schedules)
 
 function now() { return Date.now(); }
 function syncMeta() {
   return { _synced: false as const, _updated_at: now(), _deleted: false as const };
 }
 
-// ─── HRT dose logs ───────────────────────────────────────────────────────────
+// ─── HRT timeline periods ────────────────────────────────────────────────────
 
-export async function logHrtDose(opts: {
-  medication: string;
-  dose_mg?: number | null;
-  route?: 'injection' | 'topical' | 'oral' | 'patch' | 'other' | null;
-  notes?: string | null;
-  taken?: boolean;
-  hrt_protocol_uuid?: string | null;
-  logged_at?: string;
-}): Promise<LocalHrtLog> {
-  const log: LocalHrtLog = {
-    uuid: genUUID(),
-    logged_at: opts.logged_at ?? new Date().toISOString(),
-    medication: opts.medication.trim(),
-    dose_mg: opts.dose_mg ?? null,
-    route: opts.route ?? null,
-    notes: opts.notes?.trim() || null,
-    taken: opts.taken ?? true,
-    hrt_protocol_uuid: opts.hrt_protocol_uuid ?? null,
-    ...syncMeta(),
-  };
-  await db.hrt_logs.add(log);
-  syncEngine.schedulePush();
-  return log;
-}
-
-export async function updateHrtTaken(uuid: string, taken: boolean): Promise<void> {
-  await db.hrt_logs.update(uuid, { taken, ...syncMeta() });
-  syncEngine.schedulePush();
-}
-
-export async function deleteHrtLog(uuid: string): Promise<void> {
-  await db.hrt_logs.update(uuid, { _deleted: true, _synced: false, _updated_at: now() });
-  syncEngine.schedulePush();
-}
-
-// ─── HRT protocols ───────────────────────────────────────────────────────────
-
-export async function createHrtProtocol(opts: {
-  medication: string;
-  dose_description: string;
-  form: 'gel' | 'patch' | 'injection' | 'oral' | 'other';
-  started_at: string;
+export async function createHrtTimelinePeriod(opts: {
+  name: string;
+  started_at: string;             // YYYY-MM-DD
   ended_at?: string | null;
-  includes_blocker?: boolean;
-  blocker_name?: string | null;
+  doses_e?: string | null;
+  doses_t_blocker?: string | null;
+  doses_other?: string[];
   notes?: string | null;
-}): Promise<LocalHrtProtocol> {
-  const protocol: LocalHrtProtocol = {
+}): Promise<LocalHrtTimelinePeriod> {
+  const period: LocalHrtTimelinePeriod = {
     uuid: genUUID(),
-    medication: opts.medication.trim(),
-    dose_description: opts.dose_description.trim(),
-    form: opts.form,
+    name: opts.name.trim(),
     started_at: opts.started_at,
     ended_at: opts.ended_at ?? null,
-    includes_blocker: opts.includes_blocker ?? false,
-    blocker_name: opts.blocker_name?.trim() || null,
+    doses_e: opts.doses_e ?? null,
+    doses_t_blocker: opts.doses_t_blocker ?? null,
+    doses_other: opts.doses_other ?? [],
     notes: opts.notes?.trim() || null,
     ...syncMeta(),
   };
-  await db.hrt_protocols.add(protocol);
+  await db.hrt_timeline_periods.add(period);
   syncEngine.schedulePush();
-  return protocol;
+  return period;
 }
 
-export async function updateHrtProtocol(
+export async function updateHrtTimelinePeriod(
   uuid: string,
-  patch: Partial<Omit<LocalHrtProtocol, 'uuid' | '_synced' | '_updated_at' | '_deleted'>>,
+  patch: Partial<Omit<LocalHrtTimelinePeriod, 'uuid' | '_synced' | '_updated_at' | '_deleted'>>,
 ): Promise<void> {
-  await db.hrt_protocols.update(uuid, { ...patch, ...syncMeta() });
+  await db.hrt_timeline_periods.update(uuid, { ...patch, ...syncMeta() });
   syncEngine.schedulePush();
 }
 
-export async function endHrtProtocol(uuid: string, endedAt?: string): Promise<void> {
-  await db.hrt_protocols.update(uuid, {
+export async function endHrtTimelinePeriod(uuid: string, endedAt?: string): Promise<void> {
+  await db.hrt_timeline_periods.update(uuid, {
     ended_at: endedAt ?? new Date().toISOString().slice(0, 10),
     ...syncMeta(),
   });
   syncEngine.schedulePush();
 }
 
-export async function deleteHrtProtocol(uuid: string): Promise<void> {
-  await db.hrt_protocols.update(uuid, { _deleted: true, _synced: false, _updated_at: now() });
+export async function deleteHrtTimelinePeriod(uuid: string): Promise<void> {
+  await db.hrt_timeline_periods.update(uuid, { _deleted: true, _synced: false, _updated_at: now() });
+  syncEngine.schedulePush();
+}
+
+// ─── Lab draws + results ─────────────────────────────────────────────────────
+
+export async function createLabDraw(opts: {
+  drawn_at: string;               // YYYY-MM-DD
+  notes?: string | null;
+  source?: string;
+  results?: Array<{ lab_code: string; value: number }>;
+}): Promise<LocalLabDraw> {
+  const draw: LocalLabDraw = {
+    uuid: genUUID(),
+    drawn_at: opts.drawn_at,
+    notes: opts.notes?.trim() || null,
+    source: opts.source ?? 'manual',
+    ...syncMeta(),
+  };
+  await db.lab_draws.add(draw);
+
+  if (opts.results && opts.results.length > 0) {
+    const rows: LocalLabResult[] = opts.results.map(r => ({
+      uuid: genUUID(),
+      draw_uuid: draw.uuid,
+      lab_code: r.lab_code,
+      value: r.value,
+      ...syncMeta(),
+    }));
+    await db.lab_results.bulkAdd(rows);
+  }
+
+  syncEngine.schedulePush();
+  return draw;
+}
+
+export async function updateLabDraw(
+  uuid: string,
+  patch: Partial<Pick<LocalLabDraw, 'drawn_at' | 'notes' | 'source'>>,
+): Promise<void> {
+  await db.lab_draws.update(uuid, { ...patch, ...syncMeta() });
+  syncEngine.schedulePush();
+}
+
+export async function deleteLabDraw(uuid: string): Promise<void> {
+  // Soft-delete the draw + every result that referenced it. The server-side
+  // CASCADE handles the FK relationship after both rows push, but we have to
+  // tombstone children locally too so they push as deletes (not orphans).
+  const results = await db.lab_results.filter(r => r.draw_uuid === uuid).toArray();
+  await db.transaction('rw', db.lab_draws, db.lab_results, async () => {
+    await db.lab_draws.update(uuid, { _deleted: true, _synced: false, _updated_at: now() });
+    for (const r of results) {
+      await db.lab_results.update(r.uuid, { _deleted: true, _synced: false, _updated_at: now() });
+    }
+  });
+  syncEngine.schedulePush();
+}
+
+export async function upsertLabResult(opts: {
+  draw_uuid: string;
+  lab_code: string;
+  value: number;
+}): Promise<void> {
+  const existing = await db.lab_results
+    .filter(r => !r._deleted && r.draw_uuid === opts.draw_uuid && r.lab_code === opts.lab_code)
+    .first();
+
+  if (existing) {
+    await db.lab_results.update(existing.uuid, { value: opts.value, ...syncMeta() });
+  } else {
+    await db.lab_results.add({
+      uuid: genUUID(),
+      draw_uuid: opts.draw_uuid,
+      lab_code: opts.lab_code,
+      value: opts.value,
+      ...syncMeta(),
+    });
+  }
+  syncEngine.schedulePush();
+}
+
+export async function deleteLabResult(uuid: string): Promise<void> {
+  await db.lab_results.update(uuid, { _deleted: true, _synced: false, _updated_at: now() });
   syncEngine.schedulePush();
 }

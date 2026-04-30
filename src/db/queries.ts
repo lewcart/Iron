@@ -15,8 +15,6 @@ import type {
   NutritionLog,
   NutritionWeekMeal,
   NutritionDayNote,
-  HrtProtocol,
-  HrtLog,
   WellbeingLog,
   DysphoriaLog,
   ClothesTestLog,
@@ -1578,119 +1576,8 @@ export async function upsertNutritionDayNote(date: string, data: { hydration_ml?
   return parseNutritionDayNote(row!);
 }
 
-// ===== HRT (Module 5) =====
-
-function parseHrtLog(row: DbRow): HrtLog {
-  return {
-    uuid: row.uuid as string,
-    logged_at: row.logged_at as string,
-    medication: row.medication as string,
-    dose_mg: row.dose_mg != null ? parseFloat(row.dose_mg as string) : null,
-    route: row.route as HrtLog['route'],
-    notes: row.notes as string | null,
-    taken: row.taken === true || row.taken === 't',
-    protocol_uuid: row.protocol_uuid as string | null,
-  };
-}
-
-export async function createHrtLog(data: Omit<HrtLog, 'uuid' | 'logged_at'> & { logged_at?: string }): Promise<HrtLog> {
-  const uuid = randomUUID();
-  const row = await queryOne(
-    `INSERT INTO hrt_logs (uuid, logged_at, medication, dose_mg, route, notes, taken, protocol_uuid)
-     VALUES ($1, COALESCE($2::TIMESTAMP, NOW()), $3, $4, $5, $6, $7, $8) RETURNING *`,
-    [uuid, data.logged_at ?? null, data.medication, data.dose_mg ?? null, data.route ?? null, data.notes ?? null, data.taken ?? false, data.protocol_uuid ?? null],
-  );
-  return parseHrtLog(row!);
-}
-
-export async function listHrtLogs(limit = 90): Promise<HrtLog[]> {
-  const rows = await query(`SELECT * FROM hrt_logs ORDER BY logged_at DESC LIMIT $1`, [limit]);
-  return rows.map(parseHrtLog);
-}
-
-export async function getHrtLog(uuid: string): Promise<HrtLog | null> {
-  const row = await queryOne(`SELECT * FROM hrt_logs WHERE uuid = $1`, [uuid]);
-  return row ? parseHrtLog(row) : null;
-}
-
-export async function updateHrtLog(uuid: string, data: Partial<Omit<HrtLog, 'uuid'>>): Promise<HrtLog | null> {
-  const fields: string[] = [];
-  const params: unknown[] = [];
-  let i = 1;
-  for (const [key, val] of Object.entries(data)) {
-    fields.push(`${key} = $${i++}`);
-    params.push(val);
-  }
-  if (fields.length === 0) return getHrtLog(uuid);
-  params.push(uuid);
-  const row = await queryOne(
-    `UPDATE hrt_logs SET ${fields.join(', ')} WHERE uuid = $${i} RETURNING *`,
-    params,
-  );
-  return row ? parseHrtLog(row) : null;
-}
-
-export async function deleteHrtLog(uuid: string): Promise<void> {
-  await query(`DELETE FROM hrt_logs WHERE uuid = $1`, [uuid]);
-}
-
-// ===== HRT PROTOCOLS =====
-
-function parseHrtProtocol(row: DbRow): HrtProtocol {
-  return {
-    uuid: row.uuid as string,
-    medication: row.medication as string,
-    dose_description: row.dose_description as string,
-    form: row.form as HrtProtocol['form'],
-    started_at: row.started_at as string,
-    ended_at: row.ended_at as string | null,
-    includes_blocker: row.includes_blocker === true || row.includes_blocker === 't',
-    blocker_name: row.blocker_name as string | null,
-    notes: row.notes as string | null,
-    created_at: row.created_at as string,
-  };
-}
-
-export async function createHrtProtocol(data: Omit<HrtProtocol, 'uuid' | 'created_at'>): Promise<HrtProtocol> {
-  const uuid = randomUUID();
-  const row = await queryOne(
-    `INSERT INTO hrt_protocols (uuid, medication, dose_description, form, started_at, ended_at, includes_blocker, blocker_name, notes)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *`,
-    [uuid, data.medication, data.dose_description, data.form, data.started_at, data.ended_at ?? null, data.includes_blocker ?? false, data.blocker_name ?? null, data.notes ?? null],
-  );
-  return parseHrtProtocol(row!);
-}
-
-export async function listHrtProtocols(): Promise<HrtProtocol[]> {
-  const rows = await query(`SELECT * FROM hrt_protocols ORDER BY started_at DESC`);
-  return rows.map(parseHrtProtocol);
-}
-
-export async function getHrtProtocol(uuid: string): Promise<HrtProtocol | null> {
-  const row = await queryOne(`SELECT * FROM hrt_protocols WHERE uuid = $1`, [uuid]);
-  return row ? parseHrtProtocol(row) : null;
-}
-
-export async function updateHrtProtocol(uuid: string, data: Partial<Omit<HrtProtocol, 'uuid' | 'created_at'>>): Promise<HrtProtocol | null> {
-  const fields: string[] = [];
-  const params: unknown[] = [];
-  let i = 1;
-  for (const [key, val] of Object.entries(data)) {
-    fields.push(`${key} = $${i++}`);
-    params.push(val);
-  }
-  if (fields.length === 0) return getHrtProtocol(uuid);
-  params.push(uuid);
-  const row = await queryOne(
-    `UPDATE hrt_protocols SET ${fields.join(', ')} WHERE uuid = $${i} RETURNING *`,
-    params,
-  );
-  return row ? parseHrtProtocol(row) : null;
-}
-
-export async function deleteHrtProtocol(uuid: string): Promise<void> {
-  await query(`DELETE FROM hrt_protocols WHERE uuid = $1`, [uuid]);
-}
+// HRT logs/protocols dropped in migration 020. Timeline + lab tables are
+// owned by mcp-tools.ts (server) and the Dexie sync layer (client).
 
 // ===== WELLBEING (Module 6) =====
 

@@ -239,31 +239,16 @@ export interface NutritionDayNote {
   updated_at: string;
 }
 
-export type HrtRoute = 'injection' | 'topical' | 'oral' | 'patch' | 'other';
-export type HrtForm = 'gel' | 'patch' | 'injection' | 'oral' | 'other';
-
-export interface HrtProtocol {
+// HRT timeline period (replaces dropped HrtProtocol/HrtLog from migration 020).
+export interface HrtTimelinePeriod {
   uuid: string;
-  medication: string;
-  dose_description: string;
-  form: HrtForm;
-  started_at: string;   // DATE as ISO string
-  ended_at: string | null;
-  includes_blocker: boolean;
-  blocker_name: string | null;
+  name: string;
+  started_at: string;             // YYYY-MM-DD
+  ended_at: string | null;        // YYYY-MM-DD; null = current
+  doses_e: string | null;
+  doses_t_blocker: string | null;
+  doses_other: string[];
   notes: string | null;
-  created_at: string;
-}
-
-export interface HrtLog {
-  uuid: string;
-  logged_at: string;
-  medication: string;
-  dose_mg: number | null;
-  route: HrtRoute | null;
-  notes: string | null;
-  taken: boolean;
-  protocol_uuid: string | null;
 }
 
 export interface WellbeingLog {

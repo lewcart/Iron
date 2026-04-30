@@ -207,13 +207,13 @@ describe('GET /api/timeline', () => {
 
   // ===== HRT formatting =====
 
-  it('formats HRT entry with dose and taken=true', async () => {
+  it('formats HRT timeline entry with estrogen dose', async () => {
     const db = await import('@/db/db');
     vi.mocked(db.query)
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([
-        { uuid: 'h1', logged_at: '2026-03-25T08:00:00.000Z', medication: 'Estradiol', dose_mg: 2, taken: true },
+        { uuid: 'h1', started_at: '2026-03-25', ended_at: null, name: 'Estrogel + Cypro', doses_e: 'Estrogel 1.5mg estradiol' },
       ])
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([])
@@ -230,17 +230,17 @@ describe('GET /api/timeline', () => {
       id: 'h1',
       module: 'hrt',
       icon: 'pill',
-      summary: 'Estradiol 2mg · taken',
+      summary: 'Protocol started: Estrogel + Cypro · Estrogel 1.5mg estradiol',
     });
   });
 
-  it('formats HRT entry without dose and taken=false', async () => {
+  it('formats HRT timeline entry without estrogen dose', async () => {
     const db = await import('@/db/db');
     vi.mocked(db.query)
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([
-        { uuid: 'h1', logged_at: '2026-03-25T08:00:00.000Z', medication: 'Progesterone', dose_mg: null, taken: false },
+        { uuid: 'h1', started_at: '2026-03-25', ended_at: null, name: 'Pause', doses_e: null },
       ])
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([])
@@ -253,7 +253,7 @@ describe('GET /api/timeline', () => {
     const { GET } = await import('./route');
     const [entry] = await (await GET(new NextRequest('http://localhost/api/timeline'))).json();
 
-    expect(entry.summary).toBe('Progesterone · skipped');
+    expect(entry.summary).toBe('Protocol started: Pause');
   });
 
   // ===== Measurement formatting =====

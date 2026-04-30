@@ -78,6 +78,17 @@ export interface SleepNight {
   in_bed_min: number;
 }
 
+export interface MedicationRecord {
+  hk_uuid: string;
+  medication_name: string;
+  dose_string?: string;
+  taken_at: number;          // epoch ms
+  scheduled_at?: number;     // epoch ms
+  source_name?: string;
+  source_bundle_id?: string;
+  metadata_json?: string;
+}
+
 export interface FullHKWorkout {
   hk_uuid: string;
   activity_type: string;
@@ -128,6 +139,12 @@ interface HealthKitPlugin {
     endTime: number;
     anchor?: string;
   }): Promise<{ workouts: FullHKWorkout[]; deleted: string[]; nextAnchor: string }>;
+
+  fetchMedicationRecords(options: {
+    startTime: number;
+    endTime: number;
+    anchor?: string;
+  }): Promise<{ medications: MedicationRecord[]; deleted: string[]; nextAnchor: string }>;
 
   // Writes
   saveNutrition(options: {
