@@ -3,6 +3,7 @@
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '@/db/local';
 import type { LocalWorkout, LocalWorkoutExercise, LocalWorkoutSet, LocalBodyweightLog, LocalExercise } from '@/db/local';
+import { estimate1RM } from '@/lib/pr';
 
 // ─── Compound type for full workout view ───────────────────────────────────────
 
@@ -325,27 +326,34 @@ export function useBodyweightLogs(limit = 30): LocalBodyweightLog[] {
 // ─── Autofill helpers ─────────────────────────────────────────────────────────
 
 /** Returns the all-time best estimated 1RM (Epley) for an exercise, excluding the
- *  given workout. Returns 0 if no historical sets exist. */
+ *  given workout. Returns 0 if no historical sets exist.
+ *
+ *  Single-pass: collect candidate workout_exercise UUIDs, then do ONE
+ *  bulk anyOf() lookup across all sets. Avoids N+1 round trips that
+ *  accumulated against IndexedDB on long histories. */
 export async function getAllTimeBest1RM(
   exerciseUuid: string,
   excludeWorkoutUuid: string,
 ): Promise<number> {
   const allWe = await db.workout_exercises
-    .filter(we => we.exercise_uuid.toLowerCase() === exerciseUuid.toLowerCase() && !we._deleted)
+    .filter(we => we.exercise_uuid.toLowerCase() === exerciseUuid.toLowerCase()
+      && !we._deleted
+      && we.workout_uuid !== excludeWorkoutUuid)
+    .toArray();
+
+  if (allWe.length === 0) return 0;
+
+  const weUuids = allWe.map(we => we.uuid);
+  const sets = await db.workout_sets
+    .where('workout_exercise_uuid')
+    .anyOf(weUuids)
+    .filter(s => s.is_completed && !s._deleted && s.weight != null && s.repetitions != null)
     .toArray();
 
   let best = 0;
-  for (const we of allWe) {
-    if (we.workout_uuid === excludeWorkoutUuid) continue;
-    const sets = await db.workout_sets
-      .where('workout_exercise_uuid')
-      .equals(we.uuid)
-      .filter(s => s.is_completed && !s._deleted && s.weight != null && s.repetitions != null)
-      .toArray();
-    for (const s of sets) {
-      const orm = s.weight! * (1 + s.repetitions! / 30);
-      if (orm > best) best = orm;
-    }
+  for (const s of sets) {
+    const orm = estimate1RM(s.weight!, s.repetitions!);
+    if (orm > best) best = orm;
   }
   return best;
 }

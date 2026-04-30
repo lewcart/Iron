@@ -27,7 +27,7 @@ import type {
   BodyNormRange,
   BodyBalance,
 } from '../types';
-import { calculatePRs } from '../lib/pr';
+import { calculatePRs, estimate1RM } from '../lib/pr';
 import { muscleGroupSearchTerms } from '../lib/muscle-groups';
 
 export type DbRow = Record<string, unknown>;
@@ -412,11 +412,11 @@ export async function getHistoricalBestsForExercise(
   exerciseUuid: string,
   excludeWorkoutUuid: string,
 ): Promise<{ best1RM: number }> {
-  const row = await queryOne<{
-    best_1rm: string | null;
+  const rows = await query<{
+    weight: string;
+    repetitions: number;
   }>(`
-    SELECT
-      MAX(ws.weight * (1 + ws.repetitions::float / 30)) AS best_1rm
+    SELECT ws.weight, ws.repetitions
     FROM workout_sets ws
     JOIN workout_exercises we ON ws.workout_exercise_uuid = we.uuid
     JOIN workouts w ON we.workout_uuid = w.uuid
@@ -427,9 +427,12 @@ export async function getHistoricalBestsForExercise(
       AND ws.repetitions IS NOT NULL
   `, [exerciseUuid, excludeWorkoutUuid]);
 
-  return {
-    best1RM: row?.best_1rm ? parseFloat(row.best_1rm) : 0,
-  };
+  let best = 0;
+  for (const row of rows) {
+    const orm = estimate1RM(parseFloat(row.weight), row.repetitions);
+    if (orm > best) best = orm;
+  }
+  return { best1RM: best };
 }
 
 // ===== EXERCISE PROGRESS & PRs =====
@@ -483,7 +486,7 @@ export async function getExerciseProgress(exerciseUuid: string, since?: Date): P
     const maxWeight = parseFloat(row.max_weight) || 0;
     const totalVolume = parseFloat(row.total_volume) || 0;
     const reps = row.max_reps_at_max_weight || 1;
-    const estimated1RM = maxWeight * (1 + reps / 30);
+    const estimated1RM = estimate1RM(maxWeight, reps);
     return {
       date: row.date,
       maxWeight,

@@ -7,6 +7,7 @@
  */
 
 import { query, queryOne, transaction } from '@/db/db';
+import { estimate1RM } from '@/lib/pr';
 
 // ── Result helpers ────────────────────────────────────────────────────────────
 
@@ -193,8 +194,6 @@ async function getExerciseHistory(args: Record<string, unknown>) {
     return acc;
   }, {} as Record<string, typeof sets>);
 
-  const epley1rm = (weight: number, reps: number) => Math.round(weight * (1 + reps / 30) * 10) / 10;
-
   return toolResult(sessions.map(s => {
     const sessionSets = (setsByWe[s.we_uuid] ?? []).map(row => ({
       weight: row.weight,
@@ -202,7 +201,8 @@ async function getExerciseHistory(args: Record<string, unknown>) {
     }));
     const best1rm = sessionSets.reduce((max, row) => {
       if (row.weight == null || row.reps == null || row.reps === 0) return max;
-      const rm = epley1rm(row.weight, row.reps);
+      // 1 decimal place rounding preserves the historic MCP output format.
+      const rm = Math.round(estimate1RM(row.weight, row.reps) * 10) / 10;
       return rm > max ? rm : max;
     }, 0);
     return {
