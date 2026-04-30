@@ -1547,11 +1547,14 @@ export async function deleteNutritionWeekMeal(uuid: string): Promise<void> {
 // ===== NUTRITION DAY NOTES =====
 
 function parseNutritionDayNote(row: DbRow): NutritionDayNote {
+  const status = row.approved_status as string | null | undefined;
   return {
     uuid: row.uuid as string,
     date: row.date as string,
     hydration_ml: row.hydration_ml != null ? parseInt(row.hydration_ml as string, 10) : null,
     notes: row.notes as string | null,
+    approved_status: status === 'approved' ? 'approved' : 'pending',
+    approved_at: row.approved_at != null ? String(row.approved_at) : null,
     updated_at: row.updated_at as string,
   };
 }

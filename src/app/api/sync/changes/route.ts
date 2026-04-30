@@ -200,18 +200,25 @@ async function fetchRows(table: SyncedTable, uuids: string[]): Promise<Array<Rec
         'SELECT metric_key, target_value, unit, direction, notes FROM body_goals WHERE metric_key = ANY($1::text[])', [uuids]);
     case 'nutrition_logs':
       return (await query<Record<string, unknown>>(
-        'SELECT uuid, logged_at, meal_type, calories, protein_g, carbs_g, fat_g, notes FROM nutrition_logs WHERE uuid = ANY($1::text[])', [uuids]))
+        `SELECT uuid, logged_at, meal_type, meal_name, calories, protein_g, carbs_g, fat_g,
+                notes, template_meal_id, status
+         FROM nutrition_logs WHERE uuid = ANY($1::text[])`, [uuids]))
         .map(r => ({ ...r, logged_at: toIso(r.logged_at) }));
     case 'nutrition_week_meals':
       return query<Record<string, unknown>>(
-        'SELECT uuid, day_of_week, meal_slot, meal_name, protein_g, calories, quality_rating, sort_order FROM nutrition_week_meals WHERE uuid = ANY($1::text[])', [uuids]);
+        `SELECT uuid, day_of_week, meal_slot, meal_name, protein_g, carbs_g, fat_g,
+                calories, quality_rating, sort_order
+         FROM nutrition_week_meals WHERE uuid = ANY($1::text[])`, [uuids]);
     case 'nutrition_day_notes':
-      return query<Record<string, unknown>>(
-        'SELECT uuid, date, hydration_ml, notes FROM nutrition_day_notes WHERE uuid = ANY($1::text[])', [uuids]);
+      return (await query<Record<string, unknown>>(
+        `SELECT uuid, date, hydration_ml, notes, approved_status, approved_at
+         FROM nutrition_day_notes WHERE uuid = ANY($1::text[])`, [uuids]))
+        .map(r => ({ ...r, approved_at: r.approved_at ? toIso(r.approved_at) : null }));
     case 'nutrition_targets':
       // Singleton — uuids contains '1'. Map id→id.
       return (await query<Record<string, unknown>>(
-        'SELECT id, calories, protein_g, carbs_g, fat_g FROM nutrition_targets WHERE id::TEXT = ANY($1::text[])', [uuids]))
+        `SELECT id, calories, protein_g, carbs_g, fat_g, bands
+         FROM nutrition_targets WHERE id::TEXT = ANY($1::text[])`, [uuids]))
         .map(r => ({ ...r, id: Number(r.id) }));
     case 'hrt_timeline_periods':
       return (await query<Record<string, unknown>>(

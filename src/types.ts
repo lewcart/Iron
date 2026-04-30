@@ -231,11 +231,15 @@ export interface NutritionWeekMeal {
   sort_order: number;
 }
 
+export type NutritionDayApprovedStatus = 'pending' | 'approved';
+
 export interface NutritionDayNote {
   uuid: string;
   date: string; // YYYY-MM-DD
   hydration_ml: number | null;
   notes: string | null;
+  approved_status: NutritionDayApprovedStatus;
+  approved_at: string | null;
   updated_at: string;
 }
 

@@ -208,11 +208,14 @@ export interface LocalNutritionLog extends SyncMeta {
   uuid: string;
   logged_at: string;
   meal_type: 'breakfast' | 'lunch' | 'dinner' | 'snack' | 'other' | null;
+  meal_name: string | null;
   calories: number | null;
   protein_g: number | null;
   carbs_g: number | null;
   fat_g: number | null;
   notes: string | null;
+  template_meal_id: string | null;
+  status: 'planned' | 'deviation' | 'added' | null;
 }
 
 export interface LocalNutritionWeekMeal extends SyncMeta {
@@ -221,6 +224,8 @@ export interface LocalNutritionWeekMeal extends SyncMeta {
   meal_slot: string;
   meal_name: string;
   protein_g: number | null;
+  carbs_g: number | null;
+  fat_g: number | null;
   calories: number | null;
   quality_rating: number | null;
   sort_order: number;
@@ -231,6 +236,20 @@ export interface LocalNutritionDayNote extends SyncMeta {
   date: string;
   hydration_ml: number | null;
   notes: string | null;
+  approved_status: 'pending' | 'approved';
+  approved_at: string | null;
+}
+
+export interface MacroBand {
+  low: number;
+  high: number | null;
+}
+
+export interface MacroBands {
+  cal?: MacroBand;
+  pro?: MacroBand;
+  carb?: MacroBand;
+  fat?: MacroBand;
 }
 
 /** Singleton — keyed by id=1 in Dexie too. */
@@ -240,6 +259,7 @@ export interface LocalNutritionTarget extends SyncMeta {
   protein_g: number | null;
   carbs_g: number | null;
   fat_g: number | null;
+  bands: MacroBands | null;
 }
 
 // ─── HRT ──────────────────────────────────────────────────────────────────────
@@ -442,7 +462,7 @@ export class IronDB extends Dexie {
 
     // v6: HRT timeline + labs replace the old adherence model. Drop the
     // hrt_protocols + hrt_logs Dexie tables (server-side equivalents are
-    // dropped in migration 020); add hrt_timeline_periods, lab_definitions,
+    // dropped in main's migration 020); add hrt_timeline_periods,
     // lab_draws, lab_results.
     const v6Stores = {
       ...v5Stores,
@@ -453,6 +473,30 @@ export class IronDB extends Dexie {
       lab_results: 'uuid, draw_uuid, lab_code, _synced, _updated_at',
     };
     this.version(6).stores(v6Stores);
+
+    // v7: nutrition upgrade — extend log/week/day-note/target rows with new
+    // fields (meal_name, template_meal_id, status on logs; carbs_g/fat_g on
+    // week_meals; approved_status/approved_at on day_notes; bands on
+    // targets). Existing rows backfilled with safe defaults via upgrade tx.
+    // No new indexed fields — none of the new columns are queried by index.
+    this.version(7).stores(v6Stores).upgrade(async tx => {
+      await tx.table('nutrition_logs').toCollection().modify(row => {
+        if (row.meal_name === undefined) row.meal_name = null;
+        if (row.template_meal_id === undefined) row.template_meal_id = null;
+        if (row.status === undefined) row.status = null;
+      });
+      await tx.table('nutrition_week_meals').toCollection().modify(row => {
+        if (row.carbs_g === undefined) row.carbs_g = null;
+        if (row.fat_g === undefined) row.fat_g = null;
+      });
+      await tx.table('nutrition_day_notes').toCollection().modify(row => {
+        if (row.approved_status === undefined) row.approved_status = 'pending';
+        if (row.approved_at === undefined) row.approved_at = null;
+      });
+      await tx.table('nutrition_targets').toCollection().modify(row => {
+        if (row.bands === undefined) row.bands = null;
+      });
+    });
   }
 }
 

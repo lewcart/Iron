@@ -401,20 +401,33 @@ async function pushBodyGoal(r: Record<string, unknown>): Promise<void> {
 
 // ─── Nutrition ───────────────────────────────────────────────────────────────
 
+// Whitelist for nutrition_logs.status — rejects unexpected enum values from
+// untrusted client payloads.
+const NUTRITION_LOG_STATUSES = new Set(['planned', 'deviation', 'added']);
+function sanitizeLogStatus(v: unknown): string | null {
+  return typeof v === 'string' && NUTRITION_LOG_STATUSES.has(v) ? v : null;
+}
+
 async function pushNutritionLog(r: Record<string, unknown>): Promise<void> {
   if (r._deleted) {
     await query('DELETE FROM nutrition_logs WHERE uuid = $1', [r.uuid]);
     return;
   }
   await query(
-    `INSERT INTO nutrition_logs (uuid, logged_at, meal_type, calories, protein_g, carbs_g, fat_g, notes, updated_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
+    `INSERT INTO nutrition_logs (uuid, logged_at, meal_type, meal_name, calories, protein_g, carbs_g, fat_g, notes, template_meal_id, status, updated_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW())
      ON CONFLICT (uuid) DO UPDATE SET
        logged_at = EXCLUDED.logged_at, meal_type = EXCLUDED.meal_type,
+       meal_name = EXCLUDED.meal_name,
        calories = EXCLUDED.calories, protein_g = EXCLUDED.protein_g,
        carbs_g = EXCLUDED.carbs_g, fat_g = EXCLUDED.fat_g,
-       notes = EXCLUDED.notes, updated_at = NOW()`,
-    [r.uuid, r.logged_at, r.meal_type, r.calories, r.protein_g, r.carbs_g, r.fat_g, r.notes],
+       notes = EXCLUDED.notes, template_meal_id = EXCLUDED.template_meal_id,
+       status = EXCLUDED.status, updated_at = NOW()`,
+    [
+      r.uuid, r.logged_at, r.meal_type, r.meal_name ?? null,
+      r.calories, r.protein_g, r.carbs_g, r.fat_g, r.notes,
+      r.template_meal_id ?? null, sanitizeLogStatus(r.status),
+    ],
   );
 }
 
@@ -424,15 +437,25 @@ async function pushNutritionWeekMeal(r: Record<string, unknown>): Promise<void> 
     return;
   }
   await query(
-    `INSERT INTO nutrition_week_meals (uuid, day_of_week, meal_slot, meal_name, protein_g, calories, quality_rating, sort_order, updated_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
+    `INSERT INTO nutrition_week_meals (uuid, day_of_week, meal_slot, meal_name, protein_g, carbs_g, fat_g, calories, quality_rating, sort_order, updated_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW())
      ON CONFLICT (uuid) DO UPDATE SET
        day_of_week = EXCLUDED.day_of_week, meal_slot = EXCLUDED.meal_slot,
        meal_name = EXCLUDED.meal_name, protein_g = EXCLUDED.protein_g,
+       carbs_g = EXCLUDED.carbs_g, fat_g = EXCLUDED.fat_g,
        calories = EXCLUDED.calories, quality_rating = EXCLUDED.quality_rating,
        sort_order = EXCLUDED.sort_order, updated_at = NOW()`,
-    [r.uuid, r.day_of_week, r.meal_slot, r.meal_name, r.protein_g, r.calories, r.quality_rating, r.sort_order],
+    [
+      r.uuid, r.day_of_week, r.meal_slot, r.meal_name,
+      r.protein_g, r.carbs_g ?? null, r.fat_g ?? null,
+      r.calories, r.quality_rating, r.sort_order,
+    ],
   );
+}
+
+const APPROVED_STATUSES = new Set(['pending', 'approved']);
+function sanitizeApprovedStatus(v: unknown): string {
+  return typeof v === 'string' && APPROVED_STATUSES.has(v) ? v : 'pending';
 }
 
 async function pushNutritionDayNote(r: Record<string, unknown>): Promise<void> {
@@ -440,25 +463,39 @@ async function pushNutritionDayNote(r: Record<string, unknown>): Promise<void> {
     await query('DELETE FROM nutrition_day_notes WHERE uuid = $1', [r.uuid]);
     return;
   }
+  // Conflict on `date` (the natural key) so an MCP-created row and a Dexie-
+  // created row for the same calendar day merge instead of throwing on the
+  // date UNIQUE constraint. The row's uuid is preserved on UPDATE.
   await query(
-    `INSERT INTO nutrition_day_notes (uuid, date, hydration_ml, notes, updated_at)
-     VALUES ($1, $2, $3, $4, NOW())
-     ON CONFLICT (uuid) DO UPDATE SET
-       date = EXCLUDED.date, hydration_ml = EXCLUDED.hydration_ml,
-       notes = EXCLUDED.notes, updated_at = NOW()`,
-    [r.uuid, r.date, r.hydration_ml, r.notes],
+    `INSERT INTO nutrition_day_notes (uuid, date, hydration_ml, notes, approved_status, approved_at, updated_at)
+     VALUES ($1, $2, $3, $4, $5, $6, NOW())
+     ON CONFLICT (date) DO UPDATE SET
+       hydration_ml = EXCLUDED.hydration_ml,
+       notes = EXCLUDED.notes,
+       approved_status = EXCLUDED.approved_status,
+       approved_at = EXCLUDED.approved_at,
+       updated_at = NOW()`,
+    [
+      r.uuid, r.date, r.hydration_ml, r.notes,
+      sanitizeApprovedStatus(r.approved_status),
+      r.approved_at ?? null,
+    ],
   );
 }
 
 async function pushNutritionTargets(r: Record<string, unknown>): Promise<void> {
   // Singleton — id=1. _deleted means reset to all-null.
   await query(
-    `INSERT INTO nutrition_targets (id, calories, protein_g, carbs_g, fat_g, updated_at)
-     VALUES (1, $1, $2, $3, $4, NOW())
+    `INSERT INTO nutrition_targets (id, calories, protein_g, carbs_g, fat_g, bands, updated_at)
+     VALUES (1, $1, $2, $3, $4, $5::jsonb, NOW())
      ON CONFLICT (id) DO UPDATE SET
        calories = EXCLUDED.calories, protein_g = EXCLUDED.protein_g,
-       carbs_g = EXCLUDED.carbs_g, fat_g = EXCLUDED.fat_g, updated_at = NOW()`,
-    [r.calories, r.protein_g, r.carbs_g, r.fat_g],
+       carbs_g = EXCLUDED.carbs_g, fat_g = EXCLUDED.fat_g,
+       bands = EXCLUDED.bands, updated_at = NOW()`,
+    [
+      r.calories, r.protein_g, r.carbs_g, r.fat_g,
+      r.bands == null ? null : JSON.stringify(r.bands),
+    ],
   );
 }
 
