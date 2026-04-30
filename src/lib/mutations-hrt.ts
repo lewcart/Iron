@@ -14,6 +14,16 @@ function syncMeta() {
   return { _synced: false as const, _updated_at: now(), _deleted: false as const };
 }
 
+/** YYYY-MM-DD in the user's local timezone. UTC slicing drifts by a day in
+ * NZ-style timezones (UTC+12) for half the day. */
+function todayLocal(): string {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
 // ─── HRT timeline periods ────────────────────────────────────────────────────
 
 export async function createHrtTimelinePeriod(opts: {
@@ -51,7 +61,7 @@ export async function updateHrtTimelinePeriod(
 
 export async function endHrtTimelinePeriod(uuid: string, endedAt?: string): Promise<void> {
   await db.hrt_timeline_periods.update(uuid, {
-    ended_at: endedAt ?? new Date().toISOString().slice(0, 10),
+    ended_at: endedAt ?? todayLocal(),
     ...syncMeta(),
   });
   syncEngine.schedulePush();

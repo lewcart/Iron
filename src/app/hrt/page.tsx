@@ -8,7 +8,6 @@ import {
   useHrtTimelinePeriods,
   useLabDraws,
   useLabResults,
-  useLabSeries,
 } from '@/lib/useLocalDB-hrt';
 import {
   createHrtTimelinePeriod,
@@ -16,7 +15,6 @@ import {
   deleteHrtTimelinePeriod,
   createLabDraw,
   deleteLabDraw,
-  upsertLabResult,
 } from '@/lib/mutations-hrt';
 import {
   LAB_DEFINITIONS,
@@ -62,6 +60,15 @@ function daysBetween(from: string, to: string): number {
   return Math.max(0, Math.round((toDate.getTime() - fromDate.getTime()) / 86400000));
 }
 
+/** YYYY-MM-DD in local timezone (avoids UTC slice drift in UTC+N TZs). */
+function todayLocal(): string {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
 // ────────────────────────────────────────────────────────────────────────────
 // Timeline tab
 // ────────────────────────────────────────────────────────────────────────────
@@ -79,7 +86,7 @@ function TimelineTab() {
   const [dosesOther, setDosesOther] = useState<string[]>([]);
   const [notes, setNotes] = useState('');
 
-  const today = new Date().toISOString().slice(0, 10);
+  const today = todayLocal();
 
   const reset = () => {
     setName(''); setStartedAt(''); setEndedAt('');
@@ -229,7 +236,7 @@ function TimelineTab() {
 }
 
 function CurrentProtocolCard({ period }: { period: LocalHrtTimelinePeriod }) {
-  const today = new Date().toISOString().slice(0, 10);
+  const today = todayLocal();
   const days = daysBetween(period.started_at, today);
   return (
     <div className="ios-section">
@@ -251,7 +258,7 @@ function CurrentProtocolCard({ period }: { period: LocalHrtTimelinePeriod }) {
 
 function TimelineRow({ period }: { period: LocalHrtTimelinePeriod }) {
   const isCurrent = !period.ended_at;
-  const today = new Date().toISOString().slice(0, 10);
+  const today = todayLocal();
   const days = daysBetween(period.started_at, period.ended_at || today);
   return (
     <div className="ios-section">
@@ -512,12 +519,11 @@ function AllLabsView({ draws, results }: { draws: LocalLabDraw[]; results: Local
 }
 
 function NewDrawForm({ onDone }: { onDone: () => void }) {
-  const today = new Date().toISOString().slice(0, 10);
+  const today = todayLocal();
   const [drawnAt, setDrawnAt] = useState(today);
   const [notes, setNotes] = useState('');
   const [values, setValues] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
-  const [drawUuid, setDrawUuid] = useState<string | null>(null);
 
   const handleCreate = async () => {
     setSaving(true);
@@ -526,25 +532,15 @@ function NewDrawForm({ onDone }: { onDone: () => void }) {
         .filter(([, v]) => v.trim() !== '' && Number.isFinite(Number(v)))
         .map(([lab_code, v]) => ({ lab_code, value: Number(v) }));
 
-      const draw = await createLabDraw({
+      await createLabDraw({
         drawn_at: drawnAt,
         notes: notes || null,
         results,
       });
-      setDrawUuid(draw.uuid);
       onDone();
     } finally {
       setSaving(false);
     }
-  };
-
-  // Update a single lab value live for an existing draw — used after save
-  // for users who want to add more values without closing the form.
-  const handleLiveSave = async (lab_code: string, raw: string) => {
-    setValues(v => ({ ...v, [lab_code]: raw }));
-    if (!drawUuid) return;
-    if (raw.trim() === '' || !Number.isFinite(Number(raw))) return;
-    await upsertLabResult({ draw_uuid: drawUuid, lab_code, value: Number(raw) });
   };
 
   return (
@@ -581,24 +577,22 @@ function NewDrawForm({ onDone }: { onDone: () => void }) {
               step="any"
               inputMode="decimal"
               value={values[def.lab_code] ?? ''}
-              onChange={e => drawUuid ? handleLiveSave(def.lab_code, e.target.value) : setValues(v => ({ ...v, [def.lab_code]: e.target.value }))}
+              onChange={e => setValues(v => ({ ...v, [def.lab_code]: e.target.value }))}
               placeholder="—"
               className="w-24 bg-transparent text-sm outline-none text-right"
             />
           </div>
         ))}
-        {!drawUuid && (
-          <div className="ios-row border-t border-border justify-end gap-2">
-            <button onClick={onDone} className="px-4 py-2 text-sm font-medium text-muted-foreground">Cancel</button>
-            <button
-              onClick={handleCreate}
-              disabled={saving}
-              className="px-4 py-2 bg-primary text-white text-sm font-medium rounded-lg disabled:opacity-40"
-            >
-              {saving ? 'Saving…' : 'Save'}
-            </button>
-          </div>
-        )}
+        <div className="ios-row border-t border-border justify-end gap-2">
+          <button onClick={onDone} className="px-4 py-2 text-sm font-medium text-muted-foreground">Cancel</button>
+          <button
+            onClick={handleCreate}
+            disabled={saving}
+            className="px-4 py-2 bg-primary text-white text-sm font-medium rounded-lg disabled:opacity-40"
+          >
+            {saving ? 'Saving…' : 'Save'}
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -716,27 +710,30 @@ function MedsTab() {
             </div>
           )}
 
-          {records && records.length > 0 && (
-            <div>
-              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1 px-1">Recent doses</p>
-              <div className="ios-section">
-                {records.slice(0, 50).map((r, i) => (
-                  <div
-                    key={r.hk_uuid}
-                    className={`ios-row justify-between ${i < records.slice(0, 50).length - 1 ? 'border-b border-border' : ''}`}
-                  >
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium truncate">{r.medication_name}</p>
-                      {r.dose_string && <p className="text-xs text-muted-foreground">{r.dose_string}</p>}
+          {records && records.length > 0 && (() => {
+            const visible = records.slice(0, 50);
+            return (
+              <div>
+                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1 px-1">Recent doses</p>
+                <div className="ios-section">
+                  {visible.map((r, i) => (
+                    <div
+                      key={r.hk_uuid}
+                      className={`ios-row justify-between ${i < visible.length - 1 ? 'border-b border-border' : ''}`}
+                    >
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium truncate">{r.medication_name}</p>
+                        {r.dose_string && <p className="text-xs text-muted-foreground">{r.dose_string}</p>}
+                      </div>
+                      <span className="text-xs text-muted-foreground shrink-0">
+                        {new Date(r.taken_at).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                      </span>
                     </div>
-                    <span className="text-xs text-muted-foreground shrink-0">
-                      {new Date(r.taken_at).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}
-                    </span>
-                  </div>
-                ))}
+                  ))}
+                </div>
               </div>
-            </div>
-          )}
+            );
+          })()}
         </>
       )}
     </div>
@@ -749,9 +746,6 @@ function MedsTab() {
 
 export default function HrtPage() {
   const [activeTab, setActiveTab] = useState<Tab>('timeline');
-
-  // Suppresses unused-import warnings in builds that tree-shake the helpers.
-  void useLabSeries;
 
   const tabs: { id: Tab; label: string }[] = [
     { id: 'timeline', label: 'Timeline' },
