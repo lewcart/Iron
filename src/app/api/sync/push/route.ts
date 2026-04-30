@@ -461,11 +461,14 @@ async function pushNutritionDayNote(r: Record<string, unknown>): Promise<void> {
     await query('DELETE FROM nutrition_day_notes WHERE uuid = $1', [r.uuid]);
     return;
   }
+  // Conflict on `date` (the natural key) so an MCP-created row and a Dexie-
+  // created row for the same calendar day merge instead of throwing on the
+  // date UNIQUE constraint. The row's uuid is preserved on UPDATE.
   await query(
     `INSERT INTO nutrition_day_notes (uuid, date, hydration_ml, notes, approved_status, approved_at, updated_at)
      VALUES ($1, $2, $3, $4, $5, $6, NOW())
-     ON CONFLICT (uuid) DO UPDATE SET
-       date = EXCLUDED.date, hydration_ml = EXCLUDED.hydration_ml,
+     ON CONFLICT (date) DO UPDATE SET
+       hydration_ml = EXCLUDED.hydration_ml,
        notes = EXCLUDED.notes,
        approved_status = EXCLUDED.approved_status,
        approved_at = EXCLUDED.approved_at,

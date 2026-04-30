@@ -11,14 +11,25 @@ import type {
 
 // ─── Nutrition logs (meals) ──────────────────────────────────────────────────
 
-/** All meals logged on a specific date (ISO YYYY-MM-DD). */
+/** All meals logged on a specific date (ISO YYYY-MM-DD, user-local). */
 export function useNutritionLogsForDate(date: string | null): LocalNutritionLog[] {
   return useLiveQuery(
     async () => {
       if (!date) return [] as LocalNutritionLog[];
       const all = await db.nutrition_logs.filter(l => !l._deleted).toArray();
       return all
-        .filter(l => l.logged_at.slice(0, 10) === date)
+        .filter(l => {
+          // Compare against the LOCAL calendar day. The raw ISO timestamp is
+          // UTC, so slicing the first 10 chars drifts for users east/west of
+          // UTC eating near midnight.
+          const t = Date.parse(l.logged_at);
+          if (!Number.isFinite(t)) return false;
+          const d = new Date(t);
+          const yr = d.getFullYear();
+          const mo = String(d.getMonth() + 1).padStart(2, '0');
+          const da = String(d.getDate()).padStart(2, '0');
+          return `${yr}-${mo}-${da}` === date;
+        })
         .sort((a, b) => a.logged_at.localeCompare(b.logged_at));
     },
     [date],

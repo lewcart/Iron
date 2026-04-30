@@ -196,9 +196,15 @@ export async function POST(request: NextRequest) {
   if (!body.food_name || typeof body.food_name !== 'string') {
     return NextResponse.json({ error: 'food_name required' }, { status: 400 });
   }
+  const foodName = body.food_name.trim();
+  if (foodName.length === 0 || foodName.length > 200) {
+    return NextResponse.json({ error: 'food_name must be 1-200 chars' }, { status: 400 });
+  }
+  const externalId =
+    body.external_id != null ? String(body.external_id).slice(0, 100) : null;
   const source = body.source === 'off' || body.source === 'usda' ? body.source : 'manual';
 
-  const dedupeKey = `seed:${source}:${body.external_id ?? 'noext'}:${body.food_name.toLowerCase().trim()}`;
+  const dedupeKey = `seed:${source}:${externalId ?? 'noext'}:${foodName.toLowerCase()}`;
 
   await query(
     `INSERT INTO nutrition_food_entries
@@ -207,7 +213,7 @@ export async function POST(request: NextRequest) {
      ON CONFLICT (dedupe_key) DO NOTHING`,
     [
       randomUUID(),
-      body.food_name,
+      foodName,
       body.calories ?? null,
       body.protein_g ?? null,
       body.carbs_g ?? null,

@@ -6,6 +6,7 @@ import { SearchInput } from '@/components/ui/search-input';
 import { Button } from '@/components/ui/button';
 import { logMeal } from '@/lib/mutations-nutrition';
 import { rebirthJsonHeaders } from '@/lib/api/headers';
+import { safeParseNumber } from '@/lib/nutrition-time';
 import type { MealSlot } from './MealSection';
 import type { FoodResult } from '@/app/api/nutrition/foods/route';
 
@@ -122,10 +123,10 @@ export function AddFoodSheet({ open, onClose, slot, date }: Props) {
       await logMeal({
         meal_type: slot,
         meal_name: manual.name.trim(),
-        calories: manual.calories ? parseFloat(manual.calories) : null,
-        protein_g: manual.protein_g ? parseFloat(manual.protein_g) : null,
-        carbs_g: manual.carbs_g ? parseFloat(manual.carbs_g) : null,
-        fat_g: manual.fat_g ? parseFloat(manual.fat_g) : null,
+        calories: safeParseNumber(manual.calories),
+        protein_g: safeParseNumber(manual.protein_g),
+        carbs_g: safeParseNumber(manual.carbs_g),
+        fat_g: safeParseNumber(manual.fat_g),
         status: 'added',
         logged_at: buildLoggedAt(),
       });

@@ -81,3 +81,16 @@ export function deriveDisplayStatus(
 export function canApproveDay(date: string, todayStr: string = todayLocal()): boolean {
   return date <= todayStr;
 }
+
+/**
+ * Parse an ISO timestamp into a finite number, or null if NaN/empty/invalid.
+ * Use at form boundaries before persisting macros — Postgres NUMERIC rejects
+ * NaN and breaks the sync push on rejection.
+ */
+export function safeParseNumber(input: string | null | undefined): number | null {
+  if (input == null) return null;
+  const trimmed = String(input).trim();
+  if (trimmed === '') return null;
+  const n = parseFloat(trimmed);
+  return Number.isFinite(n) ? n : null;
+}

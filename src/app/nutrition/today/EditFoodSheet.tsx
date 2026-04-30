@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { Sheet } from '@/components/ui/sheet';
 import { Button } from '@/components/ui/button';
 import { updateMeal, deleteMeal } from '@/lib/mutations-nutrition';
+import { safeParseNumber } from '@/lib/nutrition-time';
 import type { LocalNutritionLog } from '@/db/local';
 
 interface Props {
@@ -36,10 +37,10 @@ export function EditFoodSheet({ open, onClose, log }: Props) {
     try {
       await updateMeal(log.uuid, {
         meal_name: name.trim() || null,
-        calories: calories ? parseFloat(calories) : null,
-        protein_g: protein ? parseFloat(protein) : null,
-        carbs_g: carbs ? parseFloat(carbs) : null,
-        fat_g: fat ? parseFloat(fat) : null,
+        calories: safeParseNumber(calories),
+        protein_g: safeParseNumber(protein),
+        carbs_g: safeParseNumber(carbs),
+        fat_g: safeParseNumber(fat),
       });
       onClose();
     } finally {

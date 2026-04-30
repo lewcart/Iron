@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { Repeat } from 'lucide-react';
 import { db } from '@/db/local';
 import { logMeal } from '@/lib/mutations-nutrition';
-import { offsetDate } from '@/lib/nutrition-time';
+import { offsetDate, toLocalDateString } from '@/lib/nutrition-time';
 import type { LocalNutritionLog } from '@/db/local';
 import type { MealSlot } from './MealSection';
 
@@ -35,7 +35,14 @@ export function SmartRepeatSuggestion({ date, slot, empty }: Props) {
     const yesterday = offsetDate(date, -1);
     let cancelled = false;
     db.nutrition_logs
-      .filter((l) => !l._deleted && l.meal_type === slot && l.logged_at.slice(0, 10) === yesterday)
+      .filter((l) => {
+        if (l._deleted || l.meal_type !== slot) return false;
+        // Compare against the LOCAL calendar day. The raw ISO timestamp is
+        // UTC and slicing the first 10 chars drifts when the user eats late.
+        const t = Date.parse(l.logged_at);
+        if (!Number.isFinite(t)) return false;
+        return toLocalDateString(new Date(t)) === yesterday;
+      })
       .toArray()
       .then((logs) => {
         if (!cancelled) setYesterdayLogs(logs);

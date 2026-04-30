@@ -14,18 +14,43 @@ import type { FoodResult } from '@/app/api/nutrition/foods/route';
 const OFF_TIMEOUT_MS = 1500;
 const USDA_TIMEOUT_MS = 1500;
 
-async function withTimeout<T>(p: Promise<T>, ms: number): Promise<T | null> {
-  let timer: ReturnType<typeof setTimeout> | null = null;
+class RemoteSearchTimeout extends Error {
+  constructor(source: string) {
+    super(`${source} timed out`);
+    this.name = 'RemoteSearchTimeout';
+  }
+}
+
+/**
+ * Race a fetch against a hard timeout. The timeout aborts the underlying
+ * fetch (via AbortController) so the socket and response stream actually
+ * close, instead of leaking after we stop waiting.
+ *
+ * Throws on timeout/abort. Callers handle via Promise.allSettled — the
+ * cached wrapper at the route level rejects (and therefore does NOT cache)
+ * when this throws, so a transient outage doesn't poison search for 24h.
+ */
+async function fetchJsonWithTimeout<T>(
+  url: string,
+  ms: number,
+  source: string,
+  init?: RequestInit,
+): Promise<T> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), ms);
   try {
-    const timed = new Promise<null>((resolve) => {
-      timer = setTimeout(() => resolve(null), ms);
-    });
-    const out = await Promise.race([p, timed]);
-    return out as T | null;
-  } catch {
-    return null;
+    const response = await fetch(url, { ...init, signal: controller.signal });
+    if (!response.ok) {
+      throw new Error(`${source} returned ${response.status}`);
+    }
+    return (await response.json()) as T;
+  } catch (e) {
+    if ((e as Error)?.name === 'AbortError') {
+      throw new RemoteSearchTimeout(source);
+    }
+    throw e;
   } finally {
-    if (timer) clearTimeout(timer);
+    clearTimeout(timer);
   }
 }
 
@@ -58,12 +83,9 @@ export async function searchOpenFoodFacts(query: string, limit = 15): Promise<Fo
     `https://world.openfoodfacts.org/cgi/search.pl?search_terms=${encodeURIComponent(query)}` +
     `&search_simple=1&action=process&json=1&page_size=${limit}`;
 
-  const fetched = await withTimeout(
-    fetch(url, { headers: { 'User-Agent': 'Rebirth/1.0 (personal-tracker)' } }).then((r) =>
-      r.ok ? (r.json() as Promise<OFFResponse>) : null,
-    ),
-    OFF_TIMEOUT_MS,
-  );
+  const fetched = await fetchJsonWithTimeout<OFFResponse>(url, OFF_TIMEOUT_MS, 'open-food-facts', {
+    headers: { 'User-Agent': 'Rebirth/1.0 (personal-tracker)' },
+  });
 
   const products = fetched?.products ?? [];
   const results: FoodResult[] = [];
@@ -146,10 +168,7 @@ export async function searchUsdaFdc(query: string, limit = 15): Promise<FoodResu
     `https://api.nal.usda.gov/fdc/v1/foods/search?query=${encodeURIComponent(query)}` +
     `&pageSize=${limit}&api_key=${encodeURIComponent(apiKey)}`;
 
-  const fetched = await withTimeout(
-    fetch(url).then((r) => (r.ok ? (r.json() as Promise<USDAResponse>) : null)),
-    USDA_TIMEOUT_MS,
-  );
+  const fetched = await fetchJsonWithTimeout<USDAResponse>(url, USDA_TIMEOUT_MS, 'usda-fdc');
 
   const foods = fetched?.foods ?? [];
   const results: FoodResult[] = [];

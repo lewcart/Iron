@@ -5,6 +5,7 @@ import { Sheet } from '@/components/ui/sheet';
 import { Button } from '@/components/ui/button';
 import { setNutritionTargets } from '@/lib/mutations-nutrition';
 import { useNutritionTargets } from '@/lib/useLocalDB-nutrition';
+import { safeParseNumber } from '@/lib/nutrition-time';
 import type { MacroBands } from '@/db/local';
 
 interface Props {
@@ -66,10 +67,10 @@ export function GoalsSheet({ open, onClose }: Props) {
     setSaving(true);
     try {
       await setNutritionTargets({
-        calories: cal ? parseFloat(cal) : null,
-        protein_g: pro ? parseFloat(pro) : null,
-        carbs_g: carb ? parseFloat(carb) : null,
-        fat_g: fat ? parseFloat(fat) : null,
+        calories: safeParseNumber(cal),
+        protein_g: safeParseNumber(pro),
+        carbs_g: safeParseNumber(carb),
+        fat_g: safeParseNumber(fat),
         bands,
       });
       onClose();
