@@ -690,3 +690,115 @@ export async function getExerciseSessionHistoryLocal(
 
   return { sessions: page, nextCursor };
 }
+
+// ─── Time-mode PRs (longest hold) ────────────────────────────────────────────
+//
+// Mirror of getExerciseProgressLocal but for time-mode exercises. The 1RM
+// helpers and chart treat time-mode exercises as ineligible; this provides
+// the ExerciseDetail hero with a meaningful PB for them: longest single hold.
+
+export interface ExerciseTimePRsLocal {
+  longestHold: {
+    duration_seconds: number;
+    date: string;
+    workout_uuid: string;
+  } | null;
+  totalSeconds: number;
+  /** Sessions where this exercise was logged with at least one time set. Used
+   *  for an analogue of the 1RM chart that plots longest-hold per session. */
+  progress: Array<{
+    date: string;
+    workoutUuid: string;
+    longestHold: number;
+    totalSeconds: number;
+  }>;
+}
+
+export async function getExerciseTimePRsLocal(
+  exerciseUuid: string,
+  since?: Date,
+): Promise<ExerciseTimePRsLocal> {
+  // 'any' mode: time-mode exercise's history merges across duplicate rows.
+  const groupUuids = await resolveCanonicalExerciseUuids(exerciseUuid, 'any');
+  const empty: ExerciseTimePRsLocal = { longestHold: null, totalSeconds: 0, progress: [] };
+  if (groupUuids.size === 0) return empty;
+
+  const allWes = await db.workout_exercises
+    .filter(we => groupUuids.has(we.exercise_uuid.toLowerCase()) && !we._deleted)
+    .toArray();
+  if (allWes.length === 0) return empty;
+
+  const weUuids = allWes.map(we => we.uuid);
+  const allSets = await db.workout_sets
+    .where('workout_exercise_uuid')
+    .anyOf(weUuids)
+    .filter(s => s.is_completed && !s._deleted && s.duration_seconds != null && s.duration_seconds > 0)
+    .toArray();
+  if (allSets.length === 0) return empty;
+
+  const allWorkouts = await db.workouts.toArray();
+  const workoutByUuid = new Map(allWorkouts.map(w => [w.uuid, w]));
+  const weToWorkout = new Map(allWes.map(we => [we.uuid, we.workout_uuid]));
+  const sinceMs = since?.getTime();
+
+  type AnnotatedTimeSet = {
+    duration_seconds: number;
+    workout_uuid: string;
+    date: string;
+  };
+  const annotated: AnnotatedTimeSet[] = [];
+  for (const s of allSets) {
+    const woUuid = weToWorkout.get(s.workout_exercise_uuid);
+    if (!woUuid) continue;
+    const wo = workoutByUuid.get(woUuid);
+    if (!wo || wo._deleted) continue;
+    if (sinceMs != null && new Date(wo.start_time).getTime() < sinceMs) continue;
+    annotated.push({
+      duration_seconds: s.duration_seconds!,
+      workout_uuid: wo.uuid,
+      date: wo.start_time,
+    });
+  }
+  if (annotated.length === 0) return empty;
+
+  // Group by workout for the chart.
+  const byWorkout = new Map<string, AnnotatedTimeSet[]>();
+  for (const s of annotated) {
+    if (!byWorkout.has(s.workout_uuid)) byWorkout.set(s.workout_uuid, []);
+    byWorkout.get(s.workout_uuid)!.push(s);
+  }
+  const progress = [...byWorkout.values()]
+    .map(sets => {
+      const longest = sets.reduce((m, s) => Math.max(m, s.duration_seconds), 0);
+      const total = sets.reduce((sum, s) => sum + s.duration_seconds, 0);
+      return {
+        date: sets[0].date,
+        workoutUuid: sets[0].workout_uuid,
+        longestHold: longest,
+        totalSeconds: total,
+      };
+    })
+    .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+
+  // All-time bests.
+  let longest: AnnotatedTimeSet | null = null;
+  let longestVal = -Infinity;
+  let total = 0;
+  for (const s of annotated) {
+    if (s.duration_seconds > longestVal) {
+      longestVal = s.duration_seconds;
+      longest = s;
+    }
+    total += s.duration_seconds;
+  }
+
+  return {
+    longestHold: longest ? {
+      duration_seconds: longest.duration_seconds,
+      date: longest.date,
+      workout_uuid: longest.workout_uuid,
+    } : null,
+    totalSeconds: total,
+    progress,
+  };
+}

@@ -180,9 +180,12 @@ async function getExerciseHistory(args: Record<string, unknown>) {
 
   const weUuids = sessions.map(s => s.we_uuid);
   const sets = await query<{
-    workout_exercise_uuid: string; weight: number | null; repetitions: number | null;
+    workout_exercise_uuid: string;
+    weight: number | null;
+    repetitions: number | null;
+    duration_seconds: number | null;
   }>(`
-    SELECT workout_exercise_uuid, weight, repetitions
+    SELECT workout_exercise_uuid, weight, repetitions, duration_seconds
     FROM workout_sets
     WHERE workout_exercise_uuid = ANY($1)
       AND is_completed = true
@@ -194,11 +197,42 @@ async function getExerciseHistory(args: Record<string, unknown>) {
     return acc;
   }, {} as Record<string, typeof sets>);
 
+  // Surface tracking_mode so the consumer (an AI agent) knows which fields
+  // are meaningful. Single read for the resolved exercise; tracking_mode
+  // is exercise-level, so the same value applies to every session here.
+  const exerciseRow = await queryOne<{ tracking_mode: string | null }>(
+    'SELECT tracking_mode FROM exercises WHERE uuid = $1',
+    [resolvedUuid]
+  );
+  const trackingMode: 'reps' | 'time' = exerciseRow?.tracking_mode === 'time' ? 'time' : 'reps';
+
   return toolResult(sessions.map(s => {
     const sessionSets = (setsByWe[s.we_uuid] ?? []).map(row => ({
       weight: row.weight,
       reps: row.repetitions,
+      duration_seconds: row.duration_seconds,
     }));
+    if (trackingMode === 'time') {
+      // Time-mode: 1RM is meaningless. Surface longest single hold + total
+      // seconds across the session instead, so the agent gets a comparable
+      // PR-style metric for time-tracked exercises.
+      const longestHold = sessionSets.reduce((max, row) => {
+        const d = row.duration_seconds;
+        return d != null && d > max ? d : max;
+      }, 0);
+      const totalSeconds = sessionSets.reduce(
+        (sum, row) => sum + (row.duration_seconds ?? 0),
+        0,
+      );
+      return {
+        date: s.date,
+        workout_name: s.workout_name,
+        tracking_mode: 'time',
+        sets: sessionSets,
+        longest_hold_seconds: longestHold > 0 ? longestHold : null,
+        total_seconds: totalSeconds > 0 ? totalSeconds : null,
+      };
+    }
     const best1rm = sessionSets.reduce((max, row) => {
       if (row.weight == null || row.reps == null || row.reps === 0) return max;
       // 1 decimal place rounding preserves the historic MCP output format.
@@ -208,6 +242,7 @@ async function getExerciseHistory(args: Record<string, unknown>) {
     return {
       date: s.date,
       workout_name: s.workout_name,
+      tracking_mode: 'reps',
       sets: sessionSets,
       estimated_1rm: best1rm > 0 ? best1rm : null,
     };
@@ -870,7 +905,14 @@ async function addExercise(args: Record<string, unknown>) {
     exercise_id?: string;
     exercise_name?: string;
     order?: number;
-    sets?: Array<{ target_weight?: number; target_reps?: number; max_repetitions?: number; min_repetitions?: number; rpe_target?: number }>;
+    sets?: Array<{
+      target_weight?: number;
+      target_reps?: number;
+      max_repetitions?: number;
+      min_repetitions?: number;
+      rpe_target?: number;
+      target_duration_seconds?: number;
+    }>;
   };
 
   if (!routine_id) return toolError('routine_id is required');
@@ -897,14 +939,15 @@ async function addExercise(args: Record<string, unknown>) {
     const s = sets[si];
     await query(
       `INSERT INTO workout_routine_sets
-         (uuid, workout_routine_exercise_uuid, min_repetitions, max_repetitions, target_weight, rpe_target, order_index)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+         (uuid, workout_routine_exercise_uuid, min_repetitions, max_repetitions, target_weight, rpe_target, target_duration_seconds, order_index)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
       [
         crypto.randomUUID(), reUuid,
         s.min_repetitions ?? null,
         s.max_repetitions ?? s.target_reps ?? null,
         s.target_weight ?? null,
         s.rpe_target ?? null,
+        s.target_duration_seconds ?? null,
         si,
       ]
     );
@@ -928,7 +971,12 @@ async function updateSetTargets(args: Record<string, unknown>) {
   const { routine_uuid, exercise_uuid, sets } = args as {
     routine_uuid: string;
     exercise_uuid: string;
-    sets: Array<{ order_index: number; min_repetitions?: number; max_repetitions?: number }>;
+    sets: Array<{
+      order_index: number;
+      min_repetitions?: number;
+      max_repetitions?: number;
+      target_duration_seconds?: number;
+    }>;
   };
 
   const re = await queryOne<{ uuid: string }>(
@@ -939,12 +987,22 @@ async function updateSetTargets(args: Record<string, unknown>) {
 
   let updated = 0;
   for (const s of sets) {
+    // COALESCE pattern: undefined fields don't overwrite. Mode-aware
+    // callers (time-mode) pass target_duration_seconds and leave reps
+    // null; rep-mode callers do the inverse.
     const result = await query(
       `UPDATE workout_routine_sets
        SET min_repetitions = COALESCE($1, min_repetitions),
-           max_repetitions = COALESCE($2, max_repetitions)
-       WHERE workout_routine_exercise_uuid = $3 AND order_index = $4`,
-      [s.min_repetitions ?? null, s.max_repetitions ?? null, re.uuid, s.order_index]
+           max_repetitions = COALESCE($2, max_repetitions),
+           target_duration_seconds = COALESCE($3, target_duration_seconds)
+       WHERE workout_routine_exercise_uuid = $4 AND order_index = $5`,
+      [
+        s.min_repetitions ?? null,
+        s.max_repetitions ?? null,
+        s.target_duration_seconds ?? null,
+        re.uuid,
+        s.order_index,
+      ]
     );
     if (result.length >= 0) updated++;
   }
@@ -1027,6 +1085,7 @@ async function updateSets(args: Record<string, unknown>) {
       min_repetitions?: number;
       max_repetitions?: number;
       rpe_target?: number;
+      target_duration_seconds?: number;
     }>;
   };
 
@@ -1042,14 +1101,15 @@ async function updateSets(args: Record<string, unknown>) {
     const s = sets[i];
     await query(
       `INSERT INTO workout_routine_sets
-         (uuid, workout_routine_exercise_uuid, min_repetitions, max_repetitions, target_weight, rpe_target, order_index)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+         (uuid, workout_routine_exercise_uuid, min_repetitions, max_repetitions, target_weight, rpe_target, target_duration_seconds, order_index)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
       [
         crypto.randomUUID(), routine_exercise_id,
         s.min_repetitions ?? null,
         s.max_repetitions ?? s.target_reps ?? null,
         s.target_weight ?? null,
         s.rpe_target ?? null,
+        s.target_duration_seconds ?? null,
         i,
       ]
     );
@@ -2212,7 +2272,7 @@ export const tools: MCPTool[] = [
   },
   {
     name: 'update_set_targets',
-    description: 'Updates rep/RPE targets for sets on a specific exercise in a routine.',
+    description: 'Updates rep/RPE/duration targets for sets on a specific exercise in a routine. For time-mode exercises (e.g. plank), pass target_duration_seconds instead of min/max_repetitions.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -2226,6 +2286,7 @@ export const tools: MCPTool[] = [
               order_index: { type: 'number' },
               min_repetitions: { type: 'number' },
               max_repetitions: { type: 'number' },
+              target_duration_seconds: { type: 'number', description: 'Target hold in seconds (time-mode only)' },
             },
             required: ['order_index'],
           },
@@ -2237,7 +2298,7 @@ export const tools: MCPTool[] = [
   },
   {
     name: 'add_exercise',
-    description: 'Adds an exercise (with optional sets) to a specific routine day. Exercise can be specified by name or UUID.',
+    description: 'Adds an exercise (with optional sets) to a specific routine day. Exercise can be specified by name or UUID. For time-mode exercises (e.g. plank), pass target_duration_seconds per set instead of rep targets.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -2255,6 +2316,7 @@ export const tools: MCPTool[] = [
               max_repetitions: { type: 'number' },
               target_weight: { type: 'number', description: 'Target load in kg' },
               rpe_target: { type: 'number', description: 'RPE target (5.0–10.0)' },
+              target_duration_seconds: { type: 'number', description: 'Target hold in seconds (time-mode only)' },
             },
           },
         },
@@ -2295,7 +2357,7 @@ export const tools: MCPTool[] = [
   },
   {
     name: 'update_sets',
-    description: 'Fully replaces all sets for a routine exercise (delete + re-insert). Use routine_exercise_id from get_active_routine or add_exercise.',
+    description: 'Fully replaces all sets for a routine exercise (delete + re-insert). Use routine_exercise_id from get_active_routine or add_exercise. For time-mode exercises (e.g. plank), pass target_duration_seconds per set instead of rep targets.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -2311,6 +2373,7 @@ export const tools: MCPTool[] = [
               max_repetitions: { type: 'number' },
               target_weight: { type: 'number', description: 'Target load in kg' },
               rpe_target: { type: 'number', description: 'RPE target (5.0–10.0)' },
+              target_duration_seconds: { type: 'number', description: 'Target hold in seconds (time-mode only)' },
             },
           },
         },

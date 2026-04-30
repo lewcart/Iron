@@ -1,14 +1,16 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ChevronLeft, Trophy, Medal, Award } from 'lucide-react';
+import { ChevronLeft, Trophy, Medal, Award, Timer } from 'lucide-react';
 import type { Exercise } from '@/types';
 import { useUnit } from '@/context/UnitContext';
 import { apiBase } from '@/lib/api/client';
 import {
   getExerciseProgressLocal,
   getExerciseSessionHistoryLocal,
+  getExerciseTimePRsLocal,
   type ExerciseSessionGroup,
+  type ExerciseTimePRsLocal,
 } from '@/lib/useLocalDB';
 import {
   LineChart,
@@ -137,6 +139,52 @@ function OneRMHero({
   );
 }
 
+/** Time-mode counterpart to OneRMHero. Headline number is the longest hold,
+ *  date is when it was set. Total time across all sessions appears as a
+ *  secondary inline stat — useful as a "tonnage" analogue for time-mode. */
+function LongestHoldHero({
+  longestSeconds,
+  longestDate,
+  totalSeconds,
+}: {
+  longestSeconds: number | null;
+  longestDate: string;
+  totalSeconds: number;
+}) {
+  return (
+    <div className="bg-card border border-border rounded-2xl p-4 flex items-baseline gap-3">
+      <div className="flex-1">
+        <p className="text-xs uppercase text-muted-foreground tracking-wide">Personal Best</p>
+        <div className="flex items-baseline gap-1.5 mt-1">
+          <span className="text-3xl font-bold text-foreground">
+            {longestSeconds != null ? formatDuration(longestSeconds) : '—'}
+          </span>
+        </div>
+        <p className="text-xs text-muted-foreground mt-1">
+          Longest Hold · {longestDate}
+          {totalSeconds > 0 && (
+            <span className="ml-2 text-muted-foreground/70">
+              · {formatDuration(totalSeconds)} total
+            </span>
+          )}
+        </p>
+      </div>
+      <Timer className="h-8 w-8 text-amber-400/80 flex-shrink-0" />
+    </div>
+  );
+}
+
+/** Format a seconds count as the most compact human-readable string.
+ *  60 → "1:00", 75 → "1:15", 3600 → "1:00:00", 9 → "9s". */
+function formatDuration(totalSeconds: number): string {
+  if (totalSeconds < 60) return `${totalSeconds}s`;
+  const h = Math.floor(totalSeconds / 3600);
+  const m = Math.floor((totalSeconds % 3600) / 60);
+  const s = totalSeconds % 60;
+  if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+  return `${m}:${String(s).padStart(2, '0')}`;
+}
+
 function SkeletonBlock({ className }: { className?: string }) {
   return (
     <div className={`bg-muted rounded-lg animate-pulse ${className ?? ''}`} />
@@ -221,6 +269,13 @@ export default function ExerciseDetail({
   const [sessionsServerDone, setSessionsServerDone] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
 
+  // Time-mode PR — only populated for time-mode exercises. Drives the
+  // LongestHoldHero block in place of OneRMHero.
+  const [timePRs, setTimePRs] = useState<ExerciseTimePRsLocal | null>(null);
+
+  const trackingMode = exercise.tracking_mode ?? 'reps';
+  const isTimeMode = trackingMode === 'time';
+
   // Local-first chart + PR data. Compute from Dexie so the modal works
   // offline at the gym. Fall back to server only if Dexie returns empty
   // (catalog hasn't hydrated, etc.) — that's a rare edge case.
@@ -239,14 +294,16 @@ export default function ExerciseDetail({
 
     (async () => {
       try {
-        const local = await getExerciseProgressLocal(exercise.uuid, sinceDate);
+        // Branch by mode: rep-mode reads chart + 1RM PRs; time-mode reads
+        // longest-hold PRs. Session list is mode-agnostic and runs in both.
+        const [local, firstPage, time] = await Promise.all([
+          isTimeMode ? Promise.resolve(null) : getExerciseProgressLocal(exercise.uuid, sinceDate),
+          getExerciseSessionHistoryLocal(exercise.uuid, null, SESSIONS_PER_PAGE),
+          isTimeMode ? getExerciseTimePRsLocal(exercise.uuid, sinceDate) : Promise.resolve(null),
+        ]);
         if (cancelled) return;
 
-        // Initial first-page session load runs alongside the chart compute.
-        const firstPage = await getExerciseSessionHistoryLocal(exercise.uuid, null, SESSIONS_PER_PAGE);
-        if (cancelled) return;
-
-        const serialized: ProgressData = {
+        const serialized: ProgressData = local ? {
           progress: local.progress,
           prs: {
             estimated1RM: local.prs.estimated1RM ? { ...local.prs.estimated1RM, exercise_uuid: exercise.uuid } : null,
@@ -254,11 +311,17 @@ export default function ExerciseDetail({
             mostReps: local.prs.mostReps ? { ...local.prs.mostReps, exercise_uuid: exercise.uuid } : null,
           },
           volumeTrend: local.volumeTrend,
-          // recentSets retained for legacy shape parity but no longer rendered;
-          // session list below replaces the flat table.
+          recentSets: [],
+        } : {
+          // Time-mode: empty rep-shaped fields. The hero + chart branches
+          // off `isTimeMode` so this empty payload never gets rendered.
+          progress: [],
+          prs: { estimated1RM: null, heaviestWeight: null, mostReps: null },
+          volumeTrend: [],
           recentSets: [],
         };
         setProgressData(serialized);
+        setTimePRs(time);
         setSessions(firstPage.sessions);
         setSessionsCursor(firstPage.nextCursor);
         setSessionsExhaustedLocally(firstPage.nextCursor === null);
@@ -274,7 +337,7 @@ export default function ExerciseDetail({
     })();
 
     return () => { cancelled = true; };
-  }, [exercise.uuid, range]);
+  }, [exercise.uuid, range, isTimeMode]);
 
   const loadMoreSessions = useCallback(async () => {
     if (loadingMore) return;
@@ -317,8 +380,11 @@ export default function ExerciseDetail({
   const hasMoreSessions = !sessionsExhaustedLocally || !sessionsServerDone;
 
   // hasData covers the chart/PR section only. The session list manages its
-  // own visibility via the `sessions` array.
-  const hasData = progressData && (progressData.progress.length > 0 || sessions.length > 0);
+  // own visibility via the `sessions` array. Time-mode uses a different
+  // primary-data shape (timePRs.progress) but the same session-list condition.
+  const hasData = isTimeMode
+    ? ((timePRs?.progress.length ?? 0) > 0 || sessions.length > 0)
+    : (progressData != null && (progressData.progress.length > 0 || sessions.length > 0));
   const prWorkoutUuid = progressData?.prs.estimated1RM?.workout_uuid;
 
   const chartData = progressData?.progress.map(p => ({
@@ -372,15 +438,26 @@ export default function ExerciseDetail({
           <EmptyState />
         ) : (
           <>
+            {isTimeMode ? (
+              <LongestHoldHero
+                longestSeconds={timePRs?.longestHold?.duration_seconds ?? null}
+                longestDate={
+                  timePRs?.longestHold
+                    ? formatDate(timePRs.longestHold.date)
+                    : 'No data'
+                }
+                totalSeconds={timePRs?.totalSeconds ?? 0}
+              />
+            ) : (<>
             <OneRMHero
               value={
-                progressData.prs.estimated1RM
+                progressData != null && progressData.prs.estimated1RM
                   ? `${Math.round(toDisplay(progressData.prs.estimated1RM.estimated_1rm))}`
                   : '—'
               }
               unit={label}
               date={
-                progressData.prs.estimated1RM
+                progressData != null && progressData.prs.estimated1RM
                   ? formatDate(progressData.prs.estimated1RM.date)
                   : 'No data'
               }
@@ -391,12 +468,12 @@ export default function ExerciseDetail({
                 icon={<Medal className="h-4 w-4" />}
                 label="Heaviest"
                 value={
-                  progressData.prs.heaviestWeight
+                  progressData != null && progressData.prs.heaviestWeight
                     ? `${toDisplay(progressData.prs.heaviestWeight.weight)} ${label}`
                     : '—'
                 }
                 sub={
-                  progressData.prs.heaviestWeight
+                  progressData != null && progressData.prs.heaviestWeight
                     ? formatDate(progressData.prs.heaviestWeight.date)
                     : 'No data'
                 }
@@ -405,19 +482,20 @@ export default function ExerciseDetail({
                 icon={<Award className="h-4 w-4" />}
                 label="Most Reps"
                 value={
-                  progressData.prs.mostReps
+                  progressData != null && progressData.prs.mostReps
                     ? `${progressData.prs.mostReps.repetitions}`
                     : '—'
                 }
                 sub={
-                  progressData.prs.mostReps
+                  progressData != null && progressData.prs.mostReps
                     ? `@ ${toDisplay(progressData.prs.mostReps.weight)} ${label}`
                     : 'No data'
                 }
               />
             </div>
+            </>)}
 
-            {chartData.length > 0 && (
+            {!isTimeMode && chartData.length > 0 && (
               <div>
                 <div className="flex items-center justify-between mb-2 px-1">
                   <p className="text-xs font-semibold text-primary uppercase tracking-wide">Weight Progress</p>
@@ -492,7 +570,7 @@ export default function ExerciseDetail({
               </div>
             )}
 
-            {volumeData.length > 0 && (
+            {!isTimeMode && volumeData.length > 0 && (
               <div>
                 <p className="text-xs font-semibold text-primary uppercase tracking-wide mb-2 px-1">Volume Trend</p>
                 <div className="bg-card border border-border rounded-xl p-3">

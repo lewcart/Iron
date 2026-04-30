@@ -273,6 +273,7 @@ export async function updateRoutineSet(
   patch: {
     min_repetitions?: number | null;
     max_repetitions?: number | null;
+    target_duration_seconds?: number | null;
     tag?: 'dropSet' | null;
     comment?: string | null;
   },
@@ -280,6 +281,7 @@ export async function updateRoutineSet(
   const changes: Partial<LocalWorkoutRoutineSet> = { ...syncMeta() };
   if (patch.min_repetitions !== undefined) changes.min_repetitions = patch.min_repetitions;
   if (patch.max_repetitions !== undefined) changes.max_repetitions = patch.max_repetitions;
+  if (patch.target_duration_seconds !== undefined) changes.target_duration_seconds = patch.target_duration_seconds;
   if (patch.tag !== undefined) changes.tag = patch.tag;
   if (patch.comment !== undefined) changes.comment = patch.comment;
   await db.workout_routine_sets.update(uuid, changes);
