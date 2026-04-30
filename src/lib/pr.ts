@@ -129,6 +129,9 @@ export function calculateTimePRs(sets: TimePRSet[]): TimePRResult {
   let total = 0;
 
   for (const set of sets) {
+    // Zero / negative durations don't qualify as "holds" — skip them so a
+    // logged-but-immediately-cancelled set doesn't show up as a PB.
+    if (set.duration_seconds <= 0) continue;
     if (set.duration_seconds > longestValue) {
       longestValue = set.duration_seconds;
       longestSet = set;

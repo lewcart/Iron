@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { ChevronLeft, Trophy, Medal, Award } from 'lucide-react';
 import type { Exercise } from '@/types';
 import { useUnit } from '@/context/UnitContext';
@@ -194,12 +194,13 @@ export default function ExerciseDetail({
   const [loading, setLoading] = useState(true);
   const [range, setRange] = useState<Range>('all');
 
-  // Materialize Recharts colors from CSS vars at render time so charts
-  // adapt to light/dark mode along with everything else. range dep means
-  // a re-fetch trigger refreshes them — and a theme-toggle within the
-  // session would need to also rerender, which existing flows already do.
+  // Materialize Recharts colors from CSS vars on every render so charts
+  // pick up theme switches immediately. Cheap: getComputedStyle is sub-ms
+  // and there's no need to memoize against a stale dep — the previous
+  // [range]-keyed memo missed dark/light toggles, since theme changes
+  // don't trigger range to update.
   const rootRef = useRef<HTMLDivElement | null>(null);
-  const chartTheme = useMemo(() => ({
+  const chartTheme = {
     grid: readCssVarColor('--border', '#e5e7eb'),
     axis: readCssVarColor('--muted-foreground', '#6b7280'),
     tooltipBg: readCssVarColor('--card', '#ffffff'),
@@ -209,8 +210,7 @@ export default function ExerciseDetail({
     lineWeight: '#10b981',
     bar: '#3b82f6',
     pr: '#f59e0b',
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }), [range]);
+  };
 
   // Session-grouped history, paginated. Lives separately from the chart
   // data so chart-range changes don't invalidate the session list.

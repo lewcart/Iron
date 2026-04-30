@@ -439,16 +439,31 @@ export interface ExerciseProgressLocal {
 
 /** Returns the canonical group of exercise UUIDs that match the given UUID,
  *  per the same dedup rules as the server (everkinetic_id when > 0, title
- *  fallback otherwise). Filters to rep-mode exercises only. */
-async function resolveCanonicalExerciseUuids(exerciseUuid: string): Promise<Set<string>> {
+ *  fallback otherwise).
+ *
+ *  modeFilter:
+ *    - 'reps' (default): used by 1RM-eligible queries (chart/PR/volume).
+ *      Time-mode duplicates are excluded so plank reps can never bleed into
+ *      bench-press 1RM stats.
+ *    - 'any': used by session-history reads, where time-mode exercises need
+ *      to merge their own duplicates (e.g. two "Plank" rows from catalog +
+ *      custom both contribute their hold history). */
+async function resolveCanonicalExerciseUuids(
+  exerciseUuid: string,
+  modeFilter: 'reps' | 'any' = 'reps',
+): Promise<Set<string>> {
   const target = await db.exercises.get(exerciseUuid.toLowerCase());
   if (!target) return new Set([exerciseUuid.toLowerCase()]);
 
+  const targetMode = target.tracking_mode ?? 'reps';
   const all = await db.exercises.toArray();
   const out = new Set<string>();
   for (const e of all) {
     const mode = e.tracking_mode ?? 'reps';
-    if (mode !== 'reps') continue;
+    if (modeFilter === 'reps' && mode !== 'reps') continue;
+    // For 'any' mode, group by mode parity so a reps-mode "Plank" never
+    // merges with a time-mode "Plank" — they're conceptually different.
+    if (modeFilter === 'any' && mode !== targetMode) continue;
     if (target.everkinetic_id > 0 && e.everkinetic_id === target.everkinetic_id) {
       out.add(e.uuid.toLowerCase());
     } else if (target.everkinetic_id === 0 && e.title === target.title) {
@@ -591,7 +606,9 @@ export async function getExerciseSessionHistoryLocal(
   cursor: string | null,
   limit = 10,
 ): Promise<{ sessions: ExerciseSessionGroup[]; nextCursor: string | null }> {
-  const groupUuids = await resolveCanonicalExerciseUuids(exerciseUuid);
+  // Session-history reads use 'any' mode: a time-mode plank's history needs
+  // to merge across duplicate plank rows even though they're not 1RM-eligible.
+  const groupUuids = await resolveCanonicalExerciseUuids(exerciseUuid, 'any');
   if (groupUuids.size === 0) return { sessions: [], nextCursor: null };
 
   let cursorTime: number | null = null;
