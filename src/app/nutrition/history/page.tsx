@@ -8,7 +8,7 @@ import { rebirthJsonHeaders } from '@/lib/api/headers';
 import { useNutritionTargets } from '@/lib/useLocalDB-nutrition';
 import { computeDayAdherence, DEFAULT_BANDS } from '@/lib/adherence';
 import { formatDateLabel, todayLocal } from '@/lib/nutrition-time';
-import type { HistoryDay } from '@/app/api/nutrition/history/route';
+import type { HistoryDay } from '@/lib/nutrition-history-types';
 import type { MacroBands } from '@/db/local';
 
 const RANGES = ['7d', '30d', '90d', 'all'] as const;

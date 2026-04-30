@@ -23,17 +23,11 @@ interface TargetsRow {
   bands: MacroBands | null;
 }
 
-export interface SummaryDay {
-  date: string;
-  calories: number | null;
-  protein_g: number | null;
-  carbs_g: number | null;
-  fat_g: number | null;
-  hit_count: number;
-  target_count: number;
-  has_data: boolean;
-  approved_status: 'pending' | 'approved';
-}
+// Source of truth lives in src/lib/nutrition-history-types.ts so the
+// Capacitor build can import it from client code (cap build moves
+// src/app/api out of the tree before next build).
+export type { SummaryDay } from '@/lib/nutrition-history-types';
+import type { SummaryDay } from '@/lib/nutrition-history-types';
 
 function num(v: string | number | null | undefined): number | null {
   if (v == null) return null;

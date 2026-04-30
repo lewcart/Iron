@@ -8,7 +8,7 @@ import { logMeal } from '@/lib/mutations-nutrition';
 import { rebirthJsonHeaders } from '@/lib/api/headers';
 import { safeParseNumber } from '@/lib/nutrition-time';
 import type { MealSlot } from './MealSection';
-import type { FoodResult } from '@/app/api/nutrition/foods/route';
+import type { FoodResult } from '@/lib/nutrition-history-types';
 
 interface Props {
   open: boolean;

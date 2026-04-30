@@ -19,18 +19,10 @@ import { searchOpenFoodFacts, searchUsdaFdc } from '@/lib/food-search-remote';
  * food shows up as a Layer-1 hit on the next search.
  */
 
-export interface FoodResult {
-  source: 'local' | 'off' | 'usda';
-  food_name: string;
-  serving_size: { qty: number; unit: string } | null;
-  calories: number | null;
-  protein_g: number | null;
-  carbs_g: number | null;
-  fat_g: number | null;
-  nutrients: Record<string, unknown> | null;
-  external_id: string | null;
-  meta: { times_logged?: number; last_logged_at?: string } | null;
-}
+// Source of truth lives in src/lib/nutrition-history-types.ts so the
+// Capacitor build can import it from client code.
+export type { FoodResult } from '@/lib/nutrition-history-types';
+import type { FoodResult } from '@/lib/nutrition-history-types';
 
 interface CanonicalRow {
   food_name: string;

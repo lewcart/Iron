@@ -12,7 +12,7 @@ import {
   CartesianGrid,
 } from 'recharts';
 import { rebirthJsonHeaders } from '@/lib/api/headers';
-import type { SummaryDay } from '@/app/api/nutrition/summary/route';
+import type { SummaryDay } from '@/lib/nutrition-history-types';
 import type { MacroBands } from '@/db/local';
 
 const RANGES = ['week', 'month', 'all'] as const;

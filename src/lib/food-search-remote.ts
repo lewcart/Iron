@@ -9,7 +9,7 @@
  * tank the search response.
  */
 
-import type { FoodResult } from '@/app/api/nutrition/foods/route';
+import type { FoodResult } from '@/lib/nutrition-history-types';
 
 const OFF_TIMEOUT_MS = 1500;
 const USDA_TIMEOUT_MS = 1500;
