@@ -3,18 +3,22 @@
 // open library and bundle them into public/exercise-images/{uuid}/.
 //
 // The everkinetic-data repo (github.com/everkinetic/data) hosts exercise
-// images at a stable raw.githubusercontent.com URL pattern. Each exercise
-// has a few frames showing different phases of the movement. This script:
+// images at:
+//   https://raw.githubusercontent.com/everkinetic/data/main/dist/png/{padded4}-relaxation.png
+//   https://raw.githubusercontent.com/everkinetic/data/main/dist/png/{padded4}-tension.png
 //
+// Two frames per exercise: relaxation (start position) + tension (peak/end).
+// {padded4} is the everkinetic_id zero-padded to 4 digits ("0006", "0284").
+//
+// This script:
 //   1. Reads public/exercises-catalog.json
 //   2. For each is_custom=false row with a valid everkinetic_id (>0)
-//   3. Probes the URL for frame 0, 1, 2 (continues until 404)
-//   4. Downloads each frame, resizes to 600×800 portrait JPEG q75 via sharp
-//   5. Saves to public/exercise-images/{uuid}/{01,02,03}.jpg
-//   6. Records the count in scripts/data/exercise-image-manifest.json
-//
-// Override the everkinetic URL pattern via env if the repo layout changes:
-//   EVERKINETIC_URL_TMPL='https://raw.githubusercontent.com/.../{id}/{frame}.jpg'
+//   3. Tries to download both frames
+//   4. If both succeed: resize to 600×800 portrait JPEG q75 via sharp,
+//      save to public/exercise-images/{uuid}/{01,02}.jpg
+//   5. Records image_count=2 in scripts/data/exercise-image-manifest.json
+//   6. Skips silently when neither frame is available (catalog gap; AI gen
+//      can fill these via gen-exercise-images.mjs).
 //
 // Usage:
 //   node scripts/fetch-everkinetic-images.mjs              # all rows
@@ -33,11 +37,13 @@ const CATALOG_PATH = join(ROOT, 'public/exercises-catalog.json');
 const IMAGES_DIR = join(ROOT, 'public/exercise-images');
 const MANIFEST_PATH = join(ROOT, 'scripts/data/exercise-image-manifest.json');
 
-const URL_TMPL = process.env.EVERKINETIC_URL_TMPL
-  ?? 'https://raw.githubusercontent.com/everkinetic/data/master/exercises/{id}/0.jpg';
+const URL_BASE = 'https://raw.githubusercontent.com/everkinetic/data/main/dist/png';
+// Frame keys to fetch in order. Maps to 01.jpg, 02.jpg in the output dir.
+const FRAME_KEYS = ['relaxation', 'tension'];
 
-function buildUrl(everkineticId, frame) {
-  return URL_TMPL.replace('{id}', String(everkineticId)).replace('{frame}', String(frame));
+function buildUrl(everkineticId, key) {
+  const padded = String(everkineticId).padStart(4, '0');
+  return `${URL_BASE}/${padded}-${key}.png`;
 }
 
 const args = process.argv.slice(2);
@@ -60,38 +66,35 @@ const rows = catalog
   .filter(ex => !onlyUuid || ex.uuid === onlyUuid)
   .slice(0, limit);
 
-console.log(`Processing ${rows.length} exercises (URL_TMPL=${URL_TMPL})`);
+console.log(`Processing ${rows.length} exercises from everkinetic-data...`);
 
+const CONCURRENCY = 12;
 let processed = 0;
 let withImages = 0;
 let skipped = 0;
 
-for (const ex of rows) {
-  const dir = join(IMAGES_DIR, ex.uuid);
+async function processOne(ex) {
   if (manifest[ex.uuid] && manifest[ex.uuid] > 0) {
     skipped++;
-    continue;
+    return;
   }
-
+  const dir = join(IMAGES_DIR, ex.uuid);
   const frames = [];
-  // Probe frames 0,1,2. Stop on first 404.
-  for (let f = 0; f < 3; f++) {
-    const url = buildUrl(ex.everkinetic_id, f);
+  for (const key of FRAME_KEYS) {
+    const url = buildUrl(ex.everkinetic_id, key);
     let res;
     try {
       res = await fetch(url);
     } catch {
-      break;
+      continue;
     }
-    if (!res.ok) break;
+    if (!res.ok) continue;
     const buf = Buffer.from(await res.arrayBuffer());
     frames.push(buf);
   }
 
-  if (frames.length === 0) {
-    console.log(`  ${ex.uuid} (${ex.title}): no frames`);
-    continue;
-  }
+  processed++;
+  if (frames.length === 0) return;
 
   mkdirSync(dir, { recursive: true });
   for (let i = 0; i < frames.length; i++) {
@@ -104,12 +107,18 @@ for (const ex of rows) {
 
   manifest[ex.uuid] = frames.length;
   withImages++;
-  if (++processed % 25 === 0) {
-    console.log(`  …${processed} processed, ${withImages} got images`);
+}
+
+// Process in batches of CONCURRENCY for parallelism without DOS'ing GitHub.
+for (let i = 0; i < rows.length; i += CONCURRENCY) {
+  const batch = rows.slice(i, i + CONCURRENCY);
+  await Promise.all(batch.map(processOne));
+  if (i % (CONCURRENCY * 10) === 0 && i > 0) {
+    console.log(`  …${processed}/${rows.length} processed, ${withImages} got images`);
     writeFileSync(MANIFEST_PATH, JSON.stringify(manifest, null, 2));
   }
 }
 
 writeFileSync(MANIFEST_PATH, JSON.stringify(manifest, null, 2));
-console.log(`\nDone. processed=${processed} with-images=${withImages} skipped=${skipped}`);
+console.log(`\nDone. processed=${processed} with-images=${withImages} skipped=${skipped} no-images=${processed - withImages}`);
 console.log(`Manifest: ${MANIFEST_PATH}`);
