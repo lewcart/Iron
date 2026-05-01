@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { ChevronRight } from 'lucide-react';
+import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { MacroBar } from '@/components/ui/macro-bar';
 import { rebirthJsonHeaders } from '@/lib/api/headers';
 import { useNutritionTargets } from '@/lib/useLocalDB-nutrition';
@@ -41,7 +41,12 @@ export default function NutritionHistoryPage() {
   return (
     <div className="tab-content max-w-3xl mx-auto px-4 pt-4 pb-24">
       <header className="mb-3 flex items-center justify-between">
-        <h1 className="text-heading">History</h1>
+        <div className="flex items-center gap-2">
+          <Link href="/nutrition" className="text-primary p-1 -ml-1">
+            <ChevronLeft className="h-5 w-5" />
+          </Link>
+          <h1 className="text-heading">History</h1>
+        </div>
         <div className="flex gap-1">
           {RANGES.map((r) => (
             <button

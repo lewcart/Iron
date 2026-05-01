@@ -1,7 +1,8 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { ChevronRight, Plus, Search, X } from 'lucide-react';
+import Link from 'next/link';
+import { ChevronLeft, ChevronRight, Plus, Search, X } from 'lucide-react';
 import type { Exercise } from '@/types';
 import { exerciseMatchesMuscleGroup } from '@/lib/muscle-groups';
 import { useExercises } from '@/lib/useLocalDB';
@@ -191,7 +192,12 @@ export default function ExercisesPage() {
       )}
       <div className="px-4 pt-safe pb-3">
         <div className="flex items-center justify-between mb-3">
-          <h1 className="text-2xl font-bold">Exercises</h1>
+          <div className="flex items-center gap-2">
+            <Link href="/workout" className="text-primary p-1 -ml-1">
+              <ChevronLeft className="h-5 w-5" />
+            </Link>
+            <h1 className="text-2xl font-bold">Exercises</h1>
+          </div>
           <button
             onClick={() => setShowCreateForm(true)}
             className="flex items-center gap-1.5 px-3 py-1.5 bg-primary text-primary-foreground text-sm font-medium rounded-full"
