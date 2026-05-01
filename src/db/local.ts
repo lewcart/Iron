@@ -69,6 +69,8 @@ export interface LocalWorkoutSet extends SyncMeta {
   min_target_reps: number | null;
   max_target_reps: number | null;
   rpe: number | null;
+  /** Reps in Reserve (0–5). 0=failure, 5=5+ left. NULL=not recorded. */
+  rir: number | null;
   tag: 'dropSet' | 'failure' | null;
   comment: string | null;
   is_completed: boolean;
@@ -656,6 +658,12 @@ export class IronDB extends Dexie {
       await tx.table('exercises').clear();
       await tx.table('_meta').delete('exercises_hydrated_at');
     });
+
+    // v12: Reps in Reserve (mirrors Postgres migration 028).
+    // workout_sets.rir is purely additive — Dexie tolerates the undefined
+    // field on existing rows, sync overwrites with the server value (NULL
+    // for un-logged sets) on next pull. No upgrade hook needed.
+    this.version(12).stores(v11Stores);
   }
 }
 

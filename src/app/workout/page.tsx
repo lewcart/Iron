@@ -762,6 +762,7 @@ function SetRow({
   trackingMode,
   onUpdate,
   onUpdateDuration,
+  onUpdateRir,
   onDelete,
   allTimeBest1RM,
 }: {
@@ -771,6 +772,7 @@ function SetRow({
   trackingMode: 'reps' | 'time';
   onUpdate: (weUuid: string, setUuid: string, weight: number, reps: number) => Promise<void>;
   onUpdateDuration: (weUuid: string, setUuid: string, durationSeconds: number) => Promise<void>;
+  onUpdateRir: (setUuid: string, rir: number | null) => Promise<void>;
   onDelete: (setUuid: string) => Promise<void>;
   allTimeBest1RM?: number | null;
 }) {
@@ -889,9 +891,43 @@ function SetRow({
     </div>
   );
 
+  // RIR chip strip — visible only after the set is completed. Reps in Reserve
+  // 0–5 (0 = went to failure, 5 = 5+ left in tank). Tap to toggle/clear; pre-
+  // completion the strip is hidden to keep the input row uncluttered. Phase 3
+  // weights this for effective_set_count, but the data is collected here.
+  const rirStrip = completed ? (
+    <div className="flex items-center gap-1 pb-1.5 px-3 pl-10">
+      <span className="text-[10px] text-muted-foreground mr-1">RIR</span>
+      {[0, 1, 2, 3, 4, 5].map(n => {
+        const active = set.rir === n;
+        return (
+          <button
+            type="button"
+            key={n}
+            onClick={async () => {
+              await onUpdateRir(set.uuid, active ? null : n);
+            }}
+            className={
+              'w-6 h-6 rounded-full text-[11px] font-medium transition-colors ' +
+              (active
+                ? 'bg-primary text-primary-foreground'
+                : 'bg-secondary text-muted-foreground hover:bg-primary/15')
+            }
+            aria-label={`RIR ${n}${active ? ' (selected — tap to clear)' : ''}`}
+          >
+            {n}
+          </button>
+        );
+      })}
+    </div>
+  ) : null;
+
   return (
     <SwipeToDelete onDelete={() => onDelete(set.uuid)}>
-      {inner}
+      <div>
+        {inner}
+        {rirStrip}
+      </div>
     </SwipeToDelete>
   );
 }
@@ -918,6 +954,7 @@ function SortableExerciseCard({
   onAddSet,
   onUpdateSet,
   onUpdateSetDuration,
+  onUpdateSetRir,
   onDeleteSet,
   onShowInfo,
 }: {
@@ -928,6 +965,7 @@ function SortableExerciseCard({
   onAddSet: () => void;
   onUpdateSet: (workoutExerciseUuid: string, setUuid: string, weight: number, reps: number) => Promise<void>;
   onUpdateSetDuration: (workoutExerciseUuid: string, setUuid: string, durationSeconds: number) => Promise<void>;
+  onUpdateSetRir: (setUuid: string, rir: number | null) => Promise<void>;
   onDeleteSet: (uuid: string) => Promise<void>;
   onShowInfo: () => void;
 }) {
@@ -1030,6 +1068,7 @@ function SortableExerciseCard({
               trackingMode={we.exercise?.tracking_mode ?? 'reps'}
               onUpdate={onUpdateSet}
               onUpdateDuration={onUpdateSetDuration}
+              onUpdateRir={onUpdateSetRir}
               onDelete={onDeleteSet}
               allTimeBest1RM={allTimeBest1RM}
             />
@@ -1290,6 +1329,7 @@ export default function WorkoutPage() {
               min_target_reps: s.min_target_reps,
               max_target_reps: s.max_target_reps,
               rpe: null,
+              rir: null,
               tag: s.tag as 'dropSet' | 'failure' | null,
               comment: s.comment,
               is_completed: false,
@@ -1383,6 +1423,10 @@ export default function WorkoutPage() {
     }
 
     setShowExercises(false);
+  };
+
+  const updateSetRir = async (setUuid: string, rir: number | null) => {
+    await mutUpdateSet(setUuid, { rir });
   };
 
   const updateSet = async (workoutExerciseUuid: string, setUuid: string, weight: number, reps: number) => {
@@ -1605,6 +1649,7 @@ export default function WorkoutPage() {
                       onAddSet={() => handleAddSet(we)}
                       onUpdateSet={updateSet}
                       onUpdateSetDuration={updateSetDuration}
+                      onUpdateSetRir={updateSetRir}
                       onDeleteSet={mutDeleteSet}
                       onShowInfo={() => setInfoExercise(we.exercise as unknown as Exercise)}
                     />

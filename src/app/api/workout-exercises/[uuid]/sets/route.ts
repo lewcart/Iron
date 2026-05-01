@@ -49,6 +49,7 @@ export async function POST(
       weight: body.weight,
       repetitions: body.repetitions,
       rpe: body.rpe,
+      rir: body.rir,
       isCompleted: body.isCompleted,
     });
 
@@ -66,6 +67,7 @@ export async function POST(
       weight: body.weight,
       repetitions: body.repetitions,
       rpe: body.rpe,
+      rir: body.rir,
       tag: body.tag,
     });
 

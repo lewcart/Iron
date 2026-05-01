@@ -59,7 +59,8 @@ Canonical muscle taxonomy: 18 slugs. Always use canonical slugs (`chest`, `lats`
 - **"Find a glute exercise"** → `find_exercises({ query: 'romanian deadlift', muscle_group: 'glutes' })` — `muscle_group` accepts canonical slugs OR legacy synonyms.
 
 Set quality:
-- Phase 1 ships set counts only. RIR (reps in reserve, 0–5) collection arrives in Phase 2; effective-set weighting in Phase 3.
 - A working set = `is_completed=true AND (reps>=1 OR duration_seconds>0)`. Drop sets count as 1 each. Each set credits BOTH primary AND secondary muscles (full credit, not fractional).
+- **RIR (Reps in Reserve, 0–5)** is collected per-set in the workout UI as a chip strip below each completed set row (0=failure, 5=5+ left). Stored on `workout_sets.rir`. NULL = not recorded.
+- **`effective_set_count`** (Phase 3) is the RIR-weighted variant on every `get_sets_per_muscle` row and `get_weekly_summary.by_muscle` row: RIR 0–3 counts 1.0, RIR 4 counts 0.5, RIR 5+ counts 0.0, RIR NULL counts 1.0 (charitable default until corpus exists). Until RIR is logged on most sets, `effective_set_count ≈ set_count`. The /feed Muscles This Week tile flags a muscle with a "JUNK" badge when `effective / set_count < 0.6` AND `set_count > 0` — meaning most logged sets were too far from failure to drive hypertrophy.
 
 `coverage` flag on `get_sets_per_muscle` rows: `'none'` means no exercise in the catalog tags this muscle (yet — the audit pass will populate). Until then those muscles can't accumulate sets. UI collapses them into a footer.

@@ -50,7 +50,9 @@ export interface WorkoutSet {
   repetitions: number | null;
   min_target_reps: number | null;
   max_target_reps: number | null;
-  rpe: number | null; // 7.0-10.0 by 0.5
+  rpe: number | null; // 7.0-10.0 by 0.5 (legacy; UI does not collect)
+  /** Reps in Reserve (0–5). 0=failure, 5=5+ left. NULL=not recorded. */
+  rir: number | null;
   tag: 'dropSet' | 'failure' | null;
   comment: string | null;
   is_completed: boolean;

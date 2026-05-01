@@ -123,7 +123,7 @@ export async function removeExerciseFromWorkout(uuid: string): Promise<void> {
 
 export async function addSet(
   workout_exercise_uuid: string,
-  data: Partial<Pick<LocalWorkoutSet, 'weight' | 'repetitions' | 'min_target_reps' | 'max_target_reps' | 'rpe' | 'tag'>>,
+  data: Partial<Pick<LocalWorkoutSet, 'weight' | 'repetitions' | 'min_target_reps' | 'max_target_reps' | 'rpe' | 'rir' | 'tag'>>,
   order_index: number,
 ): Promise<string> {
   const id = genUUID();
@@ -135,6 +135,7 @@ export async function addSet(
     min_target_reps: data.min_target_reps ?? null,
     max_target_reps: data.max_target_reps ?? null,
     rpe: data.rpe ?? null,
+    rir: data.rir ?? null,
     tag: data.tag ?? null,
     comment: null,
     is_completed: false,
