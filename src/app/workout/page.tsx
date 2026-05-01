@@ -762,6 +762,8 @@ function SetRow({
   trackingMode,
   onUpdate,
   onUpdateDuration,
+  onEdit,
+  onEditDuration,
   onUpdateRir,
   onDelete,
   allTimeBest1RM,
@@ -772,6 +774,8 @@ function SetRow({
   trackingMode: 'reps' | 'time';
   onUpdate: (weUuid: string, setUuid: string, weight: number, reps: number) => Promise<void>;
   onUpdateDuration: (weUuid: string, setUuid: string, durationSeconds: number) => Promise<void>;
+  onEdit: (weUuid: string, setUuid: string, weight: number, reps: number) => Promise<void>;
+  onEditDuration: (weUuid: string, setUuid: string, durationSeconds: number) => Promise<void>;
   onUpdateRir: (setUuid: string, rir: number | null) => Promise<void>;
   onDelete: (setUuid: string) => Promise<void>;
   allTimeBest1RM?: number | null;
@@ -810,6 +814,24 @@ function SetRow({
   };
 
   const completed = set.is_completed;
+
+  // Persist edits to weight/reps/duration after a set is already completed.
+  // Without this, the inputs stay editable but changes never reach Dexie/sync,
+  // so the next session pulls the stale values.
+  const handleRepsBlur = async () => {
+    if (!completed || trackingMode !== 'reps') return;
+    const weightKg = fromInput(parseFloat(weight) || 0);
+    const repsInt = parseInt(reps) || 0;
+    if (weightKg === (set.weight ?? 0) && repsInt === (set.repetitions ?? 0)) return;
+    await onEdit(workoutExerciseUuid, set.uuid, weightKg, repsInt);
+  };
+
+  const handleDurationBlur = async () => {
+    if (!completed || trackingMode !== 'time') return;
+    const seconds = parseInt(duration) || 0;
+    if (seconds === (set.duration_seconds ?? 0)) return;
+    await onEditDuration(workoutExerciseUuid, set.uuid, seconds);
+  };
   const isPR = set.is_pr;
   const showPD = isPR || isLivePD;
 
@@ -835,6 +857,7 @@ function SetRow({
             value={duration}
             onChange={e => setDuration(e.target.value)}
             onFocus={e => { e.target.scrollIntoView({ behavior: 'smooth', block: 'center' }); e.target.select(); }}
+            onBlur={handleDurationBlur}
             className="w-full text-right text-sm font-medium bg-transparent outline-none min-h-[36px]"
           />
           <span className="text-[10px] text-muted-foreground">sec</span>
@@ -849,6 +872,7 @@ function SetRow({
               value={weight}
               onChange={e => setWeight(e.target.value)}
               onFocus={e => { e.target.scrollIntoView({ behavior: 'smooth', block: 'center' }); e.target.select(); }}
+              onBlur={handleRepsBlur}
               className="w-full text-right text-sm font-medium bg-transparent outline-none min-h-[36px]"
             />
             <span className="text-[10px] text-muted-foreground">{label}</span>
@@ -864,6 +888,7 @@ function SetRow({
               value={reps}
               onChange={e => setReps(e.target.value)}
               onFocus={e => { e.target.scrollIntoView({ behavior: 'smooth', block: 'center' }); e.target.select(); }}
+              onBlur={handleRepsBlur}
               className="w-full text-right text-sm font-medium bg-transparent outline-none min-h-[36px]"
             />
             <span className="text-[10px] text-muted-foreground">reps</span>
@@ -974,6 +999,8 @@ function SortableExerciseCard({
   onAddSet,
   onUpdateSet,
   onUpdateSetDuration,
+  onEditSet,
+  onEditSetDuration,
   onUpdateSetRir,
   onDeleteSet,
   onShowInfo,
@@ -985,6 +1012,8 @@ function SortableExerciseCard({
   onAddSet: () => void;
   onUpdateSet: (workoutExerciseUuid: string, setUuid: string, weight: number, reps: number) => Promise<void>;
   onUpdateSetDuration: (workoutExerciseUuid: string, setUuid: string, durationSeconds: number) => Promise<void>;
+  onEditSet: (workoutExerciseUuid: string, setUuid: string, weight: number, reps: number) => Promise<void>;
+  onEditSetDuration: (workoutExerciseUuid: string, setUuid: string, durationSeconds: number) => Promise<void>;
   onUpdateSetRir: (setUuid: string, rir: number | null) => Promise<void>;
   onDeleteSet: (uuid: string) => Promise<void>;
   onShowInfo: () => void;
@@ -1088,6 +1117,8 @@ function SortableExerciseCard({
               trackingMode={we.exercise?.tracking_mode ?? 'reps'}
               onUpdate={onUpdateSet}
               onUpdateDuration={onUpdateSetDuration}
+              onEdit={onEditSet}
+              onEditDuration={onEditSetDuration}
               onUpdateRir={onUpdateSetRir}
               onDelete={onDeleteSet}
               allTimeBest1RM={allTimeBest1RM}
@@ -1468,6 +1499,13 @@ export default function WorkoutPage() {
     // Note: PR detection happens server-side after sync; is_pr updates via pull
   };
 
+  // Persist edits to an already-completed set without flipping completion or
+  // restarting the rest timer. Fires from input onBlur in SetRow when the user
+  // tweaks weight/reps after ticking a set off.
+  const editSet = async (_workoutExerciseUuid: string, setUuid: string, weight: number, reps: number) => {
+    await mutUpdateSet(setUuid, { weight, repetitions: reps });
+  };
+
   // Time-mode counterpart. Writes duration_seconds; weight + repetitions
   // stay null. Same auto-rest-timer behavior so workflow is consistent.
   const updateSetDuration = async (workoutExerciseUuid: string, setUuid: string, durationSeconds: number) => {
@@ -1482,6 +1520,10 @@ export default function WorkoutPage() {
         : undefined;
       restTimer.start(defaultRest, { exerciseName, setNumber });
     }
+  };
+
+  const editSetDuration = async (_workoutExerciseUuid: string, setUuid: string, durationSeconds: number) => {
+    await mutUpdateSet(setUuid, { duration_seconds: durationSeconds });
   };
 
   const handleAddSet = async (we: LocalWorkoutExerciseEntry) => {
@@ -1688,6 +1730,8 @@ export default function WorkoutPage() {
                       onAddSet={() => handleAddSet(we)}
                       onUpdateSet={updateSet}
                       onUpdateSetDuration={updateSetDuration}
+                      onEditSet={editSet}
+                      onEditSetDuration={editSetDuration}
                       onUpdateSetRir={updateSetRir}
                       onDeleteSet={mutDeleteSet}
                       onShowInfo={() => setInfoExercise(we.exercise as unknown as Exercise)}
