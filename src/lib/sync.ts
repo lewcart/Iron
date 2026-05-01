@@ -27,6 +27,9 @@ import type {
   LocalDysphoriaLog,
   LocalClothesTestLog,
   LocalProgressPhoto,
+  LocalBodyVision,
+  LocalBodyPlan,
+  LocalPlanCheckpoint,
 } from '@/db/local';
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
@@ -46,6 +49,8 @@ const SYNCED_TABLES = [
   'workout_plans', 'workout_routines', 'workout_routine_exercises', 'workout_routine_sets',
   // Body
   'bodyweight_logs', 'body_spec_logs', 'measurement_logs', 'inbody_scans', 'body_goals',
+  // Strategic layer (vision before plan — plan FK references vision; plan before checkpoint — checkpoint FK references plan)
+  'body_vision', 'body_plan', 'plan_checkpoint',
   // Nutrition
   'nutrition_logs', 'nutrition_week_meals', 'nutrition_day_notes', 'nutrition_targets',
   // HRT timeline periods
@@ -87,6 +92,9 @@ interface PushPayload {
   measurement_logs?: LocalMeasurementLog[];
   inbody_scans?: LocalInbodyScan[];
   body_goals?: LocalBodyGoal[];
+  body_vision?: LocalBodyVision[];
+  body_plan?: LocalBodyPlan[];
+  plan_checkpoint?: LocalPlanCheckpoint[];
   nutrition_logs?: LocalNutritionLog[];
   nutrition_week_meals?: LocalNutritionWeekMeal[];
   nutrition_day_notes?: LocalNutritionDayNote[];

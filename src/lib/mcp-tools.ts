@@ -2168,6 +2168,235 @@ async function getHkMedicationSummary(args: Record<string, unknown>) {
   return toolResult({ window_days: days, medications: rows });
 }
 
+// ── Strategy: Vision / Plan / Progress ────────────────────────────────────────
+//
+// Read-only surface for the strategic layer. Lets Claude establish "what
+// body am I building?" + "what's the plan?" context in one or two calls,
+// without re-explaining the strategy every session.
+
+interface VisionRow {
+  uuid: string;
+  title: string;
+  body_md: string | null;
+  summary: string | null;
+  principles: string[];
+  build_emphasis: string[];
+  maintain_emphasis: string[];
+  deemphasize: string[];
+  status: 'active' | 'archived';
+  archived_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+interface NorthStarMetricRow {
+  metric_key: string;
+  baseline_value: number | null;
+  baseline_date: string;
+  target_value: number | null;
+  target_date: string;
+  reasoning: string;
+}
+
+interface PlanRow {
+  uuid: string;
+  vision_id: string;
+  title: string;
+  summary: string | null;
+  body_md: string | null;
+  horizon_months: number;
+  start_date: string;
+  target_date: string;
+  north_star_metrics: NorthStarMetricRow[];
+  programming_dose: Record<string, unknown>;
+  nutrition_anchors: Record<string, unknown>;
+  reevaluation_triggers: string[];
+  status: 'active' | 'archived' | 'superseded';
+  created_at: string;
+  updated_at: string;
+}
+
+async function getActiveVisionTool() {
+  const vision = await queryOne<VisionRow>(`
+    SELECT uuid, title, body_md, summary, principles, build_emphasis,
+           maintain_emphasis, deemphasize, status, archived_at,
+           created_at, updated_at
+    FROM body_vision WHERE status = 'active' LIMIT 1
+  `);
+  return toolResult(vision ?? null);
+}
+
+async function getActivePlanTool() {
+  const plan = await queryOne<PlanRow>(`
+    SELECT uuid, vision_id, title, summary, body_md, horizon_months,
+           start_date::text AS start_date,
+           target_date::text AS target_date,
+           north_star_metrics, programming_dose, nutrition_anchors,
+           reevaluation_triggers, status, created_at, updated_at
+    FROM body_plan WHERE status = 'active' LIMIT 1
+  `);
+  if (!plan) return toolResult(null);
+
+  // Inline the linked Vision so callers don't need a second round-trip.
+  const vision = await queryOne<VisionRow>(`
+    SELECT uuid, title, body_md, summary, principles, build_emphasis,
+           maintain_emphasis, deemphasize, status, archived_at,
+           created_at, updated_at
+    FROM body_vision WHERE uuid = $1
+  `, [plan.vision_id]);
+
+  // Pending checkpoints (next-up review for Claude to flag).
+  const checkpoints = await query<{
+    uuid: string; quarter_label: string; target_date: string;
+    review_date: string | null; status: string;
+    assessment: string | null; notes: string | null;
+  }>(`
+    SELECT uuid, quarter_label,
+           target_date::text AS target_date,
+           review_date::text AS review_date,
+           status, assessment, notes
+    FROM plan_checkpoint
+    WHERE plan_id = $1
+    ORDER BY target_date
+  `, [plan.uuid]);
+
+  return toolResult({ ...plan, vision, checkpoints });
+}
+
+/** Looks up the most recent observed value for a north-star metric_key.
+ *  Returns null when we don't know how to source this metric or no row exists. */
+async function lookupCurrentValue(metric_key: string): Promise<{ value: number; observed_at: string } | null> {
+  const toIso = (v: unknown): string => {
+    if (v instanceof Date) return v.toISOString();
+    return String(v);
+  };
+  switch (metric_key) {
+    case 'waist_cm': {
+      const r = await queryOne<{ value_cm: string; measured_at: Date }>(
+        `SELECT value_cm, measured_at FROM measurement_logs
+         WHERE site = 'waist' ORDER BY measured_at DESC LIMIT 1`,
+      );
+      return r ? { value: Number(r.value_cm), observed_at: toIso(r.measured_at) } : null;
+    }
+    case 'hip_cm':
+    case 'hips_cm': {
+      const r = await queryOne<{ value_cm: string; measured_at: Date }>(
+        `SELECT value_cm, measured_at FROM measurement_logs
+         WHERE site = 'hips' ORDER BY measured_at DESC LIMIT 1`,
+      );
+      return r ? { value: Number(r.value_cm), observed_at: toIso(r.measured_at) } : null;
+    }
+    case 'pbf_pct': {
+      // Prefer whichever of body_spec_logs / inbody_scans has the most recent reading.
+      const [bspec, ib] = await Promise.all([
+        queryOne<{ body_fat_pct: string; measured_at: Date }>(
+          `SELECT body_fat_pct, measured_at FROM body_spec_logs
+           WHERE body_fat_pct IS NOT NULL ORDER BY measured_at DESC LIMIT 1`,
+        ),
+        queryOne<{ pbf_pct: string; scanned_at: Date }>(
+          `SELECT pbf_pct, scanned_at FROM inbody_scans
+           WHERE pbf_pct IS NOT NULL ORDER BY scanned_at DESC LIMIT 1`,
+        ),
+      ]);
+      const a = bspec ? { value: Number(bspec.body_fat_pct), observed_at: toIso(bspec.measured_at) } : null;
+      const b = ib ? { value: Number(ib.pbf_pct), observed_at: toIso(ib.scanned_at) } : null;
+      if (!a) return b;
+      if (!b) return a;
+      return new Date(a.observed_at).getTime() >= new Date(b.observed_at).getTime() ? a : b;
+    }
+    case 'weight_kg': {
+      const r = await queryOne<{ weight_kg: string; logged_at: Date }>(
+        `SELECT weight_kg, logged_at FROM bodyweight_logs
+         ORDER BY logged_at DESC LIMIT 1`,
+      );
+      return r ? { value: Number(r.weight_kg), observed_at: toIso(r.logged_at) } : null;
+    }
+    default:
+      // Unknown metric_key — caller still gets baseline/target back, just
+      // no current value or progress.
+      return null;
+  }
+}
+
+const ON_TRACK_TOLERANCE = 0.15;
+
+interface MetricProgress {
+  metric_key: string;
+  baseline_value: number | null;
+  target_value: number | null;
+  current_value: number | null;
+  observed_at: string | null;
+  progress_pct: number | null;          // 0..1, how far baseline → target
+  time_elapsed_pct: number;              // 0..1, today vs plan window
+  on_track: boolean | null;              // null when we can't compute
+  reasoning: string;
+}
+
+async function getPlanProgressTool() {
+  const plan = await queryOne<PlanRow>(`
+    SELECT uuid, vision_id, title, summary, horizon_months,
+           start_date::text AS start_date,
+           target_date::text AS target_date,
+           north_star_metrics, status
+    FROM body_plan WHERE status = 'active' LIMIT 1
+  `);
+  if (!plan) return toolResult(null);
+
+  const today = Date.now();
+  const startMs = new Date(plan.start_date).getTime();
+  const targetMs = new Date(plan.target_date).getTime();
+  const timeRange = targetMs - startMs;
+  const time_elapsed_pct = timeRange > 0
+    ? Math.max(0, Math.min(1, (today - startMs) / timeRange))
+    : 0;
+
+  const metrics: MetricProgress[] = await Promise.all(
+    plan.north_star_metrics.map(async (m): Promise<MetricProgress> => {
+      const obs = await lookupCurrentValue(m.metric_key);
+      const baseline = m.baseline_value;
+      const target = m.target_value;
+
+      let progress_pct: number | null = null;
+      let on_track: boolean | null = null;
+
+      if (obs && baseline != null && target != null) {
+        const range = target - baseline;
+        if (range === 0) {
+          progress_pct = 1;
+          on_track = true;
+        } else {
+          const delta = obs.value - baseline;
+          progress_pct = Math.max(0, Math.min(1, delta / range));
+          on_track = progress_pct >= time_elapsed_pct - ON_TRACK_TOLERANCE;
+        }
+      }
+
+      return {
+        metric_key: m.metric_key,
+        baseline_value: baseline,
+        target_value: target,
+        current_value: obs?.value ?? null,
+        observed_at: obs?.observed_at ?? null,
+        progress_pct,
+        time_elapsed_pct,
+        on_track,
+        reasoning: m.reasoning,
+      };
+    }),
+  );
+
+  return toolResult({
+    plan_uuid: plan.uuid,
+    plan_title: plan.title,
+    start_date: plan.start_date,
+    target_date: plan.target_date,
+    horizon_months: plan.horizon_months,
+    today: new Date(today).toISOString().slice(0, 10),
+    time_elapsed_pct,
+    metrics,
+  });
+}
+
 // ── Tool registry ─────────────────────────────────────────────────────────────
 
 import { nutritionTools } from './mcp/nutrition-tools';
@@ -2211,6 +2440,25 @@ export const tools: MCPTool[] = [
     description: 'Returns the currently active workout plan with all routines, exercises, and set targets.',
     inputSchema: { type: 'object', properties: {} },
     execute: async () => getActiveRoutine(),
+  },
+  // ── Strategy: Vision / Plan / Progress ────────────────────────────────────
+  {
+    name: 'get_active_vision',
+    description: 'Returns the active body Vision (the long-arc aesthetic concept): title, body_md prose, principles, build/maintain/de-emphasize tag arrays. Long-lived; use to anchor "what body am I building?" context.',
+    inputSchema: { type: 'object', properties: {} },
+    execute: async () => getActiveVisionTool(),
+  },
+  {
+    name: 'get_active_plan',
+    description: 'Returns the active body Plan executing the Vision, with the linked Vision inlined and all checkpoints. Includes north_star_metrics (baselines + targets), programming_dose, nutrition_anchors, reevaluation_triggers. Use to establish full strategic context in one call.',
+    inputSchema: { type: 'object', properties: {} },
+    execute: async () => getActivePlanTool(),
+  },
+  {
+    name: 'get_plan_progress',
+    description: 'For the active Plan, returns each north-star metric with its latest observed value (when known), progress_pct (0..1) toward target, time_elapsed_pct of the plan window, and an on_track boolean (true when progress_pct >= time_elapsed_pct - 0.15). current_value is null for metrics whose source mapping is unknown — surface both numbers so you can reason past the boolean.',
+    inputSchema: { type: 'object', properties: {} },
+    execute: async () => getPlanProgressTool(),
   },
   // Nutrition tools live in src/lib/mcp/nutrition-tools.ts and are spread
   // into this array at the top.
