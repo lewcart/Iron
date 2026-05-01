@@ -35,6 +35,9 @@ interface PushPayload {
   measurement_logs?: Array<Record<string, unknown>>;
   inbody_scans?: Array<Record<string, unknown>>;
   body_goals?: Array<Record<string, unknown>>;
+  body_vision?: Array<Record<string, unknown>>;
+  body_plan?: Array<Record<string, unknown>>;
+  plan_checkpoint?: Array<Record<string, unknown>>;
   nutrition_logs?: Array<Record<string, unknown>>;
   nutrition_week_meals?: Array<Record<string, unknown>>;
   nutrition_day_notes?: Array<Record<string, unknown>>;
@@ -71,6 +74,11 @@ export async function POST(req: Request) {
     for (const r of body.measurement_logs ?? []) await pushMeasurement(r);
     for (const r of body.inbody_scans ?? []) await pushInbody(r);
     for (const r of body.body_goals ?? []) await pushBodyGoal(r);
+
+    // Strategic layer — vision before plan (FK), plan before checkpoint (FK).
+    for (const r of body.body_vision ?? []) await pushBodyVision(r);
+    for (const r of body.body_plan ?? []) await pushBodyPlan(r);
+    for (const r of body.plan_checkpoint ?? []) await pushPlanCheckpoint(r);
 
     for (const r of body.nutrition_logs ?? []) await pushNutritionLog(r);
     for (const r of body.nutrition_week_meals ?? []) await pushNutritionWeekMeal(r);
@@ -400,6 +408,110 @@ async function pushBodyGoal(r: Record<string, unknown>): Promise<void> {
        target_value = EXCLUDED.target_value, unit = EXCLUDED.unit,
        direction = EXCLUDED.direction, notes = EXCLUDED.notes, updated_at = NOW()`,
     [r.metric_key, r.target_value, r.unit, r.direction, r.notes],
+  );
+}
+
+// ─── Strategic layer ─────────────────────────────────────────────────────────
+
+const VISION_STATUSES = new Set(['active', 'archived']);
+function sanitizeVisionStatus(v: unknown): string {
+  return typeof v === 'string' && VISION_STATUSES.has(v) ? v : 'active';
+}
+
+const PLAN_STATUSES = new Set(['active', 'archived', 'superseded']);
+function sanitizePlanStatus(v: unknown): string {
+  return typeof v === 'string' && PLAN_STATUSES.has(v) ? v : 'active';
+}
+
+const CHECKPOINT_STATUSES = new Set(['scheduled', 'completed']);
+function sanitizeCheckpointStatus(v: unknown): string {
+  return typeof v === 'string' && CHECKPOINT_STATUSES.has(v) ? v : 'scheduled';
+}
+
+const CHECKPOINT_ASSESSMENTS = new Set(['on_track', 'ahead', 'behind', 'reset_required']);
+function sanitizeCheckpointAssessment(v: unknown): string | null {
+  return typeof v === 'string' && CHECKPOINT_ASSESSMENTS.has(v) ? v : null;
+}
+
+function asStringArray(v: unknown): string[] {
+  return Array.isArray(v) ? v.filter(x => typeof x === 'string') as string[] : [];
+}
+
+async function pushBodyVision(r: Record<string, unknown>): Promise<void> {
+  if (r._deleted) {
+    await query('DELETE FROM body_vision WHERE uuid = $1', [r.uuid]);
+    return;
+  }
+  await query(
+    `INSERT INTO body_vision (uuid, title, body_md, summary, principles, build_emphasis,
+                              maintain_emphasis, deemphasize, status, archived_at, updated_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW())
+     ON CONFLICT (uuid) DO UPDATE SET
+       title = EXCLUDED.title, body_md = EXCLUDED.body_md, summary = EXCLUDED.summary,
+       principles = EXCLUDED.principles, build_emphasis = EXCLUDED.build_emphasis,
+       maintain_emphasis = EXCLUDED.maintain_emphasis, deemphasize = EXCLUDED.deemphasize,
+       status = EXCLUDED.status, archived_at = EXCLUDED.archived_at, updated_at = NOW()`,
+    [
+      r.uuid, r.title, r.body_md ?? null, r.summary ?? null,
+      asStringArray(r.principles), asStringArray(r.build_emphasis),
+      asStringArray(r.maintain_emphasis), asStringArray(r.deemphasize),
+      sanitizeVisionStatus(r.status), r.archived_at ?? null,
+    ],
+  );
+}
+
+async function pushBodyPlan(r: Record<string, unknown>): Promise<void> {
+  if (r._deleted) {
+    await query('DELETE FROM body_plan WHERE uuid = $1', [r.uuid]);
+    return;
+  }
+  await query(
+    `INSERT INTO body_plan (uuid, vision_id, title, summary, body_md, horizon_months,
+                            start_date, target_date, north_star_metrics, programming_dose,
+                            nutrition_anchors, reevaluation_triggers, status, updated_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10::jsonb, $11::jsonb, $12, $13, NOW())
+     ON CONFLICT (uuid) DO UPDATE SET
+       vision_id = EXCLUDED.vision_id, title = EXCLUDED.title, summary = EXCLUDED.summary,
+       body_md = EXCLUDED.body_md, horizon_months = EXCLUDED.horizon_months,
+       start_date = EXCLUDED.start_date, target_date = EXCLUDED.target_date,
+       north_star_metrics = EXCLUDED.north_star_metrics,
+       programming_dose = EXCLUDED.programming_dose,
+       nutrition_anchors = EXCLUDED.nutrition_anchors,
+       reevaluation_triggers = EXCLUDED.reevaluation_triggers,
+       status = EXCLUDED.status, updated_at = NOW()`,
+    [
+      r.uuid, r.vision_id, r.title, r.summary ?? null, r.body_md ?? null,
+      r.horizon_months, r.start_date, r.target_date,
+      JSON.stringify(r.north_star_metrics ?? []),
+      JSON.stringify(r.programming_dose ?? {}),
+      JSON.stringify(r.nutrition_anchors ?? {}),
+      asStringArray(r.reevaluation_triggers),
+      sanitizePlanStatus(r.status),
+    ],
+  );
+}
+
+async function pushPlanCheckpoint(r: Record<string, unknown>): Promise<void> {
+  if (r._deleted) {
+    await query('DELETE FROM plan_checkpoint WHERE uuid = $1', [r.uuid]);
+    return;
+  }
+  await query(
+    `INSERT INTO plan_checkpoint (uuid, plan_id, quarter_label, target_date, review_date,
+                                  status, metrics_snapshot, assessment, notes, adjustments_made, updated_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9, $10, NOW())
+     ON CONFLICT (uuid) DO UPDATE SET
+       quarter_label = EXCLUDED.quarter_label, target_date = EXCLUDED.target_date,
+       review_date = EXCLUDED.review_date, status = EXCLUDED.status,
+       metrics_snapshot = EXCLUDED.metrics_snapshot, assessment = EXCLUDED.assessment,
+       notes = EXCLUDED.notes, adjustments_made = EXCLUDED.adjustments_made, updated_at = NOW()`,
+    [
+      r.uuid, r.plan_id, r.quarter_label, r.target_date, r.review_date ?? null,
+      sanitizeCheckpointStatus(r.status),
+      r.metrics_snapshot == null ? null : JSON.stringify(r.metrics_snapshot),
+      sanitizeCheckpointAssessment(r.assessment),
+      r.notes ?? null, asStringArray(r.adjustments_made),
+    ],
   );
 }
 

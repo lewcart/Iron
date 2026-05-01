@@ -29,6 +29,7 @@ const SYNCED_TABLES = [
   'workouts', 'workout_exercises', 'workout_sets',
   'workout_plans', 'workout_routines', 'workout_routine_exercises', 'workout_routine_sets',
   'bodyweight_logs', 'body_spec_logs', 'measurement_logs', 'inbody_scans', 'body_goals',
+  'body_vision', 'body_plan', 'plan_checkpoint',
   'nutrition_logs', 'nutrition_week_meals', 'nutrition_day_notes', 'nutrition_targets',
   'hrt_timeline_periods',
   'lab_draws', 'lab_results',
@@ -198,6 +199,47 @@ async function fetchRows(table: SyncedTable, uuids: string[]): Promise<Array<Rec
       // change_log.row_uuid stores metric_key for this table.
       return query<Record<string, unknown>>(
         'SELECT metric_key, target_value, unit, direction, notes FROM body_goals WHERE metric_key = ANY($1::text[])', [uuids]);
+    case 'body_vision':
+      return (await query<Record<string, unknown>>(
+        `SELECT uuid, title, body_md, summary, principles, build_emphasis, maintain_emphasis,
+                deemphasize, status, archived_at
+         FROM body_vision WHERE uuid = ANY($1::text[])`, [uuids]))
+        .map(r => ({
+          ...r,
+          principles: Array.isArray(r.principles) ? r.principles : [],
+          build_emphasis: Array.isArray(r.build_emphasis) ? r.build_emphasis : [],
+          maintain_emphasis: Array.isArray(r.maintain_emphasis) ? r.maintain_emphasis : [],
+          deemphasize: Array.isArray(r.deemphasize) ? r.deemphasize : [],
+          archived_at: r.archived_at ? toIso(r.archived_at) : null,
+        }));
+    case 'body_plan':
+      return (await query<Record<string, unknown>>(
+        `SELECT uuid, vision_id, title, summary, body_md, horizon_months,
+                start_date, target_date, north_star_metrics, programming_dose,
+                nutrition_anchors, reevaluation_triggers, status
+         FROM body_plan WHERE uuid = ANY($1::text[])`, [uuids]))
+        .map(r => ({
+          ...r,
+          horizon_months: Number(r.horizon_months),
+          start_date: toIso(r.start_date).slice(0, 10),
+          target_date: toIso(r.target_date).slice(0, 10),
+          north_star_metrics: Array.isArray(r.north_star_metrics) ? r.north_star_metrics : [],
+          programming_dose: r.programming_dose ?? {},
+          nutrition_anchors: r.nutrition_anchors ?? {},
+          reevaluation_triggers: Array.isArray(r.reevaluation_triggers) ? r.reevaluation_triggers : [],
+        }));
+    case 'plan_checkpoint':
+      return (await query<Record<string, unknown>>(
+        `SELECT uuid, plan_id, quarter_label, target_date, review_date, status,
+                metrics_snapshot, assessment, notes, adjustments_made
+         FROM plan_checkpoint WHERE uuid = ANY($1::text[])`, [uuids]))
+        .map(r => ({
+          ...r,
+          target_date: toIso(r.target_date).slice(0, 10),
+          review_date: r.review_date ? toIso(r.review_date).slice(0, 10) : null,
+          metrics_snapshot: r.metrics_snapshot ?? null,
+          adjustments_made: Array.isArray(r.adjustments_made) ? r.adjustments_made : [],
+        }));
     case 'nutrition_logs':
       return (await query<Record<string, unknown>>(
         `SELECT uuid, logged_at, meal_type, meal_name, calories, protein_g, carbs_g, fat_g,
