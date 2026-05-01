@@ -48,3 +48,18 @@ Notes:
 - Errors:
   - `{status:'not_connected', reason, message}` — same shape as snapshot's not_connected branch.
   - `{status:'invalid_range'|'invalid_input', message, hint}` — for date / window_days / fields validation.
+
+## Strength workflow (for MCP agents)
+
+Canonical muscle taxonomy: 18 slugs. Always use canonical slugs (`chest`, `lats`, `glutes`, etc.) — legacy values like `pectoralis major` are accepted by `find_exercises(muscle_group)` via synonyms, but `create_exercise` rejects non-canonical input with `UNKNOWN_MUSCLE`.
+
+- **First time touching the strength surface?** → `list_muscles()` returns the full taxonomy with optimal ranges, parent_groups, and legacy synonyms.
+- **"Did I hit my volume targets this week?"** → `get_sets_per_muscle({ week_offset: 0 })` returns per-muscle set counts vs Schoenfeld 10–20 range. `summary.optimal_count`/`under_count`/`over_count` is the headline; `muscles[]` is the detail.
+- **"Total volume this week + per-muscle breakdown"** → `get_weekly_summary({ week_offset: 0 })` returns `total_volume`, `by_muscle[]` (canonical slugs + set_count + kg_volume), and `compliance_pct` vs active plan.
+- **"Find a glute exercise"** → `find_exercises({ query: 'romanian deadlift', muscle_group: 'glutes' })` — `muscle_group` accepts canonical slugs OR legacy synonyms.
+
+Set quality:
+- Phase 1 ships set counts only. RIR (reps in reserve, 0–5) collection arrives in Phase 2; effective-set weighting in Phase 3.
+- A working set = `is_completed=true AND (reps>=1 OR duration_seconds>0)`. Drop sets count as 1 each. Each set credits BOTH primary AND secondary muscles (full credit, not fractional).
+
+`coverage` flag on `get_sets_per_muscle` rows: `'none'` means no exercise in the catalog tags this muscle (yet — the audit pass will populate). Until then those muscles can't accumulate sets. UI collapses them into a footer.

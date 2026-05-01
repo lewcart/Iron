@@ -3,16 +3,7 @@
 import { useState } from 'react';
 import { X } from 'lucide-react';
 import { createCustomExercise } from '@/lib/mutations-exercises';
-
-const MUSCLE_OPTIONS = [
-  'chest', 'pectoralis',
-  'back', 'latissimus', 'rhomboids', 'trapezius',
-  'shoulders', 'deltoids',
-  'biceps', 'triceps', 'forearms',
-  'quadriceps', 'hamstrings', 'glutes', 'calves',
-  'abdominals', 'core', 'obliques',
-  'hip abductors', 'hip flexors', 'lower back',
-];
+import { MUSCLE_SLUGS, MUSCLE_DEFS, type MuscleSlug } from '@/lib/muscles';
 
 const EQUIPMENT_OPTIONS = [
   'barbell', 'dumbbell', 'cable', 'machine',
@@ -29,6 +20,79 @@ const MOVEMENT_PATTERNS = [
 interface Props {
   onClose: () => void;
   onCreated: () => void;
+}
+
+/**
+ * Canonical-only muscle multi-select. Renders one chip per slug, grouped by
+ * parent_group. Tap to toggle. Slugs already selected as primary appear
+ * dimmed in the secondary picker (and vice versa) so a muscle can't end up
+ * in both lists.
+ */
+function MusclePicker({
+  label,
+  values,
+  disabledSlugs,
+  onChange,
+}: {
+  label: string;
+  values: MuscleSlug[];
+  disabledSlugs: MuscleSlug[];
+  onChange: (v: MuscleSlug[]) => void;
+}) {
+  const disabled = new Set<string>(disabledSlugs);
+  const selected = new Set<string>(values);
+
+  // Group canonical slugs by parent_group, preserving display_order.
+  const groupOrder = ['chest', 'back', 'shoulders', 'arms', 'core', 'legs'];
+  const groups = new Map<string, MuscleSlug[]>();
+  for (const slug of MUSCLE_SLUGS) {
+    const pg = MUSCLE_DEFS[slug].parent_group;
+    if (!groups.has(pg)) groups.set(pg, []);
+    groups.get(pg)!.push(slug);
+  }
+
+  const toggle = (slug: MuscleSlug) => {
+    if (disabled.has(slug)) return;
+    onChange(selected.has(slug) ? values.filter(v => v !== slug) : [...values, slug]);
+  };
+
+  return (
+    <div>
+      <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">{label}</label>
+      <div className="mt-1 space-y-2">
+        {groupOrder.filter(g => groups.has(g)).map(g => (
+          <div key={g}>
+            <div className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider mb-1 capitalize">{g}</div>
+            <div className="flex flex-wrap gap-1.5">
+              {groups.get(g)!.map(slug => {
+                const isSelected = selected.has(slug);
+                const isDisabled = disabled.has(slug);
+                return (
+                  <button
+                    type="button"
+                    key={slug}
+                    onClick={() => toggle(slug)}
+                    disabled={isDisabled}
+                    className={
+                      'px-2 py-1 text-xs rounded-full border transition-colors ' +
+                      (isSelected
+                        ? 'bg-primary text-primary-foreground border-primary'
+                        : isDisabled
+                        ? 'bg-secondary/40 text-muted-foreground/40 border-border cursor-not-allowed'
+                        : 'bg-secondary text-foreground border-border hover:bg-primary/10')
+                    }
+                    title={isDisabled ? `Already selected as ${label.includes('Primary') ? 'secondary' : 'primary'}` : undefined}
+                  >
+                    {MUSCLE_DEFS[slug].display_name}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
 }
 
 function TagInput({
@@ -188,22 +252,20 @@ export default function CreateExerciseForm({ onClose, onCreated }: Props) {
             />
           </div>
 
-          {/* Primary muscles */}
-          <TagInput
+          {/* Primary muscles — canonical-only multi-select grouped by area */}
+          <MusclePicker
             label="Primary Muscles *"
-            values={primaryMuscles}
-            options={MUSCLE_OPTIONS}
-            onChange={setPrimaryMuscles}
-            placeholder="e.g. hamstrings"
+            values={primaryMuscles as MuscleSlug[]}
+            disabledSlugs={secondaryMuscles as MuscleSlug[]}
+            onChange={(v) => setPrimaryMuscles(v as string[])}
           />
 
           {/* Secondary muscles */}
-          <TagInput
+          <MusclePicker
             label="Secondary Muscles"
-            values={secondaryMuscles}
-            options={MUSCLE_OPTIONS}
-            onChange={setSecondaryMuscles}
-            placeholder="e.g. lower back"
+            values={secondaryMuscles as MuscleSlug[]}
+            disabledSlugs={primaryMuscles as MuscleSlug[]}
+            onChange={(v) => setSecondaryMuscles(v as string[])}
           />
 
           {/* Equipment */}

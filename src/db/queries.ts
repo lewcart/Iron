@@ -54,16 +54,17 @@ export async function listExercises(options: {
   }
 
   if (options.muscleGroup) {
-    const terms = muscleGroupSearchTerms(options.muscleGroup);
-    if (terms.length > 0) {
+    // Canonical slugs in the requested UI muscle area. Match via JSONB
+    // containment (@>) for exactness; substring ILIKE was the pre-023
+    // workaround for inconsistent muscle naming.
+    const slugs = muscleGroupSearchTerms(options.muscleGroup);
+    if (slugs.length > 0) {
       const orChunks: string[] = [];
-      for (const t of terms) {
-        const p1 = ++paramCount;
-        const p2 = ++paramCount;
-        const v = `%${t}%`;
-        params.push(v, v);
+      for (const slug of slugs) {
+        const p = ++paramCount;
+        params.push(JSON.stringify([slug]));
         orChunks.push(
-          `(primary_muscles::text ILIKE $${p1} OR secondary_muscles::text ILIKE $${p2})`
+          `(primary_muscles @> $${p}::jsonb OR secondary_muscles @> $${p}::jsonb)`
         );
       }
       sql += ` AND (${orChunks.join(' OR ')})`;
@@ -1265,6 +1266,124 @@ export async function getWeekMuscleFrequency(): Promise<{ primary_muscles: strin
     AND w.end_time IS NOT NULL
   `);
   return rows as { primary_muscles: string[] | string }[];
+}
+
+/**
+ * Per-muscle weekly working-set counts against canonical taxonomy.
+ *
+ * Returns ALL canonical muscles (LEFT JOIN against `muscles`), so muscles
+ * with zero sets in the week appear with set_count=0. Each working set
+ * counts toward every muscle in the exercise's primary AND secondary arrays
+ * (full credit, no fractional weighting).
+ *
+ *   coverage='none' → no exercise in the catalog tags this muscle at all.
+ *                     Useful for collapsing always-zero buckets in UI.
+ *   coverage='tagged' → at least one exercise in the catalog tags it.
+ *
+ *   week_offset 0=current, -1=last week. Boundaries match getWeekVolume
+ *   (Monday start, ISO week, local server TZ).
+ */
+export async function getWeekSetsPerMuscle(weekOffset: number = 0): Promise<{
+  slug: string;
+  display_name: string;
+  parent_group: string;
+  optimal_sets_min: number;
+  optimal_sets_max: number;
+  display_order: number;
+  set_count: number;
+  kg_volume: number;
+  coverage: 'none' | 'tagged';
+}[]> {
+  // Negative week_offset goes back. Postgres INTERVAL accepts negative values,
+  // and date_trunc + arithmetic gives us the Monday boundary.
+  const rows = await query<DbRow>(`
+    WITH week_bounds AS (
+      SELECT
+        date_trunc('week', CURRENT_DATE) + (INTERVAL '7 days' * $1::int) AS week_start,
+        date_trunc('week', CURRENT_DATE) + (INTERVAL '7 days' * ($1::int + 1)) AS week_end
+    ),
+    week_sets AS (
+      SELECT
+        ws.uuid AS set_uuid,
+        ws.weight,
+        ws.repetitions,
+        e.primary_muscles,
+        e.secondary_muscles
+      FROM workout_sets ws
+      JOIN workout_exercises we ON we.uuid = ws.workout_exercise_uuid
+      JOIN exercises e          ON e.uuid = we.exercise_uuid
+      JOIN workouts w           ON w.uuid = we.workout_uuid,
+           week_bounds wb
+      WHERE w.start_time >= wb.week_start
+        AND w.start_time <  wb.week_end
+        AND w.end_time IS NOT NULL
+        AND w.is_current = false
+        AND ws.is_completed = true
+        AND (ws.repetitions >= 1 OR ws.duration_seconds > 0)
+    ),
+    muscle_hits AS (
+      -- Explode each set into one row per muscle hit (primary AND secondary).
+      -- DISTINCT-by-(set_uuid, muscle_slug) so a set hitting a muscle via
+      -- both primary AND secondary doesn't double-count.
+      SELECT DISTINCT ws.set_uuid, v.muscle_slug, ws.weight, ws.repetitions
+      FROM week_sets ws,
+           LATERAL (
+             SELECT jsonb_array_elements_text(
+               COALESCE(ws.primary_muscles, '[]'::jsonb)
+               || COALESCE(ws.secondary_muscles, '[]'::jsonb)
+             ) AS muscle_slug
+           ) v
+    ),
+    muscle_aggregate AS (
+      SELECT
+        muscle_slug,
+        COUNT(DISTINCT set_uuid) AS set_count,
+        COALESCE(
+          SUM(weight * repetitions) FILTER (WHERE weight IS NOT NULL AND repetitions IS NOT NULL),
+          0
+        )::numeric AS kg_volume
+      FROM muscle_hits
+      GROUP BY muscle_slug
+    ),
+    muscle_coverage AS (
+      -- True if ANY exercise in the catalog tags this muscle (primary or
+      -- secondary). Independent of the week filter.
+      SELECT DISTINCT v.muscle_slug
+      FROM exercises e,
+           LATERAL (
+             SELECT jsonb_array_elements_text(
+               COALESCE(e.primary_muscles, '[]'::jsonb)
+               || COALESCE(e.secondary_muscles, '[]'::jsonb)
+             ) AS muscle_slug
+           ) v
+    )
+    SELECT
+      m.slug,
+      m.display_name,
+      m.parent_group,
+      m.optimal_sets_min,
+      m.optimal_sets_max,
+      m.display_order,
+      COALESCE(ma.set_count, 0)::int                                AS set_count,
+      COALESCE(ma.kg_volume, 0)::numeric                            AS kg_volume,
+      CASE WHEN mc.muscle_slug IS NULL THEN 'none' ELSE 'tagged' END AS coverage
+    FROM muscles m
+    LEFT JOIN muscle_aggregate ma ON ma.muscle_slug = m.slug
+    LEFT JOIN muscle_coverage  mc ON mc.muscle_slug = m.slug
+    ORDER BY m.display_order
+  `, [weekOffset]);
+
+  return rows.map(r => ({
+    slug: r.slug as string,
+    display_name: r.display_name as string,
+    parent_group: r.parent_group as string,
+    optimal_sets_min: Number(r.optimal_sets_min),
+    optimal_sets_max: Number(r.optimal_sets_max),
+    display_order: Number(r.display_order),
+    set_count: Number(r.set_count),
+    kg_volume: Number(r.kg_volume),
+    coverage: r.coverage as 'none' | 'tagged',
+  }));
 }
 
 export async function getLastWorkoutsWithDetails(limit: number = 3): Promise<{

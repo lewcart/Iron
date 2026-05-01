@@ -26,6 +26,7 @@ import { query } from '@/db/db';
 
 const SYNCED_TABLES = [
   'exercises',
+  'muscles',
   'workouts', 'workout_exercises', 'workout_sets',
   'workout_plans', 'workout_routines', 'workout_routine_exercises', 'workout_routine_sets',
   'bodyweight_logs', 'body_spec_logs', 'measurement_logs', 'inbody_scans', 'body_goals',
@@ -134,6 +135,19 @@ async function fetchRows(table: SyncedTable, uuids: string[]): Promise<Array<Rec
         'SELECT * FROM exercises WHERE uuid = ANY($1::text[])', [uuids]);
       return r.map(mapExercise);
     }
+    case 'muscles':
+      // change_log.row_uuid stores slug for this table.
+      return (await query<Record<string, unknown>>(
+        `SELECT slug, display_name, parent_group, optimal_sets_min, optimal_sets_max, display_order
+         FROM muscles WHERE slug = ANY($1::text[])`, [uuids]))
+        .map(r => ({
+          slug: r.slug,
+          display_name: r.display_name,
+          parent_group: r.parent_group,
+          optimal_sets_min: Number(r.optimal_sets_min),
+          optimal_sets_max: Number(r.optimal_sets_max),
+          display_order: Number(r.display_order),
+        }));
     case 'workouts': {
       const r = await query<Record<string, unknown>>(
         'SELECT * FROM workouts WHERE uuid = ANY($1::text[])', [uuids]);

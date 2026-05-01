@@ -225,9 +225,14 @@ describe('get_weekly_summary', () => {
       { uuid: 'w1', title: 'Push', start_time: '2026-04-01T09:00:00Z', total_volume: '4500' },
       { uuid: 'w2', title: 'Pull', start_time: '2026-04-02T09:00:00Z', total_volume: '3200' },
     ]);
+    // getWeekSetsPerMuscle row shape (post-migration 023, canonical slugs).
     vi.mocked(db.query).mockResolvedValueOnce([
-      { muscle: 'chest', volume: '3000' },
-      { muscle: 'back', volume: '2700' },
+      { slug: 'chest', display_name: 'Chest', parent_group: 'chest',
+        optimal_sets_min: 10, optimal_sets_max: 20, display_order: 10,
+        set_count: 12, kg_volume: '3000', coverage: 'tagged' },
+      { slug: 'lats', display_name: 'Lats', parent_group: 'back',
+        optimal_sets_min: 10, optimal_sets_max: 20, display_order: 20,
+        set_count: 8, kg_volume: '2700', coverage: 'tagged' },
     ]);
     vi.mocked(db.queryOne).mockResolvedValueOnce({ routine_count: '4' });
 
@@ -237,7 +242,11 @@ describe('get_weekly_summary', () => {
     expect(result.week_end).toBe('2026-04-06');
     expect(result.training_days).toBe(2);
     expect(result.total_volume).toBe(7700); // 4500 + 3200
-    expect(result.volume_by_muscle).toMatchObject({ chest: 3000, back: 2700 });
+    expect(result.volume_by_muscle).toMatchObject({ chest: 3000, lats: 2700 });
+    expect(result.by_muscle).toEqual([
+      expect.objectContaining({ slug: 'chest', set_count: 12, kg_volume: 3000, status: 'optimal' }),
+      expect.objectContaining({ slug: 'lats', set_count: 8, kg_volume: 2700, status: 'under' }),
+    ]);
     expect(result.compliance_pct).toBe(50); // 2 of 4 planned days = 50%
   });
 
