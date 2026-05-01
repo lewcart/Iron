@@ -12,6 +12,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { query, queryOne, transaction } from '@/db/db';
+import { isMainSleepNight } from '@/lib/sleep-stats';
 
 interface DailyRow {
   metric: string;
@@ -75,6 +76,12 @@ interface SyncBody {
   medications?: MedicationRecord[];
   deleted_workouts?: string[];       // HK UUIDs that were deleted since last anchor
   deleted_medications?: string[];    // HK UUIDs deleted since last medications anchor
+  deleted_sleep?: string[];          // HK sample UUIDs the plugin reports as deleted.
+                                     // SleepNight rows aren't keyed by HK UUID (native
+                                     // merges samples into one night per wake_date), so
+                                     // we accept the array but cannot currently map it
+                                     // back to night rows. Anchor reset (migration 023)
+                                     // is the canonical recovery path.
   state_updates?: SyncStateUpdate[];
 }
 
@@ -123,6 +130,7 @@ export async function POST(request: NextRequest) {
   const medications = body.medications ?? [];
   const deletedWorkoutUuids = body.deleted_workouts ?? [];
   const deletedMedicationUuids = body.deleted_medications ?? [];
+  const deletedSleepUuids = body.deleted_sleep ?? [];
   const stateUpdates = body.state_updates ?? [];
 
   // ── Upsert daily aggregates ───────────────────────────────────────────────
@@ -164,6 +172,36 @@ export async function POST(request: NextRequest) {
              value_sum = EXCLUDED.value_sum, count = 1, updated_at = NOW()`,
     params: [r.metric, r.date, r.value_sum ?? null],
   }));
+
+  // ── Sleep nights → per-night row with envelope + is_main flag ─────────────
+  const sleepNightStatements = sleep.map((n) => {
+    const startIso = new Date(n.start_at).toISOString();
+    const endIso = new Date(n.end_at).toISOString();
+    const isMain = isMainSleepNight(n.in_bed_min, n.end_at);
+    return {
+      text: `INSERT INTO healthkit_sleep_nights
+               (wake_date, start_at, end_at,
+                asleep_min, rem_min, deep_min, core_min, awake_min, in_bed_min,
+                is_main, created_at, updated_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW(), NOW())
+             ON CONFLICT (wake_date) DO UPDATE SET
+               start_at = EXCLUDED.start_at,
+               end_at = EXCLUDED.end_at,
+               asleep_min = EXCLUDED.asleep_min,
+               rem_min = EXCLUDED.rem_min,
+               deep_min = EXCLUDED.deep_min,
+               core_min = EXCLUDED.core_min,
+               awake_min = EXCLUDED.awake_min,
+               in_bed_min = EXCLUDED.in_bed_min,
+               is_main = EXCLUDED.is_main,
+               updated_at = NOW()`,
+      params: [
+        n.date, startIso, endIso,
+        n.asleep_min, n.rem_min, n.deep_min, n.core_min, n.awake_min, n.in_bed_min,
+        isMain,
+      ],
+    };
+  });
 
   // ── Workouts: upsert with dedup resolution ────────────────────────────────
   const workoutStatements: Array<{ text: string; params?: unknown[] }> = [];
@@ -327,6 +365,7 @@ export async function POST(request: NextRequest) {
   const allStatements = [
     ...dailyStatements,
     ...sleepStatements,
+    ...sleepNightStatements,
     ...workoutStatements,
     ...medicationStatements,
     ...stateStatements,
@@ -339,6 +378,8 @@ export async function POST(request: NextRequest) {
   return NextResponse.json({
     daily_upserted: dailyStatements.length,
     sleep_upserted: sleepStatements.length,
+    sleep_nights_upserted: sleepNightStatements.length,
+    sleep_deletions_seen: deletedSleepUuids.length,
     workouts_upserted: workouts.length,
     workouts_deleted: deletedWorkoutUuids.length,
     medications_upserted: medications.length,

@@ -1,10 +1,10 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { ChevronLeft, Trash2 } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Trash2 } from 'lucide-react';
 import Link from 'next/link';
 import { rebirthJsonHeaders } from '@/lib/api/headers';
-import { apiBase } from '@/lib/api/client';
+import { apiBase, fetchJson } from '@/lib/api/client';
 import { useWellbeingLogs, useDysphoriaLogs, useClothesTestLogs } from '@/lib/useLocalDB-wellbeing';
 import {
   logWellbeing,
@@ -14,6 +14,7 @@ import {
   logClothesTest,
   deleteClothesTestLog,
 } from '@/lib/mutations-wellbeing';
+import type { SleepSummaryResult } from '@/lib/health-sleep-summary';
 
 // Local-first /wellbeing across three tabs (Daily, Journal, Clothes Test).
 // Each tab reads from a useLiveQuery hook and writes through mutations-wellbeing.
@@ -71,13 +72,61 @@ function ScalePicker({
   );
 }
 
+// ===== Sleep deep-link row =====
+
+// Replaces the old self-reported "Sleep hours" input. Shows last night's
+// total + verdict pulled from HealthKit data, links to /sleep for detail.
+function SleepDeepLinkRow() {
+  const [last, setLast] = useState<{ asleep_min: number; deep_min: number } | null>(null);
+  const [loaded, setLoaded] = useState(false);
+  useEffect(() => {
+    fetchJson<SleepSummaryResult>('/api/health/sleep-summary?window_days=1&fields=nights')
+      .then(r => {
+        const n = r.nights?.[0];
+        if (n) setLast({ asleep_min: Number(n.asleep_min), deep_min: Number(n.deep_min) });
+      })
+      .catch(() => null)
+      .finally(() => setLoaded(true));
+  }, []);
+
+  const verdict = last
+    ? (last.asleep_min < 5 * 60 ? 'Light'
+        : last.asleep_min >= 7 * 60 && last.deep_min / Math.max(last.asleep_min, 1) >= 0.13 ? 'Solid'
+        : 'OK')
+    : null;
+
+  const fmt = (m: number) => {
+    const h = Math.floor(m / 60);
+    const min = Math.round(m % 60);
+    return `${h}h ${min}m`;
+  };
+
+  return (
+    <Link
+      href="/sleep"
+      className="block ios-section hover:bg-accent/50 transition-colors"
+      aria-label="View sleep detail"
+    >
+      <div className="ios-row justify-between min-h-[44px]">
+        <span className="text-sm font-medium">Sleep</span>
+        <span className="flex items-center gap-2 text-sm text-muted-foreground">
+          {!loaded ? '…'
+            : last
+              ? <>Last night {fmt(last.asleep_min)} · <strong className="text-foreground">{verdict}</strong></>
+              : <span>No data</span>}
+          <ChevronRight className="h-4 w-4" />
+        </span>
+      </div>
+    </Link>
+  );
+}
+
 // ===== Daily Tab =====
 
 function DailyTab() {
   const logs = useWellbeingLogs(30);
   const [mood, setMood] = useState<number | null>(null);
   const [energy, setEnergy] = useState<number | null>(null);
-  const [sleep, setSleep] = useState('');
   const [notes, setNotes] = useState('');
   const [saving, setSaving] = useState(false);
   const [correlation, setCorrelation] = useState<{
@@ -100,12 +149,11 @@ function DailyTab() {
       await logWellbeing({
         mood: mood ?? null,
         energy: energy ?? null,
-        sleep_hours: sleep ? parseFloat(sleep) : null,
+        sleep_hours: null,
         notes: notes || null,
       });
       setMood(null);
       setEnergy(null);
-      setSleep('');
       setNotes('');
     } finally {
       setSaving(false);
@@ -114,6 +162,9 @@ function DailyTab() {
 
   return (
     <div className="space-y-4">
+      {/* Deep-link to /sleep showing last night */}
+      <SleepDeepLinkRow />
+
       {/* Motivation correlation */}
       {correlation && (
         <div>
@@ -155,17 +206,6 @@ function DailyTab() {
             {energy && <p className="text-xs text-muted-foreground mt-1">{MOOD_LABELS[energy]}</p>}
           </div>
           <div className="border-t border-border" />
-          <div className="px-4 flex gap-2">
-            <input
-              type="number"
-              inputMode="decimal"
-              placeholder="Sleep hours (optional)"
-              value={sleep}
-              onChange={e => setSleep(e.target.value)}
-              className="flex-1 bg-transparent text-sm outline-none min-h-[44px]"
-            />
-          </div>
-          <div className="border-t border-border" />
           <div className="px-4 pb-1">
             <input
               type="text"
@@ -199,7 +239,6 @@ function DailyTab() {
                   <div className="flex gap-3 text-sm">
                     {log.mood != null && <span>Mood <strong>{log.mood}</strong></span>}
                     {log.energy != null && <span>Energy <strong>{log.energy}</strong></span>}
-                    {log.sleep_hours != null && <span>Sleep <strong>{log.sleep_hours}h</strong></span>}
                   </div>
                   {log.notes && <p className="text-xs text-muted-foreground mt-0.5 truncate">{log.notes}</p>}
                 </div>

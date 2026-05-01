@@ -26,3 +26,23 @@ Common workflows:
 Updates:
 - `update_nutrition_log` uses named params (not a `fields` blob). Server-side whitelist on which columns are editable.
 - Errors include a `hint` field naming the next tool to call when applicable.
+
+## Sleep workflow (for MCP agents)
+
+Same date conventions as nutrition (`YYYY-MM-DD` Europe/London for date params; ISO-8601 with offset for `*_at`).
+
+Tool selection:
+- `get_health_snapshot` → current state, last night detail, point-in-time HRV/RHR
+- `get_health_sleep_summary` → date-window aggregate: averages, consistency score, HRV trend
+- `get_health_series` → single-metric trend chart (e.g., HRV alone)
+
+Common workflows:
+- **"How was last night?"** → `get_health_snapshot({ fields: ['sleep_last_night','hrv'] })`
+- **"How was last week's sleep?"** → `get_health_sleep_summary({ window_days: 7 })`
+- **"Compare this week to last"** → two `get_health_sleep_summary` calls with `start_date` shifted
+- **"HRV trend only"** → `get_health_series({ metric: 'hrv', from })`
+
+Notes:
+- Naps (in_bed < 4h OR wake < 04:00 London) are filtered out of summary aggregates and the consistency score.
+- Consistency score requires ≥5 main nights with bedtime/waketime envelopes; otherwise `consistency: null`.
+- Errors mirror the snapshot shape: `{status:'not_connected'|'invalid_range'|'invalid_input', message, hint}`.
