@@ -244,6 +244,61 @@ function formatDuration(totalSeconds: number): string {
   return `${m}:${String(s).padStart(2, '0')}`;
 }
 
+/** Segmented control for flipping `tracking_mode` between 'reps' (weight ×
+ *  repetitions) and 'time' (held duration). Mirrors the create-form toggle
+ *  for visual consistency. Saves on tap — no edit/cancel affordance because
+ *  flipping is cheap and reversible (per migration 022, mode is freely
+ *  mutable; historical sets are reinterpreted under the new mode).
+ *
+ *  The set logger (`/workout`) and routine builder (`/plans`) both read
+ *  `exercise.tracking_mode` to render the right input shape, so flipping
+ *  here propagates immediately via Dexie liveQuery. */
+function TrackingModeToggle({
+  value,
+  onChange,
+}: {
+  value: 'reps' | 'time';
+  onChange: (next: 'reps' | 'time') => Promise<void>;
+}) {
+  const [saving, setSaving] = useState<'reps' | 'time' | null>(null);
+  const handleClick = async (next: 'reps' | 'time') => {
+    if (next === value || saving) return;
+    setSaving(next);
+    try {
+      await onChange(next);
+    } finally {
+      setSaving(null);
+    }
+  };
+  return (
+    <div>
+      <p className="text-xs font-semibold text-primary uppercase tracking-wide mb-1 px-1">Tracking</p>
+      <div className="flex gap-2 bg-secondary rounded-lg p-1">
+        <button
+          type="button"
+          onClick={() => handleClick('reps')}
+          disabled={saving !== null}
+          className={`flex-1 py-1.5 rounded-md text-sm font-medium transition-colors ${
+            value === 'reps' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground'
+          } disabled:opacity-60`}
+        >
+          Reps × Weight
+        </button>
+        <button
+          type="button"
+          onClick={() => handleClick('time')}
+          disabled={saving !== null}
+          className={`flex-1 py-1.5 rounded-md text-sm font-medium transition-colors ${
+            value === 'time' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground'
+          } disabled:opacity-60`}
+        >
+          Time (held)
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function SkeletonBlock({ className }: { className?: string }) {
   return (
     <div className={`bg-muted rounded-lg animate-pulse ${className ?? ''}`} />
@@ -759,6 +814,21 @@ export default function ExerciseDetail({
               ))}
             </div>
           </div>
+        )}
+
+        {/* Tracking mode toggle — flip an exercise between weight × reps and
+            held duration. Mirrors the segmented control on CreateExerciseForm
+            so the UX is consistent with first-creation. Only editable in
+            page mode; the in-workout modal stays read-only. The set logger
+            (workout page) and routine builder (plans page) both branch on
+            this value to render the right inputs. */}
+        {chrome === 'page' && (
+          <TrackingModeToggle
+            value={trackingMode}
+            onChange={async (next) => {
+              await updateExercise(exercise.uuid, { tracking_mode: next });
+            }}
+          />
         )}
 
         {exercise.equipment.length > 0 && (

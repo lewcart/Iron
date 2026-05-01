@@ -3,6 +3,7 @@
 import { db } from '@/db/local';
 import { syncEngine } from '@/lib/sync';
 import { uuid as genUUID } from '@/lib/uuid';
+import { localStubUrl, processPendingUploads } from '@/lib/photo-upload-queue';
 import type {
   LocalMeasurementLog,
   LocalBodySpecLog,
@@ -123,24 +124,44 @@ export async function deleteBodyGoal(metric_key: string): Promise<void> {
   syncEngine.schedulePush();
 }
 
-// ─── Progress photos (metadata only — Blob upload via /api/progress-photos/upload) ──
+// ─── Progress photos (offline-friendly Blob+retry capture) ──────────────────
+//
+// Capture flow (parity with InspoCaptureButton):
+//   1. Lou picks a JPEG. We write a Dexie row immediately with `uploaded='0'`,
+//      the raw Blob in `blob`, and a `local:<uuid>` stub `blob_url`. The row
+//      is created with `_synced=true` so the sync engine doesn't push the
+//      stub URL to the server.
+//   2. We queue the upload via processPendingUploads(). On success the row
+//      is rewritten with the real Vercel Blob URL and `_synced=false`, which
+//      lets the sync engine carry the metadata forward on the next push.
+//   3. On failure the row stays queued; the sweeper retries on app focus /
+//      online events. UI renders queued rows from the Blob via createObjectURL.
 
-export async function recordProgressPhoto(opts: {
-  blob_url: string;
+export async function recordProgressPhotoFromBlob(opts: {
+  blob: Blob;
   pose: 'front' | 'side' | 'back';
   notes?: string | null;
   taken_at?: string;
 }): Promise<LocalProgressPhoto> {
+  const photoUuid = genUUID();
   const photo: LocalProgressPhoto = {
-    uuid: genUUID(),
-    blob_url: opts.blob_url,
+    uuid: photoUuid,
+    blob_url: localStubUrl(photoUuid),
     pose: opts.pose,
     notes: opts.notes?.trim() || null,
     taken_at: opts.taken_at ?? new Date().toISOString(),
-    ...syncMeta(),
+    blob: opts.blob,
+    uploaded: '0',
+    // Hold _synced=true while uploaded='0' so the local: stub never reaches
+    // the server. uploadProgressPhotoRow flips _synced=false once the real
+    // URL is in place.
+    _synced: true,
+    _updated_at: now(),
+    _deleted: false,
   };
   await db.progress_photos.add(photo);
-  syncEngine.schedulePush();
+  // Fire-and-forget — the sweeper picks up failures on app focus.
+  processPendingUploads();
   return photo;
 }
 

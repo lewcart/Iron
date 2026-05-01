@@ -312,13 +312,20 @@ export interface ProgressPhoto {
   taken_at: string;
 }
 
-// Inspo photos — physique inspiration captured discreetly
+// Inspo photos — physique inspiration captured discreetly.
+// `pose` mirrors the progress_photos pose enum so the photos-compare feature can
+// mix progress + inspo photos in the same pose-filtered chronological viewer.
+// `pose` may be null on legacy rows captured before migration 030 — UI prompts
+// to set it. New uploads should always provide a pose.
+export type InspoPhotoPose = 'front' | 'side' | 'back' | 'other';
+
 export interface InspoPhoto {
   uuid: string;
   blob_url: string;
   notes: string | null;
   taken_at: string;
   burst_group_id: string | null;
+  pose: InspoPhotoPose | null;
 }
 
 // ── InBody scan catalog ──────────────────────────────────────────────────────

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { App } from '@capacitor/app';
-import { ExternalLink, RefreshCw, HeartPulse } from 'lucide-react';
+import { ExternalLink, RefreshCw, HeartPulse, SlidersHorizontal } from 'lucide-react';
 import { HealthKit } from '@/lib/healthkit';
 import { markPermissionsRequested } from '@/features/health/healthService';
 import {
@@ -11,6 +11,7 @@ import {
   type SyncResult,
 } from '@/features/health/healthSync';
 import { apiBase } from '@/lib/api/client';
+import { HealthKitPermissionsSheet } from '@/components/HealthKitPermissionsSheet';
 
 // Coarse status — iOS hides per-type read auth, so pretending we know more
 // than "unavailable | not-connected | connected | error" is false precision.
@@ -32,6 +33,7 @@ export function HealthKitSettings() {
   const [lastSyncAt, setLastSyncAt] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [consecutiveErrors, setConsecutiveErrors] = useState(0);
+  const [permsSheetOpen, setPermsSheetOpen] = useState(false);
 
   const applySyncResult = useCallback((result: SyncResult) => {
     if (result.ok) {
@@ -238,6 +240,18 @@ export function HealthKitSettings() {
               </div>
             </button>
             <button
+              onClick={() => setPermsSheetOpen(true)}
+              className="ios-row justify-between w-full text-left"
+            >
+              <div className="flex items-center gap-3">
+                <div className="w-8 h-8 rounded-[10px] flex items-center justify-center flex-shrink-0 bg-violet-500/20">
+                  <SlidersHorizontal className="w-4 h-4 text-violet-400" />
+                </div>
+                <span className="text-sm font-medium">Edit permissions</span>
+              </div>
+              <span className="text-xs text-muted-foreground">Reads &amp; writes</span>
+            </button>
+            <button
               onClick={handleManageInHealth}
               className="ios-row justify-between w-full text-left"
             >
@@ -250,6 +264,21 @@ export function HealthKitSettings() {
               <ExternalLink className="h-4 w-4 text-muted-foreground" />
             </button>
           </>
+        )}
+
+        {status === 'not-connected' && (
+          <button
+            onClick={() => setPermsSheetOpen(true)}
+            className="ios-row justify-between w-full text-left"
+          >
+            <div className="flex items-center gap-3">
+              <div className="w-8 h-8 rounded-[10px] flex items-center justify-center flex-shrink-0 bg-violet-500/20">
+                <SlidersHorizontal className="w-4 h-4 text-violet-400" />
+              </div>
+              <span className="text-sm font-medium">Edit permissions</span>
+            </div>
+            <span className="text-xs text-muted-foreground">Reads &amp; writes</span>
+          </button>
         )}
       </div>
 
@@ -264,6 +293,8 @@ export function HealthKitSettings() {
           your Rebirth workouts, meals (energy, protein, carbs, fat, water), and body composition from InBody scans.
         </p>
       </div>
+
+      <HealthKitPermissionsSheet open={permsSheetOpen} onClose={() => setPermsSheetOpen(false)} />
     </div>
   );
 }

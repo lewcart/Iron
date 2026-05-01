@@ -23,6 +23,7 @@ const mockPhoto = {
   notes: null,
   taken_at: '2026-04-09T10:00:00.000Z',
   burst_group_id: null,
+  pose: null,
 };
 
 // ===== GET /api/inspo-photos =====
@@ -88,6 +89,7 @@ describe('POST /api/inspo-photos', () => {
       notes: null,
       taken_at: '2026-04-09T10:00:00.000Z',
       burst_group_id: null,
+      pose: null,
     });
   });
 
@@ -122,6 +124,7 @@ describe('POST /api/inspo-photos', () => {
       notes: null,
       taken_at: undefined,
       burst_group_id: null,
+      pose: null,
     });
   });
 });

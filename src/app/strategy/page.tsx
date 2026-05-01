@@ -1,5 +1,8 @@
 'use client';
 
+import Link from 'next/link';
+import { useEffect, useState } from 'react';
+import Image from 'next/image';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import {
   Target,
@@ -10,34 +13,57 @@ import {
   CheckCircle2,
   Circle,
   ArrowRight,
+  ChevronLeft,
+  Trophy,
+  Camera,
 } from 'lucide-react';
 import {
   useActiveVision,
   useActivePlan,
   useCheckpointsForPlan,
 } from '@/lib/useLocalDB-strategy';
+import { useBodyGoals, useInbodyScans } from '@/lib/useLocalDB-measurements';
 import type {
   LocalBodyVision,
   LocalBodyPlan,
   LocalPlanCheckpoint,
+  LocalBodyGoal,
+  LocalInbodyScan,
   NorthStarMetric,
   ProgrammingDose,
 } from '@/db/local';
+import type { InspoPhoto } from '@/types';
+import { METRIC_LABEL } from '@/lib/inbody';
+import { apiBase, fetchJsonAuthed } from '@/lib/api/client';
+import {
+  EditVisionButton,
+  EditPlanButton,
+  NewCheckpointButton,
+} from './StrategyEditors';
 
 export default function StrategyPage() {
   const vision = useActiveVision();
   const plan = useActivePlan();
   const checkpoints = useCheckpointsForPlan(plan?.uuid);
+  const goals = useBodyGoals();
+  const scans = useInbodyScans(1);
+  const latestScan = scans[0] ?? null;
+  const inspoPhotos = useInspoPhotosFeed(8);
 
   // useLiveQuery returns undefined while loading, null/[] when nothing matches.
   const loading = vision === undefined || plan === undefined;
 
   return (
-    <main className="tab-content px-4 pt-6 pb-8 max-w-2xl mx-auto space-y-6">
+    <main className="tab-content px-4 pt-safe pb-8 max-w-2xl mx-auto space-y-6">
       <header className="space-y-1">
-        <h1 className="text-2xl font-bold tracking-tight gradient-brand-text">
-          Strategy
-        </h1>
+        <div className="flex items-center gap-2">
+          <Link href="/feed" className="text-primary p-1 -ml-1">
+            <ChevronLeft className="h-5 w-5" />
+          </Link>
+          <h1 className="text-2xl font-bold tracking-tight gradient-brand-text">
+            Strategy
+          </h1>
+        </div>
         <p className="text-sm text-muted-foreground">
           Vision and Plan — what you&apos;re building, and how.
         </p>
@@ -49,8 +75,35 @@ export default function StrategyPage() {
 
       {vision && <VisionCard vision={vision} />}
       {plan && <PlanCard plan={plan} checkpoints={checkpoints} />}
+      {goals.length > 0 && <GoalsCard goals={goals} latestScan={latestScan} />}
+      <InspoCard photos={inspoPhotos} />
     </main>
   );
+}
+
+// ─── Inspo photos (REST — inspo_photos is local-only / not in CDC sync) ──────
+//
+// Inspo photos are intentionally outside the change_log sync layer (see
+// `SYNCED_TABLES` in src/lib/sync.ts). The capture path writes to Dexie + POSTs
+// to the server, but the gallery reads via REST. Strategy page mirrors that
+// pattern: pull a small recent set on mount.
+
+function useInspoPhotosFeed(limit: number): InspoPhoto[] | undefined {
+  const [photos, setPhotos] = useState<InspoPhoto[] | undefined>(undefined);
+  useEffect(() => {
+    let cancelled = false;
+    fetchJsonAuthed<InspoPhoto[]>(`${apiBase()}/api/inspo-photos?limit=${limit}`)
+      .then((rows) => {
+        if (!cancelled) setPhotos(rows);
+      })
+      .catch(() => {
+        if (!cancelled) setPhotos([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [limit]);
+  return photos;
 }
 
 // ─── Vision ──────────────────────────────────────────────────────────────────
@@ -66,6 +119,7 @@ function VisionCard({ vision }: { vision: LocalBodyVision }) {
           <h2 className="text-lg font-semibold leading-tight">{vision.title}</h2>
           <p className="text-xs text-muted-foreground mt-0.5">Active vision</p>
         </div>
+        <EditVisionButton vision={vision} />
       </header>
 
       {(vision.build_emphasis.length > 0 ||
@@ -131,6 +185,7 @@ function PlanCard({
             </span>
           </p>
         </div>
+        <EditPlanButton plan={plan} />
       </header>
 
       {plan.summary && (
@@ -179,18 +234,25 @@ function PlanCard({
         </div>
       )}
 
-      {checkpoints.length > 0 && (
-        <div className="px-5 pb-4">
-          <p className="text-xs uppercase tracking-wide text-muted-foreground mb-2">
+      <div className="px-5 pb-4">
+        <div className="flex items-center justify-between mb-2">
+          <p className="text-xs uppercase tracking-wide text-muted-foreground">
             Checkpoints
           </p>
+          <NewCheckpointButton planId={plan.uuid} />
+        </div>
+        {checkpoints.length === 0 ? (
+          <p className="text-xs italic text-muted-foreground">
+            No checkpoints yet — use the button above to log a quarterly review.
+          </p>
+        ) : (
           <ol className="space-y-1.5">
             {checkpoints.map((c) => (
               <CheckpointRow key={c.uuid} checkpoint={c} />
             ))}
           </ol>
-        </div>
-      )}
+        )}
+      </div>
 
       <ProseBlock markdown={plan.body_md} placeholder="No prose yet — Plan strategy body will render here once written." />
     </section>
@@ -348,6 +410,138 @@ function CheckpointRow({ checkpoint }: { checkpoint: LocalPlanCheckpoint }) {
         </span>
       )}
     </li>
+  );
+}
+
+// ─── Goals ───────────────────────────────────────────────────────────────────
+
+function GoalsCard({
+  goals,
+  latestScan,
+}: {
+  goals: LocalBodyGoal[];
+  latestScan: LocalInbodyScan | null;
+}) {
+  // Sort goals by metric label for a stable, readable ordering. metric_key is
+  // a snake_case identifier — METRIC_LABEL gives the human-readable name.
+  const sorted = [...goals].sort((a, b) =>
+    (METRIC_LABEL[a.metric_key] ?? a.metric_key).localeCompare(
+      METRIC_LABEL[b.metric_key] ?? b.metric_key,
+    ),
+  );
+
+  // Pull latest scan value per metric_key so each goal can show "current → target".
+  const scanRecord = latestScan as unknown as Record<string, number | null | undefined>;
+  return (
+    <section className="rounded-2xl bg-card border border-border shadow-sm overflow-hidden">
+      <header className="px-5 pt-5 pb-3 flex items-start gap-3">
+        <div className="rounded-xl bg-amber-500/10 p-2 shrink-0">
+          <Trophy className="h-5 w-5 text-amber-500" strokeWidth={2} />
+        </div>
+        <div className="flex-1 min-w-0">
+          <h2 className="text-lg font-semibold leading-tight">Goals</h2>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            {goals.length} target{goals.length === 1 ? '' : 's'} · edit on{' '}
+            <Link href="/measurements/goals" className="text-trans-blue underline underline-offset-2">
+              Body Goals
+            </Link>
+          </p>
+        </div>
+      </header>
+      <div className="px-5 pb-4 space-y-1.5">
+        {sorted.map((g) => {
+          const current = scanRecord ? scanRecord[g.metric_key] : null;
+          const label = METRIC_LABEL[g.metric_key] ?? g.metric_key;
+          return <GoalRow key={g.metric_key} goal={g} label={label} current={current ?? null} />;
+        })}
+      </div>
+    </section>
+  );
+}
+
+function GoalRow({
+  goal,
+  label,
+  current,
+}: {
+  goal: LocalBodyGoal;
+  label: string;
+  current: number | null | undefined;
+}) {
+  const arrow = goal.direction === 'higher' ? '≥' : goal.direction === 'lower' ? '≤' : '=';
+  const currentText = typeof current === 'number' ? current.toFixed(1) : null;
+  return (
+    <div className="rounded-lg border border-border bg-background/50 px-3 py-2 flex items-center gap-2 text-sm">
+      <span className="font-medium flex-1 min-w-0 truncate">{label}</span>
+      {currentText && (
+        <span className="text-xs text-muted-foreground tabular-nums">{currentText}</span>
+      )}
+      {currentText && <ArrowRight className="h-3 w-3 text-muted-foreground shrink-0" />}
+      <span className="text-trans-blue tabular-nums text-sm font-medium">
+        {arrow} {goal.target_value}
+        {goal.unit ? ` ${goal.unit}` : ''}
+      </span>
+    </div>
+  );
+}
+
+// ─── Inspo photos ────────────────────────────────────────────────────────────
+
+function InspoCard({ photos }: { photos: InspoPhoto[] | undefined }) {
+  // undefined = loading, [] = no photos yet, otherwise render strip.
+  if (photos === undefined) {
+    return (
+      <section className="rounded-2xl bg-card border border-border shadow-sm h-32 animate-pulse" />
+    );
+  }
+  return (
+    <section className="rounded-2xl bg-card border border-border shadow-sm overflow-hidden">
+      <header className="px-5 pt-5 pb-3 flex items-start gap-3">
+        <div className="rounded-xl bg-trans-pink/10 p-2 shrink-0">
+          <Camera className="h-5 w-5 text-trans-pink" strokeWidth={2} />
+        </div>
+        <div className="flex-1 min-w-0">
+          <h2 className="text-lg font-semibold leading-tight">Inspo</h2>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            Aspirational physiques ·{' '}
+            <Link href="/inspo" className="text-trans-blue underline underline-offset-2">
+              Open gallery
+            </Link>
+          </p>
+        </div>
+      </header>
+      <div className="px-5 pb-5">
+        {photos.length === 0 ? (
+          <p className="text-xs italic text-muted-foreground">
+            No inspo photos yet. Tap the dumbbell button to capture.
+          </p>
+        ) : (
+          <div className="grid grid-cols-4 gap-2">
+            {photos.slice(0, 8).map((photo) => (
+              <Link
+                key={photo.uuid}
+                href="/inspo"
+                className="relative aspect-[3/4] overflow-hidden rounded-lg bg-muted"
+              >
+                <Image
+                  src={photo.blob_url}
+                  alt={photo.notes ?? 'Inspo photo'}
+                  fill
+                  sizes="(max-width: 640px) 25vw, 12vw"
+                  className="object-cover"
+                  unoptimized
+                />
+                {photo.pose && (
+                  <span className="absolute bottom-1 left-1 text-[9px] uppercase tracking-wide font-semibold px-1.5 py-0.5 rounded bg-black/60 text-white">
+                    {photo.pose}
+                  </span>
+                )}
+              </Link>
+            ))}
+          </div>
+        )}
+      </div>
+    </section>
   );
 }
 

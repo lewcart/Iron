@@ -7,9 +7,12 @@ import { apiBase, fetchJsonAuthed } from '@/lib/api/client';
 import { onNativeBurstTrigger, savePhotoToLibrary } from '@/lib/inspo-burst-control';
 import { db } from '@/db/local';
 import { uuid as genUUID } from '@/lib/uuid';
+import { uploadBlobToVercel } from '@/lib/photo-upload-queue';
+import type { InspoPhotoPose } from '@/types';
 
 const BURST_COUNT = 5;
 const BURST_INTERVAL_MS = 1500;
+const POSE_OPTIONS: InspoPhotoPose[] = ['front', 'side', 'back', 'other'];
 
 async function openBackCamera(): Promise<MediaStream> {
   return navigator.mediaDevices.getUserMedia({
@@ -31,6 +34,13 @@ export function InspoCaptureButton() {
   const [burstProgress, setBurstProgress] = useState<number>(0); // 0 = idle, 1-5 = shot number
   const [flash, setFlash] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /** Burst photos still awaiting a pose tag. When non-null, the post-burst
+   *  pose picker is shown. UUIDs reference both Dexie rows + server rows
+   *  (server is updated lazily once Lou taps a pose). */
+  const [pendingPoseBurst, setPendingPoseBurst] = useState<{
+    burstGroupId: string;
+    photoUuids: string[];
+  } | null>(null);
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const didLongPress = useRef(false);
   const router = useRouter();
@@ -40,24 +50,14 @@ export function InspoCaptureButton() {
     setTimeout(() => setFlash(false), 250);
   }, []);
 
-  const uploadBlob = useCallback(async (blob: Blob, filename: string): Promise<string> => {
-    const formData = new FormData();
-    formData.append('file', blob, filename);
-
-    const apiKey = process.env.NEXT_PUBLIC_REBIRTH_API_KEY;
-    const authHeaders: HeadersInit = apiKey ? { 'X-Api-Key': apiKey } : {};
-
-    const uploadRes = await fetch(`${apiBase()}/api/inspo-photos/upload`, {
-      method: 'POST',
-      headers: authHeaders,
-      body: formData,
-    });
-    if (!uploadRes.ok) {
-      throw new Error(`Upload ${uploadRes.status} ${uploadRes.statusText || ''}`.trim());
-    }
-    const { url } = await uploadRes.json();
-    return url as string;
-  }, []);
+  // Inspo's Blob upload is the same FormData POST as progress photos —
+  // delegated to the shared helper so the offline-friendly capture pattern
+  // stays in one place.
+  const uploadBlob = useCallback(
+    (blob: Blob, filename: string): Promise<string> =>
+      uploadBlobToVercel({ table: 'inspo_photos', blob, filename }),
+    [],
+  );
 
   const triggerCapture = useCallback(async () => {
     if (capturing) return;
@@ -105,6 +105,8 @@ export function InspoCaptureButton() {
         const uuid = genUUID();
         // Persist to IndexedDB immediately — if upload later fails, the photo
         // is still preserved locally and can be retried from the gallery.
+        // pose: null at capture time; the post-burst picker tags all 5 frames
+        // with the same pose once the burst completes.
         try {
           await db.inspo_photos.put({
             uuid,
@@ -115,6 +117,7 @@ export function InspoCaptureButton() {
             uploaded: '0',
             created_at: takenAt,
             notes: null,
+            pose: null,
           });
         } catch (err) {
           console.warn('[inspo] local save failed:', err);
@@ -168,7 +171,52 @@ export function InspoCaptureButton() {
 
     setBurstProgress(0);
     setCapturing(false);
+
+    // Surface the pose picker so the burst gets categorized for the
+    // photos-compare viewer. User can dismiss to leave pose null and tag later.
+    if (local.length > 0) {
+      setPendingPoseBurst({
+        burstGroupId,
+        photoUuids: local.map(({ uuid }) => uuid),
+      });
+    }
   }, [capturing, triggerFlash, uploadBlob]);
+
+  /** Tag every photo in the just-finished burst with `pose`. Updates Dexie
+   *  immediately and PATCHes the server lazily; either failure is non-fatal —
+   *  pose can be re-tagged from the gallery. */
+  const tagBurstPose = useCallback(
+    async (pose: InspoPhotoPose | null) => {
+      const burst = pendingPoseBurst;
+      setPendingPoseBurst(null);
+      if (!burst || pose == null) return;
+
+      // Local: update every Dexie row in the burst.
+      try {
+        await Promise.all(
+          burst.photoUuids.map((uuid) => db.inspo_photos.update(uuid, { pose })),
+        );
+      } catch (err) {
+        console.warn('[inspo] local pose tag failed:', err);
+      }
+
+      // Server: lazy fire-and-forget PATCHes. Each row may not exist yet on
+      // the server (upload could've failed); failures here are non-fatal.
+      await Promise.all(
+        burst.photoUuids.map(async (uuid) => {
+          try {
+            await fetchJsonAuthed(`${apiBase()}/api/inspo-photos/${uuid}`, {
+              method: 'PATCH',
+              body: JSON.stringify({ pose }),
+            });
+          } catch {
+            /* server may not have row; pose stays local-only until next sync */
+          }
+        }),
+      );
+    },
+    [pendingPoseBurst],
+  );
 
   // Subscribe to the iOS 18 Lock Screen control trigger.
   useEffect(() => {
@@ -240,6 +288,39 @@ export function InspoCaptureButton() {
           }}
         >
           {error}
+        </div>
+      )}
+
+      {/* Post-burst pose picker — non-blocking; "Skip" leaves pose null. */}
+      {pendingPoseBurst && (
+        <div
+          className="fixed inset-x-4 z-50 rounded-2xl bg-zinc-900/95 backdrop-blur-md border border-zinc-700 shadow-2xl px-4 py-3"
+          style={{
+            bottom: 'calc(var(--tab-bar-inner-height) + env(safe-area-inset-bottom, 0px) + 76px)',
+          }}
+        >
+          <div className="flex items-center justify-between mb-2">
+            <p className="text-xs font-semibold tracking-wide text-zinc-200 uppercase">
+              Tag pose
+            </p>
+            <button
+              onClick={() => tagBurstPose(null)}
+              className="text-[11px] text-zinc-500 px-1.5 py-0.5"
+            >
+              Skip
+            </button>
+          </div>
+          <div className="flex gap-1.5">
+            {POSE_OPTIONS.map((p) => (
+              <button
+                key={p}
+                onClick={() => tagBurstPose(p)}
+                className="flex-1 px-2.5 py-2 rounded-xl bg-zinc-800 border border-zinc-700 text-xs font-medium text-zinc-100 capitalize active:scale-[0.97] transition-transform"
+              >
+                {p}
+              </button>
+            ))}
+          </div>
         </div>
       )}
 

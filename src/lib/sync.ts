@@ -328,6 +328,13 @@ class SyncEngine {
             ...(tableName === 'exercises'
               ? { uuid: String((r as { uuid: string }).uuid).toLowerCase() }
               : {}),
+            // progress_photos pulled from the server are already uploaded
+            // (server only stores the Vercel URL); backfill the offline-
+            // capture fields so downstream readers don't deal with
+            // undefined.
+            ...(tableName === 'progress_photos'
+              ? { uploaded: '1' as const, blob: null }
+              : {}),
             _synced: true,
             _updated_at: Date.now(),
             _deleted: false,

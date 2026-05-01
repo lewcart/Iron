@@ -1214,93 +1214,72 @@ export default function WorkoutPage() {
       const routine = (plans ?? []).flatMap(p => p.routines).find(r => r.uuid === routineUuid);
       if (!routine) throw new Error('Routine not found');
 
-      // End any locally active workout
-      const current = await db.workouts.filter(w => w.is_current === true).first();
-      if (current) {
-        await db.workouts.update(current.uuid, {
-          is_current: false,
-          end_time: new Date().toISOString(),
-          _synced: false,
-          _updated_at: Date.now(),
-          _deleted: false,
-        });
-      }
-
-      // Create workout entirely in local DB — instant
       const workoutUuid = genUUID();
       const now = Date.now();
       const syncMeta = { _synced: false, _updated_at: now, _deleted: false as const };
-
-      await db.workouts.add({
-        uuid: workoutUuid,
-        start_time: new Date().toISOString(),
-        end_time: null,
-        title: routine.title,
-        comment: null,
-        is_current: true,
-        workout_routine_uuid: routineUuid,
-        ...syncMeta,
-      });
-
       const exercises = routine.exercises ?? [];
-      for (const routineExercise of exercises) {
-        const weUuid = genUUID();
-        const exerciseUuid = routineExercise.exercise_uuid.toLowerCase();
-        await db.workout_exercises.add({
-          uuid: weUuid,
-          workout_uuid: workoutUuid,
-          exercise_uuid: exerciseUuid,
-          comment: routineExercise.comment ?? null,
-          order_index: routineExercise.order_index,
-          ...syncMeta,
-        });
 
-        // Look up PB per set position for this exercise to prefill weights
-        // Try server first (includes imported history), fall back to local IndexedDB
-        let lastSets: { weight: number | null; repetitions: number | null }[] = [];
-        try {
-          const res = await fetch(`${apiBase()}/api/exercises/${exerciseUuid}/history`);
-          if (res.ok) {
-            const data = await res.json();
-            const pbPerSet: { orderIndex: number; weight: number; repetitions: number }[] = data.pbPerSet ?? [];
-            if (pbPerSet.length > 0) {
-              // Build array indexed by set position
-              const pbMap = new Map(pbPerSet.map(s => [s.orderIndex, s]));
-              const maxIdx = Math.max(...pbPerSet.map(s => s.orderIndex));
-              for (let i = 0; i <= maxIdx; i++) {
-                const pb = pbMap.get(i);
-                lastSets.push(pb ? { weight: pb.weight, repetitions: pb.repetitions } : { weight: null, repetitions: null });
+      const exerciseUuids = exercises.map(re => re.exercise_uuid.toLowerCase());
+      const lastSetsByExercise = await Promise.all(
+        exerciseUuids.map(async (exerciseUuid) => {
+          let lastSets: { weight: number | null; repetitions: number | null }[] = [];
+          try {
+            const res = await fetch(`${apiBase()}/api/exercises/${exerciseUuid}/history`);
+            if (res.ok) {
+              const data = await res.json();
+              const pbPerSet: { orderIndex: number; weight: number; repetitions: number }[] = data.pbPerSet ?? [];
+              if (pbPerSet.length > 0) {
+                const pbMap = new Map(pbPerSet.map(s => [s.orderIndex, s]));
+                const maxIdx = Math.max(...pbPerSet.map(s => s.orderIndex));
+                for (let i = 0; i <= maxIdx; i++) {
+                  const pb = pbMap.get(i);
+                  lastSets.push(pb ? { weight: pb.weight, repetitions: pb.repetitions } : { weight: null, repetitions: null });
+                }
+              }
+            }
+          } catch { /* offline */ }
+
+          if (lastSets.length === 0) {
+            const prevWEs = await db.workout_exercises
+              .where('exercise_uuid')
+              .equals(exerciseUuid)
+              .filter(e => !e._deleted)
+              .toArray();
+            if (prevWEs.length > 0) {
+              const weWithTime = await Promise.all(
+                prevWEs.map(async we => {
+                  const w = await db.workouts.get(we.workout_uuid);
+                  return { we, time: w?.start_time ?? '' };
+                }),
+              );
+              weWithTime.sort((a, b) => b.time.localeCompare(a.time));
+              const mostRecent = weWithTime[0];
+              if (mostRecent) {
+                const localSets = await db.workout_sets
+                  .where('workout_exercise_uuid')
+                  .equals(mostRecent.we.uuid)
+                  .filter(s => !s._deleted && s.is_completed)
+                  .sortBy('order_index');
+                lastSets = localSets.map(s => ({ weight: s.weight, repetitions: s.repetitions }));
               }
             }
           }
-        } catch { /* offline */ }
+          return lastSets;
+        }),
+      );
 
-        if (lastSets.length === 0) {
-          const prevWEs = await db.workout_exercises
-            .where('exercise_uuid')
-            .equals(exerciseUuid)
-            .filter(e => !e._deleted && e.workout_uuid !== workoutUuid)
-            .toArray();
-          if (prevWEs.length > 0) {
-            const weWithTime = await Promise.all(
-              prevWEs.map(async we => {
-                const w = await db.workouts.get(we.workout_uuid);
-                return { we, time: w?.start_time ?? '' };
-              }),
-            );
-            weWithTime.sort((a, b) => b.time.localeCompare(a.time));
-            const mostRecent = weWithTime[0];
-            if (mostRecent) {
-              const localSets = await db.workout_sets
-                .where('workout_exercise_uuid')
-                .equals(mostRecent.we.uuid)
-                .filter(s => !s._deleted && s.is_completed)
-                .sortBy('order_index');
-              lastSets = localSets.map(s => ({ weight: s.weight, repetitions: s.repetitions }));
-            }
-          }
-        }
+      const weRows = exercises.map((routineExercise) => ({
+        uuid: genUUID(),
+        workout_uuid: workoutUuid,
+        exercise_uuid: routineExercise.exercise_uuid.toLowerCase(),
+        comment: routineExercise.comment ?? null,
+        order_index: routineExercise.order_index,
+        ...syncMeta,
+      }));
 
+      const setRows = exercises.flatMap((routineExercise, idx) => {
+        const weUuid = weRows[idx].uuid;
+        const lastSets = lastSetsByExercise[idx];
         const sets = routineExercise.sets ?? [];
         const templateSets = sets.length > 0
           ? sets.map(s => ({
@@ -1317,30 +1296,52 @@ export default function WorkoutPage() {
               comment: null as string | null,
               order_index: i,
             }));
+        return templateSets.map((s, i) => {
+          const prev = lastSets[i];
+          return {
+            uuid: genUUID(),
+            workout_exercise_uuid: weUuid,
+            weight: prev?.weight ?? null,
+            repetitions: prev?.repetitions ?? null,
+            min_target_reps: s.min_target_reps,
+            max_target_reps: s.max_target_reps,
+            rpe: null,
+            rir: null,
+            tag: s.tag as 'dropSet' | 'failure' | null,
+            comment: s.comment,
+            is_completed: false,
+            is_pr: false,
+            order_index: s.order_index,
+            duration_seconds: null,
+            ...syncMeta,
+          };
+        });
+      });
 
-        await db.workout_sets.bulkAdd(
-          templateSets.map((s, i) => {
-            const prev = lastSets[i];
-            return {
-              uuid: genUUID(),
-              workout_exercise_uuid: weUuid,
-              weight: prev?.weight ?? null,
-              repetitions: prev?.repetitions ?? null,
-              min_target_reps: s.min_target_reps,
-              max_target_reps: s.max_target_reps,
-              rpe: null,
-              rir: null,
-              tag: s.tag as 'dropSet' | 'failure' | null,
-              comment: s.comment,
-              is_completed: false,
-              is_pr: false,
-              order_index: s.order_index,
-              duration_seconds: null,
-              ...syncMeta,
-            };
-          }),
-        );
-      }
+      await db.transaction('rw', [db.workouts, db.workout_exercises, db.workout_sets], async () => {
+        const current = await db.workouts.filter(w => w.is_current === true).first();
+        if (current) {
+          await db.workouts.update(current.uuid, {
+            is_current: false,
+            end_time: new Date().toISOString(),
+            _synced: false,
+            _updated_at: now,
+            _deleted: false,
+          });
+        }
+        await db.workouts.add({
+          uuid: workoutUuid,
+          start_time: new Date().toISOString(),
+          end_time: null,
+          title: routine.title,
+          comment: null,
+          is_current: true,
+          workout_routine_uuid: routineUuid,
+          ...syncMeta,
+        });
+        await db.workout_exercises.bulkAdd(weRows);
+        await db.workout_sets.bulkAdd(setRows);
+      });
 
       // Push to server in background
       syncEngine.schedulePush();
@@ -1546,37 +1547,55 @@ export default function WorkoutPage() {
               <div className="space-y-2">
                 {plans.filter(p => p.routines.length > 0).map((plan) => {
                   const isCollapsed = collapsedPlans.has(plan.uuid);
+                  const routineCount = plan.routines.length;
                   return (
                     <div key={plan.uuid} className="ios-section">
                       <button
                         onClick={() => togglePlan(plan.uuid)}
-                        className="flex items-center gap-2 px-4 pt-3 pb-1 w-full text-left"
+                        className={`flex items-center gap-3 px-4 py-4 w-full text-left ${isCollapsed ? '' : 'border-b border-border'}`}
                       >
                         {isCollapsed
-                          ? <ChevronRight className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
-                          : <ChevronDown className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
+                          ? <ChevronRight className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                          : <ChevronDown className="h-4 w-4 text-muted-foreground flex-shrink-0" />
                         }
-                        <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                          {plan.title ?? 'Untitled Plan'}
+                        <span className="flex-1 min-w-0">
+                          <span className="block text-base font-semibold truncate">
+                            {plan.title ?? 'Untitled Plan'}
+                          </span>
+                          <span className="block text-xs text-muted-foreground mt-0.5">
+                            {routineCount} {routineCount === 1 ? 'routine' : 'routines'}
+                          </span>
                         </span>
                       </button>
-                      {!isCollapsed && plan.routines.map(routine => (
-                        <button
-                          key={routine.uuid}
-                          onClick={() => startWorkoutFromRoutine(plan.uuid, routine.uuid)}
-                          disabled={startingRoutine === routine.uuid}
-                          className="ios-row w-full text-left min-h-[52px] disabled:opacity-50"
-                        >
-                          <span className="flex-1 font-medium text-sm">
-                            {routine.title ?? 'Untitled Routine'}
-                          </span>
-                          {startingRoutine === routine.uuid ? (
-                            <span className="text-xs text-muted-foreground">Starting…</span>
-                          ) : (
-                            <ChevronRight className="h-4 w-4 text-muted-foreground" />
-                          )}
-                        </button>
-                      ))}
+                      {!isCollapsed && plan.routines.map(routine => {
+                        const exerciseCount = routine.exercises.length;
+                        const setCount = routine.exercises.reduce((sum, e) => sum + e.sets.length, 0);
+                        return (
+                          <button
+                            key={routine.uuid}
+                            onClick={() => startWorkoutFromRoutine(plan.uuid, routine.uuid)}
+                            disabled={startingRoutine === routine.uuid}
+                            className="w-full text-left flex items-center gap-3 px-4 py-3.5 min-h-[60px] border-b border-border last:border-0 disabled:opacity-50"
+                          >
+                            <span className="flex-1 min-w-0">
+                              <span className="block font-medium text-sm truncate">
+                                {routine.title ?? 'Untitled Routine'}
+                              </span>
+                              {exerciseCount > 0 && (
+                                <span className="block text-xs text-muted-foreground mt-0.5">
+                                  {exerciseCount} {exerciseCount === 1 ? 'exercise' : 'exercises'}
+                                  {setCount > 0 && ` · ${setCount} ${setCount === 1 ? 'set' : 'sets'}`}
+                                </span>
+                              )}
+                            </span>
+                            {startingRoutine === routine.uuid ? (
+                              <span className="text-xs text-muted-foreground">Starting…</span>
+                            ) : (
+                              <ChevronRight className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                            )}
+                          </button>
+                        );
+                      })}
                     </div>
                   );
                 })}

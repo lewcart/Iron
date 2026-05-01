@@ -4,7 +4,6 @@ import { Suspense, useEffect, useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { ChevronLeft, ChevronRight, Calendar, Settings } from 'lucide-react';
 import { useNutritionLogsForDate, useDayNote, useNutritionTargets } from '@/lib/useLocalDB-nutrition';
-import { useTodayWorkoutCalories } from '@/lib/useTodayWorkouts';
 import { deleteMeal } from '@/lib/mutations-nutrition';
 import {
   todayLocal,
@@ -64,7 +63,6 @@ function NutritionTodayContent() {
   const logs = useMemo(() => rawLogs ?? [], [rawLogs]);
   const dayNote = useDayNote(date);
   const targets = useNutritionTargets();
-  const workoutKcal = useTodayWorkoutCalories(date);
 
   const bands = (targets?.bands ?? DEFAULT_BANDS) as MacroBands;
 
@@ -146,7 +144,6 @@ function NutritionTodayContent() {
       <CalorieBalanceCard
         consumed={totals.cal}
         goal={targets?.calories ?? null}
-        workouts={workoutKcal}
         band={bands.cal ?? null}
       />
 

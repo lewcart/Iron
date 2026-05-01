@@ -3,8 +3,8 @@
 import { useEffect, useRef, useState } from 'react';
 import {
   Bell,
+  ChevronLeft,
   ChevronRight,
-  Trash2,
   User,
   Scale,
   Utensils,
@@ -28,8 +28,6 @@ import { Capacitor } from '@capacitor/core';
 import { useUnit } from '@/context/UnitContext';
 import { REBIRTH_EQUIPMENT_LS_KEY } from '@/lib/available-equipment';
 import { REST_LIVE_ACTIVITY_LS_KEY, endRestActivity } from '@/lib/native/rest-timer-activity';
-import type { BodyweightLog } from '@/types';
-import { apiBase } from '@/lib/api/client';
 import {
   setHomeLocation,
   removeHomeLocation,
@@ -68,14 +66,6 @@ function writeLS(key: string, value: string) {
   }
 }
 
-function formatLogDate(isoStr: string) {
-  return new Date(isoStr).toLocaleDateString('en-GB', {
-    day: '2-digit',
-    month: 'short',
-    year: 'numeric',
-  });
-}
-
 // ── Icon badge ────────────────────────────────────────────
 function IconBadge({ bg, children }: { bg: string; children: React.ReactNode }) {
   return (
@@ -106,7 +96,7 @@ function Toggle({ on, onToggle }: { on: boolean; onToggle: () => void }) {
 }
 
 export default function SettingsPage() {
-  const { unit, setUnit, toDisplay, fromInput, label } = useUnit();
+  const { unit, setUnit } = useUnit();
 
   // Rest timer
   const [defaultRest, setDefaultRest] = useState(() =>
@@ -141,13 +131,6 @@ export default function SettingsPage() {
   const [geofenceRadius, setGeofenceRadius] = useState(175);
   const [showGeofenceOnboarding, setShowGeofenceOnboarding] = useState(false);
   const [geofenceAvailable] = useState(() => isGeofenceAvailable());
-
-  // Bodyweight
-  const [bwInput, setBwInput] = useState('');
-  const [bwNote, setBwNote] = useState('');
-  const [bwLogs, setBwLogs] = useState<BodyweightLog[]>([]);
-  const [bwLoading, setBwLoading] = useState(true);
-  const [bwSaving, setBwSaving] = useState(false);
 
   // Geofence handlers
   const handleGeofenceToggle = async () => {
@@ -207,14 +190,6 @@ export default function SettingsPage() {
         setEquipmentSelectedCount(0);
       }
     }
-
-    fetch(`${apiBase()}/api/bodyweight?limit=30`)
-      .then(r => r.json())
-      .then((data: BodyweightLog[]) => {
-        setBwLogs(data);
-        setBwLoading(false);
-      })
-      .catch(() => setBwLoading(false));
 
     // Sync geofence toggle state with native layer
     if (isGeofenceAvailable()) {
@@ -302,33 +277,6 @@ export default function SettingsPage() {
     setEditingProfile(false);
   };
 
-  const handleLogBodyweight = async () => {
-    const val = parseFloat(bwInput);
-    if (!val || val <= 0) return;
-    setBwSaving(true);
-    try {
-      const weight_kg = fromInput(val);
-      const res = await fetch(`${apiBase()}/api/bodyweight`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ weight_kg, note: bwNote || undefined }),
-      });
-      if (res.ok) {
-        const log: BodyweightLog = await res.json();
-        setBwLogs(prev => [log, ...prev]);
-        setBwInput('');
-        setBwNote('');
-      }
-    } finally {
-      setBwSaving(false);
-    }
-  };
-
-  const handleDeleteBw = async (uuid: string) => {
-    await fetch(`${apiBase()}/api/bodyweight/${uuid}`, { method: 'DELETE' });
-    setBwLogs(prev => prev.filter(l => l.uuid !== uuid));
-  };
-
   const handleScheduleChange = (patch: Partial<WorkoutScheduleConfig>) => {
     const next = { ...schedule, ...patch };
     setSchedule(next);
@@ -360,6 +308,9 @@ export default function SettingsPage() {
 
       {/* ── Gradient header ─────────────────────────────── */}
       <div className="gradient-brand pt-safe pb-6 px-4 relative">
+        <Link href="/feed" className="absolute top-4 left-4 text-white p-1 -ml-1">
+          <ChevronLeft className="h-5 w-5" />
+        </Link>
         <div className="flex items-end gap-4">
           {/* Avatar */}
           <button
@@ -547,66 +498,6 @@ export default function SettingsPage() {
               <ChevronRight className="h-4 w-4 text-muted-foreground" />
             </Link>
           </div>
-        </div>
-
-        {/* ── Bodyweight ──────────────────────────────── */}
-        <div>
-          <p className="text-label-section mb-1 px-1">Bodyweight</p>
-          <div className="ios-section">
-            <div className="ios-row gap-2">
-              <input
-                type="number"
-                inputMode="decimal"
-                placeholder={`Weight (${label})`}
-                value={bwInput}
-                onChange={e => setBwInput(e.target.value)}
-                className="flex-1 bg-transparent text-sm outline-none min-h-[44px]"
-              />
-              <input
-                type="text"
-                placeholder="Note (optional)"
-                value={bwNote}
-                onChange={e => setBwNote(e.target.value)}
-                className="flex-1 bg-transparent text-sm outline-none min-h-[44px] text-muted-foreground"
-              />
-              <button
-                onClick={handleLogBodyweight}
-                disabled={bwSaving || !bwInput}
-                className="px-3 py-1.5 gradient-brand text-white text-sm font-semibold rounded-lg disabled:opacity-40"
-              >
-                Log
-              </button>
-            </div>
-          </div>
-
-          {!bwLoading && bwLogs.length > 0 && (
-            <div className="ios-section mt-2">
-              {bwLogs.map(log => (
-                <div key={log.uuid} className="ios-row justify-between">
-                  <div className="flex-1 min-w-0">
-                    <span className="text-sm font-medium">
-                      {toDisplay(log.weight_kg)} {label}
-                    </span>
-                    {log.note && (
-                      <span className="text-xs text-muted-foreground ml-2">{log.note}</span>
-                    )}
-                  </div>
-                  <span className="text-xs text-muted-foreground mr-3">
-                    {formatLogDate(log.logged_at)}
-                  </span>
-                  <button
-                    onClick={() => handleDeleteBw(log.uuid)}
-                    className="text-red-500 p-1 min-h-[44px] min-w-[44px] flex items-center justify-center"
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
-          {!bwLoading && bwLogs.length === 0 && (
-            <p className="text-caption px-1 mt-2">No bodyweight entries yet.</p>
-          )}
         </div>
 
         {/* ── Rest Timer ──────────────────────────────── */}

@@ -12,6 +12,7 @@ import { werePermissionsRequested } from '@/features/health/healthService';
 import { runForegroundSync } from '@/features/health/healthSync';
 import { hydrateExercises } from '@/db/local';
 import { syncEngine } from '@/lib/sync';
+import { processPendingUploads } from '@/lib/photo-upload-queue';
 
 function makeQueryClient() {
   return new QueryClient({
@@ -85,6 +86,10 @@ function AppBootstrap() {
       // from background.
       syncEngine.sync();
 
+      // Drain the queued photo uploads (progress_photos captured offline).
+      // The helper is idempotent + concurrency-guarded internally.
+      processPendingUploads().catch(() => undefined);
+
       // HealthKit sync is more expensive (HKQueryDescriptors round-trip
       // through native bridge); throttle to 2 min minimum.
       if (Capacitor.isNativePlatform() && werePermissionsRequested()) {
@@ -99,6 +104,12 @@ function AppBootstrap() {
     // visibilitychange catches tab/PWA web-side visibility transitions.
     const onVisible = () => { if (!document.hidden) triggerForegroundSync(); };
     document.addEventListener('visibilitychange', onVisible);
+
+    // Drain queued photo uploads when network returns. syncEngine has its
+    // own online listener; we hook here too so progress-photo retries aren't
+    // gated on a foreground/visibility transition.
+    const onOnline = () => { processPendingUploads().catch(() => undefined); };
+    window.addEventListener('online', onOnline);
 
     // App.appStateChange catches Capacitor native foreground/background.
     let capCleanup: (() => void) | undefined;
@@ -119,6 +130,7 @@ function AppBootstrap() {
 
     return () => {
       document.removeEventListener('visibilitychange', onVisible);
+      window.removeEventListener('online', onOnline);
       capCleanup?.();
       // Don't stop syncEngine — it's a singleton across the app lifetime.
     };

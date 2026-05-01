@@ -432,15 +432,33 @@ export interface LocalInspoPhoto extends Partial<SyncMeta> {
   uploaded: '0' | '1';
   created_at: string;
   notes: string | null;
+  /** Pose categorization — mirrors progress_photos.pose so the photos-compare
+   *  feature can mix progress + inspo into the same pose-filtered viewer.
+   *  Null = legacy row captured before migration 030 (UI prompts to set). */
+  pose: 'front' | 'side' | 'back' | 'other' | null;
 }
 
-/** Progress photo metadata — JPEG fetched lazily from blob_url. */
+/** Progress photo metadata — JPEG fetched lazily from blob_url.
+ *
+ *  Offline-friendly capture (parity with inspo_photos): when the upload to
+ *  Vercel Blob is queued/retrying, `blob_url` carries a `local:<uuid>` stub
+ *  pointing at the JPEG held in `blob`. Once the upload succeeds the row is
+ *  rewritten with the real Vercel URL and `uploaded` flips to '1'; sync push
+ *  then carries the metadata forward. Rows with `uploaded='0'` are excluded
+ *  from sync push (the `local:` stub would corrupt the server). */
 export interface LocalProgressPhoto extends SyncMeta {
   uuid: string;
   blob_url: string;
   pose: 'front' | 'side' | 'back';
   notes: string | null;
   taken_at: string;
+  /** Raw JPEG Blob. Present while `uploaded='0'`; cleared once upload succeeds
+   *  to free IDB space. Legacy rows (synced before this column existed) are
+   *  null with `uploaded='1'`. */
+  blob: Blob | null;
+  /** '1' once the JPEG has been pushed to Vercel Blob and `blob_url` carries
+   *  the real URL, '0' while the upload is queued/retrying. */
+  uploaded: '0' | '1';
 }
 
 // ─── Muscle taxonomy (read-only catalog, mirrors Postgres `muscles`) ─────────
@@ -659,11 +677,36 @@ export class IronDB extends Dexie {
       await tx.table('_meta').delete('exercises_hydrated_at');
     });
 
-    // v12: Reps in Reserve (mirrors Postgres migration 028).
+    // v12: Reps in Reserve (mirrors Postgres migration 028_rir_column).
     // workout_sets.rir is purely additive — Dexie tolerates the undefined
     // field on existing rows, sync overwrites with the server value (NULL
     // for un-logged sets) on next pull. No upgrade hook needed.
     this.version(12).stores(v11Stores);
+
+    // v13: pose tag on inspo photos (mirrors Postgres migration 030).
+    const v13Stores = {
+      ...v11Stores,
+      inspo_photos: 'uuid, burst_group_id, taken_at, uploaded, pose',
+    };
+    this.version(13).stores(v13Stores).upgrade(async tx => {
+      await tx.table('inspo_photos').toCollection().modify(row => {
+        if (row.pose === undefined) row.pose = null;
+      });
+    });
+
+    // v14: offline-friendly progress photo capture (parity with inspo_photos).
+    // Adds `blob` (Blob | null) and `uploaded` ('0' | '1') so the JPEG can be
+    // held locally while the Vercel Blob upload is queued/retrying.
+    const v14Stores = {
+      ...v13Stores,
+      progress_photos: 'uuid, taken_at, pose, uploaded, _synced, _updated_at',
+    };
+    this.version(14).stores(v14Stores).upgrade(async tx => {
+      await tx.table('progress_photos').toCollection().modify(row => {
+        if (row.uploaded === undefined) row.uploaded = '1';
+        if (row.blob === undefined) row.blob = null;
+      });
+    });
   }
 }
 

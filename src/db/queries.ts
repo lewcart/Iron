@@ -2169,6 +2169,7 @@ function parseInspoPhoto(row: DbRow): InspoPhoto {
     notes: row.notes as string | null,
     taken_at: row.taken_at as string,
     burst_group_id: row.burst_group_id as string | null,
+    pose: (row.pose as InspoPhoto['pose']) ?? null,
   };
 }
 
@@ -2177,12 +2178,13 @@ export async function createInspoPhoto(data: {
   notes?: string | null;
   taken_at?: string;
   burst_group_id?: string | null;
+  pose?: 'front' | 'side' | 'back' | 'other' | null;
 }): Promise<InspoPhoto> {
   const uuid = randomUUID();
   const row = await queryOne(
-    `INSERT INTO inspo_photos (uuid, blob_url, notes, taken_at, burst_group_id)
-     VALUES ($1, $2, $3, COALESCE($4::TIMESTAMP, NOW()), $5) RETURNING *`,
-    [uuid, data.blob_url, data.notes ?? null, data.taken_at ?? null, data.burst_group_id ?? null],
+    `INSERT INTO inspo_photos (uuid, blob_url, notes, taken_at, burst_group_id, pose)
+     VALUES ($1, $2, $3, COALESCE($4::TIMESTAMP, NOW()), $5, $6) RETURNING *`,
+    [uuid, data.blob_url, data.notes ?? null, data.taken_at ?? null, data.burst_group_id ?? null, data.pose ?? null],
   );
   return parseInspoPhoto(row!);
 }
@@ -2193,6 +2195,29 @@ export async function listInspoPhotos(limit = 50): Promise<InspoPhoto[]> {
     [limit],
   );
   return rows.map(parseInspoPhoto);
+}
+
+export async function updateInspoPhoto(
+  uuid: string,
+  data: { pose?: 'front' | 'side' | 'back' | 'other' | null; notes?: string | null },
+): Promise<InspoPhoto | null> {
+  const sets: string[] = [];
+  const params: unknown[] = [];
+  if ('pose' in data) {
+    params.push(data.pose ?? null);
+    sets.push(`pose = $${params.length}`);
+  }
+  if ('notes' in data) {
+    params.push(data.notes ?? null);
+    sets.push(`notes = $${params.length}`);
+  }
+  if (sets.length === 0) return null;
+  params.push(uuid);
+  const row = await queryOne(
+    `UPDATE inspo_photos SET ${sets.join(', ')} WHERE uuid = $${params.length} RETURNING *`,
+    params,
+  );
+  return row ? parseInspoPhoto(row) : null;
 }
 
 export async function deleteInspoPhoto(uuid: string): Promise<void> {

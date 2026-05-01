@@ -1,7 +1,7 @@
 'use client';
 
-import { Suspense, useState, useRef } from 'react';
-import { ChevronLeft, Trash2, Camera, ImageIcon, Activity, Target, Plus } from 'lucide-react';
+import { Suspense, useEffect, useState } from 'react';
+import { ChevronLeft, Trash2, ImageIcon, Activity, Target, Plus } from 'lucide-react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { useUnit } from '@/context/UnitContext';
@@ -9,11 +9,52 @@ import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   ReferenceLine, Legend,
 } from 'recharts';
-import type { InbodyScan, MeasurementLog, ProgressPhoto } from '@/types';
-import { apiBase } from '@/lib/api/client';
+import type { InbodyScan, MeasurementLog } from '@/types';
+import type { LocalProgressPhoto } from '@/db/local';
 import { useMeasurements, useProgressPhotos, useInbodyScans, useBodyGoal } from '@/lib/useLocalDB-measurements';
-import { logMeasurement, deleteMeasurement, recordProgressPhoto, deleteProgressPhoto } from '@/lib/mutations-measurements';
-import { logBodyweight } from '@/lib/mutations';
+import { logMeasurement, deleteMeasurement, deleteProgressPhoto } from '@/lib/mutations-measurements';
+import { logBodyweight, deleteBodyweightLog } from '@/lib/mutations';
+import { useBodyweightLogs } from '@/lib/useLocalDB';
+import { Sheet } from '@/components/ui/sheet';
+import { isLocalStub } from '@/lib/photo-upload-queue';
+import { PhotoSheet } from './PhotoSheet';
+import { InbodyScanSheet } from './InbodyScanSheet';
+
+/** Render a progress photo, transparently sourcing the JPEG from either the
+ *  remote Vercel Blob URL or — for queued/retrying captures — the locally-held
+ *  Blob via createObjectURL. Revokes the object URL on unmount/source change
+ *  so we don't leak Blob references in IDB. */
+function ProgressPhotoImage({ photo }: { photo: LocalProgressPhoto }) {
+  const [objectUrl, setObjectUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (isLocalStub(photo.blob_url) && photo.blob) {
+      const url = URL.createObjectURL(photo.blob);
+      setObjectUrl(url);
+      return () => URL.revokeObjectURL(url);
+    }
+    setObjectUrl(null);
+  }, [photo.blob_url, photo.blob]);
+
+  const src = isLocalStub(photo.blob_url) ? objectUrl : photo.blob_url;
+  if (!src) return <div className="w-full aspect-[3/4] bg-muted/40 rounded-t-xl" />;
+
+  return (
+    <div className="relative">
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src={src}
+        alt={`${photo.pose} progress photo`}
+        className="w-full object-cover max-h-[420px] rounded-t-xl"
+      />
+      {photo.uploaded === '0' && (
+        <div className="absolute top-2 right-2 rounded-full bg-black/70 px-2 py-0.5 text-[10px] font-medium text-amber-300 uppercase tracking-wide">
+          Queued
+        </div>
+      )}
+    </div>
+  );
+}
 
 const SITES = [
   { key: 'shoulder_width', label: 'Shoulder Width' },
@@ -68,11 +109,6 @@ function humanizeSite(rawSite: string): string {
 // PBF% is the headline metric most users track; reference-line enrichment targets it.
 const INBODY_TREND_METRIC: keyof InbodyScan = 'pbf_pct';
 
-function apiHeadersNoContentType(): HeadersInit {
-  const key = process.env.NEXT_PUBLIC_REBIRTH_API_KEY;
-  return key ? { 'X-Api-Key': key } : {};
-}
-
 function formatDate(isoStr: string) {
   return new Date(isoStr).toLocaleDateString('en-GB', {
     day: '2-digit', month: 'short', year: 'numeric',
@@ -89,14 +125,8 @@ function toDateInputValue(d = new Date()) {
   return d.toISOString().slice(0, 10);
 }
 
-const POSE_GUIDANCE: Record<string, string> = {
-  front: 'Face the camera, arms slightly away from your body, feet hip-width apart.',
-  side:  'Stand sideways, arms relaxed, feet together, looking straight ahead.',
-  back:  'Back to the camera, arms slightly away from your body, feet hip-width apart.',
-};
-
 function MeasurementsInner() {
-  const { fromInput, label } = useUnit();
+  const { fromInput, toDisplay, label } = useUnit();
   const searchParams = useSearchParams();
   const initialTab = (searchParams?.get('tab') as TabKey | null) ?? 'measurements';
   const [activeTab, setActiveTab] = useState<TabKey>(initialTab);
@@ -106,9 +136,10 @@ function MeasurementsInner() {
   // structurally compatible with the @/types server types (extra _synced /
   // _updated_at / _deleted fields on local rows are harmless extras).
   const logs = useMeasurements({ limit: 90 }) as unknown as MeasurementLog[];
-  const photos = useProgressPhotos(50) as unknown as ProgressPhoto[];
+  const photos = useProgressPhotos(50);
   const inbodyScans = useInbodyScans(50) as unknown as InbodyScan[];
   const inbodyGoal = useBodyGoal(INBODY_TREND_METRIC);
+  const bwLogs = useBodyweightLogs(30);
   const loading = false;
   const photosLoading = false;
   const inbodyLoading = false;
@@ -119,12 +150,9 @@ function MeasurementsInner() {
   const [weightInput, setWeightInput] = useState('');
   const [saving, setSaving] = useState(false);
   const [chartSite, setChartSite] = useState<SiteKey>('waist');
-
-  // Photos state
-  const [selectedPose, setSelectedPose] = useState<'front' | 'side' | 'back'>('front');
-  const [photoNote, setPhotoNote] = useState('');
-  const [uploading, setUploading] = useState(false);
-  const fileRef = useRef<HTMLInputElement>(null);
+  const [logSheetOpen, setLogSheetOpen] = useState(false);
+  const [photoSheetOpen, setPhotoSheetOpen] = useState(false);
+  const [inbodySheetOpen, setInbodySheetOpen] = useState(false);
 
   const handleSaveMeasurements = async () => {
     const hasAny = SITES.some(s => inputs[s.key]) || !!weightInput;
@@ -151,6 +179,7 @@ function MeasurementsInner() {
       setInputs({});
       setWeightInput('');
       setDate(toDateInputValue());
+      setLogSheetOpen(false);
     } finally {
       setSaving(false);
     }
@@ -160,34 +189,8 @@ function MeasurementsInner() {
     await deleteMeasurement(uuid);
   };
 
-  const handlePhotoUpload = async (file: File) => {
-    setUploading(true);
-    try {
-      // Photo binary still uploads through /api/progress-photos/upload to
-      // Vercel Blob — Dexie holds metadata only (per the local-first plan,
-      // PR #14). Once uploaded, recordProgressPhoto writes the URL +
-      // metadata to local Dexie and pushes through sync.
-      const formData = new FormData();
-      formData.append('file', file);
-      formData.append('pose', selectedPose);
-
-      const uploadRes = await fetch(`${apiBase()}/api/progress-photos/upload`, {
-        method: 'POST',
-        headers: apiHeadersNoContentType(),
-        body: formData,
-      });
-      if (!uploadRes.ok) return;
-      const { url } = await uploadRes.json();
-
-      await recordProgressPhoto({
-        blob_url: url,
-        pose: selectedPose,
-        notes: photoNote || null,
-      });
-      setPhotoNote('');
-    } finally {
-      setUploading(false);
-    }
+  const handleDeleteBodyweight = async (uuid: string) => {
+    await deleteBodyweightLog(uuid);
   };
 
   const handleDeletePhoto = async (uuid: string) => {
@@ -311,54 +314,6 @@ function MeasurementsInner() {
           </div>
         </div>
       )}
-
-      {/* Log new entry */}
-      <div>
-        <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1 px-1">Log Entry</p>
-        <div className="ios-section">
-          <div className="ios-row justify-between">
-            <span className="text-sm text-muted-foreground">Date</span>
-            <input
-              type="date"
-              value={date}
-              onChange={e => setDate(e.target.value)}
-              className="bg-transparent text-sm text-right outline-none min-h-[44px] text-muted-foreground"
-            />
-          </div>
-          <div className="ios-row flex-wrap gap-3">
-            {SITES.map(s => (
-              <input
-                key={s.key}
-                type="number"
-                inputMode="decimal"
-                placeholder={`${s.label} (cm)`}
-                value={inputs[s.key] ?? ''}
-                onChange={e => setInputs(prev => ({ ...prev, [s.key]: e.target.value }))}
-                className="flex-1 min-w-[110px] bg-transparent text-sm outline-none min-h-[44px]"
-              />
-            ))}
-          </div>
-          <div className="ios-row">
-            <input
-              type="number"
-              inputMode="decimal"
-              placeholder={`Weight (${label})`}
-              value={weightInput}
-              onChange={e => setWeightInput(e.target.value)}
-              className="flex-1 bg-transparent text-sm outline-none min-h-[44px]"
-            />
-          </div>
-          <div className="ios-row justify-end">
-            <button
-              onClick={handleSaveMeasurements}
-              disabled={saving || !hasInput}
-              className="px-4 py-2 bg-primary text-white text-sm font-medium rounded-lg disabled:opacity-40"
-            >
-              {saving ? 'Saving…' : 'Save'}
-            </button>
-          </div>
-        </div>
-      </div>
 
       {/* Trend chart */}
       {!loading && logs.length > 1 && (
@@ -488,27 +443,122 @@ function MeasurementsInner() {
         </div>
       )}
 
-      {/* History */}
-      {!loading && logs.length > 0 && (
+      {/* History — grouped by calendar day. Lou often saves multiple sites in
+          one Sheet submit, which creates N rows in measurement_logs. Showing
+          them as N separate History rows is noisy, so we collapse same-day
+          entries into one card. If a site appears twice in the same day we
+          keep only the latest (logs are pre-sorted desc by measured_at, so
+          the first match wins). */}
+      {!loading && logs.length > 0 && (() => {
+        type DayEntry = { log: MeasurementLog; label: string };
+        type DayGroup = { day: string; measured_at: string; entries: DayEntry[] };
+
+        const byDay = new Map<string, DayGroup>();
+        for (const log of logs) {
+          const day = log.measured_at.slice(0, 10);
+          const label = humanizeSite(log.site);
+          const group = byDay.get(day) ?? { day, measured_at: log.measured_at, entries: [] };
+          // Keep only the latest entry per site label within a day
+          if (!group.entries.some(e => e.label === label)) {
+            group.entries.push({ log, label });
+          }
+          if (log.measured_at > group.measured_at) group.measured_at = log.measured_at;
+          byDay.set(day, group);
+        }
+        const groups = Array.from(byDay.values())
+          .sort((a, b) => b.measured_at.localeCompare(a.measured_at))
+          .slice(0, 30);
+
+        return (
+          <div>
+            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1 px-1">History</p>
+            <div className="space-y-2">
+              {groups.map(group => {
+                if (group.entries.length === 1) {
+                  // Compact single-row layout — matches pre-grouping look
+                  const { log, label } = group.entries[0];
+                  return (
+                    <div key={group.day} className="ios-section">
+                      <div className="ios-row justify-between">
+                        <div className="flex-1 min-w-0">
+                          <span className="text-sm font-medium">{label}</span>
+                          <span className="text-sm text-muted-foreground ml-2">{log.value_cm} cm</span>
+                        </div>
+                        <span className="text-xs text-muted-foreground mr-3">
+                          {formatDate(log.measured_at)}
+                        </span>
+                        <button
+                          onClick={() => handleDeleteMeasurement(log.uuid)}
+                          className="text-red-500 p-1 min-h-[44px] min-w-[44px] flex items-center justify-center"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      </div>
+                    </div>
+                  );
+                }
+
+                // Multi-site day — header row with the date, then a sub-row per site
+                return (
+                  <div key={group.day} className="ios-section">
+                    <div className="ios-row justify-between border-b border-border">
+                      <span className="text-sm font-semibold">{formatDate(group.measured_at)}</span>
+                      <span className="text-xs text-muted-foreground">{group.entries.length} sites</span>
+                    </div>
+                    {group.entries.map((e, i) => (
+                      <div
+                        key={e.log.uuid}
+                        className={`ios-row justify-between ${i < group.entries.length - 1 ? 'border-b border-border' : ''}`}
+                      >
+                        <div className="flex-1 min-w-0">
+                          <span className="text-sm font-medium">{e.label}</span>
+                          <span className="text-sm text-muted-foreground ml-2">{e.log.value_cm} cm</span>
+                        </div>
+                        <button
+                          onClick={() => handleDeleteMeasurement(e.log.uuid)}
+                          className="text-red-500 p-1 min-h-[44px] min-w-[44px] flex items-center justify-center"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })()}
+
+      {!loading && logs.length === 0 && (
+        <p className="text-xs text-muted-foreground px-1">No measurements logged yet.</p>
+      )}
+
+      {/* Bodyweight history — bodyweight entries (logged here or via the
+          measurement Sheet) live alongside the rest of the measurement
+          history rather than over in Settings. */}
+      {bwLogs.length > 0 && (
         <div>
-          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1 px-1">History</p>
+          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1 px-1">Bodyweight</p>
           <div className="ios-section">
-            {logs.slice(0, 30).map((log, i) => (
+            {bwLogs.map((log, i) => (
               <div
                 key={log.uuid}
-                className={`ios-row justify-between ${i < Math.min(logs.length, 30) - 1 ? 'border-b border-border' : ''}`}
+                className={`ios-row justify-between ${i < bwLogs.length - 1 ? 'border-b border-border' : ''}`}
               >
                 <div className="flex-1 min-w-0">
                   <span className="text-sm font-medium">
-                    {humanizeSite(log.site)}
+                    {toDisplay(log.weight_kg)} {label}
                   </span>
-                  <span className="text-sm text-muted-foreground ml-2">{log.value_cm} cm</span>
+                  {log.note && (
+                    <span className="text-xs text-muted-foreground ml-2">{log.note}</span>
+                  )}
                 </div>
                 <span className="text-xs text-muted-foreground mr-3">
-                  {formatDate(log.measured_at)}
+                  {formatDate(log.logged_at)}
                 </span>
                 <button
-                  onClick={() => handleDeleteMeasurement(log.uuid)}
+                  onClick={() => handleDeleteBodyweight(log.uuid)}
                   className="text-red-500 p-1 min-h-[44px] min-w-[44px] flex items-center justify-center"
                 >
                   <Trash2 className="h-4 w-4" />
@@ -518,76 +568,11 @@ function MeasurementsInner() {
           </div>
         </div>
       )}
-
-      {!loading && logs.length === 0 && (
-        <p className="text-xs text-muted-foreground px-1">No measurements logged yet.</p>
-      )}
     </div>
   );
 
   const photosSection = (
     <div className="space-y-4">
-      {/* Upload */}
-      <div>
-        <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1 px-1">Add Photo</p>
-        <div className="ios-section">
-          {/* Pose selector */}
-          <div className="ios-row gap-2">
-            {(['front', 'side', 'back'] as const).map(pose => (
-              <button
-                key={pose}
-                onClick={() => setSelectedPose(pose)}
-                className={`flex-1 py-2 text-sm font-medium rounded-lg border capitalize transition-colors ${
-                  selectedPose === pose
-                    ? 'bg-primary text-white border-primary'
-                    : 'border-border text-muted-foreground'
-                }`}
-              >
-                {pose}
-              </button>
-            ))}
-          </div>
-
-          {/* Pose guidance */}
-          <div className="ios-row py-1">
-            <p className="text-xs text-muted-foreground">{POSE_GUIDANCE[selectedPose]}</p>
-          </div>
-
-          {/* Note */}
-          <div className="ios-row">
-            <input
-              type="text"
-              placeholder="Note (optional)"
-              value={photoNote}
-              onChange={e => setPhotoNote(e.target.value)}
-              className="flex-1 bg-transparent text-sm outline-none min-h-[44px] text-muted-foreground"
-            />
-          </div>
-
-          <div className="ios-row justify-end">
-            <input
-              ref={fileRef}
-              type="file"
-              accept="image/*"
-              className="hidden"
-              onChange={e => {
-                const file = e.target.files?.[0];
-                if (file) handlePhotoUpload(file);
-                e.target.value = '';
-              }}
-            />
-            <button
-              onClick={() => fileRef.current?.click()}
-              disabled={uploading}
-              className="flex items-center gap-2 px-4 py-2 bg-primary text-white text-sm font-medium rounded-lg disabled:opacity-40"
-            >
-              <Camera className="h-4 w-4" />
-              {uploading ? 'Uploading…' : 'Choose Photo'}
-            </button>
-          </div>
-        </div>
-      </div>
-
       {/* Gallery */}
       {!photosLoading && photos.length > 0 && (
         <div>
@@ -595,12 +580,7 @@ function MeasurementsInner() {
           <div className="space-y-3">
             {photos.map(photo => (
               <div key={photo.uuid} className="ios-section overflow-hidden">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={photo.blob_url}
-                  alt={`${photo.pose} progress photo`}
-                  className="w-full object-cover max-h-[420px] rounded-t-xl"
-                />
+                <ProgressPhotoImage photo={photo} />
                 <div className="ios-row justify-between">
                   <div className="flex flex-col">
                     <span className="text-sm font-medium capitalize">{photo.pose}</span>
@@ -628,7 +608,7 @@ function MeasurementsInner() {
         <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
           <ImageIcon className="h-12 w-12 md:h-16 md:w-16 mb-3 opacity-20" />
           <p className="text-sm">No progress photos yet.</p>
-          <p className="text-xs mt-1">Upload your first photo above.</p>
+          <p className="text-xs mt-1">Tap + to upload your first photo.</p>
         </div>
       )}
     </div>
@@ -636,15 +616,8 @@ function MeasurementsInner() {
 
   const inbodySection = (
     <div className="space-y-4">
-      {/* Action row */}
+      {/* Action row — "New Scan" lives behind the page-header "+" button now */}
       <div className="flex items-center gap-2 flex-wrap">
-        <Link
-          href="/measurements/inbody/new"
-          className="flex items-center gap-2 px-3 py-2 bg-primary text-white text-sm font-medium rounded-lg"
-        >
-          <Plus className="h-4 w-4" />
-          New Scan
-        </Link>
         {inbodyScans.length >= 2 && (
           <Link
             href="/measurements/inbody/compare"
@@ -790,6 +763,24 @@ function MeasurementsInner() {
             <ChevronLeft className="h-5 w-5" />
           </Link>
           <h1 className="text-2xl font-bold">Measurements</h1>
+          <button
+            type="button"
+            onClick={() => {
+              if (activeTab === 'photos') setPhotoSheetOpen(true);
+              else if (activeTab === 'inbody') setInbodySheetOpen(true);
+              else setLogSheetOpen(true);
+            }}
+            className="ml-auto flex items-center justify-center text-muted-foreground min-h-[44px] min-w-[44px]"
+            aria-label={
+              activeTab === 'photos'
+                ? 'Add photo'
+                : activeTab === 'inbody'
+                  ? 'New InBody scan'
+                  : 'Log measurement'
+            }
+          >
+            <Plus className="h-5 w-5" strokeWidth={1.75} />
+          </button>
         </div>
 
         {/* Mobile tab switcher — hidden at md:+ (grid renders all three sections) */}
@@ -837,6 +828,64 @@ function MeasurementsInner() {
           </section>
         </div>
       </div>
+
+      <Sheet
+        open={logSheetOpen}
+        onClose={() => setLogSheetOpen(false)}
+        title="Log Measurement"
+        height="auto"
+        footer={
+          <div className="flex justify-end">
+            <button
+              onClick={handleSaveMeasurements}
+              disabled={saving || !hasInput}
+              className="px-4 py-2 bg-primary text-white text-sm font-medium rounded-lg disabled:opacity-40"
+            >
+              {saving ? 'Saving…' : 'Save'}
+            </button>
+          </div>
+        }
+      >
+        <div className="p-4">
+          <div className="ios-section">
+            <div className="ios-row justify-between">
+              <span className="text-sm text-muted-foreground">Date</span>
+              <input
+                type="date"
+                value={date}
+                onChange={e => setDate(e.target.value)}
+                className="bg-transparent text-sm text-right outline-none min-h-[44px] text-muted-foreground"
+              />
+            </div>
+            <div className="ios-row flex-wrap gap-3">
+              {SITES.map(s => (
+                <input
+                  key={s.key}
+                  type="number"
+                  inputMode="decimal"
+                  placeholder={`${s.label} (cm)`}
+                  value={inputs[s.key] ?? ''}
+                  onChange={e => setInputs(prev => ({ ...prev, [s.key]: e.target.value }))}
+                  className="flex-1 min-w-[110px] bg-transparent text-sm outline-none min-h-[44px]"
+                />
+              ))}
+            </div>
+            <div className="ios-row">
+              <input
+                type="number"
+                inputMode="decimal"
+                placeholder={`Weight (${label})`}
+                value={weightInput}
+                onChange={e => setWeightInput(e.target.value)}
+                className="flex-1 bg-transparent text-sm outline-none min-h-[44px]"
+              />
+            </div>
+          </div>
+        </div>
+      </Sheet>
+
+      <PhotoSheet open={photoSheetOpen} onClose={() => setPhotoSheetOpen(false)} />
+      <InbodyScanSheet open={inbodySheetOpen} onClose={() => setInbodySheetOpen(false)} />
     </main>
   );
 }

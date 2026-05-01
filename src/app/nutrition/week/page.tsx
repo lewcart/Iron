@@ -1,13 +1,11 @@
 'use client';
 
 import { useState } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ChevronLeft, Pencil, Plus, Trash2 } from 'lucide-react';
 import Link from 'next/link';
-import { rebirthJsonHeaders } from '@/lib/api/headers';
-import { queryKeys } from '@/lib/api/query-keys';
-import { apiBase } from '@/lib/api/client';
-import { dateToDayOfWeek, fetchNutritionWeekAll } from '@/lib/api/nutrition';
+import { dateToDayOfWeek } from '@/lib/api/nutrition';
+import { useWeekMeals } from '@/lib/useLocalDB-nutrition';
+import { setWeekMeal, deleteWeekMeal } from '@/lib/mutations-nutrition';
 
 const DAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
@@ -32,86 +30,65 @@ const EMPTY_FORM: WeekMealForm = {
  * (one row per slot per day) that the Today page can later use as a
  * planned-meal source. Daily macro logging happens at /nutrition/today.
  *
- * Lives at /nutrition/week (sub-nav: Week). The legacy combined Today+Week
- * page used to live at /nutrition before being split into /nutrition/today
- * and this file.
+ * Reads/writes via Dexie (local-first); the sync engine pushes/pulls to
+ * Postgres in the background. Earlier versions hit /api/nutrition/week
+ * directly, which silently 401'd on the Capacitor iOS build (no
+ * NEXT_PUBLIC_REBIRTH_API_KEY baked in) and made the whole page render
+ * empty even though Postgres + Dexie had the rows.
  */
 export default function NutritionWeekPage() {
-  const queryClient = useQueryClient();
-
   const [weekDay, setWeekDay] = useState(() => dateToDayOfWeek(new Date().toISOString().slice(0, 10)));
 
   const [showAddForm, setShowAddForm] = useState(false);
   const [addForm, setAddForm] = useState<WeekMealForm>(EMPTY_FORM);
   const [editingUuid, setEditingUuid] = useState<string | null>(null);
   const [editForm, setEditForm] = useState<WeekMealForm>(EMPTY_FORM);
+  const [saving, setSaving] = useState(false);
 
-  const { data: allWeekMeals = [], isPending: loading } = useQuery({
-    queryKey: queryKeys.nutrition.weekAll(),
-    queryFn: fetchNutritionWeekAll,
-    staleTime: 20_000,
-  });
-
+  const allWeekMeals = useWeekMeals();
   const dayMeals = allWeekMeals.filter((m) => m.day_of_week === weekDay);
 
-  function invalidate() {
-    return queryClient.invalidateQueries({ queryKey: queryKeys.nutrition.weekAll() });
-  }
-
-  const addMutation = useMutation({
-    mutationFn: async (form: WeekMealForm) => {
-      const res = await fetch(`${apiBase()}/api/nutrition/week`, {
-        method: 'POST',
-        headers: rebirthJsonHeaders(),
-        body: JSON.stringify({
-          day_of_week: weekDay,
-          meal_slot: form.meal_slot || '',
-          meal_name: form.meal_name,
-          protein_g: form.protein_g ? parseFloat(form.protein_g) : null,
-          calories: form.calories ? parseFloat(form.calories) : null,
-          quality_rating: form.quality_rating ? parseInt(form.quality_rating, 10) : null,
-          sort_order: dayMeals.length,
-        }),
+  async function addMeal(form: WeekMealForm) {
+    setSaving(true);
+    try {
+      await setWeekMeal({
+        day_of_week: weekDay,
+        meal_slot: form.meal_slot || '',
+        meal_name: form.meal_name,
+        protein_g: form.protein_g ? parseFloat(form.protein_g) : null,
+        calories: form.calories ? parseFloat(form.calories) : null,
+        quality_rating: form.quality_rating ? parseInt(form.quality_rating, 10) : null,
+        sort_order: dayMeals.length,
       });
-      if (!res.ok) throw new Error(`POST /api/nutrition/week failed (${res.status})`);
-    },
-    onSuccess: async () => {
       setAddForm(EMPTY_FORM);
       setShowAddForm(false);
-      await invalidate();
-    },
-  });
+    } finally {
+      setSaving(false);
+    }
+  }
 
-  const editMutation = useMutation({
-    mutationFn: async ({ uuid, form }: { uuid: string; form: WeekMealForm }) => {
-      const res = await fetch(`${apiBase()}/api/nutrition/week/${uuid}`, {
-        method: 'PATCH',
-        headers: rebirthJsonHeaders(),
-        body: JSON.stringify({
-          meal_name: form.meal_name,
-          meal_slot: form.meal_slot,
-          protein_g: form.protein_g ? parseFloat(form.protein_g) : null,
-          calories: form.calories ? parseFloat(form.calories) : null,
-          quality_rating: form.quality_rating ? parseInt(form.quality_rating, 10) : null,
-        }),
+  async function editMeal(uuid: string, form: WeekMealForm) {
+    const existing = dayMeals.find((m) => m.uuid === uuid);
+    if (!existing) return;
+    setSaving(true);
+    try {
+      await setWeekMeal({
+        uuid,
+        day_of_week: existing.day_of_week,
+        meal_slot: form.meal_slot,
+        meal_name: form.meal_name,
+        protein_g: form.protein_g ? parseFloat(form.protein_g) : null,
+        carbs_g: existing.carbs_g,
+        fat_g: existing.fat_g,
+        calories: form.calories ? parseFloat(form.calories) : null,
+        quality_rating: form.quality_rating ? parseInt(form.quality_rating, 10) : null,
+        sort_order: existing.sort_order,
       });
-      if (!res.ok) throw new Error(`PATCH /api/nutrition/week/{uuid} failed (${res.status})`);
-    },
-    onSuccess: async () => {
       setEditingUuid(null);
-      await invalidate();
-    },
-  });
-
-  const deleteMutation = useMutation({
-    mutationFn: async (uuid: string) => {
-      await fetch(`${apiBase()}/api/nutrition/week/${uuid}`, {
-        method: 'DELETE',
-        headers: rebirthJsonHeaders(),
-      });
-    },
-    onSuccess: () => invalidate(),
-  });
+    } finally {
+      setSaving(false);
+    }
+  }
 
   return (
     <main className="tab-content bg-background">
@@ -142,9 +119,7 @@ export default function NutritionWeekPage() {
         </div>
 
         <div className="px-4 space-y-4">
-          {loading && <p className="text-xs text-muted-foreground px-1">Loading…</p>}
-
-          {!loading && dayMeals.length > 0 && (
+          {dayMeals.length > 0 && (
             <div className="ios-section">
               {dayMeals.map((meal, i) => {
                 const isEditing = editingUuid === meal.uuid;
@@ -192,7 +167,7 @@ export default function NutritionWeekPage() {
                           </button>
                           <button
                             type="button"
-                            onClick={() => deleteMutation.mutate(meal.uuid)}
+                            onClick={() => deleteWeekMeal(meal.uuid)}
                             className="p-2 text-red-500 min-h-[44px] min-w-[44px] flex items-center justify-center"
                             aria-label="Delete meal"
                           >
@@ -204,9 +179,9 @@ export default function NutritionWeekPage() {
                       <MealEditFields
                         form={editForm}
                         onChange={setEditForm}
-                        onSave={() => editMutation.mutate({ uuid: meal.uuid, form: editForm })}
+                        onSave={() => editMeal(meal.uuid, editForm)}
                         onCancel={() => setEditingUuid(null)}
-                        saving={editMutation.isPending}
+                        saving={saving}
                       />
                     )}
                   </div>
@@ -215,7 +190,7 @@ export default function NutritionWeekPage() {
             </div>
           )}
 
-          {!loading && dayMeals.length === 0 && !showAddForm && (
+          {dayMeals.length === 0 && !showAddForm && (
             <p className="text-xs text-muted-foreground px-1">No meals defined for {DAY_LABELS[weekDay]}.</p>
           )}
 
@@ -241,8 +216,8 @@ export default function NutritionWeekPage() {
                     setShowAddForm(false);
                     setAddForm(EMPTY_FORM);
                   }}
-                  onSave={() => addMutation.mutate(addForm)}
-                  saving={addMutation.isPending}
+                  onSave={() => addMeal(addForm)}
+                  saving={saving}
                 />
               </div>
             </div>

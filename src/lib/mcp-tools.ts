@@ -1698,11 +1698,21 @@ async function uploadInspoPhotoTool(args: Record<string, unknown>) {
     contentType: resolved.contentType,
   });
 
+  const VALID_POSES = ['front', 'side', 'back', 'other'] as const;
+  let pose: (typeof VALID_POSES)[number] | null = null;
+  if (typeof args.pose === 'string') {
+    if (!(VALID_POSES as readonly string[]).includes(args.pose)) {
+      return toolError(`pose must be one of ${VALID_POSES.join(', ')}`);
+    }
+    pose = args.pose as (typeof VALID_POSES)[number];
+  }
+
   const photo = await dbCreateInspoPhoto({
     blob_url: blob.url,
     notes: typeof args.notes === 'string' ? args.notes : null,
     taken_at: typeof args.taken_at === 'string' ? args.taken_at : undefined,
     burst_group_id: typeof args.burst_group_id === 'string' ? args.burst_group_id : null,
+    pose,
   });
   return toolResult(photo);
 }
@@ -2610,9 +2620,11 @@ async function getPlanProgressTool() {
 // ── Tool registry ─────────────────────────────────────────────────────────────
 
 import { nutritionTools } from './mcp/nutrition-tools';
+import { strategyWriteTools } from './mcp/strategy-tools';
 
 export const tools: MCPTool[] = [
   ...nutritionTools,
+  ...strategyWriteTools,
   {
     name: 'ping',
     description: 'Health check — confirms the MCP server is reachable.',
@@ -3429,7 +3441,7 @@ export const tools: MCPTool[] = [
   {
     name: 'upload_inspo_photo',
     description:
-      'Upload a physique inspiration photo to Vercel Blob and record it in inspo_photos. Provide image bytes via image_base64 OR image_url. Pass burst_group_id to attach this frame to an existing burst.',
+      'Upload a physique inspiration photo to Vercel Blob and record it in inspo_photos. Provide image bytes via image_base64 OR image_url. Pass burst_group_id to attach this frame to an existing burst. Pose categorizes the photo for the photos-compare viewer (mixes with progress photos of the same pose).',
     inputSchema: {
       type: 'object',
       properties: {
@@ -3447,6 +3459,11 @@ export const tools: MCPTool[] = [
         burst_group_id: {
           type: 'string',
           description: 'Optional UUID grouping multiple frames from a single burst capture.',
+        },
+        pose: {
+          type: 'string',
+          enum: ['front', 'side', 'back', 'other'],
+          description: 'Optional pose categorization. Mirrors progress_photos.pose so the compare viewer can mix progress + inspo at the same pose.',
         },
       },
     },
