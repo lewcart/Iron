@@ -5,6 +5,10 @@ import { ChevronLeft, Trophy, Medal, Award, Timer } from 'lucide-react';
 import type { Exercise } from '@/types';
 import { useUnit } from '@/context/UnitContext';
 import { apiBase } from '@/lib/api/client';
+import { ExerciseDemoStrip } from '@/components/ExerciseDemoStrip';
+import { EditableTextSection } from '@/components/EditableTextSection';
+import { updateExercise } from '@/lib/mutations-exercises';
+import { Sparkles } from 'lucide-react';
 import {
   getExerciseProgressLocal,
   getExerciseSessionHistoryLocal,
@@ -108,6 +112,61 @@ function PRBadge({
       <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide text-center">{label}</p>
       <p className="text-base font-bold text-foreground text-center leading-tight">{value}</p>
       <p className="text-[10px] text-muted-foreground text-center">{sub}</p>
+    </div>
+  );
+}
+
+/** Generate-images button shown when an exercise has no demo frames.
+ *  Calls /api/exercises/[uuid]/generate-images, which produces 3 frames via
+ *  gpt-image-1, splits them, uploads to Vercel Blob, updates DB. After
+ *  success the parent's Dexie liveQuery picks up the new image_urls and
+ *  the strip renders.
+ *
+ *  Cost: ~$0.19 per click. Loading state takes 30-60s. Disable while in
+ *  flight + show progress. */
+function GenerateImagesButton({ exerciseUuid }: { exerciseUuid: string }) {
+  const [generating, setGenerating] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleClick = async () => {
+    setGenerating(true);
+    setError(null);
+    try {
+      const res = await fetch(
+        `${apiBase()}/api/exercises/${exerciseUuid}/generate-images`,
+        { method: 'POST' },
+      );
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error ?? `HTTP ${res.status}`);
+      }
+      // Server has updated Postgres. Sync pull will catch up Dexie on its
+      // next tick; until then, force one to show the new images quickly.
+      const { syncEngine } = await import('@/lib/sync');
+      await syncEngine.pull();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'unknown';
+      setError(msg);
+    } finally {
+      setGenerating(false);
+    }
+  };
+
+  return (
+    <div className="bg-card border border-border rounded-2xl p-4 text-center">
+      <Sparkles className="h-6 w-6 mx-auto text-primary/60 mb-2" />
+      <p className="text-sm text-foreground mb-1">No demo images yet</p>
+      <p className="text-xs text-muted-foreground mb-3">
+        Generate 3-frame demo via AI. Takes ~30-60 seconds.
+      </p>
+      <button
+        onClick={handleClick}
+        disabled={generating}
+        className="px-4 py-2 bg-primary text-primary-foreground text-sm font-medium rounded-full disabled:opacity-50"
+      >
+        {generating ? 'Generating…' : 'Generate demo images'}
+      </button>
+      {error && <p className="mt-2 text-xs text-destructive">{error}</p>}
     </div>
   );
 }
@@ -432,6 +491,28 @@ export default function ExerciseDetail({
           <h1 className="text-xl font-bold">{exercise.title}</h1>
         )}
 
+        {/* Demo strip — renders only when image_count > 0 OR image_urls set.
+            Tap → openYouTube when youtube_url present. Always visible at top
+            of detail (before stats/chart) so it's the first thing the user
+            sees mid-workout. */}
+        {(exercise.image_count > 0 || (exercise.image_urls && exercise.image_urls.length > 0)) && (
+          <ExerciseDemoStrip
+            exerciseUuid={exercise.uuid}
+            imageCount={exercise.image_count}
+            imageUrls={exercise.image_urls ?? null}
+            youtubeUrl={exercise.youtube_url}
+            compact={chrome === 'modal'}
+          />
+        )}
+
+        {/* No demo images yet — offer to generate them. Page mode only;
+            modal stays read-only (in-workout reference, not authoring). */}
+        {chrome === 'page'
+          && exercise.image_count === 0
+          && (!exercise.image_urls || exercise.image_urls.length === 0) && (
+          <GenerateImagesButton exerciseUuid={exercise.uuid} />
+        )}
+
         {loading ? (
           <LoadingSkeleton />
         ) : !hasData ? (
@@ -649,14 +730,16 @@ export default function ExerciseDetail({
           </>
         )}
 
-        {exercise.description && (
-          <div>
-            <p className="text-xs font-semibold text-primary uppercase tracking-wide mb-1 px-1">About</p>
-            <div className="ios-section p-4">
-              <p className="text-sm text-foreground leading-relaxed">{exercise.description}</p>
-            </div>
-          </div>
-        )}
+        <EditableTextSection
+          mode="prose"
+          label="About"
+          value={exercise.description}
+          emptyPlaceholder="Describe what this exercise does and what to focus on…"
+          editable={chrome === 'page'}
+          onSave={async (next) => {
+            await updateExercise(exercise.uuid, { description: next });
+          }}
+        />
 
         {(exercise.primary_muscles.length > 0 || exercise.secondary_muscles.length > 0) && (
           <div>
@@ -691,32 +774,27 @@ export default function ExerciseDetail({
           </div>
         )}
 
-        {exercise.steps.length > 0 && (
-          <div>
-            <p className="text-xs font-semibold text-primary uppercase tracking-wide mb-1 px-1">Steps</p>
-            <div className="ios-section">
-              {exercise.steps.map((step, i) => (
-                <div key={i} className="ios-row gap-3">
-                  <span className="text-xs font-bold text-primary w-5 text-center flex-shrink-0">{i + 1}</span>
-                  <p className="text-sm flex-1 leading-snug">{step}</p>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
+        <EditableTextSection
+          mode="numbered-list"
+          label="Steps"
+          value={exercise.steps}
+          emptyPlaceholder="Add a step…"
+          editable={chrome === 'page'}
+          onSave={async (next) => {
+            await updateExercise(exercise.uuid, { steps: next });
+          }}
+        />
 
-        {exercise.tips.length > 0 && (
-          <div>
-            <p className="text-xs font-semibold text-primary uppercase tracking-wide mb-1 px-1">Tips</p>
-            <div className="ios-section">
-              {exercise.tips.map((tip, i) => (
-                <div key={i} className="ios-row">
-                  <p className="text-sm flex-1 leading-snug">{tip}</p>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
+        <EditableTextSection
+          mode="bullet-list"
+          label="Tips"
+          value={exercise.tips}
+          emptyPlaceholder="Add a tip or thing to watch out for…"
+          editable={chrome === 'page'}
+          onSave={async (next) => {
+            await updateExercise(exercise.uuid, { tips: next });
+          }}
+        />
 
         {exercise.alias.length > 0 && (
           <div>

@@ -17,6 +17,13 @@ export interface Exercise {
   /** How sets are tracked: 'reps' uses weight + repetitions; 'time' uses
    *  duration_seconds on the set. Defaults to 'reps' for legacy data. */
   tracking_mode: 'reps' | 'time';
+  /** Number of demo image frames available (0-3). Frames addressed by
+   *  exercise.uuid at public/exercise-images/{uuid}/{01,02,03}.jpg. */
+  image_count: number;
+  /** Optional YouTube reference URL with start-time embedded. */
+  youtube_url: string | null;
+  /** Optional Vercel Blob URLs for AI-generated in-app demo images. */
+  image_urls: string[] | null;
 }
 
 export interface Workout {

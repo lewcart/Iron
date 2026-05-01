@@ -95,15 +95,24 @@ export async function createCustomExercise(data: {
   steps?: string[];
   tips?: string[];
   movementPattern?: string;
+  trackingMode?: 'reps' | 'time';
+  youtubeUrl?: string | null;
 }): Promise<Exercise> {
   const uuid = randomUUID();
+
+  // youtube_url validated server-side: only persist if it looks like a YouTube
+  // host. MCP/import paths can otherwise bypass form validation.
+  const ytClean = data.youtubeUrl && /^https?:\/\/(www\.)?(youtube\.com|youtu\.be)\//i.test(data.youtubeUrl)
+    ? data.youtubeUrl
+    : null;
 
   await query(`
     INSERT INTO exercises (
       uuid, everkinetic_id, title, description,
       primary_muscles, secondary_muscles, equipment,
-      steps, tips, is_custom, movement_pattern
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, true, $10)
+      steps, tips, is_custom, movement_pattern,
+      tracking_mode, youtube_url, image_count
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, true, $10, $11, $12, 0)
   `, [
     uuid,
     10000 + Date.now(),
@@ -115,6 +124,8 @@ export async function createCustomExercise(data: {
     JSON.stringify(data.steps || []),
     JSON.stringify(data.tips || []),
     data.movementPattern || null,
+    data.trackingMode || 'reps',
+    ytClean,
   ]);
 
   return (await getExercise(uuid))!;
@@ -1322,6 +1333,9 @@ export function parseExercise(row: DbRow): Exercise {
     is_hidden: Boolean(row.is_hidden),
     movement_pattern: (row.movement_pattern as string | null) ?? null,
     tracking_mode: (row.tracking_mode === 'time' ? 'time' : 'reps') as 'reps' | 'time',
+    image_count: typeof row.image_count === 'number' ? row.image_count : 0,
+    youtube_url: (row.youtube_url as string | null) ?? null,
+    image_urls: Array.isArray(row.image_urls) ? row.image_urls as string[] : null,
   };
 }
 

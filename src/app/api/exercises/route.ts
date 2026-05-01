@@ -59,8 +59,20 @@ export async function POST(request: Request) {
   const equipment = Array.isArray(data.equipment)
     ? (data.equipment as unknown[]).filter((e): e is string => typeof e === 'string')
     : [];
+  const steps = Array.isArray(data.steps)
+    ? (data.steps as unknown[]).filter((s): s is string => typeof s === 'string')
+    : [];
+  const tips = Array.isArray(data.tips)
+    ? (data.tips as unknown[]).filter((t): t is string => typeof t === 'string')
+    : [];
   const description = typeof data.description === 'string' ? data.description.trim() || undefined : undefined;
   const movementPattern = typeof data.movement_pattern === 'string' ? data.movement_pattern.trim() || undefined : undefined;
+  const trackingMode = data.tracking_mode === 'time' ? 'time' : 'reps';
+  // Server-side YouTube validation (MCP/import paths bypass the form).
+  const youtubeUrlRaw = typeof data.youtube_url === 'string' ? data.youtube_url.trim() : '';
+  const youtubeUrl = youtubeUrlRaw && /^https?:\/\/(www\.)?(youtube\.com|youtu\.be)\//i.test(youtubeUrlRaw)
+    ? youtubeUrlRaw
+    : null;
 
   const exercise = await createCustomExercise({
     title,
@@ -68,7 +80,11 @@ export async function POST(request: Request) {
     primaryMuscles,
     secondaryMuscles,
     equipment,
+    steps,
+    tips,
     movementPattern,
+    trackingMode,
+    youtubeUrl,
   });
 
   return NextResponse.json(exercise, { status: 201 });

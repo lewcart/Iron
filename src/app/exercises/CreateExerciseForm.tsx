@@ -116,6 +116,8 @@ export default function CreateExerciseForm({ onClose, onCreated }: Props) {
   const [movementPattern, setMovementPattern] = useState('');
   const [description, setDescription] = useState('');
   const [trackingMode, setTrackingMode] = useState<'reps' | 'time'>('reps');
+  const [youtubeUrl, setYoutubeUrl] = useState('');
+  const [youtubeError, setYoutubeError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   const canSubmit = title.trim().length > 0 && primaryMuscles.length > 0;
@@ -123,6 +125,22 @@ export default function CreateExerciseForm({ onClose, onCreated }: Props) {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!canSubmit || submitting) return;
+
+    // Validate YouTube URL inline. Empty is fine. Garbage rejects with an
+    // error rather than silently dropping — the user gets feedback.
+    let ytClean: string | null = null;
+    const ytTrimmed = youtubeUrl.trim();
+    if (ytTrimmed.length > 0) {
+      const { parseYouTubeUrl } = await import('@/lib/youtube-url');
+      const parsed = parseYouTubeUrl(ytTrimmed);
+      if (!parsed) {
+        setYoutubeError('Not a valid YouTube URL');
+        return;
+      }
+      ytClean = ytTrimmed;
+    }
+    setYoutubeError(null);
+
     setSubmitting(true);
     try {
       await createCustomExercise({
@@ -133,6 +151,7 @@ export default function CreateExerciseForm({ onClose, onCreated }: Props) {
         movement_pattern: movementPattern || undefined,
         description: description.trim() || undefined,
         tracking_mode: trackingMode,
+        youtube_url: ytClean,
       });
       onCreated();
     } finally {
@@ -254,6 +273,27 @@ export default function CreateExerciseForm({ onClose, onCreated }: Props) {
               rows={3}
               className="mt-1 w-full px-3 py-2 bg-secondary rounded-lg text-sm outline-none resize-none"
             />
+          </div>
+
+          {/* YouTube URL — optional. Tap on the demo strip later opens this.
+              Validate inline; reject garbage on submit. */}
+          <div>
+            <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+              YouTube reference (optional)
+            </label>
+            <input
+              type="url"
+              value={youtubeUrl}
+              onChange={(e) => { setYoutubeUrl(e.target.value); setYoutubeError(null); }}
+              placeholder="https://youtu.be/… or https://www.youtube.com/watch?v=…"
+              className="mt-1 w-full px-3 py-2 bg-secondary rounded-lg text-sm outline-none"
+            />
+            {youtubeError && (
+              <p className="mt-1 text-xs text-destructive">{youtubeError}</p>
+            )}
+            <p className="mt-1 text-[11px] text-muted-foreground">
+              Add ?t=42 to start at a specific second (or ?t=1m23s).
+            </p>
           </div>
 
         </form>

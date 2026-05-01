@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from 'react';
 import { syncEngine, type SyncStatus } from '@/lib/sync';
-import { ChevronRight, X, Search, Download } from 'lucide-react';
+import Link from 'next/link';
+import { ChevronLeft, ChevronRight, X, Search, Download } from 'lucide-react';
 import type { LocalExercise } from '@/db/local';
 import type { LocalWorkoutSummary } from '@/lib/useLocalDB';
 import { useWorkoutSummaries, useExercises } from '@/lib/useLocalDB';
@@ -74,7 +75,12 @@ export default function HistoryPage() {
   return (
     <main className="tab-content bg-background">
       <div className="px-4 pt-safe pb-3 flex justify-between items-baseline">
-        <h1 className="text-2xl font-bold">History</h1>
+        <div className="flex items-baseline gap-2">
+          <Link href="/workout" className="text-primary self-center p-1 -ml-1">
+            <ChevronLeft className="h-5 w-5" />
+          </Link>
+          <h1 className="text-2xl font-bold">History</h1>
+        </div>
 
         <div className="flex items-center gap-2">
           <a

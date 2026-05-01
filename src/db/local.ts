@@ -32,6 +32,15 @@ export interface LocalExercise {
    *  callers should coerce undefined → 'reps' for rows that arrived from
    *  a Dexie v5 store before the v6 schema bump. */
   tracking_mode: 'reps' | 'time';
+  /** Number of demo image frames available (0-3). Source-of-truth for
+   *  whether the demo strip renders. Frames addressed by exercise.uuid
+   *  at public/exercise-images/{uuid}/{01,02,03}.jpg. */
+  image_count: number;
+  /** Optional YouTube reference URL with start-time embedded. */
+  youtube_url: string | null;
+  /** Optional Vercel Blob URLs for AI-generated in-app demo images.
+   *  When set, takes precedence over the bundled public/ path. */
+  image_urls: string[] | null;
 }
 
 export interface LocalWorkout extends SyncMeta {
@@ -588,18 +597,31 @@ export class IronDB extends Dexie {
     // undefined → 'reps' / null defensively. No upgrade hook needed.
     this.version(8).stores(v6Stores);
 
-    // v9: strategic layer — body_vision + body_plan + plan_checkpoint
+    // v9: exercise demo assets (mirrors Postgres migration 023).
+    // image_count (0-3), youtube_url (nullable), image_urls (Blob URLs for
+    // AI-generated in-app images). All additive. Backfill defaults so old
+    // rows pushed via sync don't fail the server-side NOT NULL constraint
+    // on image_count.
+    this.version(9).stores(v6Stores).upgrade(async tx => {
+      await tx.table('exercises').toCollection().modify(row => {
+        if (row.image_count === undefined) row.image_count = 0;
+        if (row.youtube_url === undefined) row.youtube_url = null;
+        if (row.image_urls === undefined) row.image_urls = null;
+      });
+    });
+
+    // v10: strategic layer — body_vision + body_plan + plan_checkpoint
     // (mirrors Postgres migration 024). All synced via change_log. Indexes:
     // status (for active-row lookups), vision_id / plan_id (for FK joins),
     // target_date on checkpoints (for chronological listing). plan_dose_revision
     // is server-only and not represented in Dexie.
-    const v9Stores = {
+    const v10Stores = {
       ...v6Stores,
       body_vision: 'uuid, status, _synced, _updated_at',
       body_plan: 'uuid, vision_id, status, _synced, _updated_at',
       plan_checkpoint: 'uuid, plan_id, target_date, status, _synced, _updated_at',
     };
-    this.version(9).stores(v9Stores);
+    this.version(10).stores(v10Stores);
   }
 }
 
@@ -683,6 +705,9 @@ export async function hydrateExercises(): Promise<void> {
           is_hidden: ex.is_hidden ?? false,
           movement_pattern: ex.movement_pattern ?? null,
           tracking_mode: ex.tracking_mode ?? 'reps',
+          image_count: ex.image_count ?? 0,
+          youtube_url: ex.youtube_url ?? null,
+          image_urls: ex.image_urls ?? null,
         });
       }
     });

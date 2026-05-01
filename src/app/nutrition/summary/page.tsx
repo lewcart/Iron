@@ -1,6 +1,8 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import Link from 'next/link';
+import { ChevronLeft } from 'lucide-react';
 import {
   ResponsiveContainer,
   LineChart,
@@ -59,7 +61,12 @@ export default function NutritionSummaryPage() {
   return (
     <div className="tab-content max-w-3xl mx-auto px-4 pt-4 pb-24 space-y-4">
       <header className="flex items-center justify-between">
-        <h1 className="text-heading">Summary</h1>
+        <div className="flex items-center gap-2">
+          <Link href="/nutrition" className="text-primary p-1 -ml-1">
+            <ChevronLeft className="h-5 w-5" />
+          </Link>
+          <h1 className="text-heading">Summary</h1>
+        </div>
         <div className="flex gap-1">
           {RANGES.map((r) => (
             <button
