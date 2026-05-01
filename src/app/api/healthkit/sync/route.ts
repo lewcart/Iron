@@ -85,7 +85,7 @@ interface SyncBody {
                                      // 1:1 to rows in healthkit_sleep_nights. Until the
                                      // Capacitor plugin is extended to emit per-night
                                      // hk_uuids alongside the merged stage minutes, the
-                                     // anchor-reset path (migration 023, or any future
+                                     // anchor-reset path (migration 025, or any future
                                      // forced re-pull) is the only recovery for edits /
                                      // deletes that happened in iOS Health.
                                      //

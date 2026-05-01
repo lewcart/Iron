@@ -1,7 +1,7 @@
 # Sleep Tracking Surface — Plan v2 (post-review)
 
 Branch: `scratch/20260501-1347` (rename to `feat/sleep-surface` once accepted)
-Single-user app (Lewis only). Multi-user / migration-skew concerns relaxed.
+Single-user app (Lou only). Multi-user / migration-skew concerns relaxed.
 
 > **North star:** Eight Sleep + Apple Watch already write every sleep sample into Apple Health. We have stage minutes per night flowing into `healthkit_daily`, but the wake/bed envelope and a coaching-grade rollup view are missing. v2 (this doc) absorbs Design + Eng + DX review findings — most importantly, the discovery that `SleepNight.start_at`/`end_at` already exist in the Capacitor payload, eliminating the proposed plugin change.
 
@@ -64,10 +64,10 @@ Gaps:
 
 ---
 
-## Data model — migration 023 (rev)
+## Data model — migration 025 (rev)
 
 ```sql
--- 023_healthkit_sleep_nights.sql
+-- 025_healthkit_sleep_nights.sql
 
 -- One row per night per source. Source-aware so multi-source nights
 -- (Eight Sleep + Apple Watch) coexist; the UI picks a canonical per night.
@@ -124,7 +124,7 @@ To keep them honest, a unit test asserts: for any wake_date, `SUM(asleep_min WHE
 
 1. **Persist `start_at` / `end_at`** — already in payload, just persisted now.
 2. **Process `deleted: string[]`** — currently dropped at `healthSync.ts:148`. Carry through; sync route deletes by `(wake_date, source_key)` for any night derived from a deleted sample. Edge: native sample UUIDs don't directly map to our row PK; deletion handling re-materializes the affected `wake_date` from remaining samples instead. (Documented in failure modes.)
-3. **Backfill on first deploy** — migration 023 includes a guarded one-shot:
+3. **Backfill on first deploy** — migration 025 includes a guarded one-shot:
    ```sql
    -- end of 023:
    UPDATE healthkit_sync_state SET last_anchor = NULL WHERE metric = 'sleep';
@@ -145,7 +145,7 @@ function deriveSourceKey(bundleId: string | null | undefined): 'apple_watch' | '
 
 ### Canonical source per night
 
-When both Eight Sleep AND Apple Watch wrote a night, the UI / aggregates pick the canonical row. Rule: **`MAX(in_bed_min)` wins.** Eight Sleep typically captures more total time (full in-bed envelope) vs the Watch's stage-detection windows. If tied, prefer `eight_sleep` (more accurate for Lewis's setup).
+When both Eight Sleep AND Apple Watch wrote a night, the UI / aggregates pick the canonical row. Rule: **`MAX(in_bed_min)` wins.** Eight Sleep typically captures more total time (full in-bed envelope) vs the Watch's stage-detection windows. If tied, prefer `eight_sleep` (more accurate for Lou's setup).
 
 `get_health_sleep_summary` exposes `sources: string[]` listing all source keys seen in the window for transparency.
 
@@ -437,7 +437,7 @@ Tool selection:
 | Step | What | Why this order |
 |---|---|---|
 | 1 ~~Capacitor plugin~~ | DELETED — `start_at`/`end_at` already in payload (`src/lib/healthkit.ts:71`) | n/a |
-| 1 | Migration 023 + sync route persistence (start_at, end_at, sources, is_main filter, deletion handler, anchor reset for backfill) | Schema + ingest before consumers |
+| 1 | Migration 025 + sync route persistence (start_at, end_at, sources, is_main filter, deletion handler, anchor reset for backfill) | Schema + ingest before consumers |
 | 2 | `get_health_sleep_summary` MCP tool + cross-reference edits to existing tool descriptions | Server-side, no UI dependency |
 | 3 | Page primitives: `StageBar`, `RangeTabs`, layout shell | Load-bearing |
 | 4 | `LedeCard` (verdict + total + key signals + HRV inline) reads from `healthkit_sleep_nights` (canonical row) | First visible win |
@@ -456,15 +456,15 @@ Steps 1-5 are MVP. 6-10 are polish.
 
 | Codepath | Test | Type |
 |---|---|---|
-| Migration 023 forward + idempotent re-run | Apply twice; second is no-op | integration |
-| Migration 023 anchor reset | After migration, `last_anchor` for sleep is NULL | integration |
+| Migration 025 forward + idempotent re-run | Apply twice; second is no-op | integration |
+| Migration 025 anchor reset | After migration, `last_anchor` for sleep is NULL | integration |
 | Sleep nights upsert by (wake_date, source_key) | Same source re-syncs → updates; different source same date → second row | integration |
 | `is_main` filter — short nap | 30-min in_bed + 02:00 end → `is_main = false` | unit |
 | `is_main` filter — main night | 7h in_bed + 07:00 end → `is_main = true` | unit |
 | Cross-midnight nap pollution | Nap with wake_date = today doesn't poison consistency stdev | integration |
 | Multi-source same night | Eight Sleep + Apple Watch both write → 2 rows; `MAX(in_bed_min)` picks canonical | integration |
 | HK deletion of a sleep sample | Sync re-materializes affected wake_date; stale row removed | integration |
-| Backfill on first deploy | Migration 023 → next sync pulls last 90 days into nights table | integration |
+| Backfill on first deploy | Migration 025 → next sync pulls last 90 days into nights table | integration |
 | Sync ignores `deleted` array bug | Pre-fix `healthSync.ts:148` test should fail; post-fix passes | regression |
 | `get_health_sleep_summary` empty window | `range.n_nights: 0`, `averages: null`, `consistency: null` | unit |
 | `get_health_sleep_summary` 4 nights | `consistency: null` (<5 threshold), averages = the 4 nights | unit |
@@ -503,14 +503,14 @@ Steps 1-5 are MVP. 6-10 are polish.
 | 2 | Eight Sleep + Apple Watch double-write | medium | high | (wake_date, source_key) PK; canonical = MAX(in_bed_min); sources[] in response |
 | 3 | Naps pollute aggregates | high | high | `is_main` filter (in_bed≥4h AND end≥04:00); aggregates `WHERE is_main` |
 | 4 | HK deletes a sleep sample | high | medium | `deleted` array carried through sync; affected wake_date re-materialized |
-| 5 | Backfill empty post-deploy | high | certain | Anchor reset in migration 023 → next sync pulls 90d |
+| 5 | Backfill empty post-deploy | high | certain | Anchor reset in migration 025 → next sync pulls 90d |
 | 6 | Server TZ ≠ Europe/London → wrong clock minutes | high | high | Circular stats use `Intl.DateTimeFormat({timeZone:'Europe/London'})` |
 | 7 | DST 23h day breaks consistency math | medium | low | Circular stats unaffected (works on angles); test added |
 | 8 | TZ travel produces erratic consistency | low | low | Travel-banner UX; score paused |
 | 9 | Daily and nightly aggregates drift | medium | medium | Cross-check unit test on canonical sum |
 | 10 | `>90d` window crashes | medium | low | Capped server-side + `window_capped: true` |
 | 11 | Naming inconsistency between snapshot and summary HRV | low | low | Lift HRV type from snapshot; one source |
-| 12 | Migration 023 rollback corrupts existing health data | critical | low | New table only; rollback = `DROP TABLE healthkit_sleep_nights` |
+| 12 | Migration 025 rollback corrupts existing health data | critical | low | New table only; rollback = `DROP TABLE healthkit_sleep_nights` |
 | 13 | Stage stack viz misread as hypnogram | medium | medium | `<StageBar>` proportional, never temporal; design review caught |
 | 14 | Manual `sleep_hours` removal breaks wellbeing logs | low | low | Column kept; UI only removed; regression test |
 | 15 | Score "78" reads as B-grade | medium | high | UI shows label only; number behind ⓘ tap |
@@ -522,10 +522,10 @@ Steps 1-5 are MVP. 6-10 are polish.
 
 ## Open taste decisions (gate)
 
-These are surfaced for Lewis's call. v2 has a recommendation on each.
+These are surfaced for Lou's call. v2 has a recommendation on each.
 
 1. **Stage stack viz: `<StageBar>` proportional vs full hypnogram.** Hypnogram is more honest and emotionally resonant (Design review subagent #7) but requires raw HK samples (we don't fetch them today). Proportional bar reuses the data we have. Recommended: **proportional now, hypnogram in a follow-up issue** if we add sample-level fetching.
-2. **Top-level `/sleep` vs `/recovery` route.** Codex Eng flagged: the page is sleep + HRV + readiness — that's "recovery." Lewis's prior chat said "sleep tracking." Recommended: **`/sleep`** — single source-of-truth metric (sleep) is what Lewis actually asked for; HRV is supportive context, not a co-equal pillar.
+2. **Top-level `/sleep` vs `/recovery` route.** Codex Eng flagged: the page is sleep + HRV + readiness — that's "recovery." Lou's prior chat said "sleep tracking." Recommended: **`/sleep`** — single source-of-truth metric (sleep) is what Lou actually asked for; HRV is supportive context, not a co-equal pillar.
 3. **Manual sleep input on `/wellbeing`: remove + deep-link row.** Recommended: **remove the input, add the deep-link row**. Eight Sleep is reliable; the input was vestigial.
 4. **>90d window: cap silently vs error.** Recommended: **cap silently with `data_quality.window_capped: true`**. Agents handle truncation poorly; safer to deliver partial data.
 5. **Consistency n threshold: 5 vs 7.** Recommended: **5** (a working week minus 2 missed nights).
@@ -629,7 +629,7 @@ The DX surface needed the most renaming/consistency work.
 | 3 | Eng | start_at/end_at NULLABLE | Mechanical | P1 completeness | Historical samples lack envelope |
 | 4 | Eng | `is_main` filter for naps | Auto | P1 completeness | Otherwise pollutes consistency + averages |
 | 5 | Eng | Carry HK `deleted` array; re-materialize wake_date | Auto | P1 completeness | Stale rows after iOS Health edits |
-| 6 | Eng | Migration 023 anchor reset for backfill | Auto | P1 completeness | Without it, table empty 90d post-deploy |
+| 6 | Eng | Migration 025 anchor reset for backfill | Auto | P1 completeness | Without it, table empty 90d post-deploy |
 | 7 | Eng | Circular statistics for consistency | Auto | P1 completeness | Linear math broken at midnight + redeyes |
 | 8 | Eng | Europe/London via Intl.DateTimeFormat | Auto | P5 explicit | getHours() = runtime TZ; wrong |
 | 9 | Eng | n threshold 3 → 5 | Auto | P5 explicit | 3 is statistically meaningless |
@@ -669,7 +669,7 @@ The DX surface needed the most renaming/consistency work.
 
 The hard part of sleep tracking — ingestion — is mostly done; the *edges* of ingestion (deletions, naps, multi-source, backfill, TZ) need fixing alongside the views. v2 expands scope from "views only" to "views + ingestion edges":
 
-1. Migration 023: `healthkit_sleep_nights` table, source-aware, nullable envelope, `is_main` filter, anchor-reset backfill.
+1. Migration 025: `healthkit_sleep_nights` table, source-aware, nullable envelope, `is_main` filter, anchor-reset backfill.
 2. Sync changes: persist envelope + sample_count + `is_main` + handle `deleted` array.
 3. Consistency score: circular statistics, Europe/London-aware, n=5 threshold.
 4. `get_health_sleep_summary` MCP tool: `fields[]` projection, error shape mirroring snapshot, cross-refs in snapshot+series.

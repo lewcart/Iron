@@ -1,4 +1,4 @@
--- Migration 023: Per-night sleep records.
+-- Migration 025: Per-night sleep records.
 --
 -- Adds healthkit_sleep_nights for the bedtime/waketime envelope plus the stage
 -- minutes the existing healthkit_daily rows already capture. This lets us
