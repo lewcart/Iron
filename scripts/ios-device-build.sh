@@ -70,14 +70,20 @@ xcodebuild \
   | tail -1
 
 # ── Install + launch ──────────────────────────────────────────────────────────
+# devicectl emits a harmless "Failed to load provisioning paramter list"
+# warning before EVERY command (Apple bug — `manage create may support a
+# reduced set of arguments`). Filter that out and surface only the real
+# success/error lines.
 APP_PATH="build/ios-device/Build/Products/Debug-iphoneos/App.app"
 echo "▸ install…"
 xcrun devicectl device install app --device "$DEVICE_ID" "$APP_PATH" 2>&1 \
-  | grep -E "bundleID|error" | head -2
+  | grep -vE "Failed to load provisioning paramter list|may support a reduced" \
+  | grep -E "bundleID|App installed|error|Error" | head -3
 
 sleep 1
 echo "▸ launch…"
 xcrun devicectl device process launch --device "$DEVICE_ID" app.rebirth 2>&1 \
-  | grep -E "Launched|error" | head -2
+  | grep -vE "Failed to load provisioning paramter list|may support a reduced" \
+  | grep -E "Launched|error|Error" | head -2
 
 echo "✓ Done."

@@ -32,6 +32,15 @@ export interface LocalExercise {
    *  callers should coerce undefined → 'reps' for rows that arrived from
    *  a Dexie v5 store before the v6 schema bump. */
   tracking_mode: 'reps' | 'time';
+  /** Number of demo image frames available (0-3). Source-of-truth for
+   *  whether the demo strip renders. Frames addressed by exercise.uuid
+   *  at public/exercise-images/{uuid}/{01,02,03}.jpg. */
+  image_count: number;
+  /** Optional YouTube reference URL with start-time embedded. */
+  youtube_url: string | null;
+  /** Optional Vercel Blob URLs for AI-generated in-app demo images.
+   *  When set, takes precedence over the bundled public/ path. */
+  image_urls: string[] | null;
 }
 
 export interface LocalWorkout extends SyncMeta {
@@ -213,6 +222,75 @@ export interface LocalBodyGoal extends SyncMeta {
   notes: string | null;
 }
 
+// ─── Vision / Plan / Checkpoints ──────────────────────────────────────────────
+//
+// Strategic layer above execution. Vision = aesthetic concept (years, prose-
+// first). Plan = time-bound strategy (12-24 months, structured + prose).
+// Checkpoint = quarterly review record. JSONB shapes mirror migration 024.
+
+export interface NorthStarMetric {
+  metric_key: string;
+  baseline_value: number | null;
+  baseline_date: string;       // YYYY-MM-DD
+  target_value: number | null;
+  target_date: string;         // YYYY-MM-DD
+  reasoning: string;
+}
+
+export interface ProgrammingDose {
+  strength_sessions_per_week?: { min: number; max: number; rationale: string };
+  cardio_floor_minutes_weekly?: { target: number; rationale: string };
+  movement_principles?: string[];
+  add_more_when?: string[];
+}
+
+export interface NutritionAnchors {
+  protein_g_per_kg?: number;
+  deficit_approach?: 'aggressive' | 'moderate' | 'maintenance' | 'surplus';
+}
+
+export interface LocalBodyVision extends SyncMeta {
+  uuid: string;
+  title: string;
+  body_md: string | null;
+  summary: string | null;
+  principles: string[];
+  build_emphasis: string[];
+  maintain_emphasis: string[];
+  deemphasize: string[];
+  status: 'active' | 'archived';
+  archived_at: string | null;
+}
+
+export interface LocalBodyPlan extends SyncMeta {
+  uuid: string;
+  vision_id: string;
+  title: string;
+  summary: string | null;
+  body_md: string | null;
+  horizon_months: number;
+  start_date: string;          // YYYY-MM-DD
+  target_date: string;         // YYYY-MM-DD
+  north_star_metrics: NorthStarMetric[];
+  programming_dose: ProgrammingDose;
+  nutrition_anchors: NutritionAnchors;
+  reevaluation_triggers: string[];
+  status: 'active' | 'archived' | 'superseded';
+}
+
+export interface LocalPlanCheckpoint extends SyncMeta {
+  uuid: string;
+  plan_id: string;
+  quarter_label: string;
+  target_date: string;         // YYYY-MM-DD
+  review_date: string | null;  // YYYY-MM-DD; null until completed
+  status: 'scheduled' | 'completed';
+  metrics_snapshot: Record<string, number | null> | null;
+  assessment: 'on_track' | 'ahead' | 'behind' | 'reset_required' | null;
+  notes: string | null;
+  adjustments_made: string[];
+}
+
 // ─── Nutrition ────────────────────────────────────────────────────────────────
 
 export interface LocalNutritionLog extends SyncMeta {
@@ -390,6 +468,9 @@ export class IronDB extends Dexie {
   measurement_logs!: Table<LocalMeasurementLog, string>;
   inbody_scans!: Table<LocalInbodyScan, string>;
   body_goals!: Table<LocalBodyGoal, string>;
+  body_vision!: Table<LocalBodyVision, string>;
+  body_plan!: Table<LocalBodyPlan, string>;
+  plan_checkpoint!: Table<LocalPlanCheckpoint, string>;
   nutrition_logs!: Table<LocalNutritionLog, string>;
   nutrition_week_meals!: Table<LocalNutritionWeekMeal, string>;
   nutrition_day_notes!: Table<LocalNutritionDayNote, string>;
@@ -515,6 +596,32 @@ export class IronDB extends Dexie {
     // tolerates missing fields on existing rows, and read sites coerce
     // undefined → 'reps' / null defensively. No upgrade hook needed.
     this.version(8).stores(v6Stores);
+
+    // v9: exercise demo assets (mirrors Postgres migration 023).
+    // image_count (0-3), youtube_url (nullable), image_urls (Blob URLs for
+    // AI-generated in-app images). All additive. Backfill defaults so old
+    // rows pushed via sync don't fail the server-side NOT NULL constraint
+    // on image_count.
+    this.version(9).stores(v6Stores).upgrade(async tx => {
+      await tx.table('exercises').toCollection().modify(row => {
+        if (row.image_count === undefined) row.image_count = 0;
+        if (row.youtube_url === undefined) row.youtube_url = null;
+        if (row.image_urls === undefined) row.image_urls = null;
+      });
+    });
+
+    // v10: strategic layer — body_vision + body_plan + plan_checkpoint
+    // (mirrors Postgres migration 024). All synced via change_log. Indexes:
+    // status (for active-row lookups), vision_id / plan_id (for FK joins),
+    // target_date on checkpoints (for chronological listing). plan_dose_revision
+    // is server-only and not represented in Dexie.
+    const v10Stores = {
+      ...v6Stores,
+      body_vision: 'uuid, status, _synced, _updated_at',
+      body_plan: 'uuid, vision_id, status, _synced, _updated_at',
+      plan_checkpoint: 'uuid, plan_id, target_date, status, _synced, _updated_at',
+    };
+    this.version(10).stores(v10Stores);
   }
 }
 
@@ -598,6 +705,9 @@ export async function hydrateExercises(): Promise<void> {
           is_hidden: ex.is_hidden ?? false,
           movement_pattern: ex.movement_pattern ?? null,
           tracking_mode: ex.tracking_mode ?? 'reps',
+          image_count: ex.image_count ?? 0,
+          youtube_url: ex.youtube_url ?? null,
+          image_urls: ex.image_urls ?? null,
         });
       }
     });

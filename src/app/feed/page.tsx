@@ -3,7 +3,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Settings } from 'lucide-react';
+import { Settings, Target, ArrowRight } from 'lucide-react';
 import type { TimelineEntry, TimelineModule, StatsData, SummaryData } from '@/lib/api/feed-types';
 import { FEED_QUERY_DEFAULTS, fetchFeedBundle, type FeedBundle } from '@/lib/api/feed';
 import { queryKeys } from '@/lib/api/query-keys';
@@ -362,6 +362,25 @@ export default function FeedPage() {
             ))}
           </div>
         </div>
+
+        {/* Strategy entry point — Vision + Plan above execution */}
+        <button
+          onClick={() => router.push('/strategy')}
+          className="w-full text-left rounded-xl bg-card border border-border p-4 shadow-sm hover:bg-muted/40 active:scale-[0.99] transition-all flex items-center gap-3"
+        >
+          <div className="rounded-xl bg-trans-blue/10 p-2 shrink-0">
+            <Target className="h-5 w-5 text-trans-blue" strokeWidth={2} />
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="text-xs font-semibold text-primary uppercase tracking-wide">
+              Strategy
+            </div>
+            <div className="text-sm text-card-foreground mt-0.5">
+              Vision &amp; Plan — what you&apos;re building, and how
+            </div>
+          </div>
+          <ArrowRight className="h-4 w-4 text-muted-foreground shrink-0" strokeWidth={2} />
+        </button>
 
         {/* Last 3 Workouts */}
         {(summary?.lastWorkouts?.length ?? 0) > 0 && (

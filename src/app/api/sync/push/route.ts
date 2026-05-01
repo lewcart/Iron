@@ -35,6 +35,9 @@ interface PushPayload {
   measurement_logs?: Array<Record<string, unknown>>;
   inbody_scans?: Array<Record<string, unknown>>;
   body_goals?: Array<Record<string, unknown>>;
+  body_vision?: Array<Record<string, unknown>>;
+  body_plan?: Array<Record<string, unknown>>;
+  plan_checkpoint?: Array<Record<string, unknown>>;
   nutrition_logs?: Array<Record<string, unknown>>;
   nutrition_week_meals?: Array<Record<string, unknown>>;
   nutrition_day_notes?: Array<Record<string, unknown>>;
@@ -71,6 +74,11 @@ export async function POST(req: Request) {
     for (const r of body.measurement_logs ?? []) await pushMeasurement(r);
     for (const r of body.inbody_scans ?? []) await pushInbody(r);
     for (const r of body.body_goals ?? []) await pushBodyGoal(r);
+
+    // Strategic layer — vision before plan (FK), plan before checkpoint (FK).
+    for (const r of body.body_vision ?? []) await pushBodyVision(r);
+    for (const r of body.body_plan ?? []) await pushBodyPlan(r);
+    for (const r of body.plan_checkpoint ?? []) await pushPlanCheckpoint(r);
 
     for (const r of body.nutrition_logs ?? []) await pushNutritionLog(r);
     for (const r of body.nutrition_week_meals ?? []) await pushNutritionWeekMeal(r);
@@ -162,23 +170,61 @@ async function pushBodyweight(r: Record<string, unknown>): Promise<void> {
 }
 
 async function pushExercise(r: Record<string, unknown>): Promise<void> {
-  // exercises is mostly read-only on the client side (catalog), but custom
-  // exercises (is_custom=true) created via the app need to push. Server
-  // upsert is permissive — matches the existing /api/exercises behavior.
+  // The exercises table is in the CDC sync layer. Catalog and custom rows
+  // both push through here when the client edits them — text editing in
+  // ExerciseDetail (description/steps/tips), the in-app image generator,
+  // create-exercise form, etc. Server-side validation guards garbage
+  // youtube_url because MCP/import paths can bypass form validation.
   if (r._deleted) {
     await query('DELETE FROM exercises WHERE uuid = $1', [String(r.uuid).toLowerCase()]);
     return;
   }
+
+  // Validate youtube_url shape using the same regex the client helper does
+  // (looksLikeYouTubeUrl). MCP/import paths can't bypass — anything that
+  // doesn't look like a youtube host gets coerced to null. Single source
+  // of truth would be ideal but server importing client-side helper is
+  // awkward; the regex is duplicated and easy to keep in sync.
+  const ytRaw = r.youtube_url;
+  let ytClean: string | null = null;
+  if (typeof ytRaw === 'string' && ytRaw.trim().length > 0) {
+    if (/^(?:https?:\/\/)?(?:[a-z0-9-]+\.)?(?:youtube\.com|youtu\.be)\//i.test(ytRaw.trim())) {
+      ytClean = ytRaw.trim();
+    }
+  } else if (ytRaw === null) {
+    ytClean = null;
+  }
+
+  // image_urls is owned by the AI-gen endpoint, NOT routine client pushes.
+  // If the client explicitly sent an array, accept it. If absent (undefined)
+  // we use COALESCE in the upsert to preserve whatever the server already
+  // had — otherwise a stale-Dexie sync push would null out fresh AI URLs.
+  // image_count gets the same treatment: if the client doesn't supply it,
+  // we keep the server's existing value. This is critical because the AI
+  // generation flow updates these two columns directly via SQL, bypassing
+  // the client → sync layer.
+  const clientSentImageCount = typeof r.image_count === 'number';
+  const imageUrlsArr = Array.isArray(r.image_urls) ? r.image_urls as unknown[] : null;
+  const clientSentImageUrls = imageUrlsArr !== null;
+  const imageUrlsParam = imageUrlsArr !== null
+    ? (imageUrlsArr.length > 0 ? imageUrlsArr : null)
+    : null; // sentinel: the SQL branch on clientSentImageUrls preserves existing value
+  const imageCountParam = clientSentImageCount ? r.image_count : 0;
+
   await query(
-    `INSERT INTO exercises (uuid, everkinetic_id, title, alias, description, primary_muscles, secondary_muscles, equipment, steps, tips, is_custom, is_hidden, movement_pattern, tracking_mode, updated_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW())
+    `INSERT INTO exercises (uuid, everkinetic_id, title, alias, description, primary_muscles, secondary_muscles, equipment, steps, tips, is_custom, is_hidden, movement_pattern, tracking_mode, image_count, youtube_url, image_urls, updated_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, NOW())
      ON CONFLICT (uuid) DO UPDATE SET
        title = EXCLUDED.title, alias = EXCLUDED.alias, description = EXCLUDED.description,
        primary_muscles = EXCLUDED.primary_muscles, secondary_muscles = EXCLUDED.secondary_muscles,
        equipment = EXCLUDED.equipment, steps = EXCLUDED.steps, tips = EXCLUDED.tips,
        is_custom = EXCLUDED.is_custom, is_hidden = EXCLUDED.is_hidden,
        movement_pattern = EXCLUDED.movement_pattern,
-       tracking_mode = EXCLUDED.tracking_mode, updated_at = NOW()`,
+       tracking_mode = EXCLUDED.tracking_mode,
+       image_count = ${clientSentImageCount ? 'EXCLUDED.image_count' : 'exercises.image_count'},
+       youtube_url = EXCLUDED.youtube_url,
+       image_urls = ${clientSentImageUrls ? 'EXCLUDED.image_urls' : 'exercises.image_urls'},
+       updated_at = NOW()`,
     [
       String(r.uuid).toLowerCase(), r.everkinetic_id, r.title,
       JSON.stringify(r.alias ?? []), r.description,
@@ -186,6 +232,9 @@ async function pushExercise(r: Record<string, unknown>): Promise<void> {
       JSON.stringify(r.equipment ?? []), JSON.stringify(r.steps ?? []), JSON.stringify(r.tips ?? []),
       Boolean(r.is_custom), Boolean(r.is_hidden), r.movement_pattern,
       r.tracking_mode ?? 'reps',
+      imageCountParam,
+      ytClean,
+      imageUrlsParam,
     ],
   );
 }
@@ -400,6 +449,110 @@ async function pushBodyGoal(r: Record<string, unknown>): Promise<void> {
        target_value = EXCLUDED.target_value, unit = EXCLUDED.unit,
        direction = EXCLUDED.direction, notes = EXCLUDED.notes, updated_at = NOW()`,
     [r.metric_key, r.target_value, r.unit, r.direction, r.notes],
+  );
+}
+
+// ─── Strategic layer ─────────────────────────────────────────────────────────
+
+const VISION_STATUSES = new Set(['active', 'archived']);
+function sanitizeVisionStatus(v: unknown): string {
+  return typeof v === 'string' && VISION_STATUSES.has(v) ? v : 'active';
+}
+
+const PLAN_STATUSES = new Set(['active', 'archived', 'superseded']);
+function sanitizePlanStatus(v: unknown): string {
+  return typeof v === 'string' && PLAN_STATUSES.has(v) ? v : 'active';
+}
+
+const CHECKPOINT_STATUSES = new Set(['scheduled', 'completed']);
+function sanitizeCheckpointStatus(v: unknown): string {
+  return typeof v === 'string' && CHECKPOINT_STATUSES.has(v) ? v : 'scheduled';
+}
+
+const CHECKPOINT_ASSESSMENTS = new Set(['on_track', 'ahead', 'behind', 'reset_required']);
+function sanitizeCheckpointAssessment(v: unknown): string | null {
+  return typeof v === 'string' && CHECKPOINT_ASSESSMENTS.has(v) ? v : null;
+}
+
+function asStringArray(v: unknown): string[] {
+  return Array.isArray(v) ? v.filter(x => typeof x === 'string') as string[] : [];
+}
+
+async function pushBodyVision(r: Record<string, unknown>): Promise<void> {
+  if (r._deleted) {
+    await query('DELETE FROM body_vision WHERE uuid = $1', [r.uuid]);
+    return;
+  }
+  await query(
+    `INSERT INTO body_vision (uuid, title, body_md, summary, principles, build_emphasis,
+                              maintain_emphasis, deemphasize, status, archived_at, updated_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW())
+     ON CONFLICT (uuid) DO UPDATE SET
+       title = EXCLUDED.title, body_md = EXCLUDED.body_md, summary = EXCLUDED.summary,
+       principles = EXCLUDED.principles, build_emphasis = EXCLUDED.build_emphasis,
+       maintain_emphasis = EXCLUDED.maintain_emphasis, deemphasize = EXCLUDED.deemphasize,
+       status = EXCLUDED.status, archived_at = EXCLUDED.archived_at, updated_at = NOW()`,
+    [
+      r.uuid, r.title, r.body_md ?? null, r.summary ?? null,
+      asStringArray(r.principles), asStringArray(r.build_emphasis),
+      asStringArray(r.maintain_emphasis), asStringArray(r.deemphasize),
+      sanitizeVisionStatus(r.status), r.archived_at ?? null,
+    ],
+  );
+}
+
+async function pushBodyPlan(r: Record<string, unknown>): Promise<void> {
+  if (r._deleted) {
+    await query('DELETE FROM body_plan WHERE uuid = $1', [r.uuid]);
+    return;
+  }
+  await query(
+    `INSERT INTO body_plan (uuid, vision_id, title, summary, body_md, horizon_months,
+                            start_date, target_date, north_star_metrics, programming_dose,
+                            nutrition_anchors, reevaluation_triggers, status, updated_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10::jsonb, $11::jsonb, $12, $13, NOW())
+     ON CONFLICT (uuid) DO UPDATE SET
+       vision_id = EXCLUDED.vision_id, title = EXCLUDED.title, summary = EXCLUDED.summary,
+       body_md = EXCLUDED.body_md, horizon_months = EXCLUDED.horizon_months,
+       start_date = EXCLUDED.start_date, target_date = EXCLUDED.target_date,
+       north_star_metrics = EXCLUDED.north_star_metrics,
+       programming_dose = EXCLUDED.programming_dose,
+       nutrition_anchors = EXCLUDED.nutrition_anchors,
+       reevaluation_triggers = EXCLUDED.reevaluation_triggers,
+       status = EXCLUDED.status, updated_at = NOW()`,
+    [
+      r.uuid, r.vision_id, r.title, r.summary ?? null, r.body_md ?? null,
+      r.horizon_months, r.start_date, r.target_date,
+      JSON.stringify(r.north_star_metrics ?? []),
+      JSON.stringify(r.programming_dose ?? {}),
+      JSON.stringify(r.nutrition_anchors ?? {}),
+      asStringArray(r.reevaluation_triggers),
+      sanitizePlanStatus(r.status),
+    ],
+  );
+}
+
+async function pushPlanCheckpoint(r: Record<string, unknown>): Promise<void> {
+  if (r._deleted) {
+    await query('DELETE FROM plan_checkpoint WHERE uuid = $1', [r.uuid]);
+    return;
+  }
+  await query(
+    `INSERT INTO plan_checkpoint (uuid, plan_id, quarter_label, target_date, review_date,
+                                  status, metrics_snapshot, assessment, notes, adjustments_made, updated_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9, $10, NOW())
+     ON CONFLICT (uuid) DO UPDATE SET
+       quarter_label = EXCLUDED.quarter_label, target_date = EXCLUDED.target_date,
+       review_date = EXCLUDED.review_date, status = EXCLUDED.status,
+       metrics_snapshot = EXCLUDED.metrics_snapshot, assessment = EXCLUDED.assessment,
+       notes = EXCLUDED.notes, adjustments_made = EXCLUDED.adjustments_made, updated_at = NOW()`,
+    [
+      r.uuid, r.plan_id, r.quarter_label, r.target_date, r.review_date ?? null,
+      sanitizeCheckpointStatus(r.status),
+      r.metrics_snapshot == null ? null : JSON.stringify(r.metrics_snapshot),
+      sanitizeCheckpointAssessment(r.assessment),
+      r.notes ?? null, asStringArray(r.adjustments_made),
+    ],
   );
 }
 

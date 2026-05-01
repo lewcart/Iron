@@ -1,7 +1,8 @@
 'use client';
 
 import { useState, useMemo } from 'react';
-import { ChevronDown, ChevronRight, ChevronUp, Check, Plus, Search, Star, Trash2, X } from 'lucide-react';
+import Link from 'next/link';
+import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Check, Plus, Search, Star, Trash2, X } from 'lucide-react';
 import type { Exercise } from '@/types';
 import { apiBase } from '@/lib/api/client';
 import { useExercises } from '@/lib/useLocalDB';
@@ -680,7 +681,12 @@ export default function PlansPage() {
     <main className="tab-content bg-background">
       <div className="px-4 pt-safe pb-4">
         <div className="flex items-center justify-between mb-4">
-          <h1 className="text-2xl font-bold">Plans</h1>
+          <div className="flex items-center gap-2">
+            <Link href="/workout" className="text-primary p-1 -ml-1">
+              <ChevronLeft className="h-5 w-5" />
+            </Link>
+            <h1 className="text-2xl font-bold">Plans</h1>
+          </div>
           <button
             onClick={() => setCreatingPlan(true)}
             className="flex items-center gap-1.5 bg-primary text-primary-foreground px-3 py-2 rounded-xl text-sm font-semibold"

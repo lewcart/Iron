@@ -351,34 +351,33 @@ public class HealthKitPlugin: CAPPlugin, CAPBridgedPlugin {
         healthStore.execute(query)
     }
 
-    // MARK: - New: fetchMedicationRecords (iOS 16.4+ Medications feature)
-
-    /// Anchored incremental fetch of HKCategoryTypeIdentifierMedicationRecord
-    /// samples — the iOS Health app's "Medications" feature.
-    ///
-    /// Availability: gated on iOS 16.4 (when the Medications HK type became
-    /// readable to third-party apps). On older iOS or if the type is
-    /// unavailable for any reason, returns an empty payload so the sync
-    /// layer treats this as a no-op.
-    ///
-    /// Each medication sample carries:
-    ///   - HK metadata: HKMetadataKeyMedicationName, MedicationDoseString,
-    ///     HKMetadataKeyMedicationScheduled (epoch seconds), source
-    /// We project those into a stable JS shape that mirrors fetchWorkouts.
+    // MARK: - New: fetchMedicationRecords (iOS 26+ Medications feature)
+    //
+    // Currently a no-op while we debug an iOS 26 launch crash that surfaced
+    // when this method actually queried HKUserAnnotatedMedicationQuery /
+    // HKMedicationDoseEvent. Server side (DB schema, sync route, MCP tools)
+    // stays wired so flipping this on later is a Swift-only change.
+    //
+    // To re-enable: remove the guard below. Real implementation kept inline
+    // for reference.
     @objc public func fetchMedicationRecords(_ call: CAPPluginCall) {
+        // Always return empty until the launch-crash root cause is found.
+        call.resolve(["medications": [], "deleted": [], "nextAnchor": ""])
+        return
+
+        // Unreachable below — kept intentionally for fast re-enable.
+        // swiftlint:disable:next unreachable_code
         guard HKHealthStore.isHealthDataAvailable() else {
             call.resolve(["medications": [], "deleted": [], "nextAnchor": ""])
             return
         }
 
-        // The Medications type is exposed as HKCategoryTypeIdentifier
-        // "HKCategoryTypeIdentifierMedicationRecord". Resolve by raw value so
-        // builds against older SDKs still compile. If unavailable, no-op.
-        let identifier = HKCategoryTypeIdentifier(rawValue: "HKCategoryTypeIdentifierMedicationRecord")
-        guard let medicationType = HKCategoryType.categoryType(forIdentifier: identifier) else {
+        guard #available(iOS 26.0, *) else {
             call.resolve(["medications": [], "deleted": [], "nextAnchor": ""])
             return
         }
+
+        let medicationType = HKObjectType.medicationDoseEventType()
 
         let startMs = call.getDouble("startTime") ?? Date().addingTimeInterval(-365*24*3600).timeIntervalSince1970 * 1000
         let endMs = call.getDouble("endTime") ?? Date().timeIntervalSince1970 * 1000
@@ -388,54 +387,97 @@ public class HealthKitPlugin: CAPPlugin, CAPBridgedPlugin {
         let anchor = Self.decodeAnchor(call.getString("anchor"))
         let predicate = HKQuery.predicateForSamples(withStart: startDate, end: endDate, options: [])
 
-        let query = HKAnchoredObjectQuery(
-            type: medicationType,
-            predicate: predicate,
-            anchor: anchor,
+        // Step 1 — accumulate concept-id → display name mapping. The query's
+        // result handler is invoked once per medication, then once more with
+        // done=true; only after that do we issue the dose-event query.
+        var nameMap: [HKHealthConceptIdentifier: String] = [:]
+        let nameQuery = HKUserAnnotatedMedicationQuery(
+            predicate: nil,
             limit: HKObjectQueryNoLimit
-        ) { _, samples, deleted, newAnchor, err in
-            if let err = err {
-                call.reject(err.localizedDescription)
-                return
+        ) { [weak self] _, med, done, _ in
+            guard let self = self else { return }
+            if let med = med {
+                let name = med.nickname ?? med.medication.displayText
+                nameMap[med.medication.identifier] = name
             }
-            let catSamples = (samples as? [HKCategorySample]) ?? []
-            let medications: [[String: Any]] = catSamples.map { s in
-                let meta = s.metadata ?? [:]
-                let name = (meta["HKMetadataKeyMedicationName"] as? String)
-                    ?? (meta["MedicationName"] as? String)
-                    ?? "Unknown medication"
-                let doseString = (meta["HKMetadataKeyMedicationDoseString"] as? String)
-                    ?? (meta["MedicationDoseString"] as? String)
-                let scheduledMs: Double? = {
-                    if let s = meta["HKMetadataKeyMedicationScheduled"] as? Double { return s * 1000.0 }
-                    if let d = meta["HKMetadataKeyMedicationScheduled"] as? Date { return d.timeIntervalSince1970 * 1000.0 }
-                    return nil
-                }()
-                let metaJsonString = Self.jsonString(meta.compactMapValues { v in
-                    if v is NSNumber || v is String { return v }
-                    return String(describing: v)
-                })
-                var dict: [String: Any] = [
-                    "hk_uuid": s.uuid.uuidString,
-                    "medication_name": name,
-                    "taken_at": s.startDate.timeIntervalSince1970 * 1000.0,
-                    "source_name": s.sourceRevision.source.name,
-                    "source_bundle_id": s.sourceRevision.source.bundleIdentifier,
-                    "metadata_json": metaJsonString,
-                ]
-                if let doseString = doseString { dict["dose_string"] = doseString }
-                if let scheduledMs = scheduledMs { dict["scheduled_at"] = scheduledMs }
-                return dict
+            if done {
+                let doseQuery = HKAnchoredObjectQuery(
+                    type: medicationType,
+                    predicate: predicate,
+                    anchor: anchor,
+                    limit: HKObjectQueryNoLimit
+                ) { _, samples, deleted, newAnchor, err in
+                    if let err = err {
+                        call.reject(err.localizedDescription)
+                        return
+                    }
+                    let doseSamples = (samples as? [HKMedicationDoseEvent]) ?? []
+                    let medications: [[String: Any]] = doseSamples.map { dose in
+                        let displayName = nameMap[dose.medicationConceptIdentifier] ?? "Unknown medication"
+                        let doseString = Self.formatDoseString(dose: dose)
+                        let scheduledMs: Double? = dose.scheduledDate.map { $0.timeIntervalSince1970 * 1000.0 }
+                        let logStatusStr = Self.logStatusString(dose.logStatus)
+                        let scheduleTypeStr = Self.scheduleTypeString(dose.scheduleType)
+                        let metaJsonString = Self.jsonString([
+                            "log_status": logStatusStr,
+                            "schedule_type": scheduleTypeStr,
+                            "unit": dose.unit.unitString,
+                        ])
+                        var dict: [String: Any] = [
+                            "hk_uuid": dose.uuid.uuidString,
+                            "medication_name": displayName,
+                            "taken_at": dose.startDate.timeIntervalSince1970 * 1000.0,
+                            "source_name": dose.sourceRevision.source.name,
+                            "source_bundle_id": dose.sourceRevision.source.bundleIdentifier,
+                            "metadata_json": metaJsonString,
+                        ]
+                        if let doseString = doseString { dict["dose_string"] = doseString }
+                        if let scheduledMs = scheduledMs { dict["scheduled_at"] = scheduledMs }
+                        return dict
+                    }
+                    let deletedUuids = (deleted ?? []).map { $0.uuid.uuidString }
+                    let anchorString = Self.encodeAnchor(newAnchor)
+                    call.resolve([
+                        "medications": medications,
+                        "deleted": deletedUuids,
+                        "nextAnchor": anchorString,
+                    ])
+                }
+                self.healthStore.execute(doseQuery)
             }
-            let deletedUuids = (deleted ?? []).map { $0.uuid.uuidString }
-            let anchorString = Self.encodeAnchor(newAnchor)
-            call.resolve([
-                "medications": medications,
-                "deleted": deletedUuids,
-                "nextAnchor": anchorString,
-            ])
         }
-        healthStore.execute(query)
+        healthStore.execute(nameQuery)
+    }
+
+    /// "<qty> <unit>" — falls back to the scheduled quantity if the actual
+    /// dose isn't recorded (e.g. for an upcoming scheduled dose).
+    @available(iOS 26.0, *)
+    private static func formatDoseString(dose: HKMedicationDoseEvent) -> String? {
+        let qty = dose.doseQuantity ?? dose.scheduledDoseQuantity
+        guard let qty = qty else { return nil }
+        return "\(qty) \(dose.unit.unitString)"
+    }
+
+    @available(iOS 26.0, *)
+    private static func logStatusString(_ status: HKMedicationDoseEvent.LogStatus) -> String {
+        switch status {
+        case .notInteracted: return "not_interacted"
+        case .notificationNotSent: return "notification_not_sent"
+        case .snoozed: return "snoozed"
+        case .taken: return "taken"
+        case .skipped: return "skipped"
+        case .notLogged: return "not_logged"
+        @unknown default: return "unknown"
+        }
+    }
+
+    @available(iOS 26.0, *)
+    private static func scheduleTypeString(_ type: HKMedicationDoseEvent.ScheduleType) -> String {
+        switch type {
+        case .asNeeded: return "as_needed"
+        case .schedule: return "schedule"
+        @unknown default: return "unknown"
+        }
     }
 
     // MARK: - Workout write (existing)
@@ -925,12 +967,11 @@ public class HealthKitPlugin: CAPPlugin, CAPBridgedPlugin {
         if let t = HKCategoryType.categoryType(forIdentifier: .sleepAnalysis) {
             read.insert(t)
         }
-        // Medications (iOS 16.4+). Resolved by raw value so older SDKs build.
-        if let medicationType = HKCategoryType.categoryType(
-            forIdentifier: HKCategoryTypeIdentifier(rawValue: "HKCategoryTypeIdentifierMedicationRecord")
-        ) {
-            read.insert(medicationType)
-        }
+        // Medications (iOS 26+) — DISABLED while debugging launch crash.
+        // Re-enable by un-commenting alongside fetchMedicationRecords.
+        // if #available(iOS 26.0, *) {
+        //     read.insert(HKObjectType.medicationDoseEventType())
+        // }
         read.insert(HKObjectType.workoutType())
 
         // Writes
