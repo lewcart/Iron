@@ -98,8 +98,13 @@ async function processOne(ex) {
 
   mkdirSync(dir, { recursive: true });
   for (let i = 0; i < frames.length; i++) {
+    // `fit: 'contain'` letterboxes the source onto a 600×800 canvas with
+    // white padding. Everkinetic art is landscape line-art on white, so
+    // padding is invisible. The previous `fit: 'cover'` was clipping
+    // heads/limbs out of the frame for landscape sources.
     const out = await sharp(frames[i])
-      .resize(600, 800, { fit: 'cover', position: 'center' })
+      .resize(600, 800, { fit: 'contain', background: { r: 255, g: 255, b: 255 } })
+      .flatten({ background: { r: 255, g: 255, b: 255 } })
       .jpeg({ quality: 75 })
       .toBuffer();
     writeFileSync(join(dir, `${String(i + 1).padStart(2, '0')}.jpg`), out);

@@ -4,7 +4,7 @@ import { getExercise } from '@/db/queries';
 import { query } from '@/db/db';
 import { requireApiKey } from '@/lib/api-auth';
 import { buildExerciseImagePrompt } from '@/lib/exercise-image-prompt';
-import { splitThreePanel } from '@/lib/split-three-panel';
+import { splitVerticalPanels } from '@/lib/split-vertical-panels';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -92,11 +92,13 @@ export async function POST(
     );
   }
 
-  // Split the composite into 3 portrait frames
+  // Split the composite into 2 portrait frames (start + end positions).
+  // gpt-image-1 places 50%-split panels reliably; the prior 3-panel split
+  // mid-cut content because the model doesn't honor 33%/66% boundaries.
   const composite = Buffer.from(imageBase64, 'base64');
-  let frames: [Buffer, Buffer, Buffer];
+  let frames: [Buffer, Buffer];
   try {
-    frames = await splitThreePanel(composite);
+    frames = await splitVerticalPanels(composite);
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'unknown';
     console.error('[generate-images] split error:', err);
@@ -106,7 +108,7 @@ export async function POST(
     );
   }
 
-  // Upload all 3 to Vercel Blob in parallel
+  // Upload both frames to Vercel Blob in parallel.
   let urls: string[];
   try {
     const ts = Date.now(); // bust any old-cache reference
@@ -129,13 +131,13 @@ export async function POST(
     );
   }
 
-  // Persist to Postgres. image_urls = the three Blob URLs in order.
+  // Persist to Postgres. image_urls = the two Blob URLs in order.
   // If the UPDATE fails, clean up the just-uploaded blobs so we don't
   // accumulate orphan storage on retries.
   try {
     await query(
       'UPDATE exercises SET image_count = $1, image_urls = $2, updated_at = NOW() WHERE uuid = $3',
-      [3, urls, uuid.toLowerCase()],
+      [2, urls, uuid.toLowerCase()],
     );
   } catch (err) {
     // Best-effort cleanup. Don't fail the response over cleanup errors —
@@ -150,5 +152,5 @@ export async function POST(
     );
   }
 
-  return NextResponse.json({ image_count: 3, image_urls: urls });
+  return NextResponse.json({ image_count: 2, image_urls: urls });
 }

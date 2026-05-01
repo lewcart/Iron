@@ -96,10 +96,13 @@ for (const ex of targets) {
   const dir = join(IMAGES_DIR, ex.uuid);
   mkdirSync(dir, { recursive: true });
 
-  // Split into 3 panels (vertical stack). Each panel becomes a 600×800 JPEG.
+  // Split into 2 panels (vertical stack). Each panel becomes a 600×800 JPEG.
+  // Why 2 not 3: gpt-image-1 doesn't honor 33%/66% boundaries — the 50%
+  // split is far more reliable. Matches the everkinetic relaxation/tension
+  // 2-frame paradigm too.
   const meta = await sharp(buf).metadata();
-  const panelH = Math.floor(meta.height / 3);
-  for (let i = 0; i < 3; i++) {
+  const panelH = Math.floor(meta.height / 2);
+  for (let i = 0; i < 2; i++) {
     const out = await sharp(buf)
       .extract({ left: 0, top: i * panelH, width: meta.width, height: panelH })
       .resize(600, 800, { fit: 'cover', position: 'center' })
@@ -108,7 +111,10 @@ for (const ex of targets) {
     writeFileSync(join(dir, `${String(i + 1).padStart(2, '0')}.jpg`), out);
   }
 
-  console.log(`  saved 3 frames to ${dir}`);
+  // Remove any stale 03.jpg from a previous 3-panel run.
+  try { (await import('fs')).rmSync(join(dir, '03.jpg')); } catch { /* none */ }
+
+  console.log(`  saved 2 frames to ${dir}`);
 
   if (!skipReview) {
     spawn('open', [dir], { stdio: 'ignore', detached: true });
@@ -125,7 +131,7 @@ for (const ex of targets) {
     }
   }
 
-  manifest[ex.uuid] = 3;
+  manifest[ex.uuid] = 2;
   writeFileSync(MANIFEST_PATH, JSON.stringify(manifest, null, 2));
 }
 
@@ -136,20 +142,19 @@ function buildPrompt(ex) {
   const firstSteps = (ex.steps ?? []).slice(0, 3).join('. ');
   const desc = ex.description?.trim() || '';
   return [
-    `Three-panel exercise demonstration showing the "${ex.title}" exercise.`,
-    'Render as ONE single PORTRAIT image with three panels STACKED VERTICALLY (one above the other), each panel showing a different phase:',
-    '  Top panel: Starting position',
-    '  Middle panel: Mid-movement',
-    '  Bottom panel: End position',
+    `Two-panel exercise demonstration showing the "${ex.title}" exercise.`,
+    'Render as ONE single PORTRAIT image with two panels STACKED VERTICALLY (one above the other), each panel showing a different phase:',
+    '  Top panel: Starting position (relaxation / setup)',
+    '  Bottom panel: End position (peak contraction / full extension)',
     '',
-    'Strict constraints — identical across all three panels:',
-    '- Same gender-neutral athlete',
+    'Strict constraints — identical across both panels:',
+    '- Same femme-presenting athlete in both panels (athletic feminine physique, toned, fit, mid-20s to 30s build)',
     '- Same gym setting and lighting',
     '- Same camera angle (side-view, full body visible)',
     '- Plain neutral light-grey background',
     `- Equipment: ${equipment}`,
-    '- Style: clean line-art / anatomy-textbook illustration',
-    '- Each panel separated by a thin horizontal line',
+    '- Style: clean line-art / anatomy-textbook illustration, black outlines on white',
+    '- Each panel separated by a thin horizontal line at the exact vertical midpoint',
     '- No text, no labels, no numbers',
     '',
     desc ? `Movement description: ${desc}` : '',
