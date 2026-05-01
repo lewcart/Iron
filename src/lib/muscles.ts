@@ -99,8 +99,10 @@ export const MUSCLE_SYNONYMS: Record<string, MuscleSlug> = {
   'mid_traps': 'mid_traps',
   'mid traps': 'mid_traps',
   'trapezius': 'mid_traps',
+  'upper traps': 'mid_traps',
   'lower_traps': 'lower_traps',
   'lower traps': 'lower_traps',
+  'lower trapezius': 'lower_traps',
   // erectors
   'erectors': 'erectors',
   'erector spinae': 'erectors',
@@ -110,12 +112,14 @@ export const MUSCLE_SYNONYMS: Record<string, MuscleSlug> = {
   'deltoid': 'delts',
   'deltoids': 'delts',
   'shoulders': 'delts',
+  'rear delts': 'delts',
   // rotator cuff
   'rotator_cuff': 'rotator_cuff',
   'rotator cuff': 'rotator_cuff',
   // biceps
   'biceps': 'biceps',
   'biceps brachii': 'biceps',
+  'brachialis': 'biceps',
   // triceps
   'triceps': 'triceps',
   'triceps brachii': 'triceps',
@@ -128,6 +132,8 @@ export const MUSCLE_SYNONYMS: Record<string, MuscleSlug> = {
   'abdominals': 'core',
   'abs': 'core',
   'obliques': 'core',
+  'deep stabilisers': 'core',
+  'hip flexors': 'core',
   // glutes
   'glutes': 'glutes',
   'glutaeus maximus': 'glutes',
@@ -142,6 +148,7 @@ export const MUSCLE_SYNONYMS: Record<string, MuscleSlug> = {
   'hip_abductors': 'hip_abductors',
   'hip abductors': 'hip_abductors',
   'tensor fasciae latae': 'hip_abductors',
+  'hip stabilisers': 'hip_abductors',
   'hip_adductors': 'hip_adductors',
   'hip adductors': 'hip_adductors',
   // calves

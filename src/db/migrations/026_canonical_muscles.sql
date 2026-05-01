@@ -50,7 +50,7 @@ COMMENT ON TABLE muscles IS
   'translation lives in muscle_synonyms.';
 
 -- muscles uses slug as primary key, not uuid. record_change_uuid() would try
--- to dereference NEW.uuid (doesn't exist), so use a slug-based variant.
+-- to dereference NEW.uuid (which does not exist), so use a slug-based variant.
 CREATE OR REPLACE FUNCTION record_change_muscles()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -70,6 +70,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+DROP TRIGGER IF EXISTS muscles_change_log ON muscles;
 CREATE TRIGGER muscles_change_log AFTER INSERT OR UPDATE OR DELETE ON muscles
   FOR EACH ROW EXECUTE FUNCTION record_change_muscles();
 
@@ -128,28 +129,33 @@ INSERT INTO muscle_synonyms (synonym, muscle_slug) VALUES
   ('latissimus',             'lats'),
   -- rhomboids (no legacy synonyms in current data; canonical only)
   ('rhomboids',              'rhomboids'),
-  -- mid/lower traps. trapezius (current Everkinetic value) defaults to
-  -- mid_traps; audit pass (Phase 1 step 6) refines per-exercise.
+  -- mid/lower traps. trapezius (current Everkinetic value) and "upper traps"
+  -- both default to mid_traps. audit pass (Phase 1 step 6) refines per-exercise.
   ('mid_traps',              'mid_traps'),
   ('mid traps',              'mid_traps'),
   ('trapezius',              'mid_traps'),
+  ('upper traps',            'mid_traps'),
   ('lower_traps',            'lower_traps'),
   ('lower traps',            'lower_traps'),
+  ('lower trapezius',        'lower_traps'),
   -- erectors
   ('erectors',               'erectors'),
   ('erector spinae',         'erectors'),
   ('lower back',             'erectors'),
-  -- delts
+  -- delts. "rear delts" collapses here for now; audit pass can split them
+  -- out into delts vs rotator_cuff per-exercise.
   ('delts',                  'delts'),
   ('deltoid',                'delts'),
   ('deltoids',               'delts'),
   ('shoulders',              'delts'),
+  ('rear delts',             'delts'),
   -- rotator cuff (no legacy synonyms; canonical only)
   ('rotator_cuff',           'rotator_cuff'),
   ('rotator cuff',           'rotator_cuff'),
-  -- biceps
+  -- biceps. brachialis is a deep elbow flexor under the biceps; counts here.
   ('biceps',                 'biceps'),
   ('biceps brachii',         'biceps'),
+  ('brachialis',             'biceps'),
   -- triceps
   ('triceps',                'triceps'),
   ('triceps brachii',        'triceps'),
@@ -157,11 +163,15 @@ INSERT INTO muscle_synonyms (synonym, muscle_slug) VALUES
   ('forearms',               'forearms'),
   ('forearm',                'forearms'),
   ('forerm',                 'forearms'),  -- typo present in seed data
-  -- core
+  -- core. "deep stabilisers" (transverse abdominis etc.) and "hip flexors"
+  -- (psoas/iliacus dominant — rectus femoris is also a quad but not the
+  -- common usage) both fold into core for v1.
   ('core',                   'core'),
   ('abdominals',             'core'),
   ('abs',                    'core'),
   ('obliques',               'core'),
+  ('deep stabilisers',       'core'),
+  ('hip flexors',            'core'),
   -- glutes
   ('glutes',                 'glutes'),
   ('glutaeus maximus',       'glutes'),
@@ -177,6 +187,7 @@ INSERT INTO muscle_synonyms (synonym, muscle_slug) VALUES
   ('hip_abductors',          'hip_abductors'),
   ('hip abductors',          'hip_abductors'),
   ('tensor fasciae latae',   'hip_abductors'),
+  ('hip stabilisers',        'hip_abductors'),
   ('hip_adductors',          'hip_adductors'),
   ('hip adductors',          'hip_adductors'),
   -- calves: gastrocnemius and soleus collapse together
@@ -272,7 +283,7 @@ END $$;
 
 -- ─── Validation trigger on exercises ─────────────────────────────────────────
 --
--- Goes on AFTER the UPDATE+verify so the migration itself doesn't trip it.
+-- Goes on AFTER the UPDATE+verify so the migration itself does not trip it.
 -- All future INSERT/UPDATE on exercises must use canonical slugs.
 
 CREATE OR REPLACE FUNCTION validate_exercise_muscles()
