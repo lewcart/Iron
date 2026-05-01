@@ -120,3 +120,45 @@
       have been deleted; the file is now just the Week template editor.
       **Completed:** v0.2.2 (2026-05-01)
 
+## HRT / Apple Health Medications follow-ups (deferred from 2026-05-01)
+
+- [ ] **Re-enable the iOS 26 HKMedicationDoseEvent path safely.**
+      `HealthKitPlugin.swift > fetchMedicationRecords` is currently a no-op
+      after the initial real-API build crashed on launch on iPhone 17
+      (iOS 26.3.1). Real implementation kept inline below the early
+      `return` for fast re-enable. Steps to reproduce + fix:
+      1. Plug iPhone in, install a crash-build (delete just the early
+         `return` in `fetchMedicationRecords` and `read.insert(...)` in
+         `allRequestedTypes`).
+      2. Pull crash log: open Xcode → Window → Devices and Simulators →
+         select Chill → View Device Logs, filter for "App". Or via
+         `xcrun devicectl device info files` with the right domain
+         identifier (CrashReporter directory).
+      3. Most likely culprits to check first: (a) iOS 26 needs a new
+         `Info.plist` usage description for medication reads —
+         try adding `NSHealthDataMedicationsUsageDescription` alongside
+         the existing `NSHealthShareUsageDescription`; (b)
+         `HKUserAnnotatedMedicationQuery` faulting when called before
+         the user has actually set up Medications in Health.app — wrap
+         the dispatch in a try/catch and short-circuit if zero medications
+         exist; (c) entitlement issue — iOS 26 may require an explicit
+         `com.apple.developer.healthkit` entitlements key for medication
+         data that the provisioning profile doesn't include yet.
+      4. Once stable, add `HKObjectType.medicationDoseEventType()` back
+         into `Self.allRequestedTypes()` so iOS surfaces the Medications
+         toggle in Settings → Health → Rebirth.
+      Owner: next session with USB-attached iPhone + Xcode device-log
+      access. DB, sync route, MCP tools, and Meds tab UI all stay wired.
+
+- [ ] **Wire `requestPermissions` into foreground sync so new HK types
+      auto-prompt.** Currently `connectHealthKit()` is the only call site
+      for `HealthKit.requestPermissions()`, and that's only reachable via
+      a button that hides once status is `connected`. Result: when a new
+      build adds HK types, existing users never see the auth sheet for
+      them. Fix: call `await HealthKit.requestPermissions()` at the top
+      of `runForegroundSync` in `src/features/health/healthSync.ts`.
+      Apple's runtime de-dupes — no UI shown if every requested type is
+      already determined; only genuinely new types trigger the sheet.
+      Bundle this with the medication re-enable so the flow tests
+      end-to-end.
+
