@@ -785,6 +785,7 @@ function SetRow({
     set.duration_seconds != null ? String(set.duration_seconds) : ''
   );
   const [saving, setSaving] = useState(false);
+  const [rirOpen, setRirOpen] = useState(false);
 
   // Live PD detection — compare current estimated 1RM against all-time best.
   // No is_completed guard: badge persists naturally after completion since
@@ -870,6 +871,26 @@ function SetRow({
         </>
       )}
 
+      {completed && (
+        <button
+          type="button"
+          onClick={() => setRirOpen(o => !o)}
+          aria-expanded={rirOpen}
+          aria-label={set.rir != null ? `RIR ${set.rir}, tap to change` : 'Set RIR'}
+          className={
+            'flex-shrink-0 h-7 px-2 rounded-full text-[11px] flex items-center gap-1 transition-colors ' +
+            (set.rir != null
+              ? 'bg-primary/15 text-primary'
+              : rirOpen
+                ? 'bg-secondary text-foreground'
+                : 'text-muted-foreground/70 border border-dashed border-border hover:bg-secondary')
+          }
+        >
+          <span className="text-[9px] tracking-wide uppercase opacity-70">RIR</span>
+          {set.rir != null && <span className="font-bold tabular-nums">{set.rir}</span>}
+        </button>
+      )}
+
       <div className="relative flex-shrink-0">
         <button
           onClick={handleComplete}
@@ -891,13 +912,11 @@ function SetRow({
     </div>
   );
 
-  // RIR chip strip — visible only after the set is completed. Reps in Reserve
-  // 0–5 (0 = went to failure, 5 = 5+ left in tank). Tap to toggle/clear; pre-
-  // completion the strip is hidden to keep the input row uncluttered. Phase 3
-  // weights this for effective_set_count, but the data is collected here.
-  const rirStrip = completed ? (
-    <div className="flex items-center gap-1 pb-1.5 px-3 pl-10">
-      <span className="text-[10px] text-muted-foreground mr-1">RIR</span>
+  // RIR picker — Reps in Reserve 0–5 (0 = failure, 5 = 5+ left). Hidden by
+  // default to keep the set list compact; expanded via the inline pill on the
+  // set row. Tap a chip to set+collapse; tap an active chip to clear+collapse.
+  const rirPicker = completed && rirOpen ? (
+    <div className="flex items-center justify-end gap-1 pb-1.5 px-3 -mt-0.5">
       {[0, 1, 2, 3, 4, 5].map(n => {
         const active = set.rir === n;
         return (
@@ -906,9 +925,10 @@ function SetRow({
             key={n}
             onClick={async () => {
               await onUpdateRir(set.uuid, active ? null : n);
+              setRirOpen(false);
             }}
             className={
-              'w-6 h-6 rounded-full text-[11px] font-medium transition-colors ' +
+              'w-7 h-7 rounded-full text-[11px] font-medium transition-colors ' +
               (active
                 ? 'bg-primary text-primary-foreground'
                 : 'bg-secondary text-muted-foreground hover:bg-primary/15')
@@ -926,7 +946,7 @@ function SetRow({
     <SwipeToDelete onDelete={() => onDelete(set.uuid)}>
       <div>
         {inner}
-        {rirStrip}
+        {rirPicker}
       </div>
     </SwipeToDelete>
   );
