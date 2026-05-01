@@ -110,7 +110,7 @@ const SECONDARY_MODULES = [
   { label: 'Wellbeing', href: '/wellbeing', emoji: '🫀' },
   { label: 'Nutrition', href: '/nutrition', emoji: '🥗' },
   { label: 'Measures', href: '/measurements', emoji: '📏' },
-  { label: 'Photos', href: '/body-spec', emoji: '📸' },
+  { label: 'Photos', href: '/measurements?tab=photos', emoji: '📸' },
 ];
 
 function FeedPageSkeleton() {
