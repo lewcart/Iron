@@ -9,6 +9,12 @@
 import { query, queryOne, transaction } from '@/db/db';
 import { estimate1RM } from '@/lib/pr';
 import { LAB_DEFINITIONS_BY_CODE, evaluateLabRange } from '@/lib/lab-definitions';
+import {
+  computeSleepSummary,
+  SLEEP_SUMMARY_FIELDS,
+  type SleepSummaryField,
+  type SleepSummaryArgs,
+} from '@/lib/health-sleep-summary';
 
 // ── Result helpers ────────────────────────────────────────────────────────────
 
@@ -1848,6 +1854,22 @@ async function getHealthWorkoutsTool(args: Record<string, unknown>) {
   return toolResult(rows);
 }
 
+async function getHealthSleepSummary(args: Record<string, unknown>) {
+  const status = await getHealthKitStatus();
+  if (status.status !== 'connected') return toolResult(notConnectedResponse(status.status));
+
+  const summaryArgs: SleepSummaryArgs = {
+    start_date: typeof args.start_date === 'string' ? args.start_date : undefined,
+    end_date: typeof args.end_date === 'string' ? args.end_date : undefined,
+    window_days: typeof args.window_days === 'number' ? args.window_days : undefined,
+    fields: Array.isArray(args.fields)
+      ? (args.fields as string[]).filter((f): f is SleepSummaryField =>
+          SLEEP_SUMMARY_FIELDS.includes(f as SleepSummaryField))
+      : undefined,
+  };
+  return toolResult(await computeSleepSummary(summaryArgs));
+}
+
 // ── HRT Timeline tools ────────────────────────────────────────────────────────
 
 interface HrtTimelinePeriodRow {
@@ -3218,7 +3240,7 @@ export const tools: MCPTool[] = [
   {
     name: 'get_health_snapshot',
     description:
-      'Returns a composite "how are they right now" snapshot from Apple HealthKit: last night sleep (total, REM, deep), HRV (latest + window + 30d baseline + delta %), resting HR (same), VO2 max, today\'s activity rings (steps, active/basal kcal, exercise min), any workouts HK recorded in the last 24h that aren\'t logged in Rebirth (source="hk_only" — this is the adherence/missed-workout signal), and data_quality info. Pass fields=["sleep_last_night","hrv"] to project only specific branches (~120 tokens vs ~500 full). Call once per session or when the user asks about health, training, or recovery. If HealthKit isn\'t connected, returns {status:"not_connected", reason, message}.',
+      'Returns a composite "how are they right now" snapshot from Apple HealthKit: last night sleep (total, REM, deep), HRV (latest + window + 30d baseline + delta %), resting HR (same), VO2 max, today\'s activity rings (steps, active/basal kcal, exercise min), any workouts HK recorded in the last 24h that aren\'t logged in Rebirth (source="hk_only" — this is the adherence/missed-workout signal), and data_quality info. Pass fields=["sleep_last_night","hrv"] to project only specific branches (~120 tokens vs ~500 full). Call once per session or when the user asks about health, training, or recovery. For multi-day sleep rollups (averages + consistency), use get_health_sleep_summary. If HealthKit isn\'t connected, returns {status:"not_connected", reason, message}.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -3239,7 +3261,7 @@ export const tools: MCPTool[] = [
   {
     name: 'get_health_series',
     description:
-      'Returns daily (or weekly) aggregate time-series for a single HealthKit metric. Use this for trend questions ("how has my HRV been over 2 weeks?"). Pairs with get_health_snapshot for point-in-time reads.',
+      'Returns daily (or weekly) aggregate time-series for a single HealthKit metric. Use this for trend questions ("how has my HRV been over 2 weeks?"). Pairs with get_health_snapshot for point-in-time reads. For sleep, prefer get_health_sleep_summary — returns all stages + consistency + HRV in one call.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -3274,6 +3296,25 @@ export const tools: MCPTool[] = [
       required: ['from'],
     },
     execute: getHealthWorkoutsTool,
+  },
+  {
+    name: 'get_health_sleep_summary',
+    description:
+      'Returns a sleep + recovery rollup for a date range from Apple HealthKit: per-stage averages (deep/REM/core/awake + percentages), consistency score (circular stdev of bedtime/waketime in minutes; n>=5 main nights required), HRV trend (window avg, 30d baseline, delta %), and optional per-night detail. Naps are excluded (in_bed >= 4h AND wake >= 04:00 Europe/London). Use for "how was last week\'s sleep?" or "compare this week vs last." For a single night, use get_health_snapshot.sleep_last_night. For one metric trend (e.g. HRV alone), use get_health_series. Pass fields=["consistency"] for ~30 tokens vs ~250 full. include "nights" in fields to get the per-night array. Errors mirror get_health_snapshot: {status:"not_connected", reason, message} or {status:"invalid_range", message, hint}.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        start_date:  { type: 'string', description: 'YYYY-MM-DD inclusive (Europe/London). Optional if window_days is set. Capped at 90 days before end_date.' },
+        end_date:    { type: 'string', description: 'YYYY-MM-DD inclusive; defaults to today.' },
+        window_days: { type: 'number', description: 'Alternative to start_date. Default 7. Range 1..90.' },
+        fields: {
+          type: 'array',
+          items: { type: 'string', enum: [...SLEEP_SUMMARY_FIELDS] },
+          description: 'Optional projection: range, averages, consistency, hrv, nights, data_quality. Omit for everything except per-night detail (nights opts in).',
+        },
+      },
+    },
+    execute: getHealthSleepSummary,
   },
 
   // ── HRT Timeline tools ──────────────────────────────────────────────────────

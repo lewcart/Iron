@@ -140,17 +140,19 @@ export async function runForegroundSync(): Promise<SyncResult> {
 
   // ── Sleep (anchored) ──────────────────────────────────────────────────────
   let sleep: SleepNight[] = [];
+  let deletedSleepUuids: string[] = [];
   let sleepAnchor: string | null = null;
   let sleepError: string | null = null;
   try {
     const prev = state['sleep'];
     const startMs = prev?.last_anchor ? backfillStart : backfillStart;
-    const { nights, nextAnchor } = await HealthKit.fetchSleepNights({
+    const { nights, deleted, nextAnchor } = await HealthKit.fetchSleepNights({
       startTime: startMs,
       endTime: now,
       anchor: prev?.last_anchor ?? undefined,
     });
     sleep = nights;
+    deletedSleepUuids = deleted;
     sleepAnchor = nextAnchor;
     nightsSynced = nights.length;
     metricsSyncedSet.add('sleep');
@@ -211,7 +213,7 @@ export async function runForegroundSync(): Promise<SyncResult> {
   ];
 
   try {
-    await fetch(`${apiBase()}/api/healthkit/sync`, {
+    const res = await fetch(`${apiBase()}/api/healthkit/sync`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -221,9 +223,16 @@ export async function runForegroundSync(): Promise<SyncResult> {
         medications,
         deleted_workouts: deletedWorkoutUuids,
         deleted_medications: deletedMedicationUuids,
+        deleted_sleep: deletedSleepUuids,
         state_updates: stateUpdates,
       }),
     });
+    if (!res.ok) {
+      // Server rejected the payload (DB error, schema drift, validation, ...).
+      // Surface as a network-style failure rather than a silent ok:true so the
+      // caller knows the data didn't actually land.
+      return { ...emptyResult('network', started), metrics_synced: metricsSyncedSet.size };
+    }
   } catch {
     return { ...emptyResult('network', started), metrics_synced: metricsSyncedSet.size };
   }

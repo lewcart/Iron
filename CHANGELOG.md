@@ -2,6 +2,21 @@
 
 All notable changes to Rebirth are documented here.
 
+## [0.3.0] - 2026-05-01
+
+### Added
+- **`/sleep` page — verdict-first recovery view.** Opens with a one-word verdict ("Solid" / "OK" / "Light" / "Restless") computed from last night's total + deep %, with the stage breakdown and HRV inline. Window averages card shows Avg sleep / Consistency (label, not raw score) / Avg deep / Avg REM / HRV(7d) with delta vs 30-day baseline. Two charts split for legibility at 375px: a 7-day stacked stage bar chart and a separate HRV sparkline. Day / Week / Month / 3-Month range tabs change the window in one tap. Bad-night UX adapts the lede instead of punishing it ("Light night. Your 7-night average is still 7h 22m."). Empty states for "no data last night," "<5 nights for consistency," "HK disconnected," and offline are all specified inline.
+- **`get_health_sleep_summary` MCP tool.** One-call sleep + recovery rollup for AI coaching agents, replacing the previous "call `get_health_series` six times" pattern. Returns per-stage averages, consistency score (circular stdev of bedtime/waketime in minutes — main-night-filtered, n>=5 required), HRV trend with 30-day baseline + delta_pct, and per-night detail when requested. `fields` projection drops branches you don't need (~30 tokens for `consistency` only vs ~250 for the full payload). `window_days` parameter sidesteps `start_date` math for "last week"-style questions. Errors mirror `get_health_snapshot`'s `not_connected`/`invalid_range`/`invalid_input` shapes. Cross-references appended to `get_health_snapshot` and `get_health_series` descriptions so agents can find it.
+- **`healthkit_sleep_nights` table (migration 025).** One row per night with the bed/wake envelope (`start_at`/`end_at`, both nullable for historical samples), per-stage minutes, and `is_main` filter (true when in_bed >= 4h AND wake >= 04:00 Europe/London). The Capacitor plugin's `SleepNight` payload already exposed `start_at`/`end_at` — no native code change required. Migration includes a one-shot anchor reset on `healthkit_sync_state.metric='sleep'` so the next iOS sync re-pulls the last 90 days into the new table.
+
+### Changed
+- **`/wellbeing` no longer asks you to type sleep hours.** The manual `Sleep hours (optional)` text input is gone — Eight Sleep + Apple Watch already write nightly sleep into HealthKit, and the manual field was vestigial. In its place: a Sleep deep-link row at the top of the Daily tab showing last night's total and verdict ("Sleep / Last night 7h 42m · Solid ›") that taps through to `/sleep`. The `wellbeing_logs.sleep_hours` column is preserved (no data loss) — only the input is removed.
+- **HealthKit sync route persists per-night sleep envelopes.** `src/app/api/healthkit/sync/route.ts` now writes both the existing `healthkit_daily.sleep_*` aggregate rows AND a new `healthkit_sleep_nights` row per `SleepNight`, including the `is_main` flag computed via Europe/London-aware `Intl.DateTimeFormat` (server timezone irrelevant). `healthSync.ts` no longer drops the `deleted: string[]` array from `fetchSleepNights`; it's accepted server-side and counted in the response as `sleep_deletions_acknowledged_no_op` (mapping back to derived nights requires a future plugin extension that emits per-night HK UUIDs — documented as TODO).
+- **HealthKit sync surfaces server failures instead of silently returning ok.** Previous behavior: any DB error during sync (schema drift, payload validation, etc.) returned `ok:true` to the client. Now: `res.ok` is checked and a non-2xx response is surfaced as a network-style sync failure so the caller sees the data didn't land. (Codex adversarial review caught this.)
+
+### Fixed
+- **Consistency-score math is timezone- and midnight-safe.** Earlier sketch used JavaScript `Date.getHours()` (returns server-local time) and a noon-pivot wrap-around for clock arithmetic — both broken for redeyes, naps, BST/GMT transitions, or any server not running in Europe/London. Replaced with circular statistics on the 24-hour clock circle, with all clock-time extraction routed through `Intl.DateTimeFormat({timeZone:'Europe/London'})`. `n` threshold raised from 3 to 5 (a working week) so the score isn't statistically meaningless on tiny windows.
+
 ## [0.2.2] - 2026-05-01
 
 ### Added
