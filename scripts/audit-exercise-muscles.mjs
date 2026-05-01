@@ -7,7 +7,7 @@
  * a CSV diff to ~/.gstack/projects/lewcart-Iron/exercise-muscle-audit-{ts}.csv.
  *
  * Lewis reviews the CSV, flags any rows where proposed differs from current
- * and the LLM is wrong, then hand-writes migration 024_exercise_muscle_audit.sql
+ * and the LLM is wrong, then hand-writes migration 027_exercise_muscle_audit.sql
  * with explicit UUID-keyed UPDATEs to apply the approved changes.
  *
  * Cost: roughly $0.30 for ~200 exercises via gpt-4o-mini (structured-output mode,
@@ -273,7 +273,7 @@ async function main() {
   console.log('Next steps:');
   console.log('  1. Open the CSV in a spreadsheet, sort by primary_changed=CHANGED then by confidence desc.');
   console.log('  2. Eyeball changes; flag any wrong proposals.');
-  console.log('  3. Apply approved changes via a hand-written migration 024_exercise_muscle_audit.sql.');
+  console.log('  3. Apply approved changes via a hand-written migration 027_exercise_muscle_audit.sql.');
 }
 
 main().catch(err => {
