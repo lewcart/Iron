@@ -284,8 +284,10 @@ describe('listExercises', () => {
     const [sql, params] = vi.mocked(db.query).mock.calls[0];
     expect(sql).toContain('primary_muscles');
     expect(sql).toContain('secondary_muscles');
-    expect(params).toContain('%pectoralis%');
-    expect(params).toContain('%chest%');
+    // Post-canonicalization (migration 026): JSONB containment match against
+    // the canonical 'chest' slug, not substring ILIKE.
+    expect(sql).toContain('@>');
+    expect(params).toContain(JSON.stringify(['chest']));
   });
 
   it('includes ORDER BY clause', async () => {

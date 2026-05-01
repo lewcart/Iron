@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import { Settings, Target, ArrowRight } from 'lucide-react';
 import type { TimelineEntry, TimelineModule, StatsData, SummaryData } from '@/lib/api/feed-types';
 import { FEED_QUERY_DEFAULTS, fetchFeedBundle, type FeedBundle } from '@/lib/api/feed';
+import { MusclesThisWeek } from '@/components/MusclesThisWeek';
 import { queryKeys } from '@/lib/api/query-keys';
 import { fetchJson } from '@/lib/api/client';
 import type { Workout } from '@/types';
@@ -47,30 +48,6 @@ function formatTimeAgo(iso: string): string {
   if (days === 1) return 'Yesterday';
   if (days < 7) return `${days}d ago`;
   return formatDate(iso);
-}
-
-const MUSCLE_GROUPS = [
-  { key: 'chest', label: 'Chest' },
-  { key: 'back', label: 'Back' },
-  { key: 'shoulders', label: 'Shoulders' },
-  { key: 'biceps', label: 'Biceps' },
-  { key: 'triceps', label: 'Triceps' },
-  { key: 'legs', label: 'Legs' },
-  { key: 'glutes', label: 'Glutes' },
-  { key: 'abdominals', label: 'Abs' },
-  { key: 'traps', label: 'Traps' },
-];
-
-function muscleHeatColor(count: number): string {
-  if (count >= 3) return 'bg-primary';
-  if (count === 2) return 'bg-primary/70';
-  if (count === 1) return 'bg-primary/35';
-  return 'bg-muted';
-}
-
-function muscleTextColor(count: number): string {
-  if (count >= 1) return 'text-primary-foreground';
-  return 'text-muted-foreground';
 }
 
 // Module chip styling (light + dark)
@@ -454,25 +431,9 @@ export default function FeedPage() {
           </div>
         </div>
 
-        {/* Muscle Group Heatmap */}
-        {summary && (
-          <div className="rounded-xl bg-card border border-border p-4 shadow-sm">
-            <span className="text-xs font-semibold text-primary uppercase tracking-wide">Muscles This Week</span>
-            <div className="grid grid-cols-3 gap-2 mt-3">
-              {MUSCLE_GROUPS.map(({ key, label }) => {
-                const count = summary.muscleFrequency[key] ?? 0;
-                return (
-                  <div
-                    key={key}
-                    className={`rounded-lg p-2 flex flex-col items-center gap-1 ${muscleHeatColor(count)}`}
-                  >
-                    <span className={`text-xs font-medium ${muscleTextColor(count)}`}>{label}</span>
-                    {count > 0 && <span className="text-[10px] font-medium text-foreground/90">{count}x</span>}
-                  </div>
-                );
-              })}
-            </div>
-          </div>
+        {/* Muscles This Week (canonical taxonomy, parent-group rollup) */}
+        {summary?.setsByMuscle && summary.setsByMuscle.length > 0 && (
+          <MusclesThisWeek setsByMuscle={summary.setsByMuscle} />
         )}
 
         {/* Activity Calendar */}

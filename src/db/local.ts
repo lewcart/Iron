@@ -441,6 +441,17 @@ export interface LocalProgressPhoto extends SyncMeta {
   taken_at: string;
 }
 
+// ─── Muscle taxonomy (read-only catalog, mirrors Postgres `muscles`) ─────────
+
+export interface LocalMuscle {
+  slug: string;
+  display_name: string;
+  parent_group: string;
+  optimal_sets_min: number;
+  optimal_sets_max: number;
+  display_order: number;
+}
+
 // ─── Meta ────────────────────────────────────────────────────────────────────
 
 export interface LocalMeta {
@@ -482,6 +493,9 @@ export class IronDB extends Dexie {
   dysphoria_logs!: Table<LocalDysphoriaLog, string>;
   clothes_test_logs!: Table<LocalClothesTestLog, string>;
   progress_photos!: Table<LocalProgressPhoto, string>;
+
+  // ── v9 additions ──
+  muscles!: Table<LocalMuscle, string>;
 
   constructor() {
     super('iron-db');
@@ -622,6 +636,26 @@ export class IronDB extends Dexie {
       plan_checkpoint: 'uuid, plan_id, target_date, status, _synced, _updated_at',
     };
     this.version(10).stores(v10Stores);
+
+    // v11: canonical muscle taxonomy (mirrors Postgres migration 026).
+    //
+    // Adds muscles table (read-only, server-owned) and clears the existing
+    // exercises table so hydrateExercises() re-pulls from the canonical
+    // bundled catalog on next launch. UUIDs are preserved across the rewrite
+    // (catalog rewrite only touched primary_muscles/secondary_muscles arrays),
+    // so workout_exercises.exercise_uuid references stay valid through the
+    // window between clear() and hydrate.
+    //
+    // Pattern mirrors v2's exercise re-hydration: clear table + delete the
+    // hydrated_at marker so the next hydrate runs.
+    const v11Stores = {
+      ...v10Stores,
+      muscles: 'slug, display_order, parent_group',
+    };
+    this.version(11).stores(v11Stores).upgrade(async tx => {
+      await tx.table('exercises').clear();
+      await tx.table('_meta').delete('exercises_hydrated_at');
+    });
   }
 }
 

@@ -11,10 +11,10 @@
     "primer": "This is an exercise for the shoulder strengthening.",
     "type": "isolation",
     "primary": [
-      "deltoid"
+      "delts"
     ],
     "secondary": [
-      "triceps brachii"
+      "triceps"
     ],
     "equipment": [
       "machine"
@@ -49,10 +49,10 @@
     "primer": "An exercise for the shoulder and triceps strengthening.",
     "type": "isolation",
     "primary": [
-      "deltoid"
+      "delts"
     ],
     "secondary": [
-      "triceps brachii"
+      "triceps"
     ],
     "equipment": [
       "barbell",
@@ -87,7 +87,7 @@
     "primer": "An exercise for trapezius strengthening.",
     "type": "isolation",
     "primary": [
-      "trapezius"
+      "mid_traps"
     ],
     "secondary": [],
     "equipment": [
@@ -122,10 +122,10 @@
     "primer": "An exercise for shoulder and triceps strengthening.",
     "type": "isolation",
     "primary": [
-      "deltoid"
+      "delts"
     ],
     "secondary": [
-      "triceps brachii"
+      "triceps"
     ],
     "equipment": [
       "dumbbell"
@@ -161,11 +161,11 @@
     "primer": "An exercise for shoulder, chest and forearm strengthening.",
     "type": "isolation",
     "primary": [
-      "deltoid"
+      "delts"
     ],
     "secondary": [
-      "pectoralis major",
-      "forerm"
+      "chest",
+      "forearms"
     ],
     "equipment": [
       "barbell"
@@ -199,11 +199,11 @@
     "primer": "An exercise for shoulders, chest and forearm strengthening.",
     "type": "isolation",
     "primary": [
-      "deltoid"
+      "delts"
     ],
     "secondary": [
-      "pectoralis major",
-      "forearm"
+      "chest",
+      "forearms"
     ],
     "equipment": [
       "cable"
@@ -239,10 +239,10 @@
     "primer": "An exercise for trapezius strengthening.",
     "type": "isolation",
     "primary": [
-      "trapezius"
+      "mid_traps"
     ],
     "secondary": [
-      "deltoid"
+      "delts"
     ],
     "equipment": [
       "cable"
@@ -279,11 +279,11 @@
     "primer": "An exercise for shoulder, chest and triceps strengthening.",
     "type": "isolation",
     "primary": [
-      "deltoid"
+      "delts"
     ],
     "secondary": [
-      "triceps brachii",
-      "pectoralis major"
+      "chest",
+      "triceps"
     ],
     "equipment": [
       "dumbbell"
@@ -318,11 +318,11 @@
     "primer": "This is an exercise for shoulder, trapezius and middle back strengthening.",
     "type": "isolation",
     "primary": [
-      "deltoid"
+      "delts"
     ],
     "secondary": [
-      "trapezius",
-      "latissimus dorsi"
+      "lats",
+      "mid_traps"
     ],
     "equipment": [
       "cable"
@@ -360,10 +360,10 @@
     "primer": "This is an exercise for lateral deltoid, shoulder and forearm strengthening.",
     "type": "isolation",
     "primary": [
-      "deltoid"
+      "delts"
     ],
     "secondary": [
-      "forearm"
+      "forearms"
     ],
     "equipment": [
       "dumbbell"
@@ -400,11 +400,11 @@
     "primer": "This is an exercise for shoulder, middle back and triceps strengthening.",
     "type": "isolation",
     "primary": [
-      "deltoid"
+      "delts"
     ],
     "secondary": [
-      "triceps brachii",
-      "latissimus dorsi"
+      "lats",
+      "triceps"
     ],
     "equipment": [
       "exercise band"
@@ -439,7 +439,7 @@
     "primer": "This is an exercise for lower abdominal strengthening.",
     "type": "isolation",
     "primary": [
-      "abdominals"
+      "core"
     ],
     "secondary": [],
     "equipment": [
@@ -475,10 +475,10 @@
     "primer": "A exercise for the rear deltoid",
     "type": "isolation",
     "primary": [
-      "deltoid"
+      "delts"
     ],
     "secondary": [
-      "biceps brachii"
+      "biceps"
     ],
     "equipment": [
       "smith machine"
@@ -515,7 +515,7 @@
     "primer": "This is an exercise for shoulder strengthening.",
     "type": "isolation",
     "primary": [
-      "deltoid"
+      "delts"
     ],
     "secondary": [],
     "equipment": [
@@ -550,11 +550,11 @@
     "primer": "This is an exercise for deltoid, biceps and trapezius strengthening.",
     "type": "isolation",
     "primary": [
-      "latissimus dorsi"
+      "lats"
     ],
     "secondary": [
-      "biceps brachii",
-      "deltoid"
+      "biceps",
+      "delts"
     ],
     "equipment": [
       "dumbbell"
@@ -590,11 +590,11 @@
     "primer": "This is an exercise for middle back, biceps and lower back strengthening.",
     "type": "compound",
     "primary": [
-      "latissimus dorsi"
+      "lats"
     ],
     "secondary": [
-      "biceps brachii",
-      "erector spinae"
+      "biceps",
+      "erectors"
     ],
     "equipment": [
       "cable"
@@ -628,10 +628,10 @@
     "primer": "This is an exercise for middle back and biceps strengthening.",
     "type": "isolation",
     "primary": [
-      "latissimus dorsi"
+      "lats"
     ],
     "secondary": [
-      "biceps brachii"
+      "biceps"
     ],
     "equipment": [
       "barbell"
@@ -665,10 +665,10 @@
     "primer": "This is an exercise for shoulder and biceps strengthening.",
     "type": "isolation",
     "primary": [
-      "deltoid"
+      "delts"
     ],
     "secondary": [
-      "biceps brachii"
+      "biceps"
     ],
     "equipment": [
       "barbell"
@@ -701,11 +701,11 @@
     "primer": "This is an exercise for middle back, biceps and shoulder strengthening.",
     "type": "isolation",
     "primary": [
-      "latissimus dorsi"
+      "lats"
     ],
     "secondary": [
-      "biceps brachii",
-      "deltoid"
+      "biceps",
+      "delts"
     ],
     "equipment": [
       "t-bar machine"
@@ -740,7 +740,7 @@
     "primer": "This is an exercise for trapezius strengthening.",
     "type": "isolation",
     "primary": [
-      "trapezius"
+      "mid_traps"
     ],
     "secondary": [],
     "equipment": [
@@ -776,7 +776,7 @@
     "primer": "This is an exercise for shoulder strengthening.",
     "type": "isolation",
     "primary": [
-      "deltoid"
+      "delts"
     ],
     "secondary": [],
     "equipment": [
@@ -811,7 +811,7 @@
     "primer": "This is an exercise for shoulder strengthening.",
     "type": "isolation",
     "primary": [
-      "deltoid"
+      "delts"
     ],
     "secondary": [],
     "equipment": [
@@ -842,10 +842,10 @@
     "primer": "This is an exercise for shoulder and biceps strengthening.",
     "type": "compound",
     "primary": [
-      "deltoid"
+      "delts"
     ],
     "secondary": [
-      "biceps brachii"
+      "biceps"
     ],
     "equipment": [
       "cable"
@@ -879,7 +879,7 @@
     "primer": "This is an exercise for shoulder strengthening.",
     "type": "isolation",
     "primary": [
-      "deltoid"
+      "delts"
     ],
     "secondary": [],
     "equipment": [
@@ -912,11 +912,11 @@
     "primer": "This is one of the best exercises for the chest.",
     "type": "compound",
     "primary": [
-      "pectoralis major"
+      "chest"
     ],
     "secondary": [
-      "triceps brachii",
-      "deltoid"
+      "delts",
+      "triceps"
     ],
     "equipment": [
       "bench",
@@ -952,10 +952,10 @@
     "primer": "This is an exercise for chest and triceps strengthening.",
     "type": "isolation",
     "primary": [
-      "pectoralis major"
+      "chest"
     ],
     "secondary": [
-      "triceps brachii"
+      "triceps"
     ],
     "equipment": [
       "bench: incline",
@@ -995,7 +995,7 @@
     "primer": "This is an exercise for chest strengthening.",
     "type": "isolation",
     "primary": [
-      "pectoralis major"
+      "chest"
     ],
     "secondary": [],
     "equipment": [
@@ -1032,10 +1032,10 @@
     "primer": "This is an exercise for chest and shoulder strengthening.",
     "type": "isolation",
     "primary": [
-      "pectoralis major"
+      "chest"
     ],
     "secondary": [
-      "deltoid"
+      "delts"
     ],
     "equipment": [
       "cable"
@@ -1067,11 +1067,11 @@
     "primer": "This is an exercise for chest, triceps and shoulder strengthening.",
     "type": "isolation",
     "primary": [
-      "pectoralis major"
+      "chest"
     ],
     "secondary": [
-      "triceps brachii",
-      "deltoid"
+      "delts",
+      "triceps"
     ],
     "equipment": [
       "barbell"
@@ -1104,11 +1104,11 @@
     "primer": "This is an exercise for chest, triceps and shoulder strengthening.",
     "type": "isolation",
     "primary": [
-      "pectoralis major"
+      "chest"
     ],
     "secondary": [
-      "triceps brachii",
-      "deltoid"
+      "delts",
+      "triceps"
     ],
     "equipment": [
       "bench: decline",
@@ -1142,11 +1142,11 @@
     "primer": "This is an exercise for chest, shoulder and triceps strengthening.",
     "type": "isolation",
     "primary": [
-      "pectoralis major"
+      "chest"
     ],
     "secondary": [
-      "triceps brachii",
-      "deltoid"
+      "delts",
+      "triceps"
     ],
     "equipment": [
       "dumbbell",
@@ -1180,10 +1180,10 @@
     "primer": "This is an exercise for chest and shoulder strengthening.",
     "type": "isolation",
     "primary": [
-      "pectoralis major"
+      "chest"
     ],
     "secondary": [
-      "deltoid"
+      "delts"
     ],
     "equipment": [
       "dumbbell",
@@ -1216,11 +1216,11 @@
     "primer": "This is an exercise for chest, triceps and shoulder strengthening.",
     "type": "isolation",
     "primary": [
-      "pectoralis major"
+      "chest"
     ],
     "secondary": [
-      "triceps brachii",
-      "deltoid"
+      "delts",
+      "triceps"
     ],
     "equipment": [
       "body",
@@ -1255,11 +1255,11 @@
     "primer": "This is  an exercise for chest,triceps and shoulder strengthening.",
     "type": "isolation",
     "primary": [
-      "pectoralis major"
+      "chest"
     ],
     "secondary": [
-      "deltoid",
-      "triceps brachii"
+      "delts",
+      "triceps"
     ],
     "equipment": [
       "dumbbell",
@@ -1297,11 +1297,11 @@
     "primer": "This is an exercise for chest, triceps and shoulder strengthening.",
     "type": "isolation",
     "primary": [
-      "pectoralis major"
+      "chest"
     ],
     "secondary": [
-      "deltoid",
-      "triceps brachii"
+      "delts",
+      "triceps"
     ],
     "equipment": [
       "flat bench",
@@ -1338,10 +1338,10 @@
     "primer": "This is an exercise for chest and shoulder strengthening.",
     "type": "isolation",
     "primary": [
-      "pectoralis major"
+      "chest"
     ],
     "secondary": [
-      "deltoid"
+      "delts"
     ],
     "equipment": [
       "flat bench",
@@ -1374,11 +1374,11 @@
     "primer": "This is an exercise for chest, triceps and shoulder strengthening.",
     "type": "isolation",
     "primary": [
-      "pectoralis major"
+      "chest"
     ],
     "secondary": [
-      "triceps brachii",
-      "deltoid"
+      "delts",
+      "triceps"
     ],
     "equipment": [
       "barbell",
@@ -1410,11 +1410,11 @@
     "primer": "This is an advanced exercise for strengthening the chest, triceps and shoulders.",
     "type": "isolation",
     "primary": [
-      "pectoralis major"
+      "chest"
     ],
     "secondary": [
-      "deltoid",
-      "triceps brachii"
+      "delts",
+      "triceps"
     ],
     "equipment": [
       "dumbbell",
@@ -1449,12 +1449,12 @@
     "primer": "This exercise is an alternative to the Butterfly or Pec Deck, it defines the muscles of the chest.Place an incline bench set at a 45 degree angle between two cable towers.",
     "type": "isolation",
     "primary": [
-      "pectoralis major"
+      "chest"
     ],
     "secondary": [
-      "biceps brachii",
-      "triceps brachii",
-      "forearm"
+      "biceps",
+      "forearms",
+      "triceps"
     ],
     "equipment": [
       "bench: incline",
@@ -1486,11 +1486,11 @@
     "primer": "This is an advanced exercise for building and sculpting the chest as well as your triceps and shoulders.",
     "type": "isolation",
     "primary": [
-      "pectoralis major"
+      "chest"
     ],
     "secondary": [
-      "triceps brachii",
-      "deltoid"
+      "delts",
+      "triceps"
     ],
     "equipment": [
       "dumbbell",
@@ -1525,10 +1525,10 @@
     "primer": "This is an exercise for chest sculpting and strengthening.",
     "type": "isolation",
     "primary": [
-      "pectoralis major"
+      "chest"
     ],
     "secondary": [
-      "deltoid"
+      "delts"
     ],
     "equipment": [
       "bench: incline",
@@ -1564,11 +1564,11 @@
     "primer": "This is an exercise for chest, biceps and shoulder strengthening.",
     "type": "isolation",
     "primary": [
-      "pectoralis major"
+      "chest"
     ],
     "secondary": [
-      "triceps brachii",
-      "deltoid"
+      "delts",
+      "triceps"
     ],
     "equipment": [
       "machine: bench press"
@@ -1599,11 +1599,11 @@
     "primer": "This is the same general movement as with a Push Up except your feet are elevated allowing greater range of motions and targeting the pectorals differently than the regular Push Up.",
     "type": "isolation",
     "primary": [
-      "pectoralis major",
-      "deltoid"
+      "chest",
+      "delts"
     ],
     "secondary": [
-      "triceps brachii"
+      "triceps"
     ],
     "equipment": [
       "body",
@@ -1636,11 +1636,11 @@
     "primer": "This exercise is the main strengthening exercise when wanting to strengthen ones chest, biceps and triceps as well as core muscles.",
     "type": "isolation",
     "primary": [
-      "pectoralis major"
+      "chest"
     ],
     "secondary": [
-      "triceps brachii",
-      "deltoid"
+      "delts",
+      "triceps"
     ],
     "equipment": [
       "body"
@@ -1674,11 +1674,11 @@
     "primer": "With the use of a Smith Machine this exercise strengthens your chest shoulders and triceps.",
     "type": "isolation",
     "primary": [
-      "pectoralis major"
+      "chest"
     ],
     "secondary": [
-      "deltoid",
-      "triceps brachii"
+      "delts",
+      "triceps"
     ],
     "equipment": [
       "flat bench",
@@ -1713,11 +1713,11 @@
     "primer": "This is an exercise for chest, shoulder and triceps strengthening.",
     "type": "isolation",
     "primary": [
-      "pectoralis major"
+      "chest"
     ],
     "secondary": [
-      "deltoid",
-      "triceps brachii"
+      "delts",
+      "triceps"
     ],
     "equipment": [
       "smith machine",
@@ -1752,11 +1752,11 @@
     "primer": "This is an exercise for chest, triceps and shoulder strengthening.",
     "type": "isolation",
     "primary": [
-      "pectoralis major"
+      "chest"
     ],
     "secondary": [
-      "triceps brachii",
-      "deltoid"
+      "delts",
+      "triceps"
     ],
     "equipment": [
       "flat bench",
@@ -1792,11 +1792,11 @@
     "primer": "This is an exercise for chest, triceps and shoulder strengthening.",
     "type": "isolation",
     "primary": [
-      "pectoralis major"
+      "chest"
     ],
     "secondary": [
-      "triceps brachii",
-      "deltoid"
+      "delts",
+      "triceps"
     ],
     "equipment": [
       "barbell",
@@ -1832,11 +1832,11 @@
     "primer": "This exercise is for strengthening the upper chest and is preferred among beginners as it provides support and control.",
     "type": "isolation",
     "primary": [
-      "pectoralis major"
+      "chest"
     ],
     "secondary": [
-      "triceps brachii",
-      "deltoid"
+      "delts",
+      "triceps"
     ],
     "equipment": [
       "chest machine"
@@ -1868,11 +1868,11 @@
     "primer": "This is an exercise for the strengthening of the lower chest or pectoral muscles and is preferred by beginners as it provides support and stability.",
     "type": "isolation",
     "primary": [
-      "pectoralis major"
+      "chest"
     ],
     "secondary": [
-      "deltoid",
-      "triceps brachii"
+      "delts",
+      "triceps"
     ],
     "equipment": [
       "machine: chest"
@@ -1904,11 +1904,11 @@
     "primer": "This is a good overall exercise which strengthens your chest, core and back muscles.",
     "type": "compound",
     "primary": [
-      "latissimus dorsi"
+      "lats"
     ],
     "secondary": [
-      "biceps brachii",
-      "pectoralis major"
+      "biceps",
+      "chest"
     ],
     "equipment": [
       "bar"
@@ -1940,10 +1940,10 @@
     "primer": "This is an exercise in lats, biceps and middle back strengthening.",
     "type": "isolation",
     "primary": [
-      "latissimus dorsi"
+      "lats"
     ],
     "secondary": [
-      "biceps brachii"
+      "biceps"
     ],
     "equipment": [
       "bar"
@@ -1976,8 +1976,8 @@
     "primer": "This is an extremely good exercise for upper arm and middle back strengthening.",
     "type": "isolation",
     "primary": [
-      "latissimus dorsi",
-      "biceps brachii"
+      "biceps",
+      "lats"
     ],
     "secondary": [],
     "equipment": [
@@ -2012,11 +2012,11 @@
     "primer": "This is an exercise similar to the regular Chin Up but focuses more on shoulder strengthening.",
     "type": "isolation",
     "primary": [
-      "latissimus dorsi",
-      "biceps brachii"
+      "biceps",
+      "lats"
     ],
     "secondary": [
-      "deltoid"
+      "delts"
     ],
     "equipment": [
       "bar",
@@ -2054,10 +2054,10 @@
     "primer": "This exercise for strengthening the Lats and also works the Triceps.",
     "type": "isolation",
     "primary": [
-      "latissimus dorsi"
+      "lats"
     ],
     "secondary": [
-      "triceps brachii"
+      "triceps"
     ],
     "equipment": [
       "cable"
@@ -2090,10 +2090,10 @@
     "primer": "This is an exercise for lats and biceps strengthening.",
     "type": "isolation",
     "primary": [
-      "latissimus dorsi"
+      "lats"
     ],
     "secondary": [
-      "biceps brachii"
+      "biceps"
     ],
     "equipment": [
       "cable"
@@ -2126,10 +2126,10 @@
     "primer": "This is an exercise for lats and biceps strengthening.",
     "type": "isolation",
     "primary": [
-      "latissimus dorsi"
+      "lats"
     ],
     "secondary": [
-      "biceps brachii"
+      "biceps"
     ],
     "equipment": [
       "cable"
@@ -2162,10 +2162,10 @@
     "primer": "This is an exercise for lats, biceps and middle back strengthening.",
     "type": "isolation",
     "primary": [
-      "latissimus dorsi"
+      "lats"
     ],
     "secondary": [
-      "biceps brachii"
+      "biceps"
     ],
     "equipment": [
       "cable"
@@ -2199,11 +2199,11 @@
     "primer": "This is an exercise for lats, biceps and middle back strengthening.",
     "type": "isolation",
     "primary": [
-      "latissimus dorsi"
+      "lats"
     ],
     "secondary": [
-      "biceps brachii",
-      "latissimus dorsi"
+      "biceps",
+      "lats"
     ],
     "equipment": [
       "cable",
@@ -2238,12 +2238,11 @@
     "primer": "The techniques is identical to that of the Smith Machine deadlift except for the fact that this exercise provides less support.",
     "type": "isolation",
     "primary": [
-      "erector spinae"
+      "erectors"
     ],
     "secondary": [
-      "ischiocrural muscles",
-      "gastrocnemius",
-      "soleus"
+      "calves",
+      "hamstrings"
     ],
     "equipment": [
       "barbell"
@@ -2279,12 +2278,11 @@
     "primer": "This is the same as a Deadlift but the Smith Machine allows for better control of the weight.",
     "type": "isolation",
     "primary": [
-      "erector spinae"
+      "erectors"
     ],
     "secondary": [
-      "ischiocrural muscles",
-      "gastrocnemius",
-      "soleus"
+      "calves",
+      "hamstrings"
     ],
     "equipment": [
       "smith machine"
@@ -2316,10 +2314,10 @@
     "primer": "This is one of the oldest exercises in bodybuilding but it still is one of the best for working the lower back.",
     "type": "isolation",
     "primary": [
-      "erector spinae"
+      "erectors"
     ],
     "secondary": [
-      "ischiocrural muscles"
+      "hamstrings"
     ],
     "equipment": [
       "barbell"
@@ -2350,10 +2348,10 @@
     "primer": "This exercise utilises the same technique of the standard Good Mornings yet the use of the Smith Machine provides more stability.",
     "type": "isolation",
     "primary": [
-      "erector spinae"
+      "erectors"
     ],
     "secondary": [
-      "ischiocrural muscles"
+      "hamstrings"
     ],
     "equipment": [
       "smith machine"
@@ -2386,11 +2384,11 @@
     "primer": "This exercise not only adds strength but also flexibility to the back and core muscles.",
     "type": "isolation",
     "primary": [
-      "erector spinae"
+      "erectors"
     ],
     "secondary": [
-      "ischiocrural muscles",
-      "core"
+      "core",
+      "hamstrings"
     ],
     "equipment": [
       "bench: hyperextension"
@@ -2421,7 +2419,7 @@
     "primer": "This is an excellent exercise and a stretch for the lower back and core muscles.",
     "type": "isolation",
     "primary": [
-      "erector spinae"
+      "erectors"
     ],
     "secondary": [
       "core"
@@ -2455,12 +2453,11 @@
     "primer": "This is an exercise for lower back, hamstring and calves strengthening.",
     "type": "isolation",
     "primary": [
-      "erector spinae"
+      "erectors"
     ],
     "secondary": [
-      "gastrocnemius",
-      "soleus",
-      "ischiocrural muscles"
+      "calves",
+      "hamstrings"
     ],
     "equipment": [
       "dumbbell"
@@ -2496,7 +2493,7 @@
     "primer": "This is an exercise for core strengthening.",
     "type": "compound",
     "primary": [
-      "obliques"
+      "core"
     ],
     "secondary": [],
     "equipment": [
@@ -2525,7 +2522,7 @@
     "primer": "This is an excellent exercise for strengthening and maintaining the core muscles.",
     "type": "isolation",
     "primary": [
-      "glutaeus maximus"
+      "glutes"
     ],
     "secondary": [
       "core"
@@ -2560,10 +2557,10 @@
     "primer": "This is an exercise for gluts and hamstring strengthening.",
     "type": "isolation",
     "primary": [
-      "glutaeus maximus"
+      "glutes"
     ],
     "secondary": [
-      "ischiocrural muscles"
+      "hamstrings"
     ],
     "equipment": [
       "cable"
@@ -2594,7 +2591,7 @@
     "primer": "This is an exercise for core strengthening.",
     "type": "isolation",
     "primary": [
-      "obliques"
+      "core"
     ],
     "secondary": [],
     "equipment": [
@@ -2624,13 +2621,12 @@
     "primer": "This is a classic exercise used for strengthening the hamstrings, quadriceps, calves and gluts.",
     "type": "isolation",
     "primary": [
-      "ischiocrural muscles"
+      "hamstrings"
     ],
     "secondary": [
-      "glutaeus maximus",
-      "quadriceps",
-      "gastrocnemius",
-      "soleus"
+      "calves",
+      "glutes",
+      "quads"
     ],
     "equipment": [
       "barbell"
@@ -2665,13 +2661,12 @@
     "primer": "This is an exercise for whole leg but mainly hamstring strengthening.",
     "type": "isolation",
     "primary": [
-      "ischiocrural muscles"
+      "hamstrings"
     ],
     "secondary": [
-      "glutaeus maximus",
-      "quadriceps",
-      "gastrocnemius",
-      "soleus"
+      "calves",
+      "glutes",
+      "quads"
     ],
     "equipment": [
       "dumbbell"
@@ -2706,10 +2701,10 @@
     "primer": "This is an exercise for quadriceps and hamstring strengthening.",
     "type": "isolation",
     "primary": [
-      "ischiocrural muscles"
+      "hamstrings"
     ],
     "secondary": [
-      "quadriceps"
+      "quads"
     ],
     "equipment": [
       "flat bench"
@@ -2741,7 +2736,7 @@
     "primer": "This is an exercise for hamstring strengthening.",
     "type": "isolation",
     "primary": [
-      "ischiocrural muscles"
+      "hamstrings"
     ],
     "secondary": [],
     "equipment": [
@@ -2773,13 +2768,12 @@
     "primer": "This is an exercise similar to the regular deadlift and strengthens the hamstring, calves, quadriceps and gluts.",
     "type": "isolation",
     "primary": [
-      "ischiocrural muscles"
+      "hamstrings"
     ],
     "secondary": [
-      "gastrocnemius",
-      "soleus",
-      "quadriceps",
-      "glutaeus maximus"
+      "calves",
+      "glutes",
+      "quads"
     ],
     "equipment": [
       "barbell"
@@ -2812,7 +2806,7 @@
     "primer": "This is an exercise for hamstring strengthening which is similar to the laying leg curls.",
     "type": "isolation",
     "primary": [
-      "ischiocrural muscles"
+      "hamstrings"
     ],
     "secondary": [],
     "equipment": [
@@ -2844,7 +2838,7 @@
     "primer": "This is an exercise for hamstring strengthening.",
     "type": "isolation",
     "primary": [
-      "ischiocrural muscles"
+      "hamstrings"
     ],
     "secondary": [],
     "equipment": [
@@ -2876,13 +2870,12 @@
     "primer": "A walking lunge gives you the benefit of lunges plus core muscle training from the constant motion.",
     "type": "isolation",
     "primary": [
-      "ischiocrural muscles"
+      "hamstrings"
     ],
     "secondary": [
-      "quadriceps",
-      "glutaeus maximus",
-      "gastrocnemius",
-      "soleus"
+      "calves",
+      "glutes",
+      "quads"
     ],
     "equipment": [
       "dumbbell"
@@ -2921,10 +2914,10 @@
     "primer": "This is the most important exercise for overall strength.",
     "type": "compound",
     "primary": [
-      "quadriceps"
+      "quads"
     ],
     "secondary": [
-      "ischiocrural muscles"
+      "hamstrings"
     ],
     "equipment": [
       "barbell"
@@ -2958,12 +2951,11 @@
     "primer": "This exercise is a variation of the Squat which uses a machine.",
     "type": "compound",
     "primary": [
-      "quadriceps"
+      "quads"
     ],
     "secondary": [
-      "ischiocrural muscles",
-      "gastrocnemius",
-      "soleus"
+      "calves",
+      "hamstrings"
     ],
     "equipment": [
       "machine"
@@ -2997,13 +2989,12 @@
     "primer": "This exercise is a variation of a squat using the Smith Machine.",
     "type": "compound",
     "primary": [
-      "quadriceps"
+      "quads"
     ],
     "secondary": [
-      "gastrocnemius",
-      "soleus",
-      "glutaeus maximus",
-      "ischiocrural muscles"
+      "calves",
+      "glutes",
+      "hamstrings"
     ],
     "equipment": [
       "smith machine"
@@ -3037,10 +3028,10 @@
     "primer": "This is another variation of the basic Squat that focuses primarily on the quadriceps or thigh muscles.",
     "type": "compound",
     "primary": [
-      "quadriceps"
+      "quads"
     ],
     "secondary": [
-      "ischiocrural muscles"
+      "hamstrings"
     ],
     "equipment": [
       "barbell"
@@ -3073,11 +3064,11 @@
     "primer": "This is another variation of the basic Squat that focuses primarily on the quadriceps, or thigh muscles, while using the Smith Machine.",
     "type": "compound",
     "primary": [
-      "quadriceps"
+      "quads"
     ],
     "secondary": [
-      "ischiocrural muscles",
-      "glutaeus maximus"
+      "glutes",
+      "hamstrings"
     ],
     "equipment": [
       "smith machine"
@@ -3112,12 +3103,11 @@
     "primer": "This exercise is crucial for building and strengthening the legs.",
     "type": "compound",
     "primary": [
-      "quadriceps"
+      "quads"
     ],
     "secondary": [
-      "gastrocnemius",
-      "soleus",
-      "ischiocrural muscles"
+      "calves",
+      "hamstrings"
     ],
     "equipment": [
       "machine"
@@ -3149,12 +3139,11 @@
     "primer": "This is a great overall exercise for the lower body that uses dumbbells.",
     "type": "compound",
     "primary": [
-      "quadriceps"
+      "quads"
     ],
     "secondary": [
-      "ischiocrural muscles",
-      "gastrocnemius",
-      "soleus"
+      "calves",
+      "hamstrings"
     ],
     "equipment": [
       "dumbbell"
@@ -3188,10 +3177,10 @@
     "primer": "This exercises strengthens hip flexors and muscles of the thighs.",
     "type": "isolation",
     "primary": [
-      "quadriceps"
+      "quads"
     ],
     "secondary": [
-      "hip adductors"
+      "hip_adductors"
     ],
     "equipment": [
       "cable"
@@ -3222,12 +3211,11 @@
     "primer": "The Front Squat works the same muscles as the rear squat without placing the weight of the bar on your shoulders.",
     "type": "compound",
     "primary": [
-      "quadriceps"
+      "quads"
     ],
     "secondary": [
-      "ischiocrural muscles",
-      "gastrocnemius",
-      "soleus"
+      "calves",
+      "hamstrings"
     ],
     "equipment": [
       "barbell"
@@ -3260,7 +3248,7 @@
     "primer": "This exercise is a staple for building strong legs.",
     "type": "isolation",
     "primary": [
-      "quadriceps"
+      "quads"
     ],
     "secondary": [],
     "equipment": [
@@ -3293,12 +3281,11 @@
     "primer": "This is a variation of the leg press which targets more of the external muscles of the legs.",
     "type": "compound",
     "primary": [
-      "quadriceps"
+      "quads"
     ],
     "secondary": [
-      "gastrocnemius",
-      "soleus",
-      "ischiocrural muscles"
+      "calves",
+      "hamstrings"
     ],
     "equipment": [
       "machine"
@@ -3331,12 +3318,11 @@
     "primer": "Like the Hack Squat, this exercise works the muscles of the leg.",
     "type": "compound",
     "primary": [
-      "quadriceps"
+      "quads"
     ],
     "secondary": [
-      "ischiocrural muscles",
-      "gastrocnemius",
-      "soleus"
+      "calves",
+      "hamstrings"
     ],
     "equipment": [
       "machine"
@@ -3370,13 +3356,12 @@
     "primer": "This version of the Squat targets and defines more of the externals leg muscles.",
     "type": "compound",
     "primary": [
-      "quadriceps"
+      "quads"
     ],
     "secondary": [
-      "glutaeus maximus",
-      "gastrocnemius",
-      "soleus",
-      "ischiocrural muscles"
+      "calves",
+      "glutes",
+      "hamstrings"
     ],
     "equipment": [
       "barbell"
@@ -3410,10 +3395,10 @@
     "primer": "This exercise targets and works the muscles of the outer thigh.",
     "type": "isolation",
     "primary": [
-      "quadriceps"
+      "quads"
     ],
     "secondary": [
-      "ischiocrural muscles"
+      "hamstrings"
     ],
     "equipment": [
       "machine"
@@ -3444,10 +3429,10 @@
     "primer": "This exercise targets and works the muscles of the inner thigh.",
     "type": "isolation",
     "primary": [
-      "quadriceps"
+      "quads"
     ],
     "secondary": [
-      "ischiocrural muscles"
+      "hamstrings"
     ],
     "equipment": [
       "machine"
@@ -3478,12 +3463,11 @@
     "primer": "This version of the squat uses a wider stance to isolate the inner thigh.",
     "type": "compound",
     "primary": [
-      "quadriceps"
+      "quads"
     ],
     "secondary": [
-      "gastrocnemius",
-      "soleus",
-      "ischiocrural muscles"
+      "calves",
+      "hamstrings"
     ],
     "equipment": [
       "barbell"
@@ -3516,10 +3500,10 @@
     "primer": "This exercise is one of the most basic and still one of the best for building the triceps.",
     "type": "compound",
     "primary": [
-      "triceps brachii"
+      "triceps"
     ],
     "secondary": [
-      "pectoralis major"
+      "chest"
     ],
     "equipment": [
       "body"
@@ -3556,10 +3540,10 @@
     "primer": "This exercise uses cables to isolate and work the triceps.",
     "type": "isolation",
     "primary": [
-      "latissimus dorsi"
+      "lats"
     ],
     "secondary": [
-      "triceps brachii"
+      "triceps"
     ],
     "equipment": [
       "cable"
@@ -3593,7 +3577,7 @@
     "primer": "This exercise uses cables to isolate and work the triceps.",
     "type": "isolation",
     "primary": [
-      "triceps brachii"
+      "triceps"
     ],
     "secondary": [],
     "equipment": [
@@ -3627,7 +3611,7 @@
     "primer": "This exercise uses cables to isolate and work the triceps.",
     "type": "isolation",
     "primary": [
-      "triceps brachii"
+      "triceps"
     ],
     "secondary": [],
     "equipment": [
@@ -3665,10 +3649,10 @@
     "primer": "This exercise combines a close grip bench press with triceps extension.",
     "type": "isolation",
     "primary": [
-      "triceps brachii"
+      "triceps"
     ],
     "secondary": [
-      "pectoralis major"
+      "chest"
     ],
     "equipment": [
       "ez-curl-bar"
@@ -3701,7 +3685,7 @@
     "primer": "This exercise combines a decline bench and dumbbells to target the triceps.",
     "type": "isolation",
     "primary": [
-      "triceps brachii"
+      "triceps"
     ],
     "secondary": [],
     "equipment": [
@@ -3732,7 +3716,7 @@
     "primer": "This exercise combines a decline bench and a curved bar to more efficiently work the triceps.",
     "type": "isolation",
     "primary": [
-      "triceps brachii"
+      "triceps"
     ],
     "secondary": [],
     "equipment": [
@@ -3763,10 +3747,10 @@
     "primer": "This exercise uses a machine to work the triceps while in seated position.",
     "type": "compound",
     "primary": [
-      "triceps brachii"
+      "triceps"
     ],
     "secondary": [
-      "deltoid"
+      "delts"
     ],
     "equipment": [
       "machine"
@@ -3796,11 +3780,11 @@
     "primer": "This classic exercise uses the weight of your own body to work your triceps.",
     "type": "compound",
     "primary": [
-      "triceps brachii"
+      "triceps"
     ],
     "secondary": [
-      "deltoid",
-      "pectoralis major"
+      "chest",
+      "delts"
     ],
     "equipment": [
       "body"
@@ -3831,7 +3815,7 @@
     "primer": "This exercise uses a dumbbell to work each arm individually.",
     "type": "isolation",
     "primary": [
-      "triceps brachii"
+      "triceps"
     ],
     "secondary": [],
     "equipment": [
@@ -3863,7 +3847,7 @@
     "primer": "This version of a triceps extension uses gravity to increase the resistance of the exercise.",
     "type": "isolation",
     "primary": [
-      "triceps brachii"
+      "triceps"
     ],
     "secondary": [],
     "equipment": [
@@ -3895,7 +3879,7 @@
     "primer": "Kneeling allows you to isolate your triceps more effectively.",
     "type": "isolation",
     "primary": [
-      "triceps brachii"
+      "triceps"
     ],
     "secondary": [],
     "equipment": [
@@ -3928,7 +3912,7 @@
     "primer": "This exercise is done while lying on a seated row station.",
     "type": "isolation",
     "primary": [
-      "triceps brachii"
+      "triceps"
     ],
     "secondary": [],
     "equipment": [
@@ -3961,7 +3945,7 @@
     "primer": "You can use a barbell or EZ bar to further concentrate the benefit to your triceps.",
     "type": "isolation",
     "primary": [
-      "triceps brachii"
+      "triceps"
     ],
     "secondary": [],
     "equipment": [
@@ -3997,7 +3981,7 @@
     "primer": "This exercise is a classic for building the triceps.",
     "type": "isolation",
     "primary": [
-      "triceps brachii"
+      "triceps"
     ],
     "secondary": [],
     "equipment": [
@@ -4031,7 +4015,7 @@
     "primer": "This exercise uses gravity to increase the resistance of the weight.",
     "type": "isolation",
     "primary": [
-      "triceps brachii"
+      "triceps"
     ],
     "secondary": [],
     "equipment": [
@@ -4067,10 +4051,10 @@
     "primer": "This is another classic exercise for building the triceps.",
     "type": "isolation",
     "primary": [
-      "triceps brachii"
+      "triceps"
     ],
     "secondary": [
-      "pectoralis major"
+      "chest"
     ],
     "equipment": [
       "ez-curl-bar"
@@ -4103,10 +4087,10 @@
     "primer": "This version of the Pushup isolates the tricep muscles.",
     "type": "compound",
     "primary": [
-      "triceps brachii"
+      "triceps"
     ],
     "secondary": [
-      "pectoralis major"
+      "chest"
     ],
     "equipment": [
       "body"
@@ -4138,7 +4122,7 @@
     "primer": "This exercise is the reverse version of the triceps pushdown.",
     "type": "isolation",
     "primary": [
-      "triceps brachii"
+      "triceps"
     ],
     "secondary": [],
     "equipment": [
@@ -4171,10 +4155,10 @@
     "primer": "This exercise is a version of the Bench Press that specifically isolates the triceps.",
     "type": "compound",
     "primary": [
-      "triceps brachii"
+      "triceps"
     ],
     "secondary": [
-      "pectoralis major"
+      "chest"
     ],
     "equipment": [
       "barbell"
@@ -4205,7 +4189,7 @@
     "primer": "This exercise uses a barbell behind your neck to isolate the triceps effectively.",
     "type": "isolation",
     "primary": [
-      "triceps brachii"
+      "triceps"
     ],
     "secondary": [],
     "equipment": [
@@ -4237,10 +4221,10 @@
     "primer": "This version of a Bench Press uses a close grip to isolate the triceps as well as working the chest.",
     "type": "compound",
     "primary": [
-      "triceps brachii"
+      "triceps"
     ],
     "secondary": [
-      "pectoralis major"
+      "chest"
     ],
     "equipment": [
       "smith machine"
@@ -4270,7 +4254,7 @@
     "primer": "This exercise works the triceps by reaching behind your neck.",
     "type": "isolation",
     "primary": [
-      "triceps brachii"
+      "triceps"
     ],
     "secondary": [],
     "equipment": [
@@ -4304,7 +4288,7 @@
     "primer": "This exercise uses a cable machine to isolate the triceps.",
     "type": "compound",
     "primary": [
-      "triceps brachii"
+      "triceps"
     ],
     "secondary": [],
     "equipment": [
@@ -4338,7 +4322,7 @@
     "primer": "This is a single arm version of a behind the neck triceps exercise.",
     "type": "isolation",
     "primary": [
-      "triceps brachii"
+      "triceps"
     ],
     "secondary": [],
     "equipment": [
@@ -4372,7 +4356,7 @@
     "primer": "This is a double arm barbell version of a behind the neck triceps exercise.",
     "type": "isolation",
     "primary": [
-      "triceps brachii"
+      "triceps"
     ],
     "secondary": [],
     "equipment": [
@@ -4405,7 +4389,7 @@
     "primer": "This along with the Triceps Push Down is one of the most beneficial exercises for the arms.",
     "type": "isolation",
     "primary": [
-      "triceps brachii"
+      "triceps"
     ],
     "secondary": [],
     "equipment": [
@@ -4439,7 +4423,7 @@
     "primer": "This exercise is the original version of the triceps pushdown.",
     "type": "isolation",
     "primary": [
-      "triceps brachii"
+      "triceps"
     ],
     "secondary": [],
     "equipment": [
@@ -4473,7 +4457,7 @@
     "primer": "This version of the triceps pushdown uses a rope for better definition in the muscle.",
     "type": "isolation",
     "primary": [
-      "triceps brachii"
+      "triceps"
     ],
     "secondary": [],
     "equipment": [
@@ -4507,7 +4491,7 @@
     "primer": "This exercise is the triceps pushdown uses a V shaped bar.",
     "type": "isolation",
     "primary": [
-      "triceps brachii"
+      "triceps"
     ],
     "secondary": [],
     "equipment": [
@@ -4544,10 +4528,10 @@
     "primer": "This version of the triceps extension uses an incline bench.",
     "type": "isolation",
     "primary": [
-      "triceps brachii"
+      "triceps"
     ],
     "secondary": [
-      "deltoid"
+      "delts"
     ],
     "equipment": [
       "dumbbell"
@@ -4578,7 +4562,7 @@
     "primer": "This exercise uses a machine to insure proper range of motion for tricep extensions.",
     "type": "isolation",
     "primary": [
-      "triceps brachii"
+      "triceps"
     ],
     "secondary": [],
     "equipment": [
@@ -4609,11 +4593,11 @@
     "primer": "This is a basic exercise for the biceps.",
     "type": "isolation",
     "primary": [
-      "biceps brachii"
+      "biceps"
     ],
     "secondary": [
-      "deltoid",
-      "forearm"
+      "delts",
+      "forearms"
     ],
     "equipment": [
       "ez-curl-bar"
@@ -4645,11 +4629,11 @@
     "primer": "This version of the biceps curl uses a cable instead of a barbell to work the muscles of the arms.",
     "type": "isolation",
     "primary": [
-      "biceps brachii"
+      "biceps"
     ],
     "secondary": [
-      "forearm",
-      "deltoid"
+      "delts",
+      "forearms"
     ],
     "equipment": [
       "cable"
@@ -4682,7 +4666,7 @@
     "primer": "Using the rope with the cable machine allows you isolate the biceps with this version of the Hammer Curl.",
     "type": "isolation",
     "primary": [
-      "biceps brachii"
+      "biceps"
     ],
     "secondary": [],
     "equipment": [
@@ -4715,10 +4699,10 @@
     "primer": "A Preacher Curl uses a special bench to support the triceps and isolate the biceps to build the arms.",
     "type": "isolation",
     "primary": [
-      "biceps brachii"
+      "biceps"
     ],
     "secondary": [
-      "forearm"
+      "forearms"
     ],
     "equipment": [
       "cable"
@@ -4753,10 +4737,10 @@
     "primer": "Concentration exercises limit your range of movement to increase the effectiveness of the movement.",
     "type": "isolation",
     "primary": [
-      "biceps brachii"
+      "biceps"
     ],
     "secondary": [
-      "forearm"
+      "forearms"
     ],
     "equipment": [
       "dumbbell"
@@ -4789,10 +4773,10 @@
     "primer": "This exercise works the biceps and forearms.",
     "type": "isolation",
     "primary": [
-      "biceps brachii"
+      "biceps"
     ],
     "secondary": [
-      "forearm"
+      "forearms"
     ],
     "equipment": [
       "barbell"
@@ -4825,10 +4809,10 @@
     "primer": "This version of a biceps curl uses both arms at the same time.",
     "type": "isolation",
     "primary": [
-      "biceps brachii"
+      "biceps"
     ],
     "secondary": [
-      "forearm"
+      "forearms"
     ],
     "equipment": [
       "dumbbell"
@@ -4861,7 +4845,7 @@
     "primer": "This exercise uses a hammering motion to isolate the biceps.",
     "type": "isolation",
     "primary": [
-      "biceps brachii"
+      "biceps"
     ],
     "secondary": [],
     "equipment": [
@@ -4896,7 +4880,7 @@
     "primer": "This exercise was designed to keep the stress on the biceps.",
     "type": "isolation",
     "primary": [
-      "biceps brachii"
+      "biceps"
     ],
     "secondary": [],
     "equipment": [
@@ -4930,10 +4914,10 @@
     "primer": "A Preacher Curl uses a special bench to support the triceps and isolate the biceps to build the arms.",
     "type": "isolation",
     "primary": [
-      "biceps brachii"
+      "biceps"
     ],
     "secondary": [
-      "forearm"
+      "forearms"
     ],
     "equipment": [
       "machine"
@@ -4965,10 +4949,10 @@
     "primer": "",
     "type": "isolation",
     "primary": [
-      "biceps brachii"
+      "biceps"
     ],
     "secondary": [
-      "forearm"
+      "forearms"
     ],
     "equipment": [
       "dumbbell"
@@ -5003,7 +4987,7 @@
     "primer": "By using cable, this exercise isolates and defines the biceps muscles.",
     "type": "isolation",
     "primary": [
-      "biceps brachii"
+      "biceps"
     ],
     "secondary": [],
     "equipment": [
@@ -5040,10 +5024,10 @@
     "primer": "A Preacher Curl uses a special bench to support the triceps and isolate the biceps to build the arms.",
     "type": "isolation",
     "primary": [
-      "biceps brachii"
+      "biceps"
     ],
     "secondary": [
-      "forearm"
+      "forearms"
     ],
     "equipment": [
       "barbell"
@@ -5079,7 +5063,7 @@
     "primer": "This exercise combines a Hammer Curl with a Preacher bench.",
     "type": "isolation",
     "primary": [
-      "biceps brachii"
+      "biceps"
     ],
     "secondary": [],
     "equipment": [
@@ -5114,10 +5098,10 @@
     "primer": "This version of a Preacher Curl uses a special bench and dumbbells.",
     "type": "isolation",
     "primary": [
-      "biceps brachii"
+      "biceps"
     ],
     "secondary": [
-      "forearm"
+      "forearms"
     ],
     "equipment": [
       "dumbbell"
@@ -5153,10 +5137,10 @@
     "primer": "This is an advanced exercise where you turn the dumbbells up and out using a Preacher Curl bench for support.",
     "type": "isolation",
     "primary": [
-      "biceps brachii"
+      "biceps"
     ],
     "secondary": [
-      "forearm"
+      "forearms"
     ],
     "equipment": [
       "dumbbell"
@@ -5188,10 +5172,10 @@
     "primer": "This exercise uses a machine to insure proper form.",
     "type": "isolation",
     "primary": [
-      "biceps brachii"
+      "biceps"
     ],
     "secondary": [
-      "forearm"
+      "forearms"
     ],
     "equipment": [
       "machine"
@@ -5222,10 +5206,10 @@
     "primer": "This is a reverse curl exercise that works all of the muscles of the arms.",
     "type": "isolation",
     "primary": [
-      "biceps brachii"
+      "biceps"
     ],
     "secondary": [
-      "forearm"
+      "forearms"
     ],
     "equipment": [
       "dumbbell"
@@ -5256,8 +5240,7 @@
     "primer": "This exercise uses a Leg Press Machine to work your calves.",
     "type": "isolation",
     "primary": [
-      "gastrocnemius",
-      "soleus"
+      "calves"
     ],
     "secondary": [],
     "equipment": [
@@ -5291,8 +5274,7 @@
     "primer": "This is one of the simplest and most effective exercises for the calves.",
     "type": "isolation",
     "primary": [
-      "gastrocnemius",
-      "soleus"
+      "calves"
     ],
     "secondary": [],
     "equipment": [
@@ -5326,8 +5308,7 @@
     "primer": "This is standing version of a Calf Raise.",
     "type": "isolation",
     "primary": [
-      "gastrocnemius",
-      "soleus"
+      "calves"
     ],
     "secondary": [],
     "equipment": [
@@ -5359,8 +5340,7 @@
     "primer": "This exercise uses a machine to allow for proper form.",
     "type": "isolation",
     "primary": [
-      "gastrocnemius",
-      "soleus"
+      "calves"
     ],
     "secondary": [],
     "equipment": [
@@ -5392,8 +5372,7 @@
     "primer": "This version of a Calf Raise uses dumbbells.",
     "type": "isolation",
     "primary": [
-      "gastrocnemius",
-      "soleus"
+      "calves"
     ],
     "secondary": [],
     "equipment": [
@@ -5424,7 +5403,7 @@
     "primer": "This exercise works your abs by raising your arms to meet your legs.",
     "type": "compound",
     "primary": [
-      "abdominals"
+      "core"
     ],
     "secondary": [],
     "equipment": [
@@ -5462,7 +5441,7 @@
     "primer": "This exercise uses the weight of a cable machine to assist in a crunch.",
     "type": "isolation",
     "primary": [
-      "abdominals"
+      "core"
     ],
     "secondary": [],
     "equipment": [
@@ -5498,7 +5477,7 @@
     "primer": "This version of the crunch works both the upper and lower portion of the abs.",
     "type": "compound",
     "primary": [
-      "abdominals"
+      "core"
     ],
     "secondary": [],
     "equipment": [
@@ -5533,7 +5512,7 @@
     "primer": "",
     "type": "isolation",
     "primary": [
-      "abdominals"
+      "core"
     ],
     "secondary": [],
     "equipment": [
@@ -5569,7 +5548,7 @@
     "primer": "Using a decline crunch allows you keep your legs steady and isolate all of the abdominal muscles.",
     "type": "isolation",
     "primary": [
-      "abdominals"
+      "core"
     ],
     "secondary": [],
     "equipment": [
@@ -5603,7 +5582,7 @@
     "primer": "This exercise works the obliques, the muscles on the sides of your abs.",
     "type": "isolation",
     "primary": [
-      "abdominals"
+      "core"
     ],
     "secondary": [],
     "equipment": [
@@ -5636,7 +5615,7 @@
     "primer": "This exercise uses a ball to isolate and work the lower abdominal muscles.",
     "type": "compound",
     "primary": [
-      "abdominals"
+      "core"
     ],
     "secondary": [],
     "equipment": [
@@ -5669,10 +5648,10 @@
     "primer": "This exercise focuses on the middle back.",
     "type": "compound",
     "primary": [
-      "latissimus dorsi"
+      "lats"
     ],
     "secondary": [
-      "biceps brachii"
+      "biceps"
     ],
     "equipment": [
       "barbell"
@@ -5709,10 +5688,10 @@
     "primer": "An exercise for the shoulder and triceps strengthening.",
     "type": "compound",
     "primary": [
-      "deltoid"
+      "delts"
     ],
     "secondary": [
-      "triceps brachii"
+      "triceps"
     ],
     "equipment": [
       "barbell"
@@ -5747,7 +5726,7 @@
     "primer": "An excellent exercise for the rear shoulders.",
     "type": "isolation",
     "primary": [
-      "deltoid"
+      "delts"
     ],
     "secondary": [],
     "equipment": [

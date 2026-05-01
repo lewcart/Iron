@@ -3,8 +3,11 @@ import {
   getWeekVolume,
   getWorkoutStreak,
   getWeekMuscleFrequency,
+  getWeekSetsPerMuscle,
   getLastWorkoutsWithDetails,
 } from '@/db/queries';
+import { muscleStatus, type MuscleStatus } from '@/lib/muscles';
+import type { SetsByMuscleRow } from '@/lib/api/feed-types';
 
 function computeStreak(weekRows: { week_start: string }[]): number {
   if (weekRows.length === 0) return 0;
@@ -60,20 +63,36 @@ export interface SummaryPayload {
     exercises: string[];
     volume: number;
   }[];
+  /** @deprecated Use setsByMuscle. Kept for one release while UI migrates. */
   muscleFrequency: Record<string, number>;
+  setsByMuscle: SetsByMuscleRow[];
 }
 
 export async function getSummaryData(): Promise<SummaryPayload> {
-  const [weekWorkoutsRows, weekVolume, streakRows, muscleRows, lastWorkouts] = await Promise.all([
+  const [weekWorkoutsRows, weekVolume, streakRows, muscleRows, setsRows, lastWorkouts] = await Promise.all([
     getWeekWorkouts(),
     getWeekVolume(),
     getWorkoutStreak(),
     getWeekMuscleFrequency(),
+    getWeekSetsPerMuscle(0),
     getLastWorkoutsWithDetails(3),
   ]);
 
   const currentStreak = computeStreak(streakRows);
   const muscleFrequency = aggregateMuscleFrequency(muscleRows);
+
+  const setsByMuscle: SetsByMuscleRow[] = setsRows.map(r => ({
+    slug: r.slug,
+    display_name: r.display_name,
+    parent_group: r.parent_group,
+    set_count: r.set_count,
+    optimal_min: r.optimal_sets_min,
+    optimal_max: r.optimal_sets_max,
+    display_order: r.display_order,
+    status: muscleStatus(r.set_count, r.optimal_sets_min, r.optimal_sets_max) as MuscleStatus,
+    coverage: r.coverage,
+    kg_volume: r.kg_volume,
+  }));
 
   return {
     weekWorkouts: weekWorkoutsRows.length,
@@ -81,5 +100,6 @@ export async function getSummaryData(): Promise<SummaryPayload> {
     currentStreak,
     lastWorkouts,
     muscleFrequency,
+    setsByMuscle,
   };
 }

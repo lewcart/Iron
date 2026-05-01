@@ -41,8 +41,11 @@ type SyncStatusListener = (status: SyncStatus) => void;
  * load-bearing on push: parents before children so foreign keys never reference
  * a not-yet-pushed row. */
 const SYNCED_TABLES = [
-  // Catalogs (parent of references)
+  // Catalogs (parent of references). Read-only on the client; server is
+  // authoritative. They participate in pull but push() is a no-op (no client
+  // code writes dirty rows).
   'exercises',
+  'muscles',
   // Workouts hierarchy
   'workouts', 'workout_exercises', 'workout_sets',
   // Plans hierarchy

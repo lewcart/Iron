@@ -15,6 +15,8 @@ import {
   type SleepSummaryField,
   type SleepSummaryArgs,
 } from '@/lib/health-sleep-summary';
+import { getWeekSetsPerMuscle } from '@/db/queries';
+import { resolveMuscleSlug } from '@/lib/muscles';
 
 // ── Result helpers ────────────────────────────────────────────────────────────
 
@@ -24,6 +26,20 @@ export function toolResult(content: unknown) {
 
 export function toolError(message: string) {
   return { content: [{ type: 'text', text: message }], isError: true };
+}
+
+/**
+ * Structured error envelope: `{ error: { code, message, hint? } }`. Use for
+ * new errors where an agent can recover by calling a different tool. The
+ * `hint` names that tool. Mirrors the pattern in src/lib/mcp/nutrition-tools.ts.
+ */
+export function toolErrorEnvelope(code: string, message: string, hint?: string) {
+  return {
+    content: [
+      { type: 'text', text: JSON.stringify({ error: { code, message, hint } }, null, 2) },
+    ],
+    isError: true,
+  };
 }
 
 // ── MCPTool interface ─────────────────────────────────────────────────────────
@@ -498,7 +514,7 @@ async function getWeeklySummary(args: Record<string, unknown> = {}) {
   const weekStart = weekBoundsRow!.week_start;
   const weekEnd = weekBoundsRow!.week_end;
 
-  const [workoutRows, volumeByMuscleRows, activePlan] = await Promise.all([
+  const [workoutRows, byMuscleRows, activePlan] = await Promise.all([
     query<{ uuid: string; title: string | null; start_time: string; total_volume: string }>(`
       SELECT w.uuid, w.title, w.start_time,
              COALESCE(SUM(CASE WHEN ws.is_completed AND ws.weight IS NOT NULL AND ws.repetitions IS NOT NULL
@@ -511,21 +527,10 @@ async function getWeeklySummary(args: Record<string, unknown> = {}) {
       GROUP BY w.uuid, w.title, w.start_time
       ORDER BY w.start_time
     `, [weekStart, weekEnd]),
-    query<{ muscle: string; volume: string }>(`
-      SELECT jsonb_array_elements_text(e.primary_muscles) AS muscle,
-             SUM(ws.weight * ws.repetitions) AS volume
-      FROM workout_sets ws
-      JOIN workout_exercises we ON we.uuid = ws.workout_exercise_uuid
-      JOIN exercises e ON e.uuid = we.exercise_uuid
-      JOIN workouts w ON w.uuid = we.workout_uuid
-      WHERE w.start_time >= $1 AND w.start_time < $2
-        AND w.is_current = false
-        AND ws.is_completed = true
-        AND ws.weight IS NOT NULL
-        AND ws.repetitions IS NOT NULL
-      GROUP BY muscle
-      ORDER BY volume DESC
-    `, [weekStart, weekEnd]),
+    // Per-muscle aggregate using canonical taxonomy. Counts sets toward both
+    // primary AND secondary muscles. Returns every canonical muscle (zero-set
+    // ones too) for stable shape.
+    getWeekSetsPerMuscle(weekOffset),
     queryOne<{ routine_count: string }>(`
       SELECT COUNT(wr.uuid) AS routine_count
       FROM workout_routines wr
@@ -536,9 +541,25 @@ async function getWeeklySummary(args: Record<string, unknown> = {}) {
 
   const trainingDays = workoutRows.length;
   const totalVolume = Math.round(workoutRows.reduce((sum, w) => sum + Number(w.total_volume), 0));
+
+  // by_muscle = merged shape per /autoplan DX review. set_count is the headline
+  // metric (Schoenfeld 10–20); kg_volume kept alongside as legacy for callers
+  // that haven't migrated.
+  const byMuscle = byMuscleRows.map(m => ({
+    slug: m.slug,
+    display_name: m.display_name,
+    set_count: m.set_count,
+    optimal_min: m.optimal_sets_min,
+    optimal_max: m.optimal_sets_max,
+    status: muscleStatusOf(m.set_count, m.optimal_sets_min, m.optimal_sets_max),
+    kg_volume: Math.round(m.kg_volume),
+  }));
+
+  // Deprecated alias: { canonical_slug → kg_volume }. Will be removed in a
+  // follow-up. Agents should migrate to by_muscle[].kg_volume.
   const volumeByMuscle: Record<string, number> = {};
-  for (const row of volumeByMuscleRows) {
-    volumeByMuscle[row.muscle] = Math.round(Number(row.volume));
+  for (const m of byMuscleRows) {
+    if (m.kg_volume > 0) volumeByMuscle[m.slug] = Math.round(m.kg_volume);
   }
 
   const plannedDays = Number(activePlan?.routine_count ?? 0);
@@ -551,9 +572,138 @@ async function getWeeklySummary(args: Record<string, unknown> = {}) {
     week_end: weekEnd,
     training_days: trainingDays,
     total_volume: totalVolume,
+    by_muscle: byMuscle,
     volume_by_muscle: volumeByMuscle,
     compliance_pct: compliancePct,
   });
+}
+
+function muscleStatusOf(setCount: number, min: number, max: number): 'zero' | 'under' | 'optimal' | 'over' {
+  if (setCount === 0) return 'zero';
+  if (setCount < min) return 'under';
+  if (setCount > max) return 'over';
+  return 'optimal';
+}
+
+// ── Sets per muscle ───────────────────────────────────────────────────────────
+
+async function getSetsPerMuscle(args: Record<string, unknown> = {}) {
+  const weekOffset = Number(args.week_offset ?? 0);
+  const includeZero = args.include_zero === undefined ? true : Boolean(args.include_zero);
+
+  const weekBoundsRow = await queryOne<{ week_start: string; week_end: string }>(`
+    SELECT
+      date_trunc('week', NOW() + ($1 || ' weeks')::interval)::date::text AS week_start,
+      (date_trunc('week', NOW() + ($1 || ' weeks')::interval) + INTERVAL '7 days' - INTERVAL '1 day')::date::text AS week_end
+  `, [weekOffset]);
+
+  const muscles = await getWeekSetsPerMuscle(weekOffset);
+
+  type MuscleOut = {
+    slug: string;
+    display_name: string;
+    set_count: number;
+    optimal_min: number;
+    optimal_max: number;
+    status: 'zero' | 'under' | 'optimal' | 'over';
+    coverage: 'none' | 'tagged';
+    kg_volume: number;
+  };
+
+  const rows: MuscleOut[] = muscles.map(m => ({
+    slug: m.slug,
+    display_name: m.display_name,
+    set_count: m.set_count,
+    optimal_min: m.optimal_sets_min,
+    optimal_max: m.optimal_sets_max,
+    status: muscleStatusOf(m.set_count, m.optimal_sets_min, m.optimal_sets_max),
+    coverage: m.coverage,
+    kg_volume: Math.round(m.kg_volume),
+  }));
+
+  const visible = includeZero ? rows : rows.filter(r => r.set_count > 0);
+
+  // Summary headline. delta semantics: positive = sets needed to enter range
+  // (undershoot), negative = sets above optimal_max (overshoot).
+  let biggestUndershoot: { slug: string; display_name: string; delta: number } | null = null;
+  let biggestOvershoot: { slug: string; display_name: string; delta: number } | null = null;
+  let optimalCount = 0;
+  let underCount = 0;
+  let overCount = 0;
+  let zeroCount = 0;
+
+  for (const r of rows) {
+    if (r.coverage === 'none' && r.set_count === 0) continue; // exclude untagged buckets from summary
+    if (r.status === 'optimal') optimalCount++;
+    else if (r.status === 'under' || r.status === 'zero') {
+      if (r.status === 'zero') zeroCount++; else underCount++;
+      const delta = r.optimal_min - r.set_count;
+      if (!biggestUndershoot || delta > biggestUndershoot.delta) {
+        biggestUndershoot = { slug: r.slug, display_name: r.display_name, delta };
+      }
+    } else if (r.status === 'over') {
+      overCount++;
+      const delta = r.optimal_max - r.set_count; // negative
+      if (!biggestOvershoot || delta < biggestOvershoot.delta) {
+        biggestOvershoot = { slug: r.slug, display_name: r.display_name, delta };
+      }
+    }
+  }
+
+  return toolResult({
+    week_start: weekBoundsRow!.week_start,
+    week_end: weekBoundsRow!.week_end,
+    summary: {
+      total_muscles: rows.filter(r => r.coverage === 'tagged').length,
+      optimal_count: optimalCount,
+      under_count: underCount,
+      over_count: overCount,
+      zero_count: zeroCount,
+      biggest_undershoot: biggestUndershoot,
+      biggest_overshoot: biggestOvershoot,
+    },
+    muscles: visible,
+  });
+}
+
+// ── List muscles (canonical taxonomy) ─────────────────────────────────────────
+
+async function listMuscles() {
+  const rows = await query<{
+    slug: string;
+    display_name: string;
+    parent_group: string;
+    optimal_sets_min: number;
+    optimal_sets_max: number;
+    display_order: number;
+  }>(`
+    SELECT slug, display_name, parent_group, optimal_sets_min, optimal_sets_max, display_order
+    FROM muscles
+    ORDER BY display_order
+  `);
+
+  // Attach synonyms per muscle so an agent generating UI / prompts knows what
+  // legacy values map here. Cheap — synonym table is tiny.
+  const synonymRows = await query<{ synonym: string; muscle_slug: string }>(`
+    SELECT synonym, muscle_slug FROM muscle_synonyms ORDER BY synonym
+  `);
+  const synonymsBySlug = new Map<string, string[]>();
+  for (const s of synonymRows) {
+    if (!synonymsBySlug.has(s.muscle_slug)) synonymsBySlug.set(s.muscle_slug, []);
+    if (s.synonym !== s.muscle_slug) synonymsBySlug.get(s.muscle_slug)!.push(s.synonym);
+  }
+
+  return toolResult(
+    rows.map(r => ({
+      slug: r.slug,
+      display_name: r.display_name,
+      parent_group: r.parent_group,
+      optimal_min: Number(r.optimal_sets_min),
+      optimal_max: Number(r.optimal_sets_max),
+      display_order: Number(r.display_order),
+      synonyms: synonymsBySlug.get(r.slug) ?? [],
+    }))
+  );
 }
 
 async function findExercises(args: Record<string, unknown>) {
@@ -562,15 +712,28 @@ async function findExercises(args: Record<string, unknown>) {
   let rows;
 
   if (muscle_group) {
+    // Resolve the muscle_group input through the synonym table. Accepts
+    // canonical slugs and any legacy synonym; rejects unknowns with a hint
+    // pointing the agent at list_muscles for the canonical taxonomy.
+    const slug = resolveMuscleSlug(muscle_group);
+    if (!slug) {
+      return toolErrorEnvelope(
+        'UNKNOWN_MUSCLE',
+        `No muscle matches "${muscle_group}". Use canonical slugs like 'chest', 'lats', 'glutes', etc.`,
+        'list_muscles',
+      );
+    }
+    // Match against canonical slugs in the JSONB arrays via @> containment.
+    // Cheap and exact post-canonicalization (migration 026).
     rows = await query(`
       SELECT uuid, title, primary_muscles, secondary_muscles, equipment
       FROM exercises
       WHERE is_hidden = false
         AND (title ILIKE $1 OR alias::text ILIKE $1)
-        AND (primary_muscles::text ILIKE $2 OR secondary_muscles::text ILIKE $2)
+        AND (primary_muscles @> $2::jsonb OR secondary_muscles @> $2::jsonb)
       ORDER BY title
       LIMIT 15
-    `, [pattern, `%${muscle_group}%`]);
+    `, [pattern, JSON.stringify([slug])]);
   } else {
     rows = await query(`
       SELECT uuid, title, primary_muscles, secondary_muscles, equipment
@@ -615,6 +778,28 @@ async function createExercise(args: Record<string, unknown>) {
   if (!title?.trim()) return toolError('title is required');
   if (!Array.isArray(primary_muscles) || primary_muscles.length === 0) {
     return toolError('primary_muscles must be a non-empty array');
+  }
+  if (secondary_muscles !== undefined && !Array.isArray(secondary_muscles)) {
+    return toolError('secondary_muscles must be an array if provided');
+  }
+
+  // Validate every muscle slug is canonical. Reject with hint to list_muscles
+  // so an agent receiving a typo or legacy name knows where to find the right
+  // value. Postgres trigger validate_exercise_muscles is the last line of
+  // defense; this gives a cleaner error envelope.
+  const allMuscles = [...primary_muscles, ...(secondary_muscles ?? [])];
+  const muscleRows = await query<{ slug: string }>(
+    'SELECT slug FROM muscles WHERE slug = ANY($1::text[])',
+    [allMuscles],
+  );
+  const validSlugs = new Set(muscleRows.map(r => r.slug));
+  const unknown = allMuscles.filter(m => !validSlugs.has(m));
+  if (unknown.length > 0) {
+    return toolErrorEnvelope(
+      'UNKNOWN_MUSCLE',
+      `Unknown muscle slug(s): ${unknown.join(', ')}. Use canonical slugs only.`,
+      'list_muscles',
+    );
   }
 
   // Server-side YouTube validation. MCP/import paths can't bypass this
@@ -2544,7 +2729,9 @@ export const tools: MCPTool[] = [
   },
   {
     name: 'get_weekly_summary',
-    description: 'Returns a weekly training summary: workout count, total volume, volume by muscle group, and compliance vs active plan.',
+    description:
+      'Returns a weekly training summary: workout count, total volume, per-muscle volume + set counts (by_muscle), and compliance vs active plan. ' +
+      'by_muscle is the new merged shape (set_count + kg_volume per canonical muscle); volume_by_muscle is a deprecated Record<slug, kg> kept for one release.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -2553,15 +2740,56 @@ export const tools: MCPTool[] = [
     },
     execute: getWeeklySummary,
   },
+  {
+    name: 'get_sets_per_muscle',
+    description:
+      'Working sets per canonical muscle for a given week, with optimal range and status. ' +
+      'Sets count toward both primary AND secondary muscles of each exercise (full credit, no fractional weighting). ' +
+      'Working set = is_completed=true AND (reps>=1 OR duration>0); warm-ups and uncompleted sets excluded. ' +
+      'Drop sets count as 1 each. ' +
+      'Optimal range defaults to 10-20 sets/muscle/week (Schoenfeld 2021), tunable per-muscle in the muscles table — rotator_cuff and forearms ship with tighter bands. ' +
+      'Returns all canonical muscles in display order; pass include_zero=false to drop muscles with zero sets. ' +
+      'Each row carries a coverage flag (none|tagged) — none means no exercise in the catalog tags this muscle yet (e.g. rhomboids until the audit pass tags them). ' +
+      'Week boundaries (Monday start, local TZ) match get_weekly_summary. ' +
+      'kg_volume is preserved on each row as a legacy metric — prefer set_count for hypertrophy questions. ' +
+      'Pairs with list_muscles (taxonomy + optimal ranges) and get_weekly_summary (total volume + compliance). ' +
+      'Use week_offset=0 for current week, -1 for last week.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        week_offset: {
+          type: 'number',
+          description: 'Weeks back from current week. 0=this week, -1=last week. Default 0.',
+        },
+        include_zero: {
+          type: 'boolean',
+          description: 'If false, omit muscles with set_count=0. Default true (returns all rows).',
+        },
+      },
+    },
+    execute: getSetsPerMuscle,
+  },
+  {
+    name: 'list_muscles',
+    description:
+      'Returns the canonical muscle taxonomy (slug, display_name, parent_group, optimal_min, optimal_max, synonyms[]). ' +
+      'Call this when an agent needs the full list of trackable muscles — to populate a UI picker, validate user input, or interpret results from get_sets_per_muscle. ' +
+      'Synonyms include legacy values (Latin, English variants) that map to each canonical slug; find_exercises accepts any synonym in muscle_group.',
+    inputSchema: { type: 'object', properties: {} },
+    execute: listMuscles,
+  },
   // ── Write tools ─────────────────────────────────────────────────────────────
   {
     name: 'find_exercises',
-    description: 'Fuzzy-search the exercise library by name or muscle group.',
+    description:
+      'Fuzzy-search the exercise library by name; optionally filter by muscle. ' +
+      'muscle_group accepts canonical slugs (chest, lats, glutes, etc.) or any synonym (pectoralis major, latissimus, glutaeus maximus). ' +
+      'Unknown values return an UNKNOWN_MUSCLE error with a hint to call list_muscles for the canonical taxonomy.',
     inputSchema: {
       type: 'object',
       properties: {
         query: { type: 'string', description: 'Name fragment to search for' },
-        muscle_group: { type: 'string', description: 'Optional muscle group filter (e.g. "chest", "quads")' },
+        muscle_group: { type: 'string', description: 'Optional muscle filter (canonical slug or synonym, e.g. "chest", "quads", "pectoralis major")' },
       },
       required: ['query'],
     },
@@ -2569,7 +2797,10 @@ export const tools: MCPTool[] = [
   },
   {
     name: 'create_exercise',
-    description: 'Creates a new custom exercise in the library. Use this to add exercises that do not already exist before adding them to a routine.',
+    description:
+      'Creates a new custom exercise in the library. Use this to add exercises that do not already exist before adding them to a routine. ' +
+      'primary_muscles is required and must be a non-empty array of CANONICAL slugs (call list_muscles for the full taxonomy). ' +
+      'Unknown slugs are rejected with an UNKNOWN_MUSCLE error envelope — no auto-translation from legacy names.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -2577,12 +2808,12 @@ export const tools: MCPTool[] = [
         primary_muscles: {
           type: 'array',
           items: { type: 'string' },
-          description: 'Primary muscle groups targeted (e.g. ["hamstrings", "glutes"])',
+          description: 'Primary muscle groups targeted, as canonical slugs (e.g. ["hamstrings", "glutes"]). See list_muscles.',
         },
         secondary_muscles: {
           type: 'array',
           items: { type: 'string' },
-          description: 'Secondary muscles worked (optional)',
+          description: 'Secondary muscles worked, as canonical slugs. Optional. Pass [] for explicit none.',
         },
         equipment: {
           type: 'array',

@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { unstable_cache } from 'next/cache';
 import { listExercises, createCustomExercise } from '@/db/queries';
+import { query } from '@/db/db';
 
 const getCachedExercises = unstable_cache(
   async (search: string, muscleGroup: string, equipment: string) =>
@@ -73,6 +74,29 @@ export async function POST(request: Request) {
   const youtubeUrl = youtubeUrlRaw && /^https?:\/\/(www\.)?(youtube\.com|youtu\.be)\//i.test(youtubeUrlRaw)
     ? youtubeUrlRaw
     : null;
+
+  // Reject any non-canonical muscle slug at the API boundary so the UI gets a
+  // clean 400 instead of a Postgres trigger error. The trigger is the last
+  // line of defense (validate_exercise_muscles in migration 026).
+  const allMuscles = [...primaryMuscles, ...secondaryMuscles];
+  if (allMuscles.length > 0) {
+    const validRows = await query<{ slug: string }>(
+      'SELECT slug FROM muscles WHERE slug = ANY($1::text[])',
+      [allMuscles],
+    );
+    const valid = new Set(validRows.map(r => r.slug));
+    const unknown = allMuscles.filter(m => !valid.has(m));
+    if (unknown.length > 0) {
+      return NextResponse.json(
+        {
+          error: 'UNKNOWN_MUSCLE',
+          message: `Unknown muscle slug(s): ${unknown.join(', ')}. Use canonical slugs only.`,
+          unknown,
+        },
+        { status: 400 },
+      );
+    }
+  }
 
   const exercise = await createCustomExercise({
     title,

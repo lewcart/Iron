@@ -165,8 +165,13 @@ describe('POST /api/exercises', () => {
 
   it('creates a custom exercise and returns 201', async () => {
     const queries = await import('@/db/queries');
+    const dbModule = await import('@/db/db');
     const created = { ...mockExercise, uuid: 'new-uuid', title: 'Dumbbell RDL', is_custom: true, movement_pattern: 'hinge' };
     vi.mocked(queries.createCustomExercise).mockResolvedValue(created);
+    // Validation step queries muscles table to verify canonical slugs.
+    vi.mocked(dbModule.query).mockResolvedValueOnce([
+      { slug: 'hamstrings' }, { slug: 'glutes' }, { slug: 'erectors' },
+    ]);
 
     const { POST } = await import('./exercises/route');
     const req = new NextRequest('http://localhost/api/exercises', {
@@ -174,7 +179,7 @@ describe('POST /api/exercises', () => {
       body: JSON.stringify({
         title: 'Dumbbell RDL',
         primary_muscles: ['hamstrings', 'glutes'],
-        secondary_muscles: ['lower back'],
+        secondary_muscles: ['erectors'],
         equipment: ['dumbbell'],
         movement_pattern: 'hinge',
         description: 'Hip hinge with dumbbells',
@@ -190,7 +195,7 @@ describe('POST /api/exercises', () => {
     expect(queries.createCustomExercise).toHaveBeenCalledWith({
       title: 'Dumbbell RDL',
       primaryMuscles: ['hamstrings', 'glutes'],
-      secondaryMuscles: ['lower back'],
+      secondaryMuscles: ['erectors'],
       equipment: ['dumbbell'],
       movementPattern: 'hinge',
       description: 'Hip hinge with dumbbells',

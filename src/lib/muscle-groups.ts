@@ -1,70 +1,49 @@
 /**
- * Maps UI muscle areas (Exercises tab) to substrings that appear in Iron / DB
- * primary_muscles and secondary_muscles JSON (anatomical names).
+ * UI muscle-area filter mapping.
+ *
+ * Post-migration 026, exercise muscle arrays use canonical slugs only. UI keys
+ * (chest/back/shoulders/arms/legs/abdominals) map to canonical parent_groups
+ * via the muscles table. This module exposes that mapping for the /exercises
+ * page filter and the server-side listExercises query.
+ *
+ * NOTE: this file is scheduled for removal once the /exercises page migrates
+ * to canonical-slug pickers (no more aggregate UI keys). Until then it stays
+ * as a thin compatibility layer.
  */
-const MUSCLE_GROUP_TERMS: Record<string, readonly string[]> = {
-  chest: ['pectoralis', 'chest', 'serratus'],
-  back: [
-    'latissimus',
-    'rhomboid',
-    'erector',
-    'trapezius',
-    'infraspinatus',
-    'supraspinatus',
-    'subscapularis',
-    'teres major',
-    'teres minor',
-    'middle back',
-    'lower back',
-    'upper back',
-    'lats',
-  ],
-  shoulders: ['deltoid', 'shoulder'],
-  arms: ['biceps', 'triceps', 'brachialis', 'brachii', 'forearm', 'brachioradialis'],
-  legs: [
-    'quadriceps',
-    'hamstring',
-    'hamstrings',
-    'glute',
-    'glutes',
-    'gastrocnemius',
-    'soleus',
-    'adductor',
-    'abductor',
-    'tibialis',
-    'vastus',
-    'rectus femoris',
-    'sartorius',
-    'gracilis',
-    'popliteus',
-    'calves',
-    'calf',
-  ],
-  abdominals: [
-    'rectus abdominis',
-    'abdominis',
-    'oblique',
-    'transverse abdominis',
-    'intercostal',
-    'abs',
-    'abdominal',
-    'core',
-  ],
+
+import { MUSCLE_DEFS, MUSCLE_SLUGS, type MuscleSlug } from './muscles';
+
+/** UI muscle-area key → canonical parent_group. abdominals folds into 'core'. */
+const UI_TO_PARENT_GROUP: Record<string, string> = {
+  chest: 'chest',
+  back: 'back',
+  shoulders: 'shoulders',
+  arms: 'arms',
+  legs: 'legs',
+  abdominals: 'core',
+  core: 'core',
 };
 
+/** All canonical slugs in the given UI muscle area. */
 export function muscleGroupSearchTerms(groupKey: string): string[] {
-  const terms = MUSCLE_GROUP_TERMS[groupKey.toLowerCase()];
-  return terms ? [...terms] : [];
+  const parentGroup = UI_TO_PARENT_GROUP[groupKey.toLowerCase()];
+  if (!parentGroup) return [];
+  return MUSCLE_SLUGS.filter(slug => MUSCLE_DEFS[slug].parent_group === parentGroup);
 }
 
-/** Client-side: does this exercise belong under the given area filter? */
+/** Client-side: does this exercise belong under the given UI muscle area? */
 export function exerciseMatchesMuscleGroup(
   primaryMuscles: string[],
   secondaryMuscles: string[],
   groupKey: string
 ): boolean {
-  const terms = muscleGroupSearchTerms(groupKey);
-  if (terms.length === 0) return false;
-  const blob = [...primaryMuscles, ...secondaryMuscles].join(' ').toLowerCase();
-  return terms.some((t) => blob.includes(t.toLowerCase()));
+  const slugs = muscleGroupSearchTerms(groupKey);
+  if (slugs.length === 0) return false;
+  const slugSet = new Set<string>(slugs);
+  for (const m of primaryMuscles) if (slugSet.has(m)) return true;
+  for (const m of secondaryMuscles) if (slugSet.has(m)) return true;
+  return false;
 }
+
+// Re-export for convenience.
+export type { MuscleSlug };
