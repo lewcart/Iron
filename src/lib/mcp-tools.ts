@@ -543,12 +543,13 @@ async function getWeeklySummary(args: Record<string, unknown> = {}) {
   const totalVolume = Math.round(workoutRows.reduce((sum, w) => sum + Number(w.total_volume), 0));
 
   // by_muscle = merged shape per /autoplan DX review. set_count is the headline
-  // metric (Schoenfeld 10–20); kg_volume kept alongside as legacy for callers
-  // that haven't migrated.
+  // metric (Schoenfeld 10–20); effective_set_count is the RIR-weighted variant
+  // (Phase 3); kg_volume kept alongside as legacy for callers that haven't migrated.
   const byMuscle = byMuscleRows.map(m => ({
     slug: m.slug,
     display_name: m.display_name,
     set_count: m.set_count,
+    effective_set_count: Math.round(m.effective_set_count * 10) / 10,
     optimal_min: m.optimal_sets_min,
     optimal_max: m.optimal_sets_max,
     status: muscleStatusOf(m.set_count, m.optimal_sets_min, m.optimal_sets_max),
@@ -603,6 +604,7 @@ async function getSetsPerMuscle(args: Record<string, unknown> = {}) {
     slug: string;
     display_name: string;
     set_count: number;
+    effective_set_count: number;
     optimal_min: number;
     optimal_max: number;
     status: 'zero' | 'under' | 'optimal' | 'over';
@@ -614,6 +616,7 @@ async function getSetsPerMuscle(args: Record<string, unknown> = {}) {
     slug: m.slug,
     display_name: m.display_name,
     set_count: m.set_count,
+    effective_set_count: Math.round(m.effective_set_count * 10) / 10,
     optimal_min: m.optimal_sets_min,
     optimal_max: m.optimal_sets_max,
     status: muscleStatusOf(m.set_count, m.optimal_sets_min, m.optimal_sets_max),
@@ -2752,6 +2755,7 @@ export const tools: MCPTool[] = [
       'Each row carries a coverage flag (none|tagged) — none means no exercise in the catalog tags this muscle yet (e.g. rhomboids until the audit pass tags them). ' +
       'Week boundaries (Monday start, local TZ) match get_weekly_summary. ' +
       'kg_volume is preserved on each row as a legacy metric — prefer set_count for hypertrophy questions. ' +
+      'effective_set_count is the RIR-weighted variant (Phase 3): RIR 0–3 counts 1.0, RIR 4 counts 0.5, RIR 5+ counts 0.0. RIR=NULL gets the charitable default of 1.0, so until RIR is collected on most sets the value will equal set_count. When effective < set_count by a meaningful margin, the user is leaving stimulus on the table (junk sets too far from failure). ' +
       'Pairs with list_muscles (taxonomy + optimal ranges) and get_weekly_summary (total volume + compliance). ' +
       'Use week_offset=0 for current week, -1 for last week.',
     inputSchema: {

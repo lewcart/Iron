@@ -357,6 +357,7 @@ function mapWorkoutSet(r: Record<string, unknown>) {
     min_target_reps: nullableNumber(r.min_target_reps),
     max_target_reps: nullableNumber(r.max_target_reps),
     rpe: nullableNumber(r.rpe),
+    rir: nullableNumber(r.rir),
     tag: r.tag ?? null,
     comment: r.comment ?? null,
     is_completed: Boolean(r.is_completed),

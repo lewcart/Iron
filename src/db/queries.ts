@@ -330,6 +330,7 @@ export async function logSet(data: {
   weight: number;
   repetitions: number;
   rpe?: number;
+  rir?: number | null;
   tag?: 'dropSet' | 'failure';
   orderIndex?: number;
 }): Promise<WorkoutSet> {
@@ -346,14 +347,15 @@ export async function logSet(data: {
 
   await query(`
     INSERT INTO workout_sets (
-      uuid, workout_exercise_uuid, weight, repetitions, rpe, tag, order_index, is_completed
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7, true)
+      uuid, workout_exercise_uuid, weight, repetitions, rpe, rir, tag, order_index, is_completed
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, true)
   `, [
     uuid,
     data.workoutExerciseUuid,
     data.weight,
     data.repetitions,
     data.rpe || null,
+    data.rir ?? null,
     data.tag || null,
     orderIndex,
   ]);
@@ -365,6 +367,7 @@ export async function updateSet(uuid: string, data: {
   weight?: number;
   repetitions?: number;
   rpe?: number;
+  rir?: number | null;
   tag?: 'dropSet' | 'failure' | null;
   isCompleted?: boolean;
   isPr?: boolean;
@@ -384,6 +387,10 @@ export async function updateSet(uuid: string, data: {
   if (data.rpe !== undefined) {
     fields.push(`rpe = $${++paramCount}`);
     values.push(data.rpe);
+  }
+  if (data.rir !== undefined) {
+    fields.push(`rir = $${++paramCount}`);
+    values.push(data.rir);
   }
   if (data.tag !== undefined) {
     fields.push(`tag = $${++paramCount}`);
@@ -1183,6 +1190,7 @@ export async function startWorkoutFromRoutine(routineUuid: string): Promise<Star
           min_target_reps: routineSet.min_repetitions ?? null,
           max_target_reps: routineSet.max_repetitions ?? null,
           rpe: null,
+          rir: null,
           tag: routineSet.tag ?? null,
           comment: routineSet.comment ?? null,
           is_completed: false,
@@ -1206,6 +1214,7 @@ export async function startWorkoutFromRoutine(routineUuid: string): Promise<Star
           min_target_reps: null,
           max_target_reps: null,
           rpe: null,
+          rir: null,
           tag: null,
           comment: null,
           is_completed: false,
@@ -1276,6 +1285,14 @@ export async function getWeekMuscleFrequency(): Promise<{ primary_muscles: strin
  * counts toward every muscle in the exercise's primary AND secondary arrays
  * (full credit, no fractional weighting).
  *
+ * Phase 3 also returns `effective_set_count` — RIR-weighted hypertrophy
+ * volume:
+ *   RIR 0–3 → weight 1.0 (close to failure, full hypertrophy stimulus)
+ *   RIR 4   → weight 0.5 (sub-stimulus; partial credit)
+ *   RIR 5+  → weight 0.0 (junk set; no hypertrophy contribution)
+ *   RIR NULL → weight 1.0 (not recorded; charitable default until corpus
+ *              of real data exists)
+ *
  *   coverage='none' → no exercise in the catalog tags this muscle at all.
  *                     Useful for collapsing always-zero buckets in UI.
  *   coverage='tagged' → at least one exercise in the catalog tags it.
@@ -1291,6 +1308,7 @@ export async function getWeekSetsPerMuscle(weekOffset: number = 0): Promise<{
   optimal_sets_max: number;
   display_order: number;
   set_count: number;
+  effective_set_count: number;
   kg_volume: number;
   coverage: 'none' | 'tagged';
 }[]> {
@@ -1307,6 +1325,7 @@ export async function getWeekSetsPerMuscle(weekOffset: number = 0): Promise<{
         ws.uuid AS set_uuid,
         ws.weight,
         ws.repetitions,
+        ws.rir,
         e.primary_muscles,
         e.secondary_muscles
       FROM workout_sets ws
@@ -1325,7 +1344,7 @@ export async function getWeekSetsPerMuscle(weekOffset: number = 0): Promise<{
       -- Explode each set into one row per muscle hit (primary AND secondary).
       -- DISTINCT-by-(set_uuid, muscle_slug) so a set hitting a muscle via
       -- both primary AND secondary doesn't double-count.
-      SELECT DISTINCT ws.set_uuid, v.muscle_slug, ws.weight, ws.repetitions
+      SELECT DISTINCT ws.set_uuid, v.muscle_slug, ws.weight, ws.repetitions, ws.rir
       FROM week_sets ws,
            LATERAL (
              SELECT jsonb_array_elements_text(
@@ -1338,6 +1357,16 @@ export async function getWeekSetsPerMuscle(weekOffset: number = 0): Promise<{
       SELECT
         muscle_slug,
         COUNT(DISTINCT set_uuid) AS set_count,
+        -- Effective sets — RIR-weighted hypertrophy volume.
+        --   RIR 0–3 = 1.0, RIR 4 = 0.5, RIR 5+ = 0.0, NULL = 1.0
+        COALESCE(SUM(
+          CASE
+            WHEN rir IS NULL THEN 1.0
+            WHEN rir <= 3    THEN 1.0
+            WHEN rir = 4     THEN 0.5
+            ELSE 0.0
+          END
+        ), 0)::numeric AS effective_set_count,
         COALESCE(
           SUM(weight * repetitions) FILTER (WHERE weight IS NOT NULL AND repetitions IS NOT NULL),
           0
@@ -1365,6 +1394,7 @@ export async function getWeekSetsPerMuscle(weekOffset: number = 0): Promise<{
       m.optimal_sets_max,
       m.display_order,
       COALESCE(ma.set_count, 0)::int                                AS set_count,
+      COALESCE(ma.effective_set_count, 0)::numeric                  AS effective_set_count,
       COALESCE(ma.kg_volume, 0)::numeric                            AS kg_volume,
       CASE WHEN mc.muscle_slug IS NULL THEN 'none' ELSE 'tagged' END AS coverage
     FROM muscles m
@@ -1381,6 +1411,7 @@ export async function getWeekSetsPerMuscle(weekOffset: number = 0): Promise<{
     optimal_sets_max: Number(r.optimal_sets_max),
     display_order: Number(r.display_order),
     set_count: Number(r.set_count),
+    effective_set_count: Number(r.effective_set_count),
     kg_volume: Number(r.kg_volume),
     coverage: r.coverage as 'none' | 'tagged',
   }));
@@ -1488,6 +1519,7 @@ export function parseWorkoutSet(row: DbRow): WorkoutSet {
     min_target_reps: row.min_target_reps as number | null,
     max_target_reps: row.max_target_reps as number | null,
     rpe: row.rpe ? parseFloat(row.rpe as string) : null,
+    rir: row.rir == null ? null : Number(row.rir),
     tag: row.tag as 'dropSet' | 'failure' | null,
     comment: row.comment as string | null,
     is_completed: Boolean(row.is_completed),

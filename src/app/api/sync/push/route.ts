@@ -141,16 +141,16 @@ async function pushWorkoutSet(r: Record<string, unknown>): Promise<void> {
     return;
   }
   await query(
-    `INSERT INTO workout_sets (uuid, workout_exercise_uuid, weight, repetitions, min_target_reps, max_target_reps, rpe, tag, comment, is_completed, is_pr, order_index, duration_seconds, updated_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, NOW())
+    `INSERT INTO workout_sets (uuid, workout_exercise_uuid, weight, repetitions, min_target_reps, max_target_reps, rpe, rir, tag, comment, is_completed, is_pr, order_index, duration_seconds, updated_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW())
      ON CONFLICT (uuid) DO UPDATE SET
        weight = EXCLUDED.weight, repetitions = EXCLUDED.repetitions,
        min_target_reps = EXCLUDED.min_target_reps, max_target_reps = EXCLUDED.max_target_reps,
-       rpe = EXCLUDED.rpe, tag = EXCLUDED.tag, comment = EXCLUDED.comment,
+       rpe = EXCLUDED.rpe, rir = EXCLUDED.rir, tag = EXCLUDED.tag, comment = EXCLUDED.comment,
        is_completed = EXCLUDED.is_completed, is_pr = EXCLUDED.is_pr,
        order_index = EXCLUDED.order_index,
        duration_seconds = EXCLUDED.duration_seconds, updated_at = NOW()`,
-    [r.uuid, r.workout_exercise_uuid, r.weight, r.repetitions, r.min_target_reps, r.max_target_reps, r.rpe, r.tag, r.comment, r.is_completed, r.is_pr, r.order_index, r.duration_seconds ?? null],
+    [r.uuid, r.workout_exercise_uuid, r.weight, r.repetitions, r.min_target_reps, r.max_target_reps, r.rpe, r.rir ?? null, r.tag, r.comment, r.is_completed, r.is_pr, r.order_index, r.duration_seconds ?? null],
   );
 }
 

@@ -86,6 +86,7 @@ export async function getSummaryData(): Promise<SummaryPayload> {
     display_name: r.display_name,
     parent_group: r.parent_group,
     set_count: r.set_count,
+    effective_set_count: r.effective_set_count,
     optimal_min: r.optimal_sets_min,
     optimal_max: r.optimal_sets_max,
     display_order: r.display_order,

@@ -53,6 +53,11 @@ export interface SetsByMuscleRow {
   display_name: string;
   parent_group: string;
   set_count: number;
+  /** RIR-weighted hypertrophy sets. RIR 0–3 = 1.0, RIR 4 = 0.5, RIR 5+ = 0.0,
+   *  NULL = 1.0 (charitable default until RIR data exists). UI surfaces a
+   *  junk-set warning when effective_set_count / set_count < 0.6 AND most
+   *  sets in the muscle's week have RIR logged. */
+  effective_set_count: number;
   optimal_min: number;
   optimal_max: number;
   display_order: number;
