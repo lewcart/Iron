@@ -5,14 +5,14 @@ import { syncEngine } from '@/lib/sync';
 import { uuid as genUUID } from '@/lib/uuid';
 import type { LocalExercise } from '@/db/local';
 
-// Mutations for the exercises catalog. The catalog is mostly read-only
-// (770+ everkinetic exercises ship in the bundled JSON) but the user can
-// create custom exercises and hide stock ones.
+// Mutations for the exercises catalog. The user can create custom exercises,
+// hide stock ones, AND edit text fields on any exercise (catalog or custom)
+// — description / steps / tips edits all flow through updateExercise into
+// the CDC sync layer via /api/sync/push's pushExercise handler.
 //
-// NB: Unlike other domains, exercises don't have SyncMeta on the local
-// type — the catalog isn't soft-deletable from the client. Custom-created
-// exercises propagate through sync via the existing exercises_change_log
-// trigger; pushed via /api/sync/push's pushExercise handler.
+// Note on sync: exercises ARE in the change_log CDC layer (mig 018+019), so
+// edits round-trip through Postgres on push. Single-user practice means
+// no contention — Lewis is the only writer.
 
 function now() { return Date.now(); }
 
@@ -26,6 +26,7 @@ export async function createCustomExercise(opts: {
   tips?: string[];
   movement_pattern?: string | null;
   tracking_mode?: 'reps' | 'time';
+  youtube_url?: string | null;
 }): Promise<LocalExercise> {
   const ex: LocalExercise = {
     uuid: genUUID().toLowerCase(),
@@ -42,15 +43,21 @@ export async function createCustomExercise(opts: {
     is_hidden: false,
     movement_pattern: opts.movement_pattern ?? null,
     tracking_mode: opts.tracking_mode ?? 'reps',
+    image_count: 0,
+    youtube_url: opts.youtube_url ?? null,
+    image_urls: null,
   };
-  // Push needs to know this is dirty. exercises don't have SyncMeta on the
-  // type but the sync engine reads `_synced` field via the `as unknown` path.
+  // Push needs the dirty flag. exercises rows technically don't extend
+  // SyncMeta on the type but the sync engine reads _synced/_updated_at
+  // through the cast.
   await db.exercises.put({ ...ex, _synced: false, _updated_at: now(), _deleted: false } as unknown as LocalExercise);
   syncEngine.schedulePush();
   return ex;
 }
 
-export async function updateCustomExercise(
+/** Edit any exercise row (catalog or custom). Pushes through the CDC sync
+ *  layer; server validates youtube_url shape and rejects garbage. */
+export async function updateExercise(
   uuid: string,
   patch: Partial<Omit<LocalExercise, 'uuid'>>,
 ): Promise<void> {
@@ -59,6 +66,9 @@ export async function updateCustomExercise(
   );
   syncEngine.schedulePush();
 }
+
+/** @deprecated Use updateExercise. Kept as an alias for downstream callers. */
+export const updateCustomExercise = updateExercise;
 
 export async function hideExercise(uuid: string): Promise<void> {
   // Sets is_hidden=true rather than soft-deleting, so workout history that

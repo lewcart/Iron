@@ -162,23 +162,61 @@ async function pushBodyweight(r: Record<string, unknown>): Promise<void> {
 }
 
 async function pushExercise(r: Record<string, unknown>): Promise<void> {
-  // exercises is mostly read-only on the client side (catalog), but custom
-  // exercises (is_custom=true) created via the app need to push. Server
-  // upsert is permissive — matches the existing /api/exercises behavior.
+  // The exercises table is in the CDC sync layer. Catalog and custom rows
+  // both push through here when the client edits them — text editing in
+  // ExerciseDetail (description/steps/tips), the in-app image generator,
+  // create-exercise form, etc. Server-side validation guards garbage
+  // youtube_url because MCP/import paths can bypass form validation.
   if (r._deleted) {
     await query('DELETE FROM exercises WHERE uuid = $1', [String(r.uuid).toLowerCase()]);
     return;
   }
+
+  // Validate youtube_url shape using the same regex the client helper does
+  // (looksLikeYouTubeUrl). MCP/import paths can't bypass — anything that
+  // doesn't look like a youtube host gets coerced to null. Single source
+  // of truth would be ideal but server importing client-side helper is
+  // awkward; the regex is duplicated and easy to keep in sync.
+  const ytRaw = r.youtube_url;
+  let ytClean: string | null = null;
+  if (typeof ytRaw === 'string' && ytRaw.trim().length > 0) {
+    if (/^(?:https?:\/\/)?(?:[a-z0-9-]+\.)?(?:youtube\.com|youtu\.be)\//i.test(ytRaw.trim())) {
+      ytClean = ytRaw.trim();
+    }
+  } else if (ytRaw === null) {
+    ytClean = null;
+  }
+
+  // image_urls is owned by the AI-gen endpoint, NOT routine client pushes.
+  // If the client explicitly sent an array, accept it. If absent (undefined)
+  // we use COALESCE in the upsert to preserve whatever the server already
+  // had — otherwise a stale-Dexie sync push would null out fresh AI URLs.
+  // image_count gets the same treatment: if the client doesn't supply it,
+  // we keep the server's existing value. This is critical because the AI
+  // generation flow updates these two columns directly via SQL, bypassing
+  // the client → sync layer.
+  const clientSentImageCount = typeof r.image_count === 'number';
+  const imageUrlsArr = Array.isArray(r.image_urls) ? r.image_urls as unknown[] : null;
+  const clientSentImageUrls = imageUrlsArr !== null;
+  const imageUrlsParam = imageUrlsArr !== null
+    ? (imageUrlsArr.length > 0 ? imageUrlsArr : null)
+    : null; // sentinel: the SQL branch on clientSentImageUrls preserves existing value
+  const imageCountParam = clientSentImageCount ? r.image_count : 0;
+
   await query(
-    `INSERT INTO exercises (uuid, everkinetic_id, title, alias, description, primary_muscles, secondary_muscles, equipment, steps, tips, is_custom, is_hidden, movement_pattern, tracking_mode, updated_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW())
+    `INSERT INTO exercises (uuid, everkinetic_id, title, alias, description, primary_muscles, secondary_muscles, equipment, steps, tips, is_custom, is_hidden, movement_pattern, tracking_mode, image_count, youtube_url, image_urls, updated_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, NOW())
      ON CONFLICT (uuid) DO UPDATE SET
        title = EXCLUDED.title, alias = EXCLUDED.alias, description = EXCLUDED.description,
        primary_muscles = EXCLUDED.primary_muscles, secondary_muscles = EXCLUDED.secondary_muscles,
        equipment = EXCLUDED.equipment, steps = EXCLUDED.steps, tips = EXCLUDED.tips,
        is_custom = EXCLUDED.is_custom, is_hidden = EXCLUDED.is_hidden,
        movement_pattern = EXCLUDED.movement_pattern,
-       tracking_mode = EXCLUDED.tracking_mode, updated_at = NOW()`,
+       tracking_mode = EXCLUDED.tracking_mode,
+       image_count = ${clientSentImageCount ? 'EXCLUDED.image_count' : 'exercises.image_count'},
+       youtube_url = EXCLUDED.youtube_url,
+       image_urls = ${clientSentImageUrls ? 'EXCLUDED.image_urls' : 'exercises.image_urls'},
+       updated_at = NOW()`,
     [
       String(r.uuid).toLowerCase(), r.everkinetic_id, r.title,
       JSON.stringify(r.alias ?? []), r.description,
@@ -186,6 +224,9 @@ async function pushExercise(r: Record<string, unknown>): Promise<void> {
       JSON.stringify(r.equipment ?? []), JSON.stringify(r.steps ?? []), JSON.stringify(r.tips ?? []),
       Boolean(r.is_custom), Boolean(r.is_hidden), r.movement_pattern,
       r.tracking_mode ?? 'reps',
+      imageCountParam,
+      ytClean,
+      imageUrlsParam,
     ],
   );
 }
