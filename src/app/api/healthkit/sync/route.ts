@@ -77,11 +77,23 @@ interface SyncBody {
   deleted_workouts?: string[];       // HK UUIDs that were deleted since last anchor
   deleted_medications?: string[];    // HK UUIDs deleted since last medications anchor
   deleted_sleep?: string[];          // HK sample UUIDs the plugin reports as deleted.
-                                     // SleepNight rows aren't keyed by HK UUID (native
-                                     // merges samples into one night per wake_date), so
-                                     // we accept the array but cannot currently map it
-                                     // back to night rows. Anchor reset (migration 023)
-                                     // is the canonical recovery path.
+                                     //
+                                     // KNOWN GAP: We accept this array but currently
+                                     // cannot act on it. Native code groups multiple
+                                     // HKCategorySamples into one derived SleepNight per
+                                     // wake_date, so individual sample UUIDs don't map
+                                     // 1:1 to rows in healthkit_sleep_nights. Until the
+                                     // Capacitor plugin is extended to emit per-night
+                                     // hk_uuids alongside the merged stage minutes, the
+                                     // anchor-reset path (migration 023, or any future
+                                     // forced re-pull) is the only recovery for edits /
+                                     // deletes that happened in iOS Health.
+                                     //
+                                     // The acknowledgement count surfaces in the
+                                     // response as `sleep_deletions_acknowledged_no_op`
+                                     // so client-side telemetry can detect the gap.
+                                     // TODO(plugin): emit hk_uuids per SleepNight, then
+                                     // delete by (wake_date, hk_uuid) here.
   state_updates?: SyncStateUpdate[];
 }
 
@@ -379,7 +391,7 @@ export async function POST(request: NextRequest) {
     daily_upserted: dailyStatements.length,
     sleep_upserted: sleepStatements.length,
     sleep_nights_upserted: sleepNightStatements.length,
-    sleep_deletions_seen: deletedSleepUuids.length,
+    sleep_deletions_acknowledged_no_op: deletedSleepUuids.length,
     workouts_upserted: workouts.length,
     workouts_deleted: deletedWorkoutUuids.length,
     medications_upserted: medications.length,

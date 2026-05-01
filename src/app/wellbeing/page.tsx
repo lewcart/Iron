@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { ChevronLeft, ChevronRight, Trash2 } from 'lucide-react';
 import Link from 'next/link';
 import { rebirthJsonHeaders } from '@/lib/api/headers';
-import { apiBase, fetchJson } from '@/lib/api/client';
+import { apiBase } from '@/lib/api/client';
 import { useWellbeingLogs, useDysphoriaLogs, useClothesTestLogs } from '@/lib/useLocalDB-wellbeing';
 import {
   logWellbeing,
@@ -80,9 +80,15 @@ function SleepDeepLinkRow() {
   const [last, setLast] = useState<{ asleep_min: number; deep_min: number } | null>(null);
   const [loaded, setLoaded] = useState(false);
   useEffect(() => {
-    fetchJson<SleepSummaryResult>('/api/health/sleep-summary?window_days=1&fields=nights')
-      .then(r => {
-        const n = r.nights?.[0];
+    // Plain fetch — the route returns 4xx/503 envelopes for HK-disconnected /
+    // validation errors. The deep-link row tolerates either: just degrade to
+    // "No data" when the response isn't a SleepSummaryResult.
+    fetch(`${apiBase()}/api/health/sleep-summary?window_days=1&fields=nights`, {
+      headers: rebirthJsonHeaders(),
+    })
+      .then(async res => {
+        const body = (await res.json().catch(() => null)) as SleepSummaryResult | null;
+        const n = body?.nights?.[0];
         if (n) setLast({ asleep_min: Number(n.asleep_min), deep_min: Number(n.deep_min) });
       })
       .catch(() => null)

@@ -213,7 +213,7 @@ export async function runForegroundSync(): Promise<SyncResult> {
   ];
 
   try {
-    await fetch(`${apiBase()}/api/healthkit/sync`, {
+    const res = await fetch(`${apiBase()}/api/healthkit/sync`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -227,6 +227,12 @@ export async function runForegroundSync(): Promise<SyncResult> {
         state_updates: stateUpdates,
       }),
     });
+    if (!res.ok) {
+      // Server rejected the payload (DB error, schema drift, validation, ...).
+      // Surface as a network-style failure rather than a silent ok:true so the
+      // caller knows the data didn't actually land.
+      return { ...emptyResult('network', started), metrics_synced: metricsSyncedSet.size };
+    }
   } catch {
     return { ...emptyResult('network', started), metrics_synced: metricsSyncedSet.size };
   }

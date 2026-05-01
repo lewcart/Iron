@@ -1,6 +1,9 @@
 import { query, queryOne } from '@/db/db';
 import { consistencyScore } from '@/lib/sleep-stats';
 
+/** Maximum window the sleep summary will return. Inputs > 90 days are silently capped. */
+export const MAX_WINDOW_DAYS = 90;
+
 export const SLEEP_SUMMARY_FIELDS = ['range', 'averages', 'consistency', 'hrv', 'nights', 'data_quality'] as const;
 export type SleepSummaryField = typeof SLEEP_SUMMARY_FIELDS[number];
 
@@ -80,14 +83,16 @@ export async function computeSleepSummary(
       return { status: 'invalid_range', message: 'invalid date format', hint: 'YYYY-MM-DD.' };
     }
     const days = Math.round((endMs - startMs) / 86400000);
-    if (days > 90) {
-      startDate = new Date(endMs - 90 * 86400000).toISOString().slice(0, 10);
+    if (days > MAX_WINDOW_DAYS) {
+      startDate = new Date(endMs - MAX_WINDOW_DAYS * 86400000).toISOString().slice(0, 10);
       windowCapped = true;
     }
   } else {
-    const w = typeof args.window_days === 'number' ? args.window_days : 7;
-    if (w < 1 || w > 90) {
-      return { status: 'invalid_input', message: 'window_days must be 1..90', hint: 'Default 7.' };
+    const w = typeof args.window_days === 'number' && Number.isFinite(args.window_days)
+      ? args.window_days
+      : 7;
+    if (w < 1 || w > MAX_WINDOW_DAYS) {
+      return { status: 'invalid_input', message: `window_days must be 1..${MAX_WINDOW_DAYS}`, hint: 'Default 7.' };
     }
     const endMs = Date.parse(endDate);
     startDate = new Date(endMs - (w - 1) * 86400000).toISOString().slice(0, 10);

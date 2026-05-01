@@ -7,26 +7,28 @@ import {
   BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Tooltip,
   LineChart, Line,
 } from 'recharts';
-import { fetchJson } from '@/lib/api/client';
+import { apiBase } from '@/lib/api/client';
+import { rebirthJsonHeaders } from '@/lib/api/headers';
 import { StageBar } from '@/components/ui/stage-bar';
 import { RangeTabs, type RangeKey } from '@/components/ui/range-tabs';
 import type { SleepSummaryResult, SleepSummaryError } from '@/lib/health-sleep-summary';
 
-// ── Constants for verdict + stage colors ────────────────────────────────────
+interface NotConnectedResponse {
+  status: 'not_connected';
+  reason: 'unavailable' | 'revoked' | 'not_requested';
+  message: string;
+}
+type SleepFetchBody = SleepSummaryResult | SleepSummaryError | NotConnectedResponse;
 
-const STAGE_COLORS = {
-  deep: 'bg-indigo-600',
-  rem: 'bg-violet-500',
-  core: 'bg-sky-400',
-  awake: 'bg-zinc-300 dark:bg-zinc-700',
-} as const;
+// ── Stage palette ───────────────────────────────────────────────────────────
+// Single source of truth: tailwind class for <StageBar> + raw fill for recharts.
+// Adding a stage means editing this map, not parallel STAGE_COLORS / STAGE_FILLS.
 
-// recharts wants raw color values; mirror the tailwind pals.
-const STAGE_FILLS = {
-  deep: '#4f46e5',
-  rem: '#8b5cf6',
-  core: '#38bdf8',
-  awake: '#9ca3af',
+const STAGES = {
+  deep:  { class: 'bg-indigo-600',                     fill: '#4f46e5' },
+  rem:   { class: 'bg-violet-500',                     fill: '#8b5cf6' },
+  core:  { class: 'bg-sky-400',                        fill: '#38bdf8' },
+  awake: { class: 'bg-zinc-300 dark:bg-zinc-700',      fill: '#9ca3af' },
 } as const;
 
 type Verdict = 'solid' | 'ok' | 'light' | 'restless';
@@ -104,22 +106,32 @@ export default function SleepPage() {
     const params = new URLSearchParams();
     params.set('window_days', String(rangeToWindowDays(range)));
     params.set('fields', 'range,averages,consistency,hrv,nights,data_quality');
-    fetchJson<SleepSummaryResult | SleepSummaryError | { status: 'not_connected'; reason: string; message: string }>(
-      `/api/health/sleep-summary?${params.toString()}`,
-    ).then(result => {
-      if (cancelled) return;
-      if ('status' in result) {
-        if (result.status === 'not_connected') {
-          setState({ loading: false, data: null, notConnected: true, error: null });
-        } else {
-          setState({ loading: false, data: null, notConnected: false, error: result as SleepSummaryError });
+    // Use raw fetch (not fetchJson) because the route now uses 4xx/503 status
+    // codes for typed errors. We always parse the body — both 2xx success and
+    // 4xx/503 typed-error envelopes are valid JSON.
+    fetch(`${apiBase()}/api/health/sleep-summary?${params.toString()}`, {
+      headers: rebirthJsonHeaders(),
+    })
+      .then(async res => {
+        const body = (await res.json().catch(() => null)) as SleepFetchBody | null;
+        if (cancelled) return;
+        if (!body) {
+          setState({ loading: false, data: null, notConnected: false, error: null });
+          return;
         }
-      } else {
-        setState({ loading: false, data: result as SleepSummaryResult, notConnected: false, error: null });
-      }
-    }).catch(() => {
-      if (!cancelled) setState({ loading: false, data: null, notConnected: false, error: null });
-    });
+        if ('status' in body) {
+          if (body.status === 'not_connected') {
+            setState({ loading: false, data: null, notConnected: true, error: null });
+          } else {
+            setState({ loading: false, data: null, notConnected: false, error: body });
+          }
+        } else {
+          setState({ loading: false, data: body, notConnected: false, error: null });
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setState({ loading: false, data: null, notConnected: false, error: null });
+      });
     return () => { cancelled = true; };
   }, [range]);
 
@@ -172,11 +184,6 @@ function LedeCard({ data }: { data: SleepSummaryResult }) {
       <section className="ios-section">
         <div className="ios-row flex flex-col gap-1 py-6">
           <p className="text-sm text-muted-foreground">No data for last night.</p>
-          {data.range && data.range.n_nights > 0 && (
-            <p className="text-xs text-muted-foreground">
-              Last logged date in window: {data.nights?.[0]?.wake_date ?? '—'}
-            </p>
-          )}
         </div>
       </section>
     );
@@ -199,15 +206,15 @@ function LedeCard({ data }: { data: SleepSummaryResult }) {
         </div>
         <StageBar
           segments={[
-            { label: 'Deep', minutes: deep, color: STAGE_COLORS.deep },
-            { label: 'REM',  minutes: Number(lastNight.rem_min),  color: STAGE_COLORS.rem },
-            { label: 'Core', minutes: Number(lastNight.core_min), color: STAGE_COLORS.core },
-            { label: 'Awake', minutes: Number(lastNight.awake_min), color: STAGE_COLORS.awake },
+            { label: 'Deep',  minutes: deep,                        color: STAGES.deep.class },
+            { label: 'REM',   minutes: Number(lastNight.rem_min),   color: STAGES.rem.class },
+            { label: 'Core',  minutes: Number(lastNight.core_min),  color: STAGES.core.class },
+            { label: 'Awake', minutes: Number(lastNight.awake_min), color: STAGES.awake.class },
           ]}
         />
         <div className="text-sm text-muted-foreground space-y-0.5">
           <div className="flex justify-between">
-            <span>Deep</span><span>{fmt(deep)} ({deepPct(asleep, deep)})</span>
+            <span>Deep</span><span>{fmt(deep)} ({pct(asleep, deep)})</span>
           </div>
           <div className="flex justify-between">
             <span>REM</span><span>{fmt(Number(lastNight.rem_min))} ({pct(asleep, Number(lastNight.rem_min))})</span>
@@ -229,10 +236,6 @@ function LedeCard({ data }: { data: SleepSummaryResult }) {
       </div>
     </section>
   );
-}
-
-function deepPct(asleep: number, deep: number): string {
-  return asleep > 0 ? `${Math.round((deep / asleep) * 100)}%` : '—';
 }
 
 function pct(asleep: number, x: number): string {
@@ -316,10 +319,10 @@ function StageStackChart({ data }: { data: SleepSummaryResult }) {
               cursor={{ fillOpacity: 0.05 }}
               contentStyle={{ fontSize: 12 }}
             />
-            <Bar dataKey="Deep"  stackId="s" fill={STAGE_FILLS.deep} />
-            <Bar dataKey="REM"   stackId="s" fill={STAGE_FILLS.rem} />
-            <Bar dataKey="Core"  stackId="s" fill={STAGE_FILLS.core} />
-            <Bar dataKey="Awake" stackId="s" fill={STAGE_FILLS.awake} />
+            <Bar dataKey="Deep"  stackId="s" fill={STAGES.deep.fill} />
+            <Bar dataKey="REM"   stackId="s" fill={STAGES.rem.fill} />
+            <Bar dataKey="Core"  stackId="s" fill={STAGES.core.fill} />
+            <Bar dataKey="Awake" stackId="s" fill={STAGES.awake.fill} />
           </BarChart>
         </ResponsiveContainer>
       </div>
