@@ -352,23 +352,21 @@ public class HealthKitPlugin: CAPPlugin, CAPBridgedPlugin {
     }
 
     // MARK: - New: fetchMedicationRecords (iOS 26+ Medications feature)
-
-    /// Anchored incremental fetch of HKMedicationDoseEvent samples — the iOS
-    /// Health app's "Medications" feature, exposed publicly to third-party
-    /// HealthKit apps from iOS 26 onwards.
-    ///
-    /// Two queries run sequentially:
-    ///   1. HKUserAnnotatedMedicationQuery → map concept-id → display name.
-    ///      Apple stores medications as opaque concept identifiers; the
-    ///      human-readable name lives on HKUserAnnotatedMedication.
-    ///   2. HKAnchoredObjectQuery on HKMedicationDoseEvent → the actual dose
-    ///      events with logStatus (taken / skipped / snoozed / ...),
-    ///      scheduleType, doseQuantity + unit, and a link back to the
-    ///      concept-id.
-    ///
-    /// On iOS < 26 or if Medications hasn't been set up by the user, returns
-    /// an empty payload so the sync layer treats it as a no-op.
+    //
+    // Currently a no-op while we debug an iOS 26 launch crash that surfaced
+    // when this method actually queried HKUserAnnotatedMedicationQuery /
+    // HKMedicationDoseEvent. Server side (DB schema, sync route, MCP tools)
+    // stays wired so flipping this on later is a Swift-only change.
+    //
+    // To re-enable: remove the guard below. Real implementation kept inline
+    // for reference.
     @objc public func fetchMedicationRecords(_ call: CAPPluginCall) {
+        // Always return empty until the launch-crash root cause is found.
+        call.resolve(["medications": [], "deleted": [], "nextAnchor": ""])
+        return
+
+        // Unreachable below — kept intentionally for fast re-enable.
+        // swiftlint:disable:next unreachable_code
         guard HKHealthStore.isHealthDataAvailable() else {
             call.resolve(["medications": [], "deleted": [], "nextAnchor": ""])
             return
@@ -969,11 +967,11 @@ public class HealthKitPlugin: CAPPlugin, CAPBridgedPlugin {
         if let t = HKCategoryType.categoryType(forIdentifier: .sleepAnalysis) {
             read.insert(t)
         }
-        // Medications (iOS 26+). Apple ships a dedicated HKMedicationDoseEvent
-        // sample type for third-party reads. Older iOS silently skips.
-        if #available(iOS 26.0, *) {
-            read.insert(HKObjectType.medicationDoseEventType())
-        }
+        // Medications (iOS 26+) — DISABLED while debugging launch crash.
+        // Re-enable by un-commenting alongside fetchMedicationRecords.
+        // if #available(iOS 26.0, *) {
+        //     read.insert(HKObjectType.medicationDoseEventType())
+        // }
         read.insert(HKObjectType.workoutType())
 
         // Writes
