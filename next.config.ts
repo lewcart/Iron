@@ -1,7 +1,15 @@
 import type { NextConfig } from "next";
+import path from "node:path";
 import withPWA from "@ducanh2912/next-pwa";
 
 const nextConfig: NextConfig = {
+  // Pin file tracing + workspace root to this directory. Without it, when
+  // running inside a git worktree under .claude/worktrees, Next.js infers
+  // the parent repo as the workspace root and module resolution can pick
+  // a duplicate copy of react from there — triggering "useInsertionEffect
+  // is null" in dev. Anchoring to __dirname keeps everything inside this
+  // tree consistent across worktrees and the main checkout.
+  outputFileTracingRoot: path.resolve(__dirname),
   ...(process.env.CAPACITOR_BUILD === "1" ? { output: "export" } : {}),
 };
 
