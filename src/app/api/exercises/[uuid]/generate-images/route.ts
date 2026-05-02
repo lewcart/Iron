@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { put, del } from '@vercel/blob';
+import sharp from 'sharp';
 import { getExercise } from '@/db/queries';
 import { query, transaction } from '@/db/db';
 import { requireApiKey } from '@/lib/api-auth';
@@ -16,28 +17,53 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 
 // POST /api/exercises/[uuid]/generate-images
 //
-// Generates a new candidate pair for an exercise:
-//   1. openai.images.generate → frame 1 (1024×1536)            ~$0.20
-//   2. openai.images.edit({ image: frame1Png }) → frame 2      ~$0.20
-//   3. resize each to 600×800 JPEG, upload to Vercel Blob
-//   4. INSERT 2 candidate rows + activate batch + mirror to exercises
+// Generates a new candidate pair for an exercise.
+//
+// Body shape — two paths:
+//   • application/json
+//       { request_id?: uuid, notes?: string }
+//   • multipart/form-data
+//       request_id?: uuid (string field)
+//       notes?:      string (≤280 chars, server-validated)
+//       reference?:  File (PNG/JPEG/WebP, ≤8MB)
+//
+// Generation flow:
+//   1. Frame 1 — openai.images.generate, OR images.edit with the user's
+//      reference image as the seed (when uploaded). 1024×1536.        ~$0.20
+//   2. Frame 2 — openai.images.edit({ image: frame1Png }) chained off
+//      frame 1. 1024×1536.                                            ~$0.20
+//   3. Resize each to 600×800 JPEG, upload to Vercel Blob.
+//   4. INSERT 2 candidate rows + activate batch + mirror to exercises.
 //
 // Atomicity: pair is the unit. If frame 2 fails, frame 1 blob is deleted
-// best-effort (no candidate rows persisted). Frame 1 OpenAI cost is sunk;
-// jobs row records partial completion for credit reconciliation.
+// best-effort (no candidate rows persisted). The user's reference blob is
+// PRESERVED on rollback — it's a source artifact, not part of the candidate
+// pair, and retries can re-use it without re-uploading.
 //
 // Auth: requireApiKey (single-user; bounds external abuse on a paid API).
-// Body: { request_id?: uuid } — client-supplied for PWA-suspend recovery
-// polling. If absent, server generates one.
-//
-// maxDuration: 300s. Two sequential gpt-image-1 calls + uploads + DB
-// budget 90-180s observed. Requires Vercel Pro+ tier.
+// maxDuration: 300s. Two sequential gpt-image-1 calls + uploads + DB budget
+// 90-180s observed. Requires Vercel Pro+ tier.
 
 export const maxDuration = 300;
 
-interface PostBody {
+interface ParsedBody {
   request_id?: string;
+  notes?: string;
+  /** When present, the route uses images.edit() for frame 1 with this PNG as
+   *  the seed. Already resized to 600×800 PNG; ready to wrap via toFile. */
+  referencePng?: Buffer;
+  /** Mime detected on the original upload, before resize (used for the
+   *  blob filename extension). Resized output is always image/png. */
+  referenceOriginalMime?: 'image/png' | 'image/jpeg' | 'image/webp';
 }
+
+const NOTES_MAX_CHARS = 280;
+const REF_MAX_BYTES = 8 * 1024 * 1024;
+const REF_ALLOWED_MIME = new Set([
+  'image/png',
+  'image/jpeg',
+  'image/webp',
+]);
 
 // Cost estimates in cents (US). gpt-image-1 high 1024×1536 ≈ $0.25 per output.
 // Plus a small input-image-token charge on the edit call. Used for the
@@ -68,13 +94,19 @@ export async function POST(
   }
   const exerciseUuid = uuid.toLowerCase();
 
-  // Body is optional; tolerate empty / missing JSON.
-  let body: PostBody = {};
-  try { body = (await request.json()) as PostBody; } catch { /* empty body ok */ }
+  // ─── Parse + validate body ──────────────────────────────────────────────
+  let parsed: ParsedBody;
+  try {
+    parsed = await parseBody(request);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Invalid request body';
+    return NextResponse.json({ error: msg }, { status: 400 });
+  }
 
-  const requestId = body.request_id && UUID_RE.test(body.request_id)
-    ? body.request_id.toLowerCase()
+  const requestId = parsed.request_id && UUID_RE.test(parsed.request_id)
+    ? parsed.request_id.toLowerCase()
     : crypto.randomUUID();
+  const notes = parsed.notes ?? null;
 
   const exercise = await getExercise(exerciseUuid);
   if (!exercise) {
@@ -131,13 +163,37 @@ export async function POST(
   const batchId = crypto.randomUUID();
   const jobUuid = crypto.randomUUID();
 
+  // ─── Upload reference to Blob (if present) ─────────────────────────────
+  // Done BEFORE the OpenAI call so the URL is on the jobs row from the
+  // start. Reference blob is preserved on rollback — it's the user's
+  // source artifact and retries can re-use it.
+  let referenceImageUrl: string | null = null;
+  if (parsed.referencePng) {
+    try {
+      const u = await put(
+        `exercise-images/${exerciseUuid}/${batchId}/ref.png`,
+        parsed.referencePng,
+        { access: 'public', contentType: 'image/png' },
+      );
+      referenceImageUrl = u.url;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'unknown';
+      console.error('[generate-images] reference blob upload failed:', err);
+      return NextResponse.json(
+        { error: `Failed to upload reference image: ${msg}` },
+        { status: 502 },
+      );
+    }
+  }
+
   // Track this attempt server-side from the start. The jobs row is the
   // audit trail — every status transition writes back here.
   await query(
     `INSERT INTO exercise_image_generation_jobs
-       (uuid, exercise_uuid, request_id, status, started_at)
-     VALUES ($1, $2, $3, 'running', NOW())`,
-    [jobUuid, exerciseUuid, requestId],
+       (uuid, exercise_uuid, request_id, status, started_at,
+        notes, reference_image_url)
+     VALUES ($1, $2, $3, 'running', NOW(), $4, $5)`,
+    [jobUuid, exerciseUuid, requestId, notes, referenceImageUrl],
   );
 
   // Lazy-import openai so the client bundle never sees it.
@@ -145,19 +201,29 @@ export async function POST(
   const openai = new OpenAI({ apiKey });
 
   // ─── Frame 1 ───────────────────────────────────────────────────────────
-  // Keep the original PNG buffer alive so we can hand it to images.edit
-  // for frame 2 without a wasted sharp decode/re-encode round-trip.
+  // When a user reference is attached, seed frame 1 from it via images.edit
+  // instead of images.generate. Frame 2 still chains from frame 1.
   let frame1Display: Buffer;
   let frame1Png: Buffer;
   let frame1OpenAiId: string | undefined;
   try {
-    const result = await openai.images.generate({
-      model: 'gpt-image-1',
-      prompt: buildExerciseImagePromptFrame1(exercise),
-      size: '1024x1536',
-      quality: 'high',
-      n: 1,
-    });
+    const frame1Prompt = buildExerciseImagePromptFrame1(exercise, { notes });
+    const result = parsed.referencePng
+      ? await openai.images.edit({
+          model: 'gpt-image-1',
+          image: await wrapPngForEdit(parsed.referencePng, 'reference.png'),
+          prompt: frame1Prompt,
+          size: '1024x1536',
+          quality: 'high',
+          n: 1,
+        })
+      : await openai.images.generate({
+          model: 'gpt-image-1',
+          prompt: frame1Prompt,
+          size: '1024x1536',
+          quality: 'high',
+          n: 1,
+        });
     frame1OpenAiId = (result as { id?: string }).id;
     const b64 = result.data?.[0]?.b64_json;
     if (!b64) throw new Error('OpenAI returned no image data for frame 1');
@@ -204,7 +270,7 @@ export async function POST(
     const result = await openai.images.edit({
       model: 'gpt-image-1',
       image: frame1File,
-      prompt: buildExerciseImagePromptFrame2(exercise),
+      prompt: buildExerciseImagePromptFrame2(exercise, { notes }),
       size: '1024x1536',
       quality: 'high',
       n: 1,
@@ -215,7 +281,8 @@ export async function POST(
     frame2Display = await resizeToDisplayJpeg(Buffer.from(b64, 'base64'));
   } catch (err) {
     // Roll back frame 1 blob best-effort. If del() fails, mark orphan
-    // so we have a record for manual cleanup later.
+    // so we have a record for manual cleanup later. Reference blob is
+    // intentionally preserved.
     const orphan = await safeDel([frame1Url]);
     return await failJob(
       jobUuid,
@@ -323,7 +390,97 @@ export async function POST(
     image_urls: [frame1Url, frame2Url],
     image_count: 2,
     cost_usd_cents: COST_PAIR_CENTS,
+    used_reference: parsed.referencePng != null,
   });
+}
+
+// ─── Body parsing + validation ──────────────────────────────────────────
+
+/** Parse + validate the request body. Detects multipart vs JSON via
+ *  Content-Type, validates notes length and reference image MIME/size,
+ *  and resizes the reference to 600×800 PNG via sharp before returning.
+ *  Throws Error with a public-safe message on validation failure. */
+async function parseBody(request: NextRequest): Promise<ParsedBody> {
+  const contentType = request.headers.get('content-type') ?? '';
+
+  if (contentType.startsWith('multipart/form-data')) {
+    const form = await request.formData();
+    const requestId = stringField(form.get('request_id'));
+    const notes = validateNotes(stringField(form.get('notes')));
+    const ref = form.get('reference');
+
+    if (!ref || typeof ref === 'string') {
+      // Multipart with no file = treat like JSON body
+      return { request_id: requestId, notes };
+    }
+
+    const refFile = ref as File;
+    if (refFile.size === 0) {
+      // Empty file slot — same as no reference
+      return { request_id: requestId, notes };
+    }
+    if (refFile.size > REF_MAX_BYTES) {
+      throw new Error(
+        `Reference image too large (${formatBytes(refFile.size)}, max ${formatBytes(REF_MAX_BYTES)}).`,
+      );
+    }
+    if (!REF_ALLOWED_MIME.has(refFile.type)) {
+      throw new Error(
+        `Reference image type "${refFile.type || 'unknown'}" not supported. Use PNG, JPEG, or WebP.`,
+      );
+    }
+
+    // Resize to 600×800 PNG. Cover-crop matches the catalog dimensions and
+    // bounds peak memory on the OpenAI edit-call wrapping.
+    const refBuf = Buffer.from(await refFile.arrayBuffer());
+    let referencePng: Buffer;
+    try {
+      referencePng = await sharp(refBuf)
+        .resize(600, 800, { fit: 'cover', position: 'center' })
+        .png()
+        .toBuffer();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'unknown';
+      throw new Error(`Could not process reference image: ${msg}`);
+    }
+
+    return {
+      request_id: requestId,
+      notes,
+      referencePng,
+      referenceOriginalMime: refFile.type as ParsedBody['referenceOriginalMime'],
+    };
+  }
+
+  // JSON path. Tolerate empty body.
+  let json: { request_id?: unknown; notes?: unknown } = {};
+  try { json = await request.json(); } catch { /* empty body ok */ }
+  return {
+    request_id: typeof json.request_id === 'string' ? json.request_id : undefined,
+    notes: validateNotes(typeof json.notes === 'string' ? json.notes : undefined),
+  };
+}
+
+function stringField(v: FormDataEntryValue | null): string | undefined {
+  return typeof v === 'string' && v.length > 0 ? v : undefined;
+}
+
+function validateNotes(raw: string | undefined): string | undefined {
+  if (raw == null) return undefined;
+  const trimmed = raw.trim();
+  if (trimmed.length === 0) return undefined;
+  if (trimmed.length > NOTES_MAX_CHARS) {
+    throw new Error(
+      `Notes too long (${trimmed.length} chars, max ${NOTES_MAX_CHARS}).`,
+    );
+  }
+  return trimmed;
+}
+
+function formatBytes(n: number): string {
+  if (n < 1024) return `${n}B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)}KB`;
+  return `${(n / 1024 / 1024).toFixed(1)}MB`;
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────
