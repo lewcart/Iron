@@ -6,11 +6,11 @@ import type { Exercise } from '@/types';
 import { useUnit } from '@/context/UnitContext';
 import { apiBase } from '@/lib/api/client';
 import { ExerciseDemoStrip } from '@/components/ExerciseDemoStrip';
+import { ExerciseImageManager } from '@/components/ExerciseImageManager';
 import { EditableTextSection } from '@/components/EditableTextSection';
 import { MuscleMap } from '@/components/MuscleMap';
 import { MUSCLE_DEFS, normalizeMuscleTags } from '@/lib/muscles';
 import { updateExercise } from '@/lib/mutations-exercises';
-import { Sparkles } from 'lucide-react';
 import {
   getExerciseProgressLocal,
   getExerciseSessionHistoryLocal,
@@ -114,61 +114,6 @@ function PRBadge({
       <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide text-center">{label}</p>
       <p className="text-base font-bold text-foreground text-center leading-tight">{value}</p>
       <p className="text-[10px] text-muted-foreground text-center">{sub}</p>
-    </div>
-  );
-}
-
-/** Generate-images button shown when an exercise has no demo frames.
- *  Calls /api/exercises/[uuid]/generate-images, which produces 3 frames via
- *  gpt-image-1, splits them, uploads to Vercel Blob, updates DB. After
- *  success the parent's Dexie liveQuery picks up the new image_urls and
- *  the strip renders.
- *
- *  Cost: ~$0.19 per click. Loading state takes 30-60s. Disable while in
- *  flight + show progress. */
-function GenerateImagesButton({ exerciseUuid }: { exerciseUuid: string }) {
-  const [generating, setGenerating] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const handleClick = async () => {
-    setGenerating(true);
-    setError(null);
-    try {
-      const res = await fetch(
-        `${apiBase()}/api/exercises/${exerciseUuid}/generate-images`,
-        { method: 'POST' },
-      );
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        throw new Error(body.error ?? `HTTP ${res.status}`);
-      }
-      // Server has updated Postgres. Sync pull will catch up Dexie on its
-      // next tick; until then, force one to show the new images quickly.
-      const { syncEngine } = await import('@/lib/sync');
-      await syncEngine.pull();
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : 'unknown';
-      setError(msg);
-    } finally {
-      setGenerating(false);
-    }
-  };
-
-  return (
-    <div className="bg-card border border-border rounded-2xl p-4 text-center">
-      <Sparkles className="h-6 w-6 mx-auto text-primary/60 mb-2" />
-      <p className="text-sm text-foreground mb-1">No demo images yet</p>
-      <p className="text-xs text-muted-foreground mb-3">
-        Generate 3-frame demo via AI. Takes ~30-60 seconds.
-      </p>
-      <button
-        onClick={handleClick}
-        disabled={generating}
-        className="px-4 py-2 bg-primary text-primary-foreground text-sm font-medium rounded-full disabled:opacity-50"
-      >
-        {generating ? 'Generating…' : 'Generate demo images'}
-      </button>
-      {error && <p className="mt-2 text-xs text-destructive">{error}</p>}
     </div>
   );
 }
@@ -551,15 +496,21 @@ export default function ExerciseDetail({
         {/* Demo strip — renders only when image_count > 0 OR image_urls set.
             Tap → openYouTube when youtube_url present. Always visible at top
             of detail (before stats/chart) so it's the first thing the user
-            sees mid-workout. */}
+            sees mid-workout. In page chrome, an edit-pencil overlay opens
+            the AI image manager (regenerate / pick a previous pair). */}
         {(exercise.image_count > 0 || (exercise.image_urls && exercise.image_urls.length > 0)) && (
-          <ExerciseDemoStrip
-            exerciseUuid={exercise.uuid}
-            imageCount={exercise.image_count}
-            imageUrls={exercise.image_urls ?? null}
-            youtubeUrl={exercise.youtube_url}
-            compact={chrome === 'modal'}
-          />
+          <div className="relative">
+            <ExerciseDemoStrip
+              exerciseUuid={exercise.uuid}
+              imageCount={exercise.image_count}
+              imageUrls={exercise.image_urls ?? null}
+              youtubeUrl={exercise.youtube_url}
+              compact={chrome === 'modal'}
+            />
+            {chrome === 'page' && (
+              <ExerciseImageManager variant="overlay" exerciseUuid={exercise.uuid} />
+            )}
+          </div>
         )}
 
         {/* No demo images yet — offer to generate them. Page mode only;
@@ -567,7 +518,7 @@ export default function ExerciseDetail({
         {chrome === 'page'
           && exercise.image_count === 0
           && (!exercise.image_urls || exercise.image_urls.length === 0) && (
-          <GenerateImagesButton exerciseUuid={exercise.uuid} />
+          <ExerciseImageManager variant="empty" exerciseUuid={exercise.uuid} />
         )}
 
         {loading ? (

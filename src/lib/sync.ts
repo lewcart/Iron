@@ -64,6 +64,9 @@ const SYNCED_TABLES = [
   'wellbeing_logs', 'dysphoria_logs', 'clothes_test_logs',
   // Photos (inspo_photos is local-only — no server table, no sync)
   'progress_photos',
+  // AI-generated exercise demo image candidates (read-only client side;
+  // server is sole writer, so push() naturally finds nothing dirty).
+  'exercise_image_candidates',
 ] as const;
 type SyncedTable = typeof SYNCED_TABLES[number];
 
