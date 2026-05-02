@@ -7,6 +7,8 @@ import { useUnit } from '@/context/UnitContext';
 import { apiBase } from '@/lib/api/client';
 import { ExerciseDemoStrip } from '@/components/ExerciseDemoStrip';
 import { EditableTextSection } from '@/components/EditableTextSection';
+import { MuscleMap } from '@/components/MuscleMap';
+import { MUSCLE_DEFS, normalizeMuscleTags } from '@/lib/muscles';
 import { updateExercise } from '@/lib/mutations-exercises';
 import { Sparkles } from 'lucide-react';
 import {
@@ -796,25 +798,48 @@ export default function ExerciseDetail({
           }}
         />
 
-        {(exercise.primary_muscles.length > 0 || exercise.secondary_muscles.length > 0) && (
-          <div>
-            <p className="text-xs font-semibold text-primary uppercase tracking-wide mb-1 px-1">Muscles</p>
-            <div className="ios-section">
-              {exercise.primary_muscles.map(m => (
-                <div key={m} className="ios-row">
-                  <span className="flex-1 text-sm capitalize">{m}</span>
-                  <span className="text-xs text-muted-foreground">Primary</span>
+        {(() => {
+          const { primary, secondary } = normalizeMuscleTags(
+            exercise.primary_muscles,
+            exercise.secondary_muscles,
+          );
+          if (primary.length === 0 && secondary.length === 0) return null;
+
+          // Page mode: anatomical diagram + pills.
+          if (chrome === 'page') {
+            return (
+              <div>
+                <p className="text-xs font-semibold text-primary uppercase tracking-wide mb-1 px-1">
+                  Target muscles
+                </p>
+                <div className="ios-section p-3">
+                  <MuscleMap primary={primary} secondary={secondary} />
                 </div>
-              ))}
-              {exercise.secondary_muscles.map(m => (
-                <div key={m} className="ios-row">
-                  <span className="flex-1 text-sm capitalize">{m}</span>
-                  <span className="text-xs text-muted-foreground">Secondary</span>
-                </div>
-              ))}
+              </div>
+            );
+          }
+
+          // Modal mode: keep dense text-row UI (mid-set context, eyes-on-bar).
+          return (
+            <div>
+              <p className="text-xs font-semibold text-primary uppercase tracking-wide mb-1 px-1">Muscles</p>
+              <div className="ios-section">
+                {primary.map((m) => (
+                  <div key={m} className="ios-row">
+                    <span className="flex-1 text-sm">{MUSCLE_DEFS[m].display_name}</span>
+                    <span className="text-xs text-muted-foreground">Primary</span>
+                  </div>
+                ))}
+                {secondary.map((m) => (
+                  <div key={m} className="ios-row">
+                    <span className="flex-1 text-sm">{MUSCLE_DEFS[m].display_name}</span>
+                    <span className="text-xs text-muted-foreground">Secondary</span>
+                  </div>
+                ))}
+              </div>
             </div>
-          </div>
-        )}
+          );
+        })()}
 
         {/* Tracking mode toggle — flip an exercise between weight × reps and
             held duration. Mirrors the segmented control on CreateExerciseForm
