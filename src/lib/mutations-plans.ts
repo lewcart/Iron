@@ -202,6 +202,7 @@ export async function addRoutineExercise(opts: {
     exercise_uuid: opts.exercise_uuid.toLowerCase(),
     comment: opts.comment ?? null,
     order_index: max,
+    goal_window: null,
     ...syncMeta(),
   };
   await db.workout_routine_exercises.add(re);
@@ -211,6 +212,39 @@ export async function addRoutineExercise(opts: {
 
 export async function updateRoutineExerciseComment(uuid: string, comment: string | null): Promise<void> {
   await db.workout_routine_exercises.update(uuid, { comment, ...syncMeta() });
+  syncEngine.schedulePush();
+}
+
+export async function setRoutineExerciseGoalWindow(
+  uuid: string,
+  goal_window: 'strength' | 'power' | 'build' | 'pump' | 'endurance' | null,
+): Promise<void> {
+  await db.transaction(
+    'rw',
+    [db.workout_routine_exercises, db.workout_routine_sets],
+    async () => {
+      await db.workout_routine_exercises.update(uuid, { goal_window, ...syncMeta() });
+
+      // When a window is chosen, cascade its min/max to every set on this
+      // exercise so the editor and the workout-time spawn agree. Clearing the
+      // window leaves set-level values alone so user-entered overrides are
+      // preserved.
+      if (goal_window) {
+        const { REP_WINDOWS } = await import('./rep-windows');
+        const w = REP_WINDOWS[goal_window];
+        const sets = await db.workout_routine_sets
+          .filter(s => s.workout_routine_exercise_uuid === uuid && !s._deleted)
+          .toArray();
+        for (const s of sets) {
+          await db.workout_routine_sets.update(s.uuid, {
+            min_repetitions: w.min,
+            max_repetitions: w.max,
+            ...syncMeta(),
+          });
+        }
+      }
+    },
+  );
   syncEngine.schedulePush();
 }
 

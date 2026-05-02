@@ -111,6 +111,9 @@ export interface LocalWorkoutRoutineExercise extends SyncMeta {
   exercise_uuid: string;
   comment: string | null;
   order_index: number;
+  /** Rep-window goal (strength|power|build|pump|endurance). See
+   *  src/lib/rep-windows.ts for the canonical registry. NULL = unassigned. */
+  goal_window: 'strength' | 'power' | 'build' | 'pump' | 'endurance' | null;
 }
 
 export interface LocalWorkoutRoutineSet extends SyncMeta {
@@ -707,6 +710,11 @@ export class IronDB extends Dexie {
         if (row.blob === undefined) row.blob = null;
       });
     });
+
+    // v15: goal_window on workout_routine_exercises (mirrors Postgres migration
+    // 031). Additive non-indexed column — no schema-string change. Existing
+    // rows get undefined locally; the next sync pull overwrites with NULL.
+    this.version(15).stores(v14Stores);
   }
 }
 

@@ -28,8 +28,9 @@ import type { WorkoutPlan, WorkoutRoutine, WorkoutRoutineExercise, WorkoutRoutin
 import { formatTime, calcCompletedSets, calcTotalVolume } from './workout-utils';
 import { uuid as genUUID } from '@/lib/uuid';
 import { useUnit } from '@/context/UnitContext';
-import { useCurrentWorkoutFull, useExercises, getAutoFillValues, getAllTimeBest1RM, getLastSessionSetsForExercise } from '@/lib/useLocalDB';
+import { useCurrentWorkoutFull, useExercises, getAutoFillValues, getAllTimeBest1RM, getLastSessionSetsForExercise, getGoalWindowForWorkoutExercise } from '@/lib/useLocalDB';
 import { recommendForExercise, type ExerciseRecommendation } from '@/lib/progression';
+import { REP_WINDOWS, type RepWindow } from '@/lib/rep-windows';
 import { usePlansFull } from '@/lib/useLocalDB-plans';
 import type { LocalWorkoutExerciseEntry, LocalWorkoutWithExercises } from '@/lib/useLocalDB';
 import { isNewEstimated1RM } from '@/lib/pr';
@@ -409,13 +410,30 @@ function FinishWorkoutModal({
   const totalVolume = calcTotalVolume(exercises);
   const exerciseCount = exercises.length;
 
+  // Per-exercise goal_window resolution — needed so the recommendation rule
+  // takes the window-aware path. Falls back to legacy set-level min/max
+  // when an exercise has no goal_window assigned.
+  const [goalWindowByExercise, setGoalWindowByExercise] = useState<Map<string, RepWindow | null>>(new Map());
+  useEffect(() => {
+    let cancelled = false;
+    Promise.all(
+      exercises.map(we =>
+        getGoalWindowForWorkoutExercise(we.workout_uuid, we.exercise_uuid).then(w => [we.exercise_uuid, w] as const),
+      ),
+    ).then(pairs => {
+      if (!cancelled) setGoalWindowByExercise(new Map(pairs));
+    });
+    return () => { cancelled = true; };
+  }, [exercises]);
+
   // Per-exercise recommendation for the next session — computed against this
   // session's just-logged sets so the cue is locked in before the user closes
   // the modal. Mirrors the inline badge on the next session's exercise card.
   const nextSessionRecs = exercises
     .map(we => {
       const mode = we.exercise?.tracking_mode ?? 'reps';
-      const rec = recommendForExercise(we.sets, mode);
+      const goalWindow = goalWindowByExercise.get(we.exercise_uuid) ?? null;
+      const rec = recommendForExercise(we.sets, mode, goalWindow);
       return rec ? { title: we.exercise?.title ?? '', rec } : null;
     })
     .filter((x): x is { title: string; rec: ExerciseRecommendation } => x != null);
@@ -785,6 +803,35 @@ function AddExerciseSheet({
 }
 
 // ─── Set row ──────────────────────────────────────────────────────────────────
+// Window pill — the GOAL (permanent label, where this exercise lives on the
+// strength↔endurance spectrum). Trans-flag-mapped: extreme windows (Strength,
+// Endurance) get solid backgrounds; middle windows get soft tinted pills.
+// Distinct visual weight from RecommendationBadge so they read as different
+// kinds of information when shown side-by-side.
+const WINDOW_STYLE: Record<RepWindow, string> = {
+  strength:  'bg-sky-400 text-white',                  // solid trans-blue
+  power:     'bg-sky-500/15 text-sky-300',             // soft blue
+  build:     'bg-purple-500/15 text-purple-300',       // soft purple (the bridge)
+  pump:      'bg-pink-500/15 text-pink-300',           // soft trans-pink
+  endurance: 'bg-pink-400 text-white',                 // solid trans-pink (catch only)
+};
+
+function WindowPill({ window: win }: { window: RepWindow }) {
+  const w = REP_WINDOWS[win];
+  return (
+    <span
+      className={
+        'inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium tabular-nums '
+        + WINDOW_STYLE[win]
+      }
+      title={`Goal: ${w.label} (${w.min}–${w.max} reps)`}
+    >
+      <span>{w.label}</span>
+      <span className="opacity-60">{w.min}–{w.max}</span>
+    </span>
+  );
+}
+
 // Inline recommendation pill — shown on the exercise card next session and in
 // the finish-workout summary. Color tracks intensity (red = high, amber = medium
 // push, blue = back off, muted = hold).
@@ -1118,19 +1165,30 @@ function SortableExerciseCard({
     getAllTimeBest1RM(we.exercise_uuid, we.workout_uuid).then(setAllTimeBest1RM);
   }, [we.exercise_uuid, we.workout_uuid]);
 
-  // Progression cue from the most-recent prior session. Hidden if there's no
-  // prior data or the rule produces no recommendation. Computed once per
-  // exercise; no re-fetch on rest-timer ticks since deps are stable.
+  // Goal window pulled from the source routine_exercise. Null if the workout
+  // wasn't started from a routine (empty workout) or the exercise isn't on it.
+  const [goalWindow, setGoalWindow] = useState<RepWindow | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    getGoalWindowForWorkoutExercise(we.workout_uuid, we.exercise_uuid).then(w => {
+      if (!cancelled) setGoalWindow(w);
+    });
+    return () => { cancelled = true; };
+  }, [we.workout_uuid, we.exercise_uuid]);
+
+  // Progression cue from the most-recent prior session. Window-aware when
+  // goal_window is set; falls back to set-level min/max otherwise. Recomputes
+  // when goalWindow resolves so the rule uses the right path.
   const [recommendation, setRecommendation] = useState<ExerciseRecommendation | null>(null);
   useEffect(() => {
     let cancelled = false;
     getLastSessionSetsForExercise(we.exercise_uuid, we.workout_uuid).then(prevSets => {
       if (cancelled) return;
       const mode = we.exercise?.tracking_mode ?? 'reps';
-      setRecommendation(recommendForExercise(prevSets, mode));
+      setRecommendation(recommendForExercise(prevSets, mode, goalWindow));
     });
     return () => { cancelled = true; };
-  }, [we.exercise_uuid, we.workout_uuid, we.exercise?.tracking_mode]);
+  }, [we.exercise_uuid, we.workout_uuid, we.exercise?.tracking_mode, goalWindow]);
 
   return (
     <div ref={setNodeRef} style={style} className="ios-section">
@@ -1156,8 +1214,9 @@ function SortableExerciseCard({
               <span className={`block font-semibold text-sm truncate ${allDone ? 'text-muted-foreground' : ''}`}>
                 {we.exercise?.title ?? ''}
               </span>
-              {(recommendation || we.comment) && (
-                <span className="flex items-center gap-1.5 mt-0.5 min-w-0">
+              {(goalWindow || recommendation || we.comment) && (
+                <span className="flex items-center gap-1.5 mt-0.5 min-w-0 flex-wrap">
+                  {goalWindow && <WindowPill window={goalWindow} />}
                   {recommendation && !allDone && <RecommendationBadge rec={recommendation} />}
                   {we.comment && (
                     <span className="text-xs text-muted-foreground italic truncate">{we.comment}</span>

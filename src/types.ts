@@ -83,6 +83,9 @@ export interface WorkoutRoutineExercise {
   exercise_uuid: string;
   comment: string | null;
   order_index: number;
+  /** Rep-window goal (strength|power|build|pump|endurance). See
+   *  src/lib/rep-windows.ts. NULL = unassigned (legacy or custom). */
+  goal_window: 'strength' | 'power' | 'build' | 'pump' | 'endurance' | null;
   /** Present when joined from exercises table (plans UI, exports). */
   exercise_title?: string | null;
   /** Present when fetched with sets (plans UI). */
