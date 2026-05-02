@@ -90,6 +90,7 @@ describe('POST /api/inspo-photos', () => {
       taken_at: '2026-04-09T10:00:00.000Z',
       burst_group_id: null,
       pose: null,
+      crop_offset_y: null,
     });
   });
 
@@ -125,6 +126,7 @@ describe('POST /api/inspo-photos', () => {
       taken_at: undefined,
       burst_group_id: null,
       pose: null,
+      crop_offset_y: null,
     });
   });
 });
