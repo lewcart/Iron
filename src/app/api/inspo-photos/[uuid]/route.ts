@@ -30,7 +30,7 @@ export async function PATCH(
     return NextResponse.json({ error: 'JSON body required' }, { status: 400 });
   }
 
-  const updates: { pose?: ValidPose | null; notes?: string | null } = {};
+  const updates: { pose?: ValidPose | null; notes?: string | null; crop_offset_y?: number | null } = {};
   if ('pose' in body) {
     if (body.pose === null) {
       updates.pose = null;
@@ -45,6 +45,18 @@ export async function PATCH(
   }
   if ('notes' in body) {
     updates.notes = body.notes == null ? null : String(body.notes);
+  }
+  if ('crop_offset_y' in body) {
+    if (body.crop_offset_y === null) {
+      updates.crop_offset_y = null;
+    } else if (typeof body.crop_offset_y === 'number' && body.crop_offset_y >= 0 && body.crop_offset_y <= 100) {
+      updates.crop_offset_y = body.crop_offset_y;
+    } else {
+      return NextResponse.json(
+        { error: 'crop_offset_y must be a number 0-100 or null' },
+        { status: 400 },
+      );
+    }
   }
 
   if (Object.keys(updates).length === 0) {

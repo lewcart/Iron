@@ -4,6 +4,7 @@ import { db } from '@/db/local';
 import { syncEngine } from '@/lib/sync';
 import { uuid as genUUID } from '@/lib/uuid';
 import { localStubUrl, processPendingUploads } from '@/lib/photo-upload-queue';
+import { tryDetectFaceY } from '@/lib/face-detect';
 import type {
   LocalMeasurementLog,
   LocalBodySpecLog,
@@ -144,6 +145,9 @@ export async function recordProgressPhotoFromBlob(opts: {
   taken_at?: string;
 }): Promise<LocalProgressPhoto> {
   const photoUuid = genUUID();
+  // Best-effort face detection — null on Safari/iOS or back-pose photos.
+  // Manual drag-to-nudge in adjust mode is the safety net.
+  const cropOffsetY = await tryDetectFaceY(opts.blob).catch(() => null);
   const photo: LocalProgressPhoto = {
     uuid: photoUuid,
     blob_url: localStubUrl(photoUuid),
@@ -152,6 +156,7 @@ export async function recordProgressPhotoFromBlob(opts: {
     taken_at: opts.taken_at ?? new Date().toISOString(),
     blob: opts.blob,
     uploaded: '0',
+    crop_offset_y: cropOffsetY,
     // Hold _synced=true while uploaded='0' so the local: stub never reaches
     // the server. uploadProgressPhotoRow flips _synced=false once the real
     // URL is in place.

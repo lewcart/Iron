@@ -8,6 +8,7 @@ import { onNativeBurstTrigger, savePhotoToLibrary } from '@/lib/inspo-burst-cont
 import { db } from '@/db/local';
 import { uuid as genUUID } from '@/lib/uuid';
 import { uploadBlobToVercel } from '@/lib/photo-upload-queue';
+import { tryDetectFaceY } from '@/lib/face-detect';
 import type { InspoPhotoPose } from '@/types';
 
 const BURST_COUNT = 5;
@@ -144,17 +145,22 @@ export function InspoCaptureButton() {
       local.map(async ({ uuid, blob, takenAt }, i) => {
         try {
           const filename = `inspo-burst-${burstGroupId}-${i + 1}.jpg`;
-          const url = await uploadBlob(blob, filename);
+          // Run face detection in parallel with upload — best-effort, never blocks.
+          const [url, cropOffsetY] = await Promise.all([
+            uploadBlob(blob, filename),
+            tryDetectFaceY(blob).catch(() => null),
+          ]);
           await fetchJsonAuthed(`${apiBase()}/api/inspo-photos`, {
             method: 'POST',
             body: JSON.stringify({
               blob_url: url,
               taken_at: takenAt,
               burst_group_id: burstGroupId,
+              crop_offset_y: cropOffsetY,
             }),
           });
           try {
-            await db.inspo_photos.update(uuid, { uploaded: '1', blob_url: url });
+            await db.inspo_photos.update(uuid, { uploaded: '1', blob_url: url, crop_offset_y: cropOffsetY });
           } catch { /* non-fatal */ }
         } catch (err) {
           failures.push(err instanceof Error ? err.message : 'upload error');
