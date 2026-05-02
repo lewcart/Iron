@@ -1615,6 +1615,9 @@ import {
   listProgressPhotos as dbListProgressPhotos,
   createInspoPhoto as dbCreateInspoPhoto,
   listInspoPhotos as dbListInspoPhotos,
+  createProjectionPhoto as dbCreateProjectionPhoto,
+  listProjectionPhotos as dbListProjectionPhotos,
+  deleteProjectionPhoto as dbDeleteProjectionPhoto,
 } from '@/db/queries';
 
 const MIME_TO_EXT: Record<string, string> = {
@@ -1743,6 +1746,49 @@ async function listInspoPhotosTool(args: Record<string, unknown>) {
   const limit = typeof args.limit === 'number' ? args.limit : 50;
   const photos = await dbListInspoPhotos(limit);
   return toolResult(photos);
+}
+
+async function uploadProjectionPhotoTool(args: Record<string, unknown>) {
+  const pose = args.pose;
+  if (pose !== 'front' && pose !== 'side' && pose !== 'back') {
+    return toolError('pose must be one of: front, side, back');
+  }
+  const resolved = await resolveImageBuffer(args);
+  if ('error' in resolved) return toolError(resolved.error);
+
+  const pathname = `projection-photos/${crypto.randomUUID()}-${pose}.${resolved.ext}`;
+  const blob = await put(pathname, resolved.buffer, {
+    access: 'public',
+    contentType: resolved.contentType,
+  });
+
+  const photo = await dbCreateProjectionPhoto({
+    blob_url: blob.url,
+    pose,
+    notes: typeof args.notes === 'string' ? args.notes : null,
+    taken_at: typeof args.taken_at === 'string' ? args.taken_at : undefined,
+    source_progress_photo_uuid:
+      typeof args.source_progress_photo_uuid === 'string' ? args.source_progress_photo_uuid : null,
+    target_horizon: typeof args.target_horizon === 'string' ? args.target_horizon : null,
+  });
+  return toolResult(photo);
+}
+
+async function listProjectionPhotosTool(args: Record<string, unknown>) {
+  const limit = typeof args.limit === 'number' ? args.limit : 50;
+  const pose = args.pose === 'front' || args.pose === 'side' || args.pose === 'back'
+    ? (args.pose as 'front' | 'side' | 'back')
+    : undefined;
+  const photos = await dbListProjectionPhotos({ pose, limit });
+  return toolResult(photos);
+}
+
+async function deleteProjectionPhotoTool(args: Record<string, unknown>) {
+  if (typeof args.uuid !== 'string' || args.uuid.length === 0) {
+    return toolError('uuid is required');
+  }
+  await dbDeleteProjectionPhoto(args.uuid);
+  return toolResult({ ok: true });
 }
 
 // ── HealthKit tools ───────────────────────────────────────────────────────────
@@ -3531,6 +3577,61 @@ export const tools: MCPTool[] = [
       properties: { limit: { type: 'number', description: 'Default 50.' } },
     },
     execute: listInspoPhotosTool,
+  },
+  {
+    name: 'upload_projection_photo',
+    description:
+      'Upload an AI-generated projection (Lou\'s aspirational future-self image, generated outside this app — ChatGPT/Midjourney/etc.) to Vercel Blob and record it in projection_photos. Schema mirrors progress_photos so the compare viewer can line a projection up against a real progress photo at the same pose. Pose is required. Optional source_progress_photo_uuid links the projection to the photo it was generated from (the compare viewer prefers that pairing). Optional target_horizon is a label like "3mo" / "6mo" / "12mo" or freeform.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        pose: { type: 'string', enum: ['front', 'side', 'back'], description: 'Required pose tag' },
+        image_base64: {
+          type: 'string',
+          description: 'Base64-encoded image bytes. Accepts raw base64 or "data:image/...;base64,..." form.',
+        },
+        image_url: {
+          type: 'string',
+          description: 'Public URL of an image to fetch and re-host on Vercel Blob.',
+        },
+        mime_type: { type: 'string' },
+        notes: { type: 'string' },
+        taken_at: { type: 'string', description: 'ISO timestamp; defaults to now.' },
+        source_progress_photo_uuid: {
+          type: 'string',
+          description: 'Optional UUID of the progress photo this projection was generated from.',
+        },
+        target_horizon: {
+          type: 'string',
+          description: 'Optional label like "3mo" / "6mo" / "12mo" or freeform.',
+        },
+      },
+      required: ['pose'],
+    },
+    execute: uploadProjectionPhotoTool,
+  },
+  {
+    name: 'list_projection_photos',
+    description:
+      'List projection photos newest first. Returns blob_url, pose, notes, taken_at, source_progress_photo_uuid, target_horizon. Filter by pose to compare against a specific progress-photo pose.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        pose: { type: 'string', enum: ['front', 'side', 'back'] },
+        limit: { type: 'number', description: 'Default 50.' },
+      },
+    },
+    execute: listProjectionPhotosTool,
+  },
+  {
+    name: 'delete_projection_photo',
+    description: 'Delete a projection photo by uuid. Removes the database row and the Vercel Blob.',
+    inputSchema: {
+      type: 'object',
+      properties: { uuid: { type: 'string' } },
+      required: ['uuid'],
+    },
+    execute: deleteProjectionPhotoTool,
   },
 
   // ── HealthKit tools ─────────────────────────────────────────────────────────

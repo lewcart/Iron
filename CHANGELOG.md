@@ -2,7 +2,7 @@
 
 All notable changes to Rebirth are documented here.
 
-## [0.5.1] - 2026-05-02
+## [0.6.1] - 2026-05-02
 
 ### Added
 - **In-app AI generation of exercise demo images.** A pencil overlay on the demo strip opens a bottom sheet with the regeneration history (each pair shown side-by-side with the active one marked) and a sticky **Generate** / **Regenerate (~$0.50)** footer. Generation runs server-side via `gpt-image-1`: frame 1 is generated, then frame 2 is generated via `images.edit` with frame 1 as the reference image so the athlete, gym, lighting, and framing stay consistent across both panels. Replaces the prior 2-panel composite + post-hoc split, which mid-cut content when `gpt-image-1` didn't honor the 50% boundary. Tap any prior pair in the history to reactivate it; the demo strip switches instantly via local-first sync.
@@ -20,6 +20,22 @@ All notable changes to Rebirth are documented here.
 
 ### Removed
 - **`src/lib/split-vertical-panels.ts`.** No longer used after the route rewrite. The two relevant lines (`.resize(600, 800).jpeg({ quality: 75 })`) inlined into a small pipeline helper.
+
+## [0.6.0] - 2026-05-02
+
+### Added
+- **Projections** — a new photo surface for AI-generated future-self images. Generate them elsewhere (ChatGPT, Midjourney, etc.) and upload them here so they line up against progress photos at the same pose for side-by-side comparison.
+- **`/projections` gallery.** Pose filter chips with live counts, grid layout, pose + horizon badges on each thumbnail, body-positive empty state framed as planning.
+- **Single-screen upload sheet.** Pose selector, source-progress-photo picker (filtered to the chosen pose, excludes still-uploading photos), target-horizon segmented control (3mo / 6mo / 12mo), notes input.
+- **Strategy page split.** The single inspo strip is now two distinct sections: **Projections** (above, dominant — trans-blue Sparkles, larger landscape thumbs, ring accent) and **Inspiration** (below, secondary — trans-pink Camera, 4-col strip). They look like different kinds of thing on first read.
+- **Compare-with-projection dialog.** Open from any progress photo on `/measurements?tab=photos`. Full-screen draggable before/after divider — slide to reveal more of either side. Pose chip strip with per-pose counts and a `(Source)` marker on the source pose. Alternate-projection carousel when multiple exist at the same pose. Source-linked projection (when uploaded with `source_progress_photo_uuid`) sorts first.
+- **Pose-mismatch UX.** Switching to a pose with no projection shows a sparkle empty state with a primary Upload CTA and `View {other-pose}` fallback chips. Never silently empty.
+- **Banner CTA on the photos tab.** "Compare your latest with your projection →" appears at the top of `/measurements?tab=photos` when at least one projection exists.
+- **MCP tools for projections.** `upload_projection_photo`, `list_projection_photos`, `delete_projection_photo` — same shape as the existing photo tools, plus optional `source_progress_photo_uuid` and `target_horizon` for compare-pair linking.
+- **CLAUDE.md gets a Projection workflow section** in the same shape as the existing nutrition/sleep/strength sections.
+
+### Fixed
+- **Orphan-blob bug on photo delete.** `deleteProgressPhoto` and `deleteInspoPhoto` were leaving the Vercel Blob behind on user-initiated delete. Both now clean up the blob alongside the row (skipping `local:*` stubs that aren't on Blob yet).
 
 ## [0.5.0] - 2026-05-02
 

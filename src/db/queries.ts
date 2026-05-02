@@ -20,6 +20,7 @@ import type {
   ClothesTestLog,
   ProgressPhoto,
   InspoPhoto,
+  ProjectionPhoto,
   InbodyScan,
   BodyGoal,
   BodyNormRange,
@@ -2158,7 +2159,17 @@ export async function listProgressPhotos(limit = 50): Promise<ProgressPhoto[]> {
 }
 
 export async function deleteProgressPhoto(uuid: string): Promise<void> {
+  // Fetch blob_url first so we can clean up the Vercel Blob alongside the row.
+  // Skip deletion of `local:*` stubs — those are Dexie-only, never on Blob.
+  const row = await queryOne<{ blob_url: string }>(
+    `SELECT blob_url FROM progress_photos WHERE uuid = $1`,
+    [uuid],
+  );
   await query(`DELETE FROM progress_photos WHERE uuid = $1`, [uuid]);
+  if (row?.blob_url && !row.blob_url.startsWith('local:')) {
+    const { del } = await import('@vercel/blob');
+    await del(row.blob_url).catch(() => { /* non-fatal: row is gone, blob retry pending */ });
+  }
 }
 
 // ===== INSPO PHOTOS =====
@@ -2222,7 +2233,90 @@ export async function updateInspoPhoto(
 }
 
 export async function deleteInspoPhoto(uuid: string): Promise<void> {
+  // Fetch blob_url first so we can clean up the Vercel Blob alongside the row.
+  // Skip deletion of `local:*` stubs — those are Dexie-only, never on Blob.
+  const row = await queryOne<{ blob_url: string }>(
+    `SELECT blob_url FROM inspo_photos WHERE uuid = $1`,
+    [uuid],
+  );
   await query(`DELETE FROM inspo_photos WHERE uuid = $1`, [uuid]);
+  if (row?.blob_url && !row.blob_url.startsWith('local:')) {
+    const { del } = await import('@vercel/blob');
+    await del(row.blob_url).catch(() => { /* non-fatal */ });
+  }
+}
+
+// ===== PROJECTION PHOTOS =====
+//
+// AI-generated images of Lou (made outside this app) uploaded for comparison
+// against progress photos. REST-only (not in CDC sync) — same pattern as inspo.
+
+function parseProjectionPhoto(row: DbRow): ProjectionPhoto {
+  return {
+    uuid: row.uuid as string,
+    blob_url: row.blob_url as string,
+    pose: row.pose as ProjectionPhoto['pose'],
+    notes: (row.notes as string | null) ?? null,
+    taken_at: row.taken_at as string,
+    source_progress_photo_uuid: (row.source_progress_photo_uuid as string | null) ?? null,
+    target_horizon: (row.target_horizon as string | null) ?? null,
+  };
+}
+
+export async function createProjectionPhoto(data: {
+  blob_url: string;
+  pose: 'front' | 'side' | 'back';
+  notes?: string | null;
+  taken_at?: string;
+  source_progress_photo_uuid?: string | null;
+  target_horizon?: string | null;
+}): Promise<ProjectionPhoto> {
+  const uuid = randomUUID();
+  const row = await queryOne(
+    `INSERT INTO projection_photos
+       (uuid, blob_url, pose, notes, taken_at, source_progress_photo_uuid, target_horizon)
+     VALUES ($1, $2, $3, $4, COALESCE($5::TIMESTAMPTZ, NOW()), $6, $7)
+     RETURNING *`,
+    [
+      uuid,
+      data.blob_url,
+      data.pose,
+      data.notes ?? null,
+      data.taken_at ?? null,
+      data.source_progress_photo_uuid ?? null,
+      data.target_horizon ?? null,
+    ],
+  );
+  return parseProjectionPhoto(row!);
+}
+
+export async function listProjectionPhotos(opts: { pose?: 'front' | 'side' | 'back'; limit?: number } = {}): Promise<ProjectionPhoto[]> {
+  const limit = opts.limit ?? 50;
+  if (opts.pose) {
+    const rows = await query(
+      `SELECT * FROM projection_photos WHERE pose = $1 ORDER BY taken_at DESC LIMIT $2`,
+      [opts.pose, limit],
+    );
+    return rows.map(parseProjectionPhoto);
+  }
+  const rows = await query(
+    `SELECT * FROM projection_photos ORDER BY taken_at DESC LIMIT $1`,
+    [limit],
+  );
+  return rows.map(parseProjectionPhoto);
+}
+
+export async function deleteProjectionPhoto(uuid: string): Promise<void> {
+  // Fetch blob_url first so we can delete the Vercel Blob alongside the row.
+  const row = await queryOne<{ blob_url: string }>(
+    `SELECT blob_url FROM projection_photos WHERE uuid = $1`,
+    [uuid],
+  );
+  await query(`DELETE FROM projection_photos WHERE uuid = $1`, [uuid]);
+  if (row?.blob_url && !row.blob_url.startsWith('local:')) {
+    const { del } = await import('@vercel/blob');
+    await del(row.blob_url).catch(() => { /* non-fatal */ });
+  }
 }
 
 export { importFitbeeExport } from './fitbee-import';
