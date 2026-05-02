@@ -19,6 +19,10 @@ import { Sheet } from '@/components/ui/sheet';
 import { isLocalStub } from '@/lib/photo-upload-queue';
 import { PhotoSheet } from './PhotoSheet';
 import { InbodyScanSheet } from './InbodyScanSheet';
+import { CompareWithProjectionDialog } from './CompareWithProjectionDialog';
+import { apiBase, fetchJsonAuthed } from '@/lib/api/client';
+import type { ProjectionPhoto } from '@/types';
+import { GitCompare } from 'lucide-react';
 
 /** Render a progress photo, transparently sourcing the JPEG from either the
  *  remote Vercel Blob URL or — for queued/retrying captures — the locally-held
@@ -153,6 +157,17 @@ function MeasurementsInner() {
   const [logSheetOpen, setLogSheetOpen] = useState(false);
   const [photoSheetOpen, setPhotoSheetOpen] = useState(false);
   const [inbodySheetOpen, setInbodySheetOpen] = useState(false);
+
+  // Projection comparison: fetch lightweight count + open dialog with the
+  // tapped progress photo as the source. The dialog itself loads the full
+  // projection list when it opens, so this query is cheap.
+  const [projectionCount, setProjectionCount] = useState<number | null>(null);
+  const [compareSource, setCompareSource] = useState<LocalProgressPhoto | null>(null);
+  useEffect(() => {
+    fetchJsonAuthed<ProjectionPhoto[]>(`${apiBase()}/api/projection-photos?limit=1`)
+      .then((rows) => setProjectionCount(rows.length))
+      .catch(() => setProjectionCount(0));
+  }, []);
 
   const handleSaveMeasurements = async () => {
     const hasAny = SITES.some(s => inputs[s.key]) || !!weightInput;
@@ -573,6 +588,18 @@ function MeasurementsInner() {
 
   const photosSection = (
     <div className="space-y-4">
+      {/* Compare-with-projection banner — only shown when ≥1 projection exists */}
+      {projectionCount !== null && projectionCount > 0 && photos.length > 0 && (
+        <Link
+          href="/projections"
+          className="flex items-center gap-2 px-3 py-2 rounded-lg bg-trans-blue/10 border border-trans-blue/30 text-trans-blue text-xs font-medium"
+        >
+          <GitCompare className="h-3.5 w-3.5" />
+          <span>Compare your latest with your projection</span>
+          <span className="ml-auto opacity-60">→</span>
+        </Link>
+      )}
+
       {/* Gallery */}
       {!photosLoading && photos.length > 0 && (
         <div>
@@ -590,6 +617,15 @@ function MeasurementsInner() {
                   </div>
                   <div className="flex items-center gap-2">
                     <span className="text-xs text-muted-foreground">{formatDate(photo.taken_at)}</span>
+                    {projectionCount !== null && projectionCount > 0 && !isLocalStub(photo.blob_url) && (
+                      <button
+                        onClick={() => setCompareSource(photo)}
+                        className="text-trans-blue p-1 min-h-[44px] min-w-[44px] flex items-center justify-center"
+                        aria-label="Compare with projection"
+                      >
+                        <GitCompare className="h-4 w-4" />
+                      </button>
+                    )}
                     <button
                       onClick={() => handleDeletePhoto(photo.uuid)}
                       className="text-red-500 p-1 min-h-[44px] min-w-[44px] flex items-center justify-center"
@@ -886,6 +922,11 @@ function MeasurementsInner() {
 
       <PhotoSheet open={photoSheetOpen} onClose={() => setPhotoSheetOpen(false)} />
       <InbodyScanSheet open={inbodySheetOpen} onClose={() => setInbodySheetOpen(false)} />
+      <CompareWithProjectionDialog
+        open={compareSource !== null}
+        onClose={() => setCompareSource(null)}
+        source={compareSource}
+      />
     </main>
   );
 }

@@ -32,7 +32,7 @@ import type {
   NorthStarMetric,
   ProgrammingDose,
 } from '@/db/local';
-import type { InspoPhoto } from '@/types';
+import type { InspoPhoto, ProjectionPhoto } from '@/types';
 import { METRIC_LABEL } from '@/lib/inbody';
 import { apiBase, fetchJsonAuthed } from '@/lib/api/client';
 import {
@@ -49,6 +49,7 @@ export default function StrategyPage() {
   const scans = useInbodyScans(1);
   const latestScan = scans[0] ?? null;
   const inspoPhotos = useInspoPhotosFeed(8);
+  const projections = useProjectionsFeed(4);
 
   // useLiveQuery returns undefined while loading, null/[] when nothing matches.
   const loading = vision === undefined || plan === undefined;
@@ -76,9 +77,30 @@ export default function StrategyPage() {
       {vision && <VisionCard vision={vision} />}
       {plan && <PlanCard plan={plan} checkpoints={checkpoints} />}
       {goals.length > 0 && <GoalsCard goals={goals} latestScan={latestScan} />}
+      <ProjectionsCard photos={projections} />
       <InspoCard photos={inspoPhotos} />
     </main>
   );
+}
+
+// ─── Projections (REST — projection_photos is REST-only, like inspo) ────────
+
+function useProjectionsFeed(limit: number): ProjectionPhoto[] | undefined {
+  const [photos, setPhotos] = useState<ProjectionPhoto[] | undefined>(undefined);
+  useEffect(() => {
+    let cancelled = false;
+    fetchJsonAuthed<ProjectionPhoto[]>(`${apiBase()}/api/projection-photos?limit=${limit}`)
+      .then((rows) => {
+        if (!cancelled) setPhotos(rows);
+      })
+      .catch(() => {
+        if (!cancelled) setPhotos([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [limit]);
+  return photos;
 }
 
 // ─── Inspo photos (REST — inspo_photos is local-only / not in CDC sync) ──────
@@ -485,6 +507,79 @@ function GoalRow({
   );
 }
 
+// ─── Projections (Lou, AI-generated) ────────────────────────────────────────
+
+function ProjectionsCard({ photos }: { photos: ProjectionPhoto[] | undefined }) {
+  if (photos === undefined) {
+    return (
+      <section className="rounded-2xl bg-card border border-border shadow-sm h-40 animate-pulse" />
+    );
+  }
+  return (
+    <section className="rounded-2xl bg-card border border-border shadow-sm overflow-hidden">
+      <header className="px-5 pt-5 pb-3 flex items-start gap-3">
+        <div className="rounded-xl bg-trans-blue/10 p-2 shrink-0">
+          <Sparkles className="h-5 w-5 text-trans-blue" strokeWidth={2} />
+        </div>
+        <div className="flex-1 min-w-0">
+          <h2 className="text-lg font-semibold leading-tight">Projections</h2>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            Where you&apos;re heading ·{' '}
+            <Link href="/projections" className="text-trans-blue underline underline-offset-2">
+              Open gallery
+            </Link>
+          </p>
+        </div>
+      </header>
+      <div className="px-5 pb-5">
+        {photos.length === 0 ? (
+          <Link
+            href="/projections"
+            className="flex flex-col items-center justify-center gap-2 py-6 rounded-xl border border-dashed border-trans-blue/40 text-trans-blue"
+          >
+            <Sparkles className="h-5 w-5" />
+            <span className="text-sm font-medium">Upload your first projection</span>
+            <span className="text-[11px] text-muted-foreground text-center max-w-xs">
+              Generate one elsewhere (ChatGPT/Midjourney) and link it to a progress photo
+            </span>
+          </Link>
+        ) : (
+          // Larger, landscape-leaning thumbs so the section feels distinct from
+          // the 4-col Inspiration strip below. Show last 4, dominant.
+          <div className="grid grid-cols-2 gap-2">
+            {photos.slice(0, 4).map((photo) => (
+              <Link
+                key={photo.uuid}
+                href="/projections"
+                className="relative aspect-[4/5] overflow-hidden rounded-lg bg-muted ring-1 ring-trans-blue/20"
+              >
+                <Image
+                  src={photo.blob_url}
+                  alt={photo.notes ?? 'Projection'}
+                  fill
+                  sizes="(max-width: 640px) 50vw, 25vw"
+                  className="object-cover"
+                  unoptimized
+                />
+                <div className="absolute bottom-1 left-1 flex gap-1">
+                  <span className="text-[9px] uppercase tracking-wide font-semibold px-1.5 py-0.5 rounded bg-black/60 text-white">
+                    {photo.pose}
+                  </span>
+                  {photo.target_horizon && (
+                    <span className="text-[9px] uppercase tracking-wide font-semibold px-1.5 py-0.5 rounded bg-trans-blue/80 text-white">
+                      {photo.target_horizon}
+                    </span>
+                  )}
+                </div>
+              </Link>
+            ))}
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
 // ─── Inspo photos ────────────────────────────────────────────────────────────
 
 function InspoCard({ photos }: { photos: InspoPhoto[] | undefined }) {
@@ -501,10 +596,10 @@ function InspoCard({ photos }: { photos: InspoPhoto[] | undefined }) {
           <Camera className="h-5 w-5 text-trans-pink" strokeWidth={2} />
         </div>
         <div className="flex-1 min-w-0">
-          <h2 className="text-lg font-semibold leading-tight">Inspo</h2>
+          <h2 className="text-lg font-semibold leading-tight">Inspiration</h2>
           <p className="text-xs text-muted-foreground mt-0.5">
-            Aspirational physiques ·{' '}
-            <Link href="/inspo" className="text-trans-blue underline underline-offset-2">
+            Physiques to draw from ·{' '}
+            <Link href="/inspo" className="text-trans-pink underline underline-offset-2">
               Open gallery
             </Link>
           </p>

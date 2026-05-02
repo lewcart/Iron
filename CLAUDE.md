@@ -64,3 +64,23 @@ Set quality:
 - **`effective_set_count`** (Phase 3) is the RIR-weighted variant on every `get_sets_per_muscle` row and `get_weekly_summary.by_muscle` row: RIR 0–3 counts 1.0, RIR 4 counts 0.5, RIR 5+ counts 0.0, RIR NULL counts 1.0 (charitable default until corpus exists). Until RIR is logged on most sets, `effective_set_count ≈ set_count`. The /feed Muscles This Week tile flags a muscle with a "JUNK" badge when `effective / set_count < 0.6` AND `set_count > 0` — meaning most logged sets were too far from failure to drive hypertrophy.
 
 `coverage` flag on `get_sets_per_muscle` rows: `'none'` means no exercise in the catalog tags this muscle (yet — the audit pass will populate). Until then those muscles can't accumulate sets. UI collapses them into a footer.
+
+## Projection workflow (for MCP agents)
+
+A "projection" is an AI-generated image of Lou (made outside this app, e.g. ChatGPT / Midjourney) showing an aspirational future-self physique. Lou uploads them here so the photos-compare viewer can line them up against real progress photos at the same pose. Schema mirrors `progress_photos` with optional `source_progress_photo_uuid` (link to source) and `target_horizon` (label).
+
+Tool selection:
+- `upload_projection_photo` → store image + metadata (pose required).
+- `list_projection_photos` → list newest first; filter by pose.
+- `delete_projection_photo` → delete row + Vercel Blob.
+
+Common workflows:
+- **"Upload a projection of me 6mo leaner, front pose"** → `upload_projection_photo({ pose: 'front', image_base64 (or image_url), target_horizon: '6mo', source_progress_photo_uuid? })`
+- **"Show my projections"** → `list_projection_photos({ pose?: 'front', limit: 20 })`
+- **"Compare today's progress to my projection"** → `list_progress_photos({ limit: 1 })` + `list_projection_photos({ pose, limit: 1 })` and surface both `blob_url`s.
+
+Notes:
+- Pose required (`'front'|'side'|'back'`). Mirrors `progress_photos.pose` so the compare viewer can line them up.
+- Optional `source_progress_photo_uuid` links the projection to the photo it was generated from — the compare viewer prefers that pairing if set.
+- `target_horizon` is a label (`'3mo'|'6mo'|'12mo'` or freeform), not a date.
+- Generation happens outside this app. Lou uploads pre-generated images; there is no in-app image generation.

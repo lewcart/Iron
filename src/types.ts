@@ -331,6 +331,20 @@ export interface InspoPhoto {
   pose: InspoPhotoPose | null;
 }
 
+// Projection photos — AI-generated images of Lou (made outside this app, e.g.
+// ChatGPT / Midjourney) uploaded here so they can be compared against progress
+// photos at the same pose. Schema mirrors progress_photos with optional source
+// link + target_horizon label. Pose is required (mirrors ProgressPhotoPose).
+export interface ProjectionPhoto {
+  uuid: string;
+  blob_url: string;
+  pose: ProgressPhotoPose;
+  notes: string | null;
+  taken_at: string;
+  source_progress_photo_uuid: string | null;
+  target_horizon: string | null;
+}
+
 // ── InBody scan catalog ──────────────────────────────────────────────────────
 export type BodyBalance = 'balanced' | 'under' | 'over' | 'slightly_under' | 'slightly_over';
 

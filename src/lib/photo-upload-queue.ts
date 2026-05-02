@@ -31,6 +31,7 @@ import { syncEngine } from '@/lib/sync';
 const UPLOAD_ROUTES = {
   progress_photos: '/api/progress-photos/upload',
   inspo_photos: '/api/inspo-photos/upload',
+  projection_photos: '/api/projection-photos/upload',
 } as const;
 
 export type PhotoTable = keyof typeof UPLOAD_ROUTES;
