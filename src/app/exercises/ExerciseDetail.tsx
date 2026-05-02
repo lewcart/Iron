@@ -180,6 +180,44 @@ function LongestHoldHero({
   );
 }
 
+/** Compact PB readout sized to fit the demo strip's leading cell
+ *  (aspect-[3/4] portrait). Shown when there are <3 demo frames so the
+ *  strip's left third stays useful instead of dead air. The standalone
+ *  OneRMHero/LongestHoldHero card is hidden when this renders so we
+ *  don't show the same number twice. */
+function PbStripCell({
+  label,
+  value,
+  unit,
+  caption,
+}: {
+  label: string;
+  value: string;
+  unit?: string;
+  caption?: string;
+}) {
+  return (
+    <div className="w-full h-full bg-secondary/40 flex flex-col items-center justify-center px-2 py-3 text-center">
+      <p className="text-[9px] font-semibold uppercase tracking-wide text-muted-foreground leading-tight">
+        {label}
+      </p>
+      <div className="flex items-baseline gap-0.5 mt-1.5">
+        <span className="text-2xl font-bold text-foreground tabular-nums leading-none">
+          {value}
+        </span>
+        {unit && (
+          <span className="text-[10px] text-muted-foreground">{unit}</span>
+        )}
+      </div>
+      {caption && (
+        <p className="text-[9px] text-muted-foreground mt-1.5 leading-tight">
+          {caption}
+        </p>
+      )}
+    </div>
+  );
+}
+
 /** Format a seconds count as the most compact human-readable string.
  *  60 → "1:00", 75 → "1:15", 3600 → "1:00:00", 9 → "9s". */
 function formatDuration(totalSeconds: number): string {
@@ -448,6 +486,47 @@ export default function ExerciseDetail({
     : (progressData != null && (progressData.progress.length > 0 || sessions.length > 0));
   const prWorkoutUuid = progressData?.prs.estimated1RM?.workout_uuid;
 
+  // Compose the demo-strip's leading PB cell + decide whether to hide the
+  // standalone hero card below the strip. The strip itself only USES the
+  // slot when there are <3 frames; here we only need to compute it once
+  // and let the strip drop it for the 3-frame catalog case.
+  // Both the cell and the hero share the same data — the cell is a denser
+  // representation of the hero, so we render one OR the other, never both.
+  const stripFrameCount = (exercise.image_urls && exercise.image_urls.length > 0)
+    ? exercise.image_urls.length
+    : Math.min(Math.max(exercise.image_count, 0), 3);
+  const stripWillUseLeadingSlot = chrome === 'page' && stripFrameCount > 0 && stripFrameCount < 3;
+  const pbStripCell: React.ReactNode = stripWillUseLeadingSlot ? (
+    isTimeMode ? (
+      <PbStripCell
+        label="Longest Hold"
+        value={
+          timePRs?.longestHold?.duration_seconds != null
+            ? formatDuration(timePRs.longestHold.duration_seconds)
+            : '—'
+        }
+        caption={
+          timePRs?.longestHold ? formatDate(timePRs.longestHold.date) : 'No data yet'
+        }
+      />
+    ) : (
+      <PbStripCell
+        label="Personal Best"
+        value={
+          progressData?.prs.estimated1RM
+            ? `${Math.round(toDisplay(progressData.prs.estimated1RM.estimated_1rm))}`
+            : '—'
+        }
+        unit={progressData?.prs.estimated1RM ? label : undefined}
+        caption={
+          progressData?.prs.estimated1RM
+            ? `Est. 1RM · ${formatDate(progressData.prs.estimated1RM.date)}`
+            : 'No data yet'
+        }
+      />
+    )
+  ) : null;
+
   const chartData = progressData?.progress.map(p => ({
     date: formatDate(p.date),
     rawDate: p.date,
@@ -497,7 +576,12 @@ export default function ExerciseDetail({
             Tap → openYouTube when youtube_url present. Always visible at top
             of detail (before stats/chart) so it's the first thing the user
             sees mid-workout. In page chrome, an edit-pencil overlay opens
-            the AI image manager (regenerate / pick a previous pair). */}
+            the AI image manager (regenerate / pick a previous pair).
+            When the strip has fewer than 3 frames (typical for the AI-
+            generated pair flow), the leading cell shows a compact PB
+            readout — denser than the full-width hero card and avoids the
+            empty third we'd otherwise have. The standalone hero card is
+            hidden in that case to avoid duplicating the same number. */}
         {(exercise.image_count > 0 || (exercise.image_urls && exercise.image_urls.length > 0)) && (
           <div className="relative">
             <ExerciseDemoStrip
@@ -506,6 +590,7 @@ export default function ExerciseDetail({
               imageUrls={exercise.image_urls ?? null}
               youtubeUrl={exercise.youtube_url}
               compact={chrome === 'modal'}
+              leadingSlot={chrome === 'page' ? pbStripCell : null}
             />
             {chrome === 'page' && (
               <ExerciseImageManager variant="overlay" exerciseUuid={exercise.uuid} />
@@ -528,29 +613,33 @@ export default function ExerciseDetail({
         ) : (
           <>
             {isTimeMode ? (
-              <LongestHoldHero
-                longestSeconds={timePRs?.longestHold?.duration_seconds ?? null}
-                longestDate={
-                  timePRs?.longestHold
-                    ? formatDate(timePRs.longestHold.date)
+              !stripWillUseLeadingSlot && (
+                <LongestHoldHero
+                  longestSeconds={timePRs?.longestHold?.duration_seconds ?? null}
+                  longestDate={
+                    timePRs?.longestHold
+                      ? formatDate(timePRs.longestHold.date)
+                      : 'No data'
+                  }
+                  totalSeconds={timePRs?.totalSeconds ?? 0}
+                />
+              )
+            ) : (<>
+            {!stripWillUseLeadingSlot && (
+              <OneRMHero
+                value={
+                  progressData != null && progressData.prs.estimated1RM
+                    ? `${Math.round(toDisplay(progressData.prs.estimated1RM.estimated_1rm))}`
+                    : '—'
+                }
+                unit={label}
+                date={
+                  progressData != null && progressData.prs.estimated1RM
+                    ? formatDate(progressData.prs.estimated1RM.date)
                     : 'No data'
                 }
-                totalSeconds={timePRs?.totalSeconds ?? 0}
               />
-            ) : (<>
-            <OneRMHero
-              value={
-                progressData != null && progressData.prs.estimated1RM
-                  ? `${Math.round(toDisplay(progressData.prs.estimated1RM.estimated_1rm))}`
-                  : '—'
-              }
-              unit={label}
-              date={
-                progressData != null && progressData.prs.estimated1RM
-                  ? formatDate(progressData.prs.estimated1RM.date)
-                  : 'No data'
-              }
-            />
+            )}
 
             <div className="flex gap-2">
               <PRBadge
