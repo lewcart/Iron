@@ -392,6 +392,26 @@ export async function getAutoFillValues(
   return { weight: null, repetitions: null };
 }
 
+/** Resolves the rep-window goal for a workout exercise. Reads the source
+ *  routine's goal_window if the workout was started from one. Returns null
+ *  for empty workouts (no source routine) or exercises that aren't on the
+ *  routine. The lookup chains: workout → workout_routine_uuid → routine_exercise
+ *  matched by exercise_uuid (lowercased for case-stable lookups). */
+export async function getGoalWindowForWorkoutExercise(
+  workoutUuid: string,
+  exerciseUuid: string,
+): Promise<'strength' | 'power' | 'build' | 'pump' | 'endurance' | null> {
+  const workout = await db.workouts.get(workoutUuid);
+  if (!workout?.workout_routine_uuid) return null;
+  const targetExUuid = exerciseUuid.toLowerCase();
+  const re = await db.workout_routine_exercises
+    .filter(re => re.workout_routine_uuid === workout.workout_routine_uuid
+      && re.exercise_uuid.toLowerCase() === targetExUuid
+      && !re._deleted)
+    .first();
+  return re?.goal_window ?? null;
+}
+
 /** Returns the working sets from the most recent completed session for this
  *  exercise (canonical group), excluding the in-progress workout. Used by the
  *  progression cue on the next session's exercise card. Returns [] if there's

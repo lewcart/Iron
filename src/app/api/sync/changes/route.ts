@@ -173,7 +173,7 @@ async function fetchRows(table: SyncedTable, uuids: string[]): Promise<Array<Rec
         'SELECT uuid, workout_plan_uuid, title, comment, order_index FROM workout_routines WHERE uuid = ANY($1::text[])', [uuids]);
     case 'workout_routine_exercises':
       return (await query<Record<string, unknown>>(
-        'SELECT uuid, workout_routine_uuid, exercise_uuid, comment, order_index FROM workout_routine_exercises WHERE uuid = ANY($1::text[])', [uuids]))
+        'SELECT uuid, workout_routine_uuid, exercise_uuid, comment, order_index, goal_window FROM workout_routine_exercises WHERE uuid = ANY($1::text[])', [uuids]))
         .map(r => ({ ...r, exercise_uuid: String(r.exercise_uuid).toLowerCase() }));
     case 'workout_routine_sets':
       return query<Record<string, unknown>>(

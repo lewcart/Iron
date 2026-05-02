@@ -111,6 +111,9 @@ export interface LocalWorkoutRoutineExercise extends SyncMeta {
   exercise_uuid: string;
   comment: string | null;
   order_index: number;
+  /** Rep-window goal (strength|power|build|pump|endurance). See
+   *  src/lib/rep-windows.ts for the canonical registry. NULL = unassigned. */
+  goal_window: 'strength' | 'power' | 'build' | 'pump' | 'endurance' | null;
 }
 
 export interface LocalWorkoutRoutineSet extends SyncMeta {
@@ -732,17 +735,23 @@ export class IronDB extends Dexie {
       });
     });
 
-    // v15: exercise image candidates (mirrors Postgres migration 031).
-    // Read-only on the client; sync pull is the only writer. Indexes:
-    // exercise_uuid (live-query the strip), batch_id (group history tiles
-    // server-side already, but useful for filtering), is_active (find the
+    // v15: goal_window on workout_routine_exercises (mirrors Postgres
+    // migration 031_routine_exercise_goal_window). Additive non-indexed
+    // column — no schema-string change. Existing rows get undefined
+    // locally; the next sync pull overwrites with NULL.
+    this.version(15).stores(v14Stores);
+
+    // v16: exercise image candidates (mirrors Postgres migration
+    // 032_exercise_image_candidates). Read-only on the client; sync pull
+    // is the only writer. Indexes: exercise_uuid (live-query the strip),
+    // batch_id (group history tiles), [exercise_uuid+is_active] (find the
     // current pair), created_at (history sort).
-    const v15Stores = {
+    const v16Stores = {
       ...v14Stores,
       exercise_image_candidates:
         'uuid, exercise_uuid, batch_id, [exercise_uuid+is_active], created_at',
     };
-    this.version(15).stores(v15Stores);
+    this.version(16).stores(v16Stores);
   }
 }
 

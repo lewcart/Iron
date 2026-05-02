@@ -107,6 +107,86 @@ describe('recommendForExercise — reps mode', () => {
   });
 });
 
+describe('recommendForExercise — window-aware path', () => {
+  it('go heavier (high) when majority spilled two windows above goal', () => {
+    // Goal: power (6-8). Sets: 16 reps → pump (12-15). Two windows up.
+    const sets = [
+      set({ repetitions: 16, rir: 1 }),
+      set({ repetitions: 14, rir: 1 }),
+    ];
+    const r = recommendForExercise(sets, 'reps', 'power');
+    expect(r?.kind).toBe('go-heavier');
+    expect(r?.intensity).toBe('high');
+  });
+
+  it('go heavier (medium) when majority spilled one window up', () => {
+    // Goal: power (6-8). Sets: 10 reps → build (one window up).
+    const sets = [
+      set({ repetitions: 10, rir: 2 }),
+      set({ repetitions: 9, rir: 2 }),
+    ];
+    const r = recommendForExercise(sets, 'reps', 'power');
+    expect(r?.kind).toBe('go-heavier');
+    expect(r?.intensity).toBe('medium');
+  });
+
+  it('more reps when in goal window with RIR room', () => {
+    // Goal: build (8-12). Sets: 10 reps → build (in window).
+    const sets = [
+      set({ repetitions: 10, rir: 2 }),
+      set({ repetitions: 11, rir: 2 }),
+    ];
+    const r = recommendForExercise(sets, 'reps', 'build');
+    expect(r?.kind).toBe('more-reps');
+  });
+
+  it('hold when in goal window with RIR 0-1', () => {
+    // Goal: build (8-12). Sets: 12 reps → build, RIR 0.
+    const sets = [
+      set({ repetitions: 12, rir: 0 }),
+      set({ repetitions: 12, rir: 1 }),
+    ];
+    expect(recommendForExercise(sets, 'reps', 'build')?.kind).toBe('hold');
+  });
+
+  it('back off when majority below goal window', () => {
+    // Goal: build (8-12). Sets: 5 reps → strength (two below).
+    const sets = [
+      set({ repetitions: 5, rir: 0 }),
+      set({ repetitions: 6, rir: 0 }),
+    ];
+    expect(recommendForExercise(sets, 'reps', 'build')?.kind).toBe('back-off');
+  });
+
+  it('boundary policy — 8 reps stays in power (not build)', () => {
+    // Goal: power (6-8). Set: 8 reps → still power (inclusive upper).
+    const sets = [set({ repetitions: 8, rir: 2 })];
+    const r = recommendForExercise(sets, 'reps', 'power');
+    expect(r?.kind).toBe('more-reps'); // in window, RIR room
+  });
+
+  it('boundary policy — 9 reps escalates power → build (one window up)', () => {
+    const sets = [set({ repetitions: 9, rir: 2 }), set({ repetitions: 9, rir: 2 })];
+    const r = recommendForExercise(sets, 'reps', 'power');
+    expect(r?.kind).toBe('go-heavier');
+    expect(r?.intensity).toBe('medium');
+  });
+
+  it('null RIR treated as 2 (charitable default)', () => {
+    const sets = [set({ repetitions: 10, rir: null }), set({ repetitions: 10, rir: null })];
+    expect(recommendForExercise(sets, 'reps', 'build')?.kind).toBe('more-reps');
+  });
+
+  it('falls back to legacy path when goalWindow is null', () => {
+    // Same input as a legacy test to confirm the fallback path is wired.
+    const sets = [
+      set({ repetitions: 12, min_target_reps: 8, max_target_reps: 12, rir: 2 }),
+      set({ repetitions: 12, min_target_reps: 8, max_target_reps: 12, rir: 2 }),
+    ];
+    expect(recommendForExercise(sets, 'reps', null)?.kind).toBe('go-heavier');
+  });
+});
+
 describe('recommendForExercise — time mode', () => {
   it('go longer (high) when avg RIR ≥ 4', () => {
     const sets = [

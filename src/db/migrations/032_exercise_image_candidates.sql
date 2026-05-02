@@ -1,4 +1,4 @@
--- Migration 031: Exercise image candidates + generation jobs
+-- Migration 032: Exercise image candidates + generation jobs
 --
 -- Two new tables to support in-app AI generation of exercise demo images
 -- with multi-candidate history, atomic pair activation, and server-side
@@ -21,16 +21,19 @@
 --
 --   NOT synced to clients (no CDC trigger). Audit-only.
 --
--- Per /autoplan (2026-05-02) decisions 17-25.
--- Pre-existing hygiene note: migrations directory has duplicate 028 and a
--- 029 gap. 031 is the next clean human number after 030. Cleanup deferred.
+-- Per /autoplan (2026-05-02) decisions 17-25. Originally numbered 031 but
+-- two other 031 migrations (routine_exercise_goal_window, projection_photos)
+-- landed on main / dev DB while this branch was in flight, so renumbered
+-- to 032 to avoid the schema_migrations name collision.
+-- UUIDs are stored as TEXT (matches the existing convention — see
+-- exercises.uuid, body_plan.uuid, etc — never the Postgres UUID type).
 
 -- ─── exercise_image_candidates ───────────────────────────────────────────────
 
 CREATE TABLE IF NOT EXISTS exercise_image_candidates (
-  uuid           UUID PRIMARY KEY,
-  exercise_uuid  UUID NOT NULL REFERENCES exercises(uuid) ON DELETE CASCADE,
-  batch_id       UUID NOT NULL,
+  uuid           TEXT PRIMARY KEY,
+  exercise_uuid  TEXT NOT NULL REFERENCES exercises(uuid) ON DELETE CASCADE,
+  batch_id       TEXT NOT NULL,
   frame_index    INT  NOT NULL CHECK (frame_index IN (1, 2)),
   url            TEXT NOT NULL,
   is_active      BOOLEAN NOT NULL DEFAULT FALSE,
@@ -81,10 +84,10 @@ COMMENT ON COLUMN exercise_image_candidates.is_active IS
 -- ─── exercise_image_generation_jobs ──────────────────────────────────────────
 
 CREATE TABLE IF NOT EXISTS exercise_image_generation_jobs (
-  uuid                UUID PRIMARY KEY,
-  exercise_uuid       UUID NOT NULL REFERENCES exercises(uuid) ON DELETE CASCADE,
-  batch_id            UUID,
-  request_id          UUID NOT NULL,
+  uuid                TEXT PRIMARY KEY,
+  exercise_uuid       TEXT NOT NULL REFERENCES exercises(uuid) ON DELETE CASCADE,
+  batch_id            TEXT,
+  request_id          TEXT NOT NULL,
   status              TEXT NOT NULL DEFAULT 'running'
                       CHECK (status IN (
                         'running',
