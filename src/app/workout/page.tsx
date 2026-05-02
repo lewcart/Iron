@@ -786,16 +786,9 @@ function AddExerciseSheet({
 
 // ─── Set row ──────────────────────────────────────────────────────────────────
 // Inline recommendation pill — shown on the exercise card next session and in
-// the finish-workout summary. Icon-only on tight rows, icon+verb when there's
-// room. Color tracks intensity (red = high, amber = medium push, blue = back
-// off, muted = hold).
-function RecommendationBadge({
-  rec,
-  variant = 'pill',
-}: {
-  rec: ExerciseRecommendation;
-  variant?: 'pill' | 'inline';
-}) {
+// the finish-workout summary. Color tracks intensity (red = high, amber = medium
+// push, blue = back off, muted = hold).
+function RecommendationBadge({ rec }: { rec: ExerciseRecommendation }) {
   const Icon =
     rec.kind === 'back-off'
       ? ChevronDown
@@ -815,12 +808,10 @@ function RecommendationBadge({
   return (
     <span
       className={
-        (variant === 'pill'
-          ? 'inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md text-[10px] font-medium '
-          : 'inline-flex items-center gap-1 text-xs font-medium ')
+        'inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md text-[10px] font-medium '
         + color
       }
-      title={`Last session: ${rec.label}`}
+      title={`Next time: ${rec.label}`}
     >
       <Icon className="h-3 w-3" strokeWidth={2.5} />
       <span>{rec.label}</span>
