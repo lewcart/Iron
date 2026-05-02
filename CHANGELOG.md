@@ -2,6 +2,16 @@
 
 All notable changes to Rebirth are documented here.
 
+## [0.4.0] - 2026-05-02
+
+### Added
+- **Anatomical muscle indicator on the exercise detail page.** Front + back female silhouettes render side-by-side under a "Target muscles" section, with primary muscles filled in their parent-group hue (chest blue / back orange / shoulders purple / arms pink / core amber / legs green) and a darker stroke ring, and secondary muscles filled in a lighter variant of the same hue. Pills above name the precise muscle (e.g. "Chest", "Lats", "Rhomboids") sorted by display_order, primary first. Two of the canonical 18 slugs that the library can't visualize, `rotator_cuff` and `hip_abductors`, surface as deep-pill-only with a Layers icon prefix, so a face pull or a side-glute exercise still shows the precise name even if the diagram can't paint it. Uses [`react-muscle-highlighter`](https://github.com/soroojshehryar/react-muscle-highlighter) (MIT, no transitive deps). Modal mode (`chrome === 'modal'`, the in-workout exercise peek) keeps the existing dense text-row UI on purpose: mid-set, eyes-on-bar, the diagram is the wrong call.
+- **`normalizeMuscleTags(rawPrimary, rawSecondary)` helper in `src/lib/muscles.ts`.** Pure function that takes whatever shape the DB/Dexie boundary returns (including null, non-array, or arrays containing legacy synonyms like "shoulders" / "rear delts") and yields canonical-slug arrays with primary winning over secondary on duplicates. Exercised by 10 unit tests covering null/non-array/empty/dedup/synonym-resolution edge cases.
+- **Typed `getMuscleGroupColor`, `getMuscleGroupColorLight`, `getMuscleGroupColorDark` accessors in `src/lib/muscle-colors.ts`.** Replaces the substring-matching `getMuscleColor(string[])` for new callers (legacy is preserved). Three palettes per muscle parent group — saturated for primary fills, lighter for secondary fills, darker for primary borders.
+
+### Changed
+- **`next.config.ts` pins `outputFileTracingRoot` to `__dirname`.** Without it, Next.js running inside `.claude/worktrees/...` infers the parent repo as the workspace root and module resolution can pick up a duplicate copy of React from outside the worktree, triggering "Cannot read properties of null (reading 'useInsertionEffect')" in dev. Anchoring the trace root keeps every worktree (and the main checkout) consistent.
+
 ## [0.3.0] - 2026-05-01
 
 ### Added
