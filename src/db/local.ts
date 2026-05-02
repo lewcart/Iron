@@ -461,6 +461,27 @@ export interface LocalProgressPhoto extends SyncMeta {
   uploaded: '0' | '1';
 }
 
+// ─── Exercise image candidates (read-only, server-owned) ────────────────────
+//
+// One row per AI-generated frame. Two rows per batch (frame 1 + frame 2,
+// generated together). Active pair (one per exercise) is mirrored into
+// exercises.image_urls / exercises.image_count for the demo strip.
+//
+// Pull-only: client never writes. Sync engine stamps _synced=true on apply,
+// so the push() dirty-row scan never picks anything up. We deliberately do
+// NOT extend SyncMeta on the type — the local writes that would set the
+// flags don't exist.
+
+export interface LocalExerciseImageCandidate {
+  uuid: string;
+  exercise_uuid: string;
+  batch_id: string;
+  frame_index: 1 | 2;
+  url: string;
+  is_active: boolean;
+  created_at: string;
+}
+
 // ─── Muscle taxonomy (read-only catalog, mirrors Postgres `muscles`) ─────────
 
 export interface LocalMuscle {
@@ -516,6 +537,9 @@ export class IronDB extends Dexie {
 
   // ── v9 additions ──
   muscles!: Table<LocalMuscle, string>;
+
+  // ── v15 additions ──
+  exercise_image_candidates!: Table<LocalExerciseImageCandidate, string>;
 
   constructor() {
     super('iron-db');
@@ -707,6 +731,18 @@ export class IronDB extends Dexie {
         if (row.blob === undefined) row.blob = null;
       });
     });
+
+    // v15: exercise image candidates (mirrors Postgres migration 031).
+    // Read-only on the client; sync pull is the only writer. Indexes:
+    // exercise_uuid (live-query the strip), batch_id (group history tiles
+    // server-side already, but useful for filtering), is_active (find the
+    // current pair), created_at (history sort).
+    const v15Stores = {
+      ...v14Stores,
+      exercise_image_candidates:
+        'uuid, exercise_uuid, batch_id, [exercise_uuid+is_active], created_at',
+    };
+    this.version(15).stores(v15Stores);
   }
 }
 
