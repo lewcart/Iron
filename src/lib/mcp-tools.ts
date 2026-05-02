@@ -286,10 +286,11 @@ async function getActiveRoutine() {
   const rUuids = routines.map(r => r.uuid);
   const rExercises = rUuids.length > 0 ? await query<{
     routine_uuid: string; re_uuid: string; exercise_uuid: string;
-    exercise_title: string; order_index: number;
+    exercise_title: string; order_index: number; goal_window: string | null;
   }>(`
     SELECT wre.workout_routine_uuid AS routine_uuid, wre.uuid AS re_uuid,
-           wre.exercise_uuid, e.title AS exercise_title, wre.order_index
+           wre.exercise_uuid, e.title AS exercise_title, wre.order_index,
+           wre.goal_window
     FROM workout_routine_exercises wre
     JOIN exercises e ON e.uuid = wre.exercise_uuid
     WHERE wre.workout_routine_uuid = ANY($1)
@@ -971,6 +972,7 @@ async function createRoutine(args: Record<string, unknown>) {
     order?: number;
     order_index?: number;
     sets?: SetInput[];
+    goal_window?: 'strength' | 'power' | 'build' | 'pump' | 'endurance' | string;
   };
   type RoutineInput = {
     day_label?: string;
@@ -1036,8 +1038,8 @@ async function createRoutine(args: Record<string, unknown>) {
       const exOrder = ex.order ?? ex.order_index ?? ei;
 
       await query(
-        'INSERT INTO workout_routine_exercises (uuid, workout_routine_uuid, exercise_uuid, order_index) VALUES ($1, $2, $3, $4)',
-        [reUuid, rUuid, resolved.uuid, exOrder]
+        'INSERT INTO workout_routine_exercises (uuid, workout_routine_uuid, exercise_uuid, order_index, goal_window) VALUES ($1, $2, $3, $4, $5)',
+        [reUuid, rUuid, resolved.uuid, exOrder, normalizeGoalWindow(ex.goal_window)]
       );
 
       for (let si = 0; si < (ex.sets ?? []).length; si++) {
@@ -1060,6 +1062,19 @@ async function createRoutine(args: Record<string, unknown>) {
   }
 
   return toolResult({ plan_id: planUuid, routine_ids: routineIds, message: `Created routine "${name}" with ${routinesInput.length} day(s).` });
+}
+
+const REP_WINDOW_NAMES = ['strength', 'power', 'build', 'pump', 'endurance'] as const;
+type RepWindowName = typeof REP_WINDOW_NAMES[number];
+
+/** Coerce arbitrary input to a valid window name. Unknown strings → null
+ *  (silent ignore — agents shouldn't be punished for omitting it). */
+function normalizeGoalWindow(input: unknown): RepWindowName | null {
+  if (typeof input !== 'string') return null;
+  const lower = input.toLowerCase().trim();
+  return (REP_WINDOW_NAMES as readonly string[]).includes(lower)
+    ? (lower as RepWindowName)
+    : null;
 }
 
 async function updateRoutine(args: Record<string, unknown>) {
@@ -1104,11 +1119,12 @@ async function deleteRoutine(args: Record<string, unknown>) {
 }
 
 async function addExercise(args: Record<string, unknown>) {
-  const { routine_id, exercise_id, exercise_name, order, sets = [] } = args as {
+  const { routine_id, exercise_id, exercise_name, order, sets = [], goal_window } = args as {
     routine_id: string;
     exercise_id?: string;
     exercise_name?: string;
     order?: number;
+    goal_window?: string;
     sets?: Array<{
       target_weight?: number;
       target_reps?: number;
@@ -1135,8 +1151,8 @@ async function addExercise(args: Record<string, unknown>) {
 
   const reUuid = crypto.randomUUID();
   await query(
-    'INSERT INTO workout_routine_exercises (uuid, workout_routine_uuid, exercise_uuid, order_index) VALUES ($1, $2, $3, $4)',
-    [reUuid, routine_id, resolved.uuid, exerciseOrder]
+    'INSERT INTO workout_routine_exercises (uuid, workout_routine_uuid, exercise_uuid, order_index, goal_window) VALUES ($1, $2, $3, $4, $5)',
+    [reUuid, routine_id, resolved.uuid, exerciseOrder, normalizeGoalWindow(goal_window)]
   );
 
   for (let si = 0; si < sets.length; si++) {
@@ -2924,12 +2940,17 @@ export const tools: MCPTool[] = [
                     exercise_id: { type: 'string', description: 'UUID of the exercise (use instead of exercise_name)' },
                     exercise_name: { type: 'string', description: 'Name fragment to fuzzy-match (use instead of exercise_id)' },
                     order: { type: 'number', description: 'Sort order within the day (also accepted as "order_index")' },
+                    goal_window: {
+                      type: 'string',
+                      enum: ['strength', 'power', 'build', 'pump', 'endurance'],
+                      description: 'Rep-window goal: strength (4-6), power (6-8), build (8-12, hypertrophy default), pump (12-15), endurance (15-30, catch only). Call list_rep_windows for the full registry. Omit to leave unassigned.',
+                    },
                     sets: {
                       type: 'array',
                       items: {
                         type: 'object',
                         properties: {
-                          target_reps: { type: 'number', description: 'Target reps (stored as max_repetitions)' },
+                          target_reps: { type: 'number', description: 'Target reps (stored as max_repetitions). Omit when goal_window is set — server resolves from the window registry.' },
                           min_repetitions: { type: 'number' },
                           max_repetitions: { type: 'number' },
                           target_weight: { type: 'number', description: 'Target load in kg' },
@@ -3024,6 +3045,11 @@ export const tools: MCPTool[] = [
         exercise_id: { type: 'string', description: 'UUID of the exercise (use instead of exercise_name)' },
         exercise_name: { type: 'string', description: 'Name fragment to fuzzy-match (use instead of exercise_id)' },
         order: { type: 'number', description: 'Position within the day (defaults to end)' },
+        goal_window: {
+          type: 'string',
+          enum: ['strength', 'power', 'build', 'pump', 'endurance'],
+          description: 'Rep-window goal: strength (4-6), power (6-8), build (8-12, hypertrophy default), pump (12-15), endurance (15-30, catch only). Call list_rep_windows for full registry. Omit to leave unassigned.',
+        },
         sets: {
           type: 'array',
           items: {
@@ -3042,6 +3068,25 @@ export const tools: MCPTool[] = [
       required: ['routine_id'],
     },
     execute: addExercise,
+  },
+  {
+    name: 'list_rep_windows',
+    description: 'Returns the canonical rep-window registry: strength (4-6), power (6-8), build (8-12, hypertrophy default), pump (12-15), endurance (15-30, catch-only — never explicitly programmed). Use this to understand the goal_window parameter on create_routine, add_exercise, and update_set_targets. Boundary policy: upper bound is INCLUSIVE — a set of 8 reps stays in Power; the 9th rep escalates the lifter into Build.',
+    inputSchema: { type: 'object', properties: {} },
+    execute: async () => {
+      const { REP_WINDOWS, REP_WINDOW_ORDER } = await import('./rep-windows');
+      return toolResult({
+        windows: REP_WINDOW_ORDER.map(key => ({
+          key,
+          label: REP_WINDOWS[key].label,
+          min: REP_WINDOWS[key].min,
+          max: REP_WINDOWS[key].max,
+        })),
+        boundary_policy: 'Upper bound inclusive: 8 reps → power, not build. The 9th rep is the trigger to add load.',
+        catch_only: ['endurance'],
+        hypertrophy_default: 'build',
+      });
+    },
   },
   {
     name: 'swap_exercise',
