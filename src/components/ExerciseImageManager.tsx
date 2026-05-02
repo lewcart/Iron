@@ -425,6 +425,12 @@ function ExerciseImageManagerSheet({ exerciseUuid, open, onClose }: SheetProps) 
 
   const generating = phase !== 'idle';
 
+  // Sheet sizes to content when there's no history (avoids 85vh of dead air
+  // around a single "No demo images yet." line). Once batches arrive or a
+  // generation is in flight, lock to 85vh so the history grid + footer are
+  // always reachable without resizing on every batch addition.
+  const sheetHeight = batches.length === 0 && phase === 'idle' ? 'auto' : '85vh';
+
   return (
     <Sheet
       open={open}
@@ -433,7 +439,7 @@ function ExerciseImageManagerSheet({ exerciseUuid, open, onClose }: SheetProps) 
       // up where we left off the next time the sheet opens.
       onClose={onClose}
       title="Demo images"
-      height="85vh"
+      height={sheetHeight}
       footer={
         <RegenerateFooter
           onRegenerate={handleRegenerate}
