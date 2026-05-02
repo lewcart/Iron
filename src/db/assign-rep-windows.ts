@@ -15,7 +15,7 @@ dotenvConfig({ path: '.env' });
 dotenvConfig({ path: '.env.local', override: true });
 
 import { query } from './db';
-import type { RepWindow } from '../lib/rep-windows';
+import { REP_WINDOWS, type RepWindow } from '../lib/rep-windows';
 
 interface Row {
   uuid: string;
@@ -156,6 +156,16 @@ async function assign(): Promise<void> {
        SET goal_window = $1, updated_at = NOW()
        WHERE uuid = $2`,
       [win, r.uuid],
+    );
+    // Cascade: write the window's min/max to every set on this exercise so
+    // the routine editor + workout spawn agree. Set-level overrides can be
+    // edited individually after assignment if needed.
+    const { min, max } = REP_WINDOWS[win];
+    await query(
+      `UPDATE workout_routine_sets
+       SET min_repetitions = $1, max_repetitions = $2, updated_at = NOW()
+       WHERE workout_routine_exercise_uuid = $3`,
+      [min, max, r.uuid],
     );
     assigned++;
     counts[win] = (counts[win] ?? 0) + 1;
