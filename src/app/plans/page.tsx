@@ -24,11 +24,24 @@ import {
   addRoutineExercise,
   removeRoutineExercise,
   updateRoutineExerciseComment,
+  setRoutineExerciseGoalWindow,
   addRoutineSet,
   updateRoutineSet,
   deleteRoutineSet,
 } from '@/lib/mutations-plans';
 import type { LocalWorkoutRoutineSet } from '@/db/local';
+import { REP_WINDOWS, REP_WINDOW_ORDER, type RepWindow } from '@/lib/rep-windows';
+
+// Trans-mapped colors for active window pills in the picker. Mirrors the
+// visual language on the workout exercise card so the editor and the in-
+// session card use the same palette.
+const WINDOW_ACTIVE_STYLE: Record<RepWindow, string> = {
+  strength:  'bg-sky-400 text-white',
+  power:     'bg-sky-500/30 text-sky-200 ring-1 ring-sky-400/50',
+  build:     'bg-purple-500/30 text-purple-200 ring-1 ring-purple-400/50',
+  pump:      'bg-pink-500/30 text-pink-200 ring-1 ring-pink-400/50',
+  endurance: 'bg-pink-400 text-white',
+};
 
 // Local-first /plans. Reads come from useLiveQuery (Dexie); writes go through
 // mutations-plans.ts which writes to Dexie + scheduleSync. The page renders
@@ -353,6 +366,35 @@ function RoutineCard({
                         <X className="h-4 w-4" />
                       </button>
                     </div>
+                    {/* Goal-window picker — only meaningful for reps-mode
+                        exercises. Tap an active window to clear; tap an
+                        inactive window to assign. */}
+                    {(re.exercise?.tracking_mode ?? 'reps') === 'reps' && (
+                      <div className="flex gap-1 px-4 pb-2">
+                        {REP_WINDOW_ORDER.filter(k => k !== 'endurance').map(key => {
+                          const w = REP_WINDOWS[key];
+                          const isActive = re.goal_window === key;
+                          return (
+                            <button
+                              key={key}
+                              type="button"
+                              onClick={() => setRoutineExerciseGoalWindow(re.uuid, isActive ? null : key)}
+                              className={
+                                'flex-1 px-1 py-1 rounded text-[10px] font-medium transition-colors leading-tight '
+                                + (isActive
+                                  ? WINDOW_ACTIVE_STYLE[key]
+                                  : 'bg-muted/40 text-muted-foreground hover:bg-muted/60')
+                              }
+                              aria-pressed={isActive}
+                              aria-label={`${w.label} ${w.min}–${w.max} reps${isActive ? ' (selected — tap to clear)' : ''}`}
+                            >
+                              <span className="block">{w.label}</span>
+                              <span className="block text-[8px] opacity-70 tabular-nums">{w.min}–{w.max}</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
                     {/* Set rows. Branches by exercise.tracking_mode: time-mode
                         renders a single seconds input; reps stay min/max. */}
                     {(() => {

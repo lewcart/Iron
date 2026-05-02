@@ -186,3 +186,34 @@ export function muscleStatus(setCount: number, min: number, max: number): Muscle
   if (setCount > max) return 'over';
   return 'optimal';
 }
+
+/**
+ * Normalize raw muscle tags from the DB/Dexie boundary into canonical slugs.
+ *
+ * Handles non-array/null input, legacy synonyms (e.g. "shoulders" → "delts"),
+ * unknown values (silently dropped), and dedupes primary > secondary so the
+ * same muscle never appears in both buckets.
+ */
+export function normalizeMuscleTags(
+  rawPrimary: unknown,
+  rawSecondary: unknown,
+): { primary: MuscleSlug[]; secondary: MuscleSlug[] } {
+  const norm = (raw: unknown): MuscleSlug[] => {
+    if (!Array.isArray(raw)) return [];
+    const out: MuscleSlug[] = [];
+    const seen = new Set<MuscleSlug>();
+    for (const v of raw) {
+      if (typeof v !== 'string') continue;
+      const slug = resolveMuscleSlug(v);
+      if (slug && !seen.has(slug)) {
+        out.push(slug);
+        seen.add(slug);
+      }
+    }
+    return out;
+  };
+  const primary = norm(rawPrimary);
+  const primarySet = new Set(primary);
+  const secondary = norm(rawSecondary).filter((s) => !primarySet.has(s));
+  return { primary, secondary };
+}

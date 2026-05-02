@@ -283,11 +283,12 @@ async function pushWorkoutRoutineExercise(r: Record<string, unknown>): Promise<v
     return;
   }
   await query(
-    `INSERT INTO workout_routine_exercises (uuid, workout_routine_uuid, exercise_uuid, comment, order_index, updated_at)
-     VALUES ($1, $2, $3, $4, $5, NOW())
+    `INSERT INTO workout_routine_exercises (uuid, workout_routine_uuid, exercise_uuid, comment, order_index, goal_window, updated_at)
+     VALUES ($1, $2, $3, $4, $5, $6, NOW())
      ON CONFLICT (uuid) DO UPDATE SET
-       comment = EXCLUDED.comment, order_index = EXCLUDED.order_index, updated_at = NOW()`,
-    [r.uuid, r.workout_routine_uuid, String(r.exercise_uuid).toLowerCase(), r.comment, r.order_index],
+       comment = EXCLUDED.comment, order_index = EXCLUDED.order_index,
+       goal_window = EXCLUDED.goal_window, updated_at = NOW()`,
+    [r.uuid, r.workout_routine_uuid, String(r.exercise_uuid).toLowerCase(), r.comment, r.order_index, r.goal_window ?? null],
   );
 }
 

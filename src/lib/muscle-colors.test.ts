@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { getMuscleColor } from './muscle-colors';
+import { getMuscleColor, getMuscleGroupColor, getSlugColor } from './muscle-colors';
+import { MUSCLE_SLUGS } from './muscles';
 
 describe('getMuscleColor', () => {
   it('returns correct color for chest', () => {
@@ -53,5 +54,36 @@ describe('getMuscleColor', () => {
 
   it('falls through to second muscle if first is unknown', () => {
     expect(getMuscleColor(['unknown', 'legs'])).toBe('#10b981');
+  });
+});
+
+describe('getMuscleGroupColor', () => {
+  it('returns a defined hex for every parent group', () => {
+    expect(getMuscleGroupColor('chest')).toMatch(/^#[0-9a-f]{6}$/i);
+    expect(getMuscleGroupColor('back')).toMatch(/^#[0-9a-f]{6}$/i);
+    expect(getMuscleGroupColor('shoulders')).toMatch(/^#[0-9a-f]{6}$/i);
+    expect(getMuscleGroupColor('arms')).toMatch(/^#[0-9a-f]{6}$/i);
+    expect(getMuscleGroupColor('core')).toMatch(/^#[0-9a-f]{6}$/i);
+    expect(getMuscleGroupColor('legs')).toMatch(/^#[0-9a-f]{6}$/i);
+  });
+
+  it('uses the canonical "core" key (not stale "abdominals")', () => {
+    expect(getMuscleGroupColor('core')).toBe('#f59e0b');
+  });
+});
+
+describe('getSlugColor', () => {
+  it('returns a hex for every canonical slug', () => {
+    for (const slug of MUSCLE_SLUGS) {
+      expect(getSlugColor(slug)).toMatch(/^#[0-9a-f]{6}$/i);
+    }
+  });
+
+  it('routes a back muscle to the back hue', () => {
+    expect(getSlugColor('lats')).toBe('#f97316');
+  });
+
+  it('routes a leg muscle to the legs hue', () => {
+    expect(getSlugColor('quads')).toBe('#10b981');
   });
 });

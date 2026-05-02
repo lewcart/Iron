@@ -22,13 +22,15 @@ import {
 import { consumeScheduleTap } from '@/lib/workout-schedule';
 import { HealthSection } from '@/components/HealthSection';
 import Link from 'next/link';
-import { Check, ChevronDown, ChevronRight, ClipboardList, Clock, Dumbbell, GripVertical, Info, Plus, Search, X } from 'lucide-react';
+import { Check, ChevronDown, ChevronRight, ChevronsUp, ChevronUp, ClipboardList, Clock, Dumbbell, Equal, GripVertical, Info, Plus, Search, X } from 'lucide-react';
 import { ExerciseDetailModal } from '@/components/ExerciseDetailModal';
 import type { WorkoutPlan, WorkoutRoutine, WorkoutRoutineExercise, WorkoutRoutineSet, Exercise } from '@/types';
 import { formatTime, calcCompletedSets, calcTotalVolume } from './workout-utils';
 import { uuid as genUUID } from '@/lib/uuid';
 import { useUnit } from '@/context/UnitContext';
-import { useCurrentWorkoutFull, useExercises, getAutoFillValues, getAllTimeBest1RM } from '@/lib/useLocalDB';
+import { useCurrentWorkoutFull, useExercises, getAutoFillValues, getAllTimeBest1RM, getLastSessionSetsForExercise, getGoalWindowForWorkoutExercise } from '@/lib/useLocalDB';
+import { recommendForExercise, type ExerciseRecommendation } from '@/lib/progression';
+import { REP_WINDOWS, type RepWindow } from '@/lib/rep-windows';
 import { usePlansFull } from '@/lib/useLocalDB-plans';
 import type { LocalWorkoutExerciseEntry, LocalWorkoutWithExercises } from '@/lib/useLocalDB';
 import { isNewEstimated1RM } from '@/lib/pr';
@@ -408,6 +410,34 @@ function FinishWorkoutModal({
   const totalVolume = calcTotalVolume(exercises);
   const exerciseCount = exercises.length;
 
+  // Per-exercise goal_window resolution — needed so the recommendation rule
+  // takes the window-aware path. Falls back to legacy set-level min/max
+  // when an exercise has no goal_window assigned.
+  const [goalWindowByExercise, setGoalWindowByExercise] = useState<Map<string, RepWindow | null>>(new Map());
+  useEffect(() => {
+    let cancelled = false;
+    Promise.all(
+      exercises.map(we =>
+        getGoalWindowForWorkoutExercise(we.workout_uuid, we.exercise_uuid).then(w => [we.exercise_uuid, w] as const),
+      ),
+    ).then(pairs => {
+      if (!cancelled) setGoalWindowByExercise(new Map(pairs));
+    });
+    return () => { cancelled = true; };
+  }, [exercises]);
+
+  // Per-exercise recommendation for the next session — computed against this
+  // session's just-logged sets so the cue is locked in before the user closes
+  // the modal. Mirrors the inline badge on the next session's exercise card.
+  const nextSessionRecs = exercises
+    .map(we => {
+      const mode = we.exercise?.tracking_mode ?? 'reps';
+      const goalWindow = goalWindowByExercise.get(we.exercise_uuid) ?? null;
+      const rec = recommendForExercise(we.sets, mode, goalWindow);
+      return rec ? { title: we.exercise?.title ?? '', rec } : null;
+    })
+    .filter((x): x is { title: string; rec: ExerciseRecommendation } => x != null);
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       {/* Overlay */}
@@ -448,6 +478,24 @@ function FinishWorkoutModal({
             </p>
           </div>
         </div>
+
+        {/* Next session — per-exercise progression cues. Hidden when no sets
+            had enough signal to produce a recommendation. */}
+        {nextSessionRecs.length > 0 && (
+          <div className="px-6 pb-4">
+            <p className="text-[10px] uppercase tracking-wide text-zinc-500 font-medium mb-2">
+              Next Session
+            </p>
+            <div className="space-y-1.5 max-h-40 overflow-y-auto">
+              {nextSessionRecs.map(({ title, rec }, i) => (
+                <div key={i} className="flex items-center justify-between gap-2 text-sm">
+                  <span className="text-zinc-200 truncate flex-1 min-w-0">{title}</span>
+                  <RecommendationBadge rec={rec} />
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Actions */}
         <div className="px-6 pb-6 flex flex-col gap-2">
@@ -755,6 +803,69 @@ function AddExerciseSheet({
 }
 
 // ─── Set row ──────────────────────────────────────────────────────────────────
+// Window pill — the GOAL (permanent label, where this exercise lives on the
+// strength↔endurance spectrum). Trans-flag-mapped: extreme windows (Strength,
+// Endurance) get solid backgrounds; middle windows get soft tinted pills.
+// Distinct visual weight from RecommendationBadge so they read as different
+// kinds of information when shown side-by-side.
+const WINDOW_STYLE: Record<RepWindow, string> = {
+  strength:  'bg-sky-400 text-white',                  // solid trans-blue
+  power:     'bg-sky-500/15 text-sky-300',             // soft blue
+  build:     'bg-purple-500/15 text-purple-300',       // soft purple (the bridge)
+  pump:      'bg-pink-500/15 text-pink-300',           // soft trans-pink
+  endurance: 'bg-pink-400 text-white',                 // solid trans-pink (catch only)
+};
+
+function WindowPill({ window: win }: { window: RepWindow }) {
+  const w = REP_WINDOWS[win];
+  return (
+    <span
+      className={
+        'inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium tabular-nums '
+        + WINDOW_STYLE[win]
+      }
+      title={`Goal: ${w.label} (${w.min}–${w.max} reps)`}
+    >
+      <span>{w.label}</span>
+      <span className="opacity-60">{w.min}–{w.max}</span>
+    </span>
+  );
+}
+
+// Inline recommendation pill — shown on the exercise card next session and in
+// the finish-workout summary. Color tracks intensity (red = high, amber = medium
+// push, blue = back off, muted = hold).
+function RecommendationBadge({ rec }: { rec: ExerciseRecommendation }) {
+  const Icon =
+    rec.kind === 'back-off'
+      ? ChevronDown
+      : rec.kind === 'hold'
+        ? Equal
+        : rec.intensity === 'high'
+          ? ChevronsUp
+          : ChevronUp;
+  const color =
+    rec.kind === 'back-off'
+      ? 'text-blue-400 bg-blue-500/15'
+      : rec.kind === 'hold'
+        ? 'text-muted-foreground bg-secondary'
+        : rec.intensity === 'high'
+          ? 'text-red-400 bg-red-500/15'
+          : 'text-amber-400 bg-amber-400/15';
+  return (
+    <span
+      className={
+        'inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md text-[10px] font-medium '
+        + color
+      }
+      title={`Next time: ${rec.label}`}
+    >
+      <Icon className="h-3 w-3" strokeWidth={2.5} />
+      <span>{rec.label}</span>
+    </span>
+  );
+}
+
 function SetRow({
   setNumber,
   set,
@@ -773,9 +884,9 @@ function SetRow({
   workoutExerciseUuid: string;
   trackingMode: 'reps' | 'time';
   onUpdate: (weUuid: string, setUuid: string, weight: number, reps: number) => Promise<void>;
-  onUpdateDuration: (weUuid: string, setUuid: string, durationSeconds: number) => Promise<void>;
+  onUpdateDuration: (weUuid: string, setUuid: string, weight: number, durationSeconds: number) => Promise<void>;
   onEdit: (weUuid: string, setUuid: string, weight: number, reps: number) => Promise<void>;
-  onEditDuration: (weUuid: string, setUuid: string, durationSeconds: number) => Promise<void>;
+  onEditDuration: (weUuid: string, setUuid: string, weight: number, durationSeconds: number) => Promise<void>;
   onUpdateRir: (setUuid: string, rir: number | null) => Promise<void>;
   onDelete: (setUuid: string) => Promise<void>;
   allTimeBest1RM?: number | null;
@@ -803,11 +914,11 @@ function SetRow({
 
   const handleComplete = async () => {
     setSaving(true);
+    const weightKg = fromInput(parseFloat(weight) || 0);
     if (trackingMode === 'time') {
       const seconds = parseInt(duration) || 0;
-      await onUpdateDuration(workoutExerciseUuid, set.uuid, seconds);
+      await onUpdateDuration(workoutExerciseUuid, set.uuid, weightKg, seconds);
     } else {
-      const weightKg = fromInput(parseFloat(weight) || 0);
       await onUpdate(workoutExerciseUuid, set.uuid, weightKg, parseInt(reps) || 0);
     }
     setSaving(false);
@@ -826,11 +937,12 @@ function SetRow({
     await onEdit(workoutExerciseUuid, set.uuid, weightKg, repsInt);
   };
 
-  const handleDurationBlur = async () => {
+  const handleTimeBlur = async () => {
     if (!completed || trackingMode !== 'time') return;
+    const weightKg = fromInput(parseFloat(weight) || 0);
     const seconds = parseInt(duration) || 0;
-    if (seconds === (set.duration_seconds ?? 0)) return;
-    await onEditDuration(workoutExerciseUuid, set.uuid, seconds);
+    if (weightKg === (set.weight ?? 0) && seconds === (set.duration_seconds ?? 0)) return;
+    await onEditDuration(workoutExerciseUuid, set.uuid, weightKg, seconds);
   };
   const isPR = set.is_pr;
   const showPD = isPR || isLivePD;
@@ -849,19 +961,37 @@ function SetRow({
       <div className="w-5 text-center text-xs font-semibold text-muted-foreground">{setNumber}</div>
 
       {trackingMode === 'time' ? (
-        <div className="flex-1 flex items-center gap-1">
-          <input
-            type="number"
-            inputMode="numeric"
-            placeholder="60"
-            value={duration}
-            onChange={e => setDuration(e.target.value)}
-            onFocus={e => { e.target.scrollIntoView({ behavior: 'smooth', block: 'center' }); e.target.select(); }}
-            onBlur={handleDurationBlur}
-            className="w-full text-right text-sm font-medium bg-transparent outline-none min-h-[36px]"
-          />
-          <span className="text-[10px] text-muted-foreground">sec</span>
-        </div>
+        <>
+          <div className="flex-1 flex items-center gap-1">
+            <input
+              type="number"
+              inputMode="decimal"
+              placeholder="—"
+              value={weight}
+              onChange={e => setWeight(e.target.value)}
+              onFocus={e => { e.target.scrollIntoView({ behavior: 'smooth', block: 'center' }); e.target.select(); }}
+              onBlur={handleTimeBlur}
+              className="w-full text-right text-sm font-medium bg-transparent outline-none min-h-[36px]"
+            />
+            <span className="text-[10px] text-muted-foreground">{label}</span>
+          </div>
+
+          <span className="text-muted-foreground text-xs">×</span>
+
+          <div className="flex-1 flex items-center gap-1">
+            <input
+              type="number"
+              inputMode="numeric"
+              placeholder="60"
+              value={duration}
+              onChange={e => setDuration(e.target.value)}
+              onFocus={e => { e.target.scrollIntoView({ behavior: 'smooth', block: 'center' }); e.target.select(); }}
+              onBlur={handleTimeBlur}
+              className="w-full text-right text-sm font-medium bg-transparent outline-none min-h-[36px]"
+            />
+            <span className="text-[10px] text-muted-foreground">sec</span>
+          </div>
+        </>
       ) : (
         <>
           <div className="flex-1 flex items-center gap-1">
@@ -1011,9 +1141,9 @@ function SortableExerciseCard({
   onRemove: () => void;
   onAddSet: () => void;
   onUpdateSet: (workoutExerciseUuid: string, setUuid: string, weight: number, reps: number) => Promise<void>;
-  onUpdateSetDuration: (workoutExerciseUuid: string, setUuid: string, durationSeconds: number) => Promise<void>;
+  onUpdateSetDuration: (workoutExerciseUuid: string, setUuid: string, weight: number, durationSeconds: number) => Promise<void>;
   onEditSet: (workoutExerciseUuid: string, setUuid: string, weight: number, reps: number) => Promise<void>;
-  onEditSetDuration: (workoutExerciseUuid: string, setUuid: string, durationSeconds: number) => Promise<void>;
+  onEditSetDuration: (workoutExerciseUuid: string, setUuid: string, weight: number, durationSeconds: number) => Promise<void>;
   onUpdateSetRir: (setUuid: string, rir: number | null) => Promise<void>;
   onDeleteSet: (uuid: string) => Promise<void>;
   onShowInfo: () => void;
@@ -1034,6 +1164,31 @@ function SortableExerciseCard({
   useEffect(() => {
     getAllTimeBest1RM(we.exercise_uuid, we.workout_uuid).then(setAllTimeBest1RM);
   }, [we.exercise_uuid, we.workout_uuid]);
+
+  // Goal window pulled from the source routine_exercise. Null if the workout
+  // wasn't started from a routine (empty workout) or the exercise isn't on it.
+  const [goalWindow, setGoalWindow] = useState<RepWindow | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    getGoalWindowForWorkoutExercise(we.workout_uuid, we.exercise_uuid).then(w => {
+      if (!cancelled) setGoalWindow(w);
+    });
+    return () => { cancelled = true; };
+  }, [we.workout_uuid, we.exercise_uuid]);
+
+  // Progression cue from the most-recent prior session. Window-aware when
+  // goal_window is set; falls back to set-level min/max otherwise. Recomputes
+  // when goalWindow resolves so the rule uses the right path.
+  const [recommendation, setRecommendation] = useState<ExerciseRecommendation | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    getLastSessionSetsForExercise(we.exercise_uuid, we.workout_uuid).then(prevSets => {
+      if (cancelled) return;
+      const mode = we.exercise?.tracking_mode ?? 'reps';
+      setRecommendation(recommendForExercise(prevSets, mode, goalWindow));
+    });
+    return () => { cancelled = true; };
+  }, [we.exercise_uuid, we.workout_uuid, we.exercise?.tracking_mode, goalWindow]);
 
   return (
     <div ref={setNodeRef} style={style} className="ios-section">
@@ -1059,8 +1214,14 @@ function SortableExerciseCard({
               <span className={`block font-semibold text-sm truncate ${allDone ? 'text-muted-foreground' : ''}`}>
                 {we.exercise?.title ?? ''}
               </span>
-              {we.comment && (
-                <span className="block text-xs text-muted-foreground italic truncate">{we.comment}</span>
+              {(goalWindow || recommendation || we.comment) && (
+                <span className="flex items-center gap-1.5 mt-0.5 min-w-0 flex-wrap">
+                  {goalWindow && <WindowPill window={goalWindow} />}
+                  {recommendation && !allDone && <RecommendationBadge rec={recommendation} />}
+                  {we.comment && (
+                    <span className="text-xs text-muted-foreground italic truncate">{we.comment}</span>
+                  )}
+                </span>
               )}
             </span>
             {allDone ? (
@@ -1091,18 +1252,17 @@ function SortableExerciseCard({
       {/* Collapsible sets */}
       {isExpanded && (
         <>
-          {/* Column headers — mirrors SetRow layout exactly. Branches on
-              tracking_mode so time-mode shows a single 'Time (sec)' column. */}
+          {/* Column headers — mirrors SetRow layout exactly. Time-mode uses
+              the same Weight × ? layout as reps so loaded holds (weighted
+              planks, dips, carries) capture both dimensions. */}
           <div className="flex items-center gap-2 px-3 py-1 border-t border-b border-border bg-secondary/30">
             <div className="w-5 text-center text-[10px] font-medium text-muted-foreground">Set</div>
+            <div className="flex-1 text-right text-[10px] font-medium text-muted-foreground">Weight</div>
+            <div className="w-3" />
             {(we.exercise?.tracking_mode ?? 'reps') === 'time' ? (
               <div className="flex-1 text-right text-[10px] font-medium text-muted-foreground">Time (sec)</div>
             ) : (
-              <>
-                <div className="flex-1 text-right text-[10px] font-medium text-muted-foreground">Weight</div>
-                <div className="w-3" />
-                <div className="flex-1 text-right text-[10px] font-medium text-muted-foreground">Reps</div>
-              </>
+              <div className="flex-1 text-right text-[10px] font-medium text-muted-foreground">Reps</div>
             )}
             <div className="w-8 flex-shrink-0" />
           </div>
@@ -1506,10 +1666,11 @@ export default function WorkoutPage() {
     await mutUpdateSet(setUuid, { weight, repetitions: reps });
   };
 
-  // Time-mode counterpart. Writes duration_seconds; weight + repetitions
-  // stay null. Same auto-rest-timer behavior so workflow is consistent.
-  const updateSetDuration = async (workoutExerciseUuid: string, setUuid: string, durationSeconds: number) => {
-    await mutUpdateSet(setUuid, { duration_seconds: durationSeconds, is_completed: true });
+  // Time-mode counterpart. Writes weight + duration_seconds (weight stays
+  // captured for loaded holds like weighted planks/dips). Same auto-rest-timer
+  // behavior as rep mode so the workflow is consistent.
+  const updateSetDuration = async (workoutExerciseUuid: string, setUuid: string, weight: number, durationSeconds: number) => {
+    await mutUpdateSet(setUuid, { weight, duration_seconds: durationSeconds, is_completed: true });
 
     const { defaultRest, autoStart } = getRestSettings();
     if (autoStart) {
@@ -1522,8 +1683,8 @@ export default function WorkoutPage() {
     }
   };
 
-  const editSetDuration = async (_workoutExerciseUuid: string, setUuid: string, durationSeconds: number) => {
-    await mutUpdateSet(setUuid, { duration_seconds: durationSeconds });
+  const editSetDuration = async (_workoutExerciseUuid: string, setUuid: string, weight: number, durationSeconds: number) => {
+    await mutUpdateSet(setUuid, { weight, duration_seconds: durationSeconds });
   };
 
   const handleAddSet = async (we: LocalWorkoutExerciseEntry) => {
