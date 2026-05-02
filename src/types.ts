@@ -313,6 +313,8 @@ export interface ProgressPhoto {
   pose: ProgressPhotoPose;
   notes: string | null;
   taken_at: string;
+  /** CSS object-position y%, 0-100. NULL = renderer defaults to 50 (center). */
+  crop_offset_y: number | null;
 }
 
 // Inspo photos — physique inspiration captured discreetly.
@@ -329,6 +331,8 @@ export interface InspoPhoto {
   taken_at: string;
   burst_group_id: string | null;
   pose: InspoPhotoPose | null;
+  /** CSS object-position y%, 0-100. NULL = renderer defaults to 50 (center). */
+  crop_offset_y: number | null;
 }
 
 // Projection photos — AI-generated images of Lou (made outside this app, e.g.
@@ -343,6 +347,8 @@ export interface ProjectionPhoto {
   taken_at: string;
   source_progress_photo_uuid: string | null;
   target_horizon: string | null;
+  /** CSS object-position y%, 0-100. NULL = renderer defaults to 50 (center). */
+  crop_offset_y: number | null;
 }
 
 // ── InBody scan catalog ──────────────────────────────────────────────────────

@@ -439,6 +439,8 @@ export interface LocalInspoPhoto extends Partial<SyncMeta> {
    *  feature can mix progress + inspo into the same pose-filtered viewer.
    *  Null = legacy row captured before migration 030 (UI prompts to set). */
   pose: 'front' | 'side' | 'back' | 'other' | null;
+  /** CSS object-position y%, 0-100. NULL = renderer defaults to 50 (center). */
+  crop_offset_y?: number | null;
 }
 
 /** Progress photo metadata — JPEG fetched lazily from blob_url.
@@ -462,6 +464,10 @@ export interface LocalProgressPhoto extends SyncMeta {
   /** '1' once the JPEG has been pushed to Vercel Blob and `blob_url` carries
    *  the real URL, '0' while the upload is queued/retrying. */
   uploaded: '0' | '1';
+  /** CSS object-position y%, 0-100. NULL = renderer defaults to 50 (center).
+   *  Auto-filled on capture via best-effort face detection where supported;
+   *  manual drag-to-nudge in adjust mode also writes here. */
+  crop_offset_y: number | null;
 }
 
 // ─── Exercise image candidates (read-only, server-owned) ────────────────────
