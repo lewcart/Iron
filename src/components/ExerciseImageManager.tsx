@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Pencil, Sparkles, RefreshCcw, AlertTriangle, Check } from 'lucide-react';
+import { Pencil, RefreshCcw, AlertTriangle, Check } from 'lucide-react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { Sheet } from '@/components/ui/sheet';
 import { db } from '@/db/local';
@@ -121,20 +121,18 @@ export function ExerciseImageManager(props: ManagerProps) {
   const [open, setOpen] = useState(false);
 
   if (props.variant === 'empty') {
+    // Match the App-UI sibling sheet pattern (PhotoSheet, HealthKitPermissionsSheet):
+    // utility tone, rounded-xl card, rounded-lg button, no decorative icon hero.
     return (
       <>
-        <div className="bg-card border border-border rounded-2xl p-4 text-center">
-          <Sparkles className="h-6 w-6 mx-auto text-primary/60 mb-2" />
-          <p className="text-sm text-foreground mb-1">No demo images yet</p>
-          <p className="text-xs text-muted-foreground mb-3">
-            Generate a 2-frame demo via AI ({COST_CTA_LABEL}, ~2 min).
-          </p>
+        <div className="ios-section p-4 flex items-center justify-between gap-3">
+          <p className="text-sm text-foreground">No demo images yet.</p>
           <button
             type="button"
             onClick={() => setOpen(true)}
-            className="px-4 py-2 bg-primary text-primary-foreground text-sm font-medium rounded-full"
+            className="flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground text-sm font-medium rounded-lg disabled:opacity-50"
           >
-            Generate demo images
+            Generate
           </button>
         </div>
         <ExerciseImageManagerSheet
@@ -155,7 +153,7 @@ export function ExerciseImageManager(props: ManagerProps) {
         aria-label="Manage demo images"
         className="absolute top-3 right-3 inline-flex items-center justify-center w-11 h-11 -m-1.5 z-10"
       >
-        <span className="inline-flex items-center justify-center w-8 h-8 rounded-full bg-black/55 text-white shadow-md backdrop-blur-sm hover:bg-black/70 transition-colors">
+        <span className="inline-flex items-center justify-center w-8 h-8 rounded-full bg-black/50 text-white shadow-md backdrop-blur-sm hover:bg-black/70 transition-colors">
           <Pencil className="h-3.5 w-3.5" aria-hidden />
         </span>
       </button>
@@ -430,7 +428,10 @@ function ExerciseImageManagerSheet({ exerciseUuid, open, onClose }: SheetProps) 
   return (
     <Sheet
       open={open}
-      onClose={generating ? () => { /* swallow close while generating */ } : onClose}
+      // Closing mid-generation is fine — the server keeps running, the
+      // localStorage pending marker stays, and the recovery effect picks
+      // up where we left off the next time the sheet opens.
+      onClose={onClose}
       title="Demo images"
       height="85vh"
       footer={
@@ -449,18 +450,21 @@ function ExerciseImageManagerSheet({ exerciseUuid, open, onClose }: SheetProps) 
         )}
 
         {batches.length > 0 && (
-          <p className="text-xs uppercase tracking-wide text-muted-foreground mb-2">
-            History ({batches.length})
-          </p>
+          <div className="flex items-baseline justify-between mb-2">
+            <h3 className="text-label-section">History</h3>
+            <span className="text-[10px] text-muted-foreground tabular-nums">
+              {batches.length} {batches.length === 1 ? 'pair' : 'pairs'}
+            </span>
+          </div>
         )}
 
         {batches.length === 0 && phase === 'idle' && (
           <p className="text-sm text-muted-foreground py-6 text-center">
-            No AI generations yet. Tap Generate below to create your first pair.
+            No demo images yet.
           </p>
         )}
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3" aria-label="Demo pair history">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2" aria-label="Demo pair history">
           {batches.map(b => (
             <PairTile
               key={b.batch_id}
@@ -498,11 +502,11 @@ function PairTile({
       aria-busy={activating}
       onClick={onActivate}
       disabled={disabled || batch.is_active}
-      className={`relative flex flex-col gap-1 p-2 rounded-2xl border text-left transition-all ${
+      className={`relative flex flex-col gap-1 p-2 rounded-xl border text-left transition-colors ${
         batch.is_active
-          ? 'border-primary ring-2 ring-primary'
+          ? 'border-primary bg-primary/10'
           : 'border-border hover:border-muted-foreground/40'
-      } ${disabled && !batch.is_active ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
+      } ${disabled && !batch.is_active ? 'opacity-50' : ''}`}
     >
       <div className="grid grid-cols-2 gap-1.5">
         {[batch.frame1_url, batch.frame2_url].map((src, i) => (
@@ -553,7 +557,7 @@ function RegenerateFooter({
   const phaseLabel = (() => {
     switch (phase) {
       case 'frame1':     return `Generating start position…`;
-      case 'frame2':     return `Generating end position (matched to start)…`;
+      case 'frame2':     return `Generating end position…`;
       case 'saving':     return `Saving…`;
       case 'recovering': return `Resuming previous generation…`;
       default:           return null;
@@ -589,7 +593,7 @@ function RegenerateFooter({
         onClick={onRegenerate}
         disabled={isGenerating}
         aria-busy={isGenerating}
-        className="w-full inline-flex items-center justify-center gap-2 px-4 py-3 min-h-[44px] bg-primary text-primary-foreground font-medium rounded-full disabled:opacity-50"
+        className="w-full inline-flex items-center justify-center gap-2 px-4 py-3 min-h-[44px] bg-primary text-primary-foreground text-sm font-medium rounded-lg disabled:opacity-50"
       >
         <RefreshCcw className={`h-4 w-4 ${isGenerating ? 'animate-spin' : ''}`} aria-hidden />
         {isGenerating ? 'Generating…' : `${ctaWord} (${COST_CTA_LABEL})`}
@@ -622,18 +626,18 @@ function ErrorBanner({
   return (
     <div className="flex items-start gap-2 p-3 mb-4 bg-destructive/10 border border-destructive/30 rounded-xl">
       <AlertTriangle className="h-4 w-4 text-destructive mt-0.5 flex-shrink-0" aria-hidden />
-      <div className="flex-1 text-xs text-destructive">
+      <div className="flex-1 text-xs text-destructive leading-relaxed">
         <p className="font-medium mb-0.5">Generation failed</p>
-        <p className="opacity-80">{error.message}{costLine}</p>
+        <p>{error.message}{costLine}</p>
         {error.status && (
-          <p className="opacity-60 mt-1">Status: {error.status}</p>
+          <p className="text-destructive/70 mt-1">Status: {error.status}</p>
         )}
       </div>
       <button
         type="button"
         onClick={onDismiss}
         aria-label="Dismiss error"
-        className="text-destructive/70 text-xs underline"
+        className="inline-flex items-center justify-center min-h-[36px] px-2 -my-1 text-destructive/70 text-xs underline"
       >
         Dismiss
       </button>
