@@ -2,6 +2,20 @@
 
 All notable changes to Rebirth are documented here.
 
+## [0.5.0] - 2026-05-02
+
+### Added
+- **Rep-window vocabulary across the app.** Strength (4–6) · Power (6–8) · Build (8–12, hypertrophy default) · Pump (12–15) · Endurance (15–30, catch-only). Single source of truth at `src/lib/rep-windows.ts` — backend, frontend, MCP, and the progression rule all import from here so the vocabulary never drifts. Boundary policy is inclusive on the upper bound: a set of exactly 8 reps stays in Power; the 9th rep is what escalates the lifter into Build. The next-window edge is the trigger to add load, not the goal-window edge.
+- **`goal_window` per routine exercise.** Migration 031 adds the column to `workout_routine_exercises` with a CHECK constraint; Dexie v15, sync pull/push, and the public `WorkoutRoutineExercise` type all carry the field end-to-end. Setting a window cascades its min/max to every set on the exercise so the routine editor and the workout-time spawn agree.
+- **Window picker on the routine editor.** Four pills under each reps-mode exercise (Strength/Power/Build/Pump — Endurance is catch-only and excluded from the picker). Tap to assign, tap the active one to clear. Trans-flag-mapped palette: Strength + Endurance get solid bg + white text (rare/extreme), Power/Build/Pump get soft tinted pills with a purple bridge in the middle.
+- **Goal-window pill on the workout exercise card.** Renders inline next to the recommendation badge with the window label (e.g. "Build 8–12"). Distinct visual weight from the recommendation badge so the goal vs cue read as different kinds of information.
+- **Window-aware progression rule.** `recommendForExercise` takes an optional `goalWindow`. When set, classifies each completed set by which window its reps land in (via `windowForReps`), then compares to the goal: in window with RIR room → "more reps"; spilled one window up → "↑ go heavier" (medium); spilled two+ windows up or avg RIR ≥ 4 → "↑↑ go heavier" (high); below goal window → "↓ back off"; in window with RIR 0–1 → "= hold". Falls back to the legacy set-level min/max path when no window is assigned.
+- **MCP `list_rep_windows` tool.** Returns the canonical registry (key, label, min, max + boundary policy + hypertrophy default) so AI agents understand the vocabulary without inferring it. `create_routine` and `add_exercise` accept `goal_window` per exercise (silently normalized — unknown values fall to NULL rather than erroring). `get_active_routine` returns it on each routine_exercise.
+- **`db:audit-routines` and `db:assign-rep-windows` scripts.** Audit groups every routine exercise by current set-level min/max and whether it snaps to a registered window. Auto-assignment is a one-shot heuristic by movement pattern (compound vs accessory vs isolation) with hypertrophy bias — conservative, never overwrites. Initial run assigned 78 exercises (8 Power, 42 Build, 28 Pump) and reconciled 246 sets.
+
+### Changed
+- **Per-set RIR strip collapsed into an inline pill on the set row.** Each completed set now has a single `RIR n` (or dashed `RIR` if unset) pill between reps and the green checkmark, not a second 30-px row of chunky 0–5 chips. Tap the pill to expand the chips for that one set; tap a chip to set + auto-collapse. Three pill states: dashed-border (unset, suggests tap), filled `RIR n` (set), neutral filled (open). Net: a 3-set exercise stays 3 rows tall instead of 5+, RIR still one tap away when you actually want to set it.
+
 ## [0.4.0] - 2026-05-02
 
 ### Added
