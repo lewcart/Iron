@@ -5,12 +5,21 @@
 // go longer / hold / back off. The user decides magnitude — we only pick
 // direction + intensity (single vs double arrow).
 //
-// Rule (rep mode):
-//   - majority of sets below min_target_reps → back off
-//   - majority above max_target_reps OR avg RIR ≥ 4 → go heavier (high)
-//   - majority at/over max_target_reps with avg RIR ≥ 2 → go heavier
-//   - in range with avg RIR ≥ 2 → more reps
-//   - nailed target with RIR 0–1 → hold
+// Two paths:
+//
+// 1. Window-aware (preferred — when goal_window is provided):
+//    - majority of sets in a window BELOW the goal → back off
+//    - majority spilled TWO+ windows up OR avg RIR ≥ 4 → go heavier (high ↑↑)
+//    - majority spilled ONE window up → go heavier (medium ↑)
+//    - majority in goal window with avg RIR ≥ 2 → more reps
+//    - majority in goal window with RIR 0–1 → hold
+//
+// 2. Legacy (fallback when goal_window is null — uses set-level min/max):
+//    - majority of sets below min_target_reps → back off
+//    - majority above max_target_reps OR avg RIR ≥ 4 → go heavier (high)
+//    - majority at/over max_target_reps with avg RIR ≥ 2 → go heavier
+//    - in range with avg RIR ≥ 2 → more reps
+//    - nailed target with RIR 0–1 → hold
 //
 // Rule (time mode): same RIR thresholds, but the verb is "go longer".
 //
@@ -18,6 +27,7 @@
 // effective_set_count weighting).
 
 import type { LocalWorkoutSet } from '@/db/local';
+import { REP_WINDOW_ORDER, windowForReps, type RepWindow } from './rep-windows';
 
 export type RecommendationKind =
   | 'go-heavier'
@@ -48,6 +58,7 @@ type ProgressionInputSet = Pick<
 export function recommendForExercise(
   prevSets: ProgressionInputSet[],
   trackingMode: 'reps' | 'time',
+  goalWindow?: RepWindow | null,
 ): ExerciseRecommendation | null {
   const working = prevSets.filter(s =>
     s.is_completed
@@ -72,6 +83,44 @@ export function recommendForExercise(
     return null;
   }
 
+  // Window-aware path: classify each set by which window its reps land in,
+  // then compare to the goal window. Diff > 0 = spilled up; diff < 0 = below.
+  if (goalWindow) {
+    const goalIdx = REP_WINDOW_ORDER.indexOf(goalWindow);
+    let inWindow = 0, upOne = 0, upTwoPlus = 0, belowGoal = 0;
+
+    for (const s of working) {
+      const setWin = windowForReps(s.repetitions ?? 0);
+      if (!setWin) { belowGoal++; continue; }
+      const diff = REP_WINDOW_ORDER.indexOf(setWin) - goalIdx;
+      if (diff === 0) inWindow++;
+      else if (diff === 1) upOne++;
+      else if (diff >= 2) upTwoPlus++;
+      else belowGoal++;
+    }
+
+    const total = working.length;
+    const majorityBelow = belowGoal / total >= 0.5;
+    const majorityUpTwoPlus = upTwoPlus / total >= 0.5;
+    const majorityUpOne = upOne / total >= 0.5;
+
+    if (majorityBelow) {
+      return { kind: 'back-off', intensity: 'medium', label: 'back off' };
+    }
+    if (majorityUpTwoPlus || rir >= 4) {
+      return { kind: 'go-heavier', intensity: 'high', label: 'go heavier' };
+    }
+    if (majorityUpOne) {
+      return { kind: 'go-heavier', intensity: 'medium', label: 'go heavier' };
+    }
+    if (rir >= 2) {
+      return { kind: 'more-reps', intensity: 'medium', label: 'more reps' };
+    }
+    return { kind: 'hold', intensity: 'medium', label: 'hold' };
+  }
+
+  // Legacy path — set-level min/max comparison. Kept for routines that haven't
+  // been assigned a goal_window yet.
   let aboveMax = 0;
   let atMax = 0;
   let belowMin = 0;
