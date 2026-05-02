@@ -1,3 +1,55 @@
+## Exercise image generation follow-ups (deferred from 2026-05-02 in-app gen ship)
+
+- [ ] **Tests for the new image-gen flow.** Test plan artifact is on disk at
+      `~/.gstack/projects/lewcart-Iron/feat-exercise-image-gen-inapp-test-plan-20260502-091008.md`
+      and lists 22 tests across 5 new test files: route success/rollback paths,
+      activate ownership predicate + concurrent-race 409, candidates list +
+      `?request_id` recovery, prompt builder snapshots, manager component
+      a11y/recovery. Tests deferred at /autoplan time to keep the
+      implementation pass focused; should be the next concrete follow-up.
+- [ ] **Vercel Pro+ tier preflight.** `maxDuration = 300` on
+      `/api/exercises/[uuid]/generate-images` requires Pro tier. Hobby caps at
+      60s and the route 502s mid-frame-2. Confirm tier before the first deploy
+      that exposes the new flow externally.
+- [ ] **Per-call AbortController on the OpenAI calls.** Two sequential
+      `gpt-image-1` high calls have observed p99 ~150s each; back-to-back p99
+      can saturate the 300s `maxDuration` with zero buffer for sharp resize +
+      blob put + DB write. Wrap each `openai.images.{generate,edit}` in an
+      AbortController with a per-call timeout (e.g. 130s) so the function
+      fails fast and writes a clean `failed_frame*` job row instead of being
+      killed by the platform mid-DB-write.
+- [ ] **Pagination cursor IN-subquery refactor.** GET
+      `/api/exercises/[uuid]/image-candidates?cursor=…` uses an
+      `IN (SELECT batch_id FROM ... WHERE created_at < $cursor GROUP BY batch_id)`
+      shape that's structurally O(rows²) per page. Fine at single-user volume
+      (a handful of batches per exercise) but worth flattening to a direct
+      `created_at <` comparison + tiebreaker on uuid if history ever grows
+      large or starts feeling slow.
+- [ ] **Candidate row pruning policy.** No upper bound on batch history per
+      exercise, every regenerate inserts 2 rows forever. At ~80KB per
+      `600×800` JPEG a year of regular use is still <10MB total Blob, but the
+      DB row count grows monotonically. Decide on a soft cap (e.g. last 20
+      batches per exercise, oldest-inactive auto-pruned) before storage cost
+      becomes visible.
+- [ ] **Orphan-blob cleanup on exercise delete.** `exercise_image_candidates`
+      cascades on `exercises.uuid` deletion, but the cascade only drops DB
+      rows — Vercel Blob URLs are orphaned. Add a server-side hook that
+      enumerates candidates and `del()`s each blob URL before the cascade
+      fires. Defer until exercise deletion is actually wired up in the UI.
+- [ ] **Migration filename hygiene cleanup.** Pre-existing 028 collision
+      (`028_exercise_uuid_dedupe.sql` + `028_rir_column.sql`) and 029 gap
+      noted in 031's comment. Lexicographic sort makes 031 deterministic but
+      the duplicate-028 is hygiene debt. One-line follow-up PR: rename one of
+      the two 028s to 029_<name>.sql if neither has been applied to prod
+      (otherwise leaves a phantom row in `schema_migrations`).
+- [ ] **Cost-attack rate limit.** `NEXT_PUBLIC_REBIRTH_API_KEY` ships in the
+      public JS bundle, so anyone visiting the PWA could scrape it and
+      trigger unbounded ~$0.50/call generations. Single-user threat model
+      accepts this for now (`/review` decision 2026-05-02), but if the URL
+      ever leaks more broadly, add a soft daily cap:
+      `SELECT COUNT(*) FROM exercise_image_generation_jobs WHERE started_at > NOW() - INTERVAL '1 day'`
+      and reject 429 over a configured ceiling (e.g. 20/day = $10).
+
 ## iPad — future work (deferred from 2026-04-20 web-first pivot)
 
 - [ ] If iPad usage is real, evaluate native universal binary + one wedge feature

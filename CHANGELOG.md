@@ -2,6 +2,25 @@
 
 All notable changes to Rebirth are documented here.
 
+## [0.3.1] - 2026-05-02
+
+### Added
+- **In-app AI generation of exercise demo images.** A pencil overlay on the demo strip opens a bottom sheet with the regeneration history (each pair shown side-by-side with the active one marked) and a sticky **Generate** / **Regenerate (~$0.50)** footer. Generation runs server-side via `gpt-image-1`: frame 1 is generated, then frame 2 is generated via `images.edit` with frame 1 as the reference image so the athlete, gym, lighting, and framing stay consistent across both panels. Replaces the prior 2-panel composite + post-hoc split, which mid-cut content when `gpt-image-1` didn't honor the 50% boundary. Tap any prior pair in the history to reactivate it; the demo strip switches instantly via local-first sync.
+- **`exercise_image_candidates` and `exercise_image_generation_jobs` (migration 031).** Candidate table holds every generated frame with a `batch_id`, frame index (1 or 2), Vercel Blob URL, and `is_active` flag. A unique partial index on `(exercise_uuid, frame_index) WHERE is_active` enforces exactly one active row per (exercise, frame) at the DB layer, catching concurrent activate races as 409s. The jobs table is server-side audit only (no CDC) and tracks status (running / succeeded / failed_frame1 / failed_frame2 / failed_db / rollback_orphan), OpenAI request ids, and estimated cost in cents. The active candidate's URLs are mirrored into `exercises.image_urls` / `image_count` so `ExerciseDemoStrip` keeps reading the existing column shape unchanged.
+- **PWA-suspend recovery for in-flight generation.** Client stamps `localStorage` with `{ request_id, started_at }` when a generate POST starts; on `visibilitychange === 'visible'` the manager polls `GET /api/exercises/[uuid]/image-candidates?request_id=X` until the corresponding job either succeeds (sync pull, swap UI) or terminally fails. Recovery footer shows real elapsed time measured from the original POST so the counter survives suspend cycles. Service-worker retries are deduped server-side: a POST with a `request_id` that already produced a `succeeded` job replays the existing batch instead of double-spending the OpenAI bill.
+- **Cumulative cost footer per exercise.** The manager's footer reads `SUM(cost_usd_cents)` from `exercise_image_generation_jobs` and renders `This exercise: 4 generations · $2.00`, including partial-failure costs so the running total is honest.
+
+### Changed
+- **Demo image flow is pair-atomic.** If frame 2 generation or upload fails, the frame 1 blob is rolled back via `del()` (best-effort) and no candidate rows are inserted, so the user never sees a half-pair in history. The jobs row records the partial cost. If `del()` itself fails, status flips to `rollback_orphan` for manual cleanup later.
+- **Demo strip generation prompts split into per-frame builders.** Replaced the single 2-panel composite prompt with `buildExerciseImagePromptFrame1` (start position, sets the visual vocabulary) and `buildExerciseImagePromptFrame2` (end position, references the frame-1 image). Both text-only, the conditioning happens via `images.edit({ image })` not via prompt repetition.
+- **`maxDuration` on `/api/exercises/[uuid]/generate-images` raised from 90s to 300s.** Two sequential `gpt-image-1` high-quality calls + uploads + DB writes budget 90-180s observed; 300s gives headroom. Requires Vercel Pro+ tier, verify before deploying.
+
+### Fixed
+- **OpenAI SDK call shape for `images.edit`.** The reference image is now wrapped via `toFile(pngBuffer, 'frame1.png', { type: 'image/png' })`. Passing a raw `Buffer` (or a JPEG buffer) to `gpt-image-1` returns `BadRequestError: Could not parse multipart`. The original 1024×1536 PNG buffer is held in memory across the two-stage call so we don't decode-and-re-encode through `sharp` for nothing.
+
+### Removed
+- **`src/lib/split-vertical-panels.ts`.** No longer used after the route rewrite. The two relevant lines (`.resize(600, 800).jpeg({ quality: 75 })`) inlined into a small pipeline helper.
+
 ## [0.3.0] - 2026-05-01
 
 ### Added
