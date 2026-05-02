@@ -186,11 +186,13 @@ function LongestHoldHero({
  *  OneRMHero/LongestHoldHero card is hidden when this renders so we
  *  don't show the same number twice. */
 function PbStripCell({
+  icon,
   label,
   value,
   unit,
   caption,
 }: {
+  icon: React.ReactNode;
   label: string;
   value: string;
   unit?: string;
@@ -198,10 +200,13 @@ function PbStripCell({
 }) {
   return (
     <div className="w-full h-full bg-secondary/40 flex flex-col items-center justify-center px-2 py-3 text-center">
+      <div className="text-amber-400/80 mb-1" aria-hidden>
+        {icon}
+      </div>
       <p className="text-[9px] font-semibold uppercase tracking-wide text-muted-foreground leading-tight">
         {label}
       </p>
-      <div className="flex items-baseline gap-0.5 mt-1.5">
+      <div className="flex items-baseline gap-0.5 mt-1">
         <span className="text-2xl font-bold text-foreground tabular-nums leading-none">
           {value}
         </span>
@@ -499,6 +504,7 @@ export default function ExerciseDetail({
   const pbStripCell: React.ReactNode = stripWillUseLeadingSlot ? (
     isTimeMode ? (
       <PbStripCell
+        icon={<Timer className="h-5 w-5" />}
         label="Longest Hold"
         value={
           timePRs?.longestHold?.duration_seconds != null
@@ -511,6 +517,7 @@ export default function ExerciseDetail({
       />
     ) : (
       <PbStripCell
+        icon={<Trophy className="h-5 w-5" />}
         label="Personal Best"
         value={
           progressData?.prs.estimated1RM
