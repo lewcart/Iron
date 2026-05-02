@@ -1,7 +1,7 @@
 'use client';
 
-import { Suspense, useEffect, useState } from 'react';
-import { ChevronLeft, Trash2, ImageIcon, Activity, Target, Plus } from 'lucide-react';
+import { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
+import { ChevronLeft, Trash2, ImageIcon, Activity, Target, Plus, GitCompare, Move } from 'lucide-react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { useUnit } from '@/context/UnitContext';
@@ -9,56 +9,22 @@ import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   ReferenceLine, Legend,
 } from 'recharts';
-import type { InbodyScan, MeasurementLog } from '@/types';
+import type { InbodyScan, MeasurementLog, ProjectionPhoto, InspoPhoto, ProgressPhotoPose } from '@/types';
 import type { LocalProgressPhoto } from '@/db/local';
 import { useMeasurements, useProgressPhotos, useInbodyScans, useBodyGoal } from '@/lib/useLocalDB-measurements';
 import { logMeasurement, deleteMeasurement, deleteProgressPhoto } from '@/lib/mutations-measurements';
 import { logBodyweight, deleteBodyweightLog } from '@/lib/mutations';
 import { useBodyweightLogs } from '@/lib/useLocalDB';
+import { db } from '@/db/local';
+import { syncEngine } from '@/lib/sync';
 import { Sheet } from '@/components/ui/sheet';
 import { isLocalStub } from '@/lib/photo-upload-queue';
 import { PhotoSheet } from './PhotoSheet';
 import { InbodyScanSheet } from './InbodyScanSheet';
-import { CompareWithProjectionDialog } from './CompareWithProjectionDialog';
+import { CompareDialog, type CompareTarget } from './CompareDialog';
+import { AdjustOffsetDialog, type AdjustablePhotoKind } from './AdjustOffsetDialog';
+import { AlignedPhoto } from './AlignedPhoto';
 import { apiBase, fetchJsonAuthed } from '@/lib/api/client';
-import type { ProjectionPhoto } from '@/types';
-import { GitCompare } from 'lucide-react';
-
-/** Render a progress photo, transparently sourcing the JPEG from either the
- *  remote Vercel Blob URL or — for queued/retrying captures — the locally-held
- *  Blob via createObjectURL. Revokes the object URL on unmount/source change
- *  so we don't leak Blob references in IDB. */
-function ProgressPhotoImage({ photo }: { photo: LocalProgressPhoto }) {
-  const [objectUrl, setObjectUrl] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (isLocalStub(photo.blob_url) && photo.blob) {
-      const url = URL.createObjectURL(photo.blob);
-      setObjectUrl(url);
-      return () => URL.revokeObjectURL(url);
-    }
-    setObjectUrl(null);
-  }, [photo.blob_url, photo.blob]);
-
-  const src = isLocalStub(photo.blob_url) ? objectUrl : photo.blob_url;
-  if (!src) return <div className="w-full aspect-[3/4] bg-muted/40 rounded-t-xl" />;
-
-  return (
-    <div className="relative">
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img
-        src={src}
-        alt={`${photo.pose} progress photo`}
-        className="w-full object-cover max-h-[420px] rounded-t-xl"
-      />
-      {photo.uploaded === '0' && (
-        <div className="absolute top-2 right-2 rounded-full bg-black/70 px-2 py-0.5 text-[10px] font-medium text-amber-300 uppercase tracking-wide">
-          Queued
-        </div>
-      )}
-    </div>
-  );
-}
 
 const SITES = [
   { key: 'shoulder_width', label: 'Shoulder Width' },
@@ -158,16 +124,47 @@ function MeasurementsInner() {
   const [photoSheetOpen, setPhotoSheetOpen] = useState(false);
   const [inbodySheetOpen, setInbodySheetOpen] = useState(false);
 
-  // Projection comparison: fetch lightweight count + open dialog with the
-  // tapped progress photo as the source. The dialog itself loads the full
-  // projection list when it opens, so this query is cheap.
+  // Compare flow: lightweight existence checks for both target types, plus
+  // dialog state. The dialog itself loads the full lists when it opens.
   const [projectionCount, setProjectionCount] = useState<number | null>(null);
+  const [inspoCount, setInspoCount] = useState<number | null>(null);
   const [compareSource, setCompareSource] = useState<LocalProgressPhoto | null>(null);
+  const [compareTarget, setCompareTarget] = useState<CompareTarget>('projection');
   useEffect(() => {
     fetchJsonAuthed<ProjectionPhoto[]>(`${apiBase()}/api/projection-photos?limit=1`)
       .then((rows) => setProjectionCount(rows.length))
       .catch(() => setProjectionCount(0));
+    fetchJsonAuthed<InspoPhoto[]>(`${apiBase()}/api/inspo-photos?limit=200`)
+      .then((rows) => {
+        const posed = rows.filter((r) => r.pose === 'front' || r.pose === 'side' || r.pose === 'back');
+        setInspoCount(posed.length);
+      })
+      .catch(() => setInspoCount(0));
   }, []);
+
+  // Adjust mode (manual head-y nudge). Holds the photo + its kind so the
+  // dialog knows which API route to PATCH on save.
+  const [adjustState, setAdjustState] = useState<{
+    photo: { uuid: string; blob_url: string; crop_offset_y: number | null };
+    kind: AdjustablePhotoKind;
+    blob?: Blob | null;
+  } | null>(null);
+
+  const handleAdjustSaved = useCallback(async (newOffset: number | null) => {
+    if (!adjustState) return;
+    // For progress photos we also write to Dexie so live queries reflect the
+    // change instantly and the sync engine pushes the same value next pass.
+    if (adjustState.kind === 'progress') {
+      try {
+        await db.progress_photos.update(adjustState.photo.uuid, {
+          crop_offset_y: newOffset,
+          _synced: false,
+          _updated_at: Date.now(),
+        });
+        syncEngine.schedulePush();
+      } catch { /* non-fatal */ }
+    }
+  }, [adjustState]);
 
   const handleSaveMeasurements = async () => {
     const hasAny = SITES.some(s => inputs[s.key]) || !!weightInput;
@@ -586,53 +583,104 @@ function MeasurementsInner() {
     </div>
   );
 
+  // Group photos by calendar date (local) so a single front/side/back capture
+  // session reads as one entry rather than three. Within a group, sort poses
+  // in canonical order (front → side → back). Edge case: if Lou retakes a
+  // pose on the same day, all of those photos appear in the group.
+  const photoGroups = useMemo(() => {
+    const POSE_ORDER: Record<string, number> = { front: 0, side: 1, back: 2 };
+    const byDate = new Map<string, LocalProgressPhoto[]>();
+    for (const p of photos) {
+      const date = p.taken_at.slice(0, 10); // YYYY-MM-DD
+      if (!byDate.has(date)) byDate.set(date, []);
+      byDate.get(date)!.push(p);
+    }
+    const groups = Array.from(byDate.entries())
+      .map(([date, ps]) => ({
+        date,
+        photos: ps.sort((a, b) => {
+          const pa = POSE_ORDER[a.pose] ?? 99;
+          const pb = POSE_ORDER[b.pose] ?? 99;
+          if (pa !== pb) return pa - pb;
+          return a.taken_at.localeCompare(b.taken_at);
+        }),
+        // For sort: use the earliest taken_at in the group (so order is by
+        // date/time, not by pose).
+        sortKey: ps.reduce((min, p) => (p.taken_at < min ? p.taken_at : min), ps[0].taken_at),
+      }))
+      .sort((a, b) => b.sortKey.localeCompare(a.sortKey));
+    return groups;
+  }, [photos]);
+
   const photosSection = (
     <div className="space-y-4">
-      {/* Compare-with-projection banner — only shown when ≥1 projection exists */}
-      {projectionCount !== null && projectionCount > 0 && photos.length > 0 && (
-        <Link
-          href="/projections"
-          className="flex items-center gap-2 px-3 py-2 rounded-lg bg-trans-blue/10 border border-trans-blue/30 text-trans-blue text-xs font-medium"
-        >
-          <GitCompare className="h-3.5 w-3.5" />
-          <span>Compare your latest with your projection</span>
-          <span className="ml-auto opacity-60">→</span>
-        </Link>
+      {/* Compare banner — show when at least one target exists. */}
+      {photos.length > 0 && (
+        (projectionCount !== null && projectionCount > 0) ||
+        (inspoCount !== null && inspoCount > 0)
+      ) && (
+        <div className="flex flex-wrap gap-2">
+          {projectionCount !== null && projectionCount > 0 && (
+            <Link
+              href="/projections"
+              className="flex items-center gap-2 px-3 py-2 rounded-lg bg-trans-blue/10 border border-trans-blue/30 text-trans-blue text-xs font-medium flex-1 min-w-[200px]"
+            >
+              <GitCompare className="h-3.5 w-3.5" />
+              <span>Compare with projection</span>
+              <span className="ml-auto opacity-60">→</span>
+            </Link>
+          )}
+          {inspoCount !== null && inspoCount > 0 && (
+            <Link
+              href="/inspo"
+              className="flex items-center gap-2 px-3 py-2 rounded-lg bg-trans-pink/10 border border-trans-pink/30 text-trans-pink text-xs font-medium flex-1 min-w-[200px]"
+            >
+              <GitCompare className="h-3.5 w-3.5" />
+              <span>Compare with inspo</span>
+              <span className="ml-auto opacity-60">→</span>
+            </Link>
+          )}
+        </div>
       )}
 
-      {/* Gallery */}
-      {!photosLoading && photos.length > 0 && (
+      {/* Gallery — one card per date with an inline pose strip. */}
+      {!photosLoading && photoGroups.length > 0 && (
         <div>
           <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1 px-1">Gallery</p>
           <div className="space-y-3">
-            {photos.map(photo => (
-              <div key={photo.uuid} className="ios-section overflow-hidden">
-                <ProgressPhotoImage photo={photo} />
-                <div className="ios-row justify-between">
-                  <div className="flex flex-col">
-                    <span className="text-sm font-medium capitalize">{photo.pose}</span>
-                    {photo.notes && (
-                      <span className="text-xs text-muted-foreground">{photo.notes}</span>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs text-muted-foreground">{formatDate(photo.taken_at)}</span>
-                    {projectionCount !== null && projectionCount > 0 && !isLocalStub(photo.blob_url) && (
-                      <button
-                        onClick={() => setCompareSource(photo)}
-                        className="text-trans-blue p-1 min-h-[44px] min-w-[44px] flex items-center justify-center"
-                        aria-label="Compare with projection"
-                      >
-                        <GitCompare className="h-4 w-4" />
-                      </button>
-                    )}
-                    <button
-                      onClick={() => handleDeletePhoto(photo.uuid)}
-                      className="text-red-500 p-1 min-h-[44px] min-w-[44px] flex items-center justify-center"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </button>
-                  </div>
+            {photoGroups.map((group) => (
+              <div key={group.date} className="ios-section overflow-hidden">
+                <div className="px-4 py-2 flex items-center justify-between border-b border-border/40">
+                  <span className="text-sm font-medium">{formatDate(group.sortKey)}</span>
+                  <span className="text-[11px] text-muted-foreground">
+                    {group.photos.length} {group.photos.length === 1 ? 'shot' : 'shots'}
+                  </span>
+                </div>
+                <div className="grid grid-cols-3 gap-1 p-1">
+                  {group.photos.map((photo) => (
+                    <PhotoTile
+                      key={photo.uuid}
+                      photo={photo}
+                      onDelete={handleDeletePhoto}
+                      onCompare={(target) => {
+                        setCompareTarget(target);
+                        setCompareSource(photo);
+                      }}
+                      onAdjust={() =>
+                        setAdjustState({
+                          photo: {
+                            uuid: photo.uuid,
+                            blob_url: photo.blob_url,
+                            crop_offset_y: photo.crop_offset_y,
+                          },
+                          kind: 'progress',
+                          blob: photo.blob,
+                        })
+                      }
+                      hasProjection={(projectionCount ?? 0) > 0}
+                      hasInspo={(inspoCount ?? 0) > 0}
+                    />
+                  ))}
                 </div>
               </div>
             ))}
@@ -922,12 +970,118 @@ function MeasurementsInner() {
 
       <PhotoSheet open={photoSheetOpen} onClose={() => setPhotoSheetOpen(false)} />
       <InbodyScanSheet open={inbodySheetOpen} onClose={() => setInbodySheetOpen(false)} />
-      <CompareWithProjectionDialog
+      <CompareDialog
         open={compareSource !== null}
         onClose={() => setCompareSource(null)}
         source={compareSource}
+        defaultTarget={compareTarget}
+        onAdjust={(photo, kind) =>
+          setAdjustState({ photo, kind })
+        }
+      />
+      <AdjustOffsetDialog
+        open={adjustState !== null}
+        onClose={() => setAdjustState(null)}
+        photo={adjustState?.photo ?? null}
+        kind={adjustState?.kind ?? 'progress'}
+        blob={adjustState?.blob ?? null}
+        onSaved={handleAdjustSaved}
       />
     </main>
+  );
+}
+
+// ─── Photo tile — one cell in a same-date group ─────────────────────────────
+
+function PhotoTile({
+  photo,
+  onDelete,
+  onCompare,
+  onAdjust,
+  hasProjection,
+  hasInspo,
+}: {
+  photo: LocalProgressPhoto;
+  onDelete: (uuid: string) => void;
+  onCompare: (target: CompareTarget) => void;
+  onAdjust: () => void;
+  hasProjection: boolean;
+  hasInspo: boolean;
+}) {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const stub = isLocalStub(photo.blob_url);
+
+  return (
+    <div className="relative group">
+      <div className="relative">
+        <AlignedPhoto
+          blobUrl={photo.blob_url}
+          blob={photo.blob}
+          cropOffsetY={photo.crop_offset_y}
+          aspectRatio="3 / 4"
+          alt={`${photo.pose} progress photo`}
+          className="rounded-lg"
+          sizes="(max-width: 768px) 33vw, 200px"
+        />
+        {/* Pose label */}
+        <span className="absolute bottom-1 left-1 text-[9px] uppercase tracking-wide font-semibold px-1.5 py-0.5 rounded bg-black/60 text-white capitalize">
+          {photo.pose}
+        </span>
+        {photo.uploaded === '0' && (
+          <span className="absolute top-1 right-1 text-[9px] font-medium px-1.5 py-0.5 rounded bg-black/70 text-amber-300 uppercase tracking-wide">
+            Queued
+          </span>
+        )}
+      </div>
+
+      {/* Action triggers — small icons over the bottom-right corner */}
+      <div className="absolute top-1 right-1 flex gap-1">
+        <button
+          onClick={() => setMenuOpen((v) => !v)}
+          className="h-7 w-7 rounded-full bg-black/60 text-white flex items-center justify-center"
+          aria-label="Photo actions"
+        >
+          ⋯
+        </button>
+      </div>
+
+      {menuOpen && (
+        <div className="absolute top-9 right-1 z-10 w-44 rounded-lg bg-zinc-900 border border-white/10 shadow-lg overflow-hidden">
+          {hasProjection && !stub && (
+            <button
+              onClick={() => { onCompare('projection'); setMenuOpen(false); }}
+              className="w-full text-left px-3 py-2 text-xs flex items-center gap-2 hover:bg-white/5 text-trans-blue"
+            >
+              <GitCompare className="h-3.5 w-3.5" />
+              Compare to projection
+            </button>
+          )}
+          {hasInspo && !stub && (
+            <button
+              onClick={() => { onCompare('inspo'); setMenuOpen(false); }}
+              className="w-full text-left px-3 py-2 text-xs flex items-center gap-2 hover:bg-white/5 text-trans-pink"
+            >
+              <GitCompare className="h-3.5 w-3.5" />
+              Compare to inspo
+            </button>
+          )}
+          <button
+            onClick={() => { onAdjust(); setMenuOpen(false); }}
+            className="w-full text-left px-3 py-2 text-xs flex items-center gap-2 hover:bg-white/5 text-white/80"
+          >
+            <Move className="h-3.5 w-3.5" />
+            Adjust alignment
+          </button>
+          <button
+            onClick={() => { onDelete(photo.uuid); setMenuOpen(false); }}
+            className="w-full text-left px-3 py-2 text-xs flex items-center gap-2 hover:bg-white/5 text-red-400"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+            Delete
+          </button>
+        </div>
+      )}
+    </div>
   );
 }
 

@@ -772,11 +772,12 @@ async function pushProgressPhoto(r: Record<string, unknown>): Promise<void> {
   // /api/progress-photos/upload separately. Push only carries metadata
   // (URL pointer, pose, notes, taken_at) once the upload is complete.
   await query(
-    `INSERT INTO progress_photos (uuid, blob_url, pose, notes, taken_at, updated_at)
-     VALUES ($1, $2, $3, $4, $5, NOW())
+    `INSERT INTO progress_photos (uuid, blob_url, pose, notes, taken_at, crop_offset_y, updated_at)
+     VALUES ($1, $2, $3, $4, $5, $6, NOW())
      ON CONFLICT (uuid) DO UPDATE SET
        blob_url = EXCLUDED.blob_url, pose = EXCLUDED.pose,
-       notes = EXCLUDED.notes, taken_at = EXCLUDED.taken_at, updated_at = NOW()`,
-    [r.uuid, r.blob_url, r.pose, r.notes, r.taken_at],
+       notes = EXCLUDED.notes, taken_at = EXCLUDED.taken_at,
+       crop_offset_y = EXCLUDED.crop_offset_y, updated_at = NOW()`,
+    [r.uuid, r.blob_url, r.pose, r.notes, r.taken_at, r.crop_offset_y ?? null],
   );
 }

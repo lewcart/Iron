@@ -33,12 +33,17 @@ export async function POST(request: NextRequest) {
     }
     pose = body.pose as ValidPose;
   }
+  const cropOffsetY =
+    typeof body.crop_offset_y === 'number' && body.crop_offset_y >= 0 && body.crop_offset_y <= 100
+      ? body.crop_offset_y
+      : null;
   const photo = await createInspoPhoto({
     blob_url: body.blob_url,
     notes: body.notes ?? null,
     taken_at: body.taken_at,
     burst_group_id: body.burst_group_id ?? null,
     pose,
+    crop_offset_y: cropOffsetY,
   });
   return NextResponse.json(photo, { status: 201 });
 }

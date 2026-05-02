@@ -2,7 +2,7 @@
 
 All notable changes to Rebirth are documented here.
 
-## [0.6.2] - 2026-05-02
+## [0.7.1] - 2026-05-02
 
 ### Added
 - **Custom notes textarea on regenerate.** Optional collapsible "Customize" section in the demo-image manager sheet, with a 280-char textarea labeled "Notes for this regeneration". Server validates the length and threads the trimmed text into BOTH frame 1 + frame 2 prompts as `Additional guidance from the user: …`, so the model sees the correction whether it's painting frame 1 from scratch or chaining frame 2 off it. Notes persist on the `exercise_image_generation_jobs` audit row. One-shot per generation: cleared after success so the next run starts fresh.
@@ -16,6 +16,22 @@ All notable changes to Rebirth are documented here.
 
 ### Schema
 - **Migration 033** adds two nullable columns to `exercise_image_generation_jobs`: `notes TEXT` and `reference_image_url TEXT`. Both are server-side audit fields; no CDC trigger and no client sync impact.
+
+## [0.7.0] - 2026-05-02
+
+### Added
+- **Same-date photo grouping.** The Photos tab gallery now collapses photos taken on the same calendar day into a single card with a 3-up pose strip (front → side → back). One capture session reads as one entry instead of three.
+- **Photo alignment via `crop_offset_y`.** New nullable column on `progress_photos`, `inspo_photos`, and `projection_photos` (CSS object-position y%, 0-100). Renderer applies it everywhere photos appear in compare context so heads can line up across the divider. NULL = renderer defaults to 50 (center).
+- **Adjust alignment mode.** Long-press menu on any photo opens a full-screen modal: drag the photo up or down to position the head against the trans-blue anchor line at 25%. Reset, Save, persists via PATCH (and through the sync layer for progress photos).
+- **Best-effort face detection on upload.** `window.FaceDetector` (Shape Detection API) where supported (Chromium-based browsers) auto-fills `crop_offset_y` to anchor the face at ~25% from the top. Returns null on Safari (incl. iOS via Capacitor) and back-pose photos; manual drag is the safety net. No model download.
+- **Unified Compare dialog with Projection / Inspiration toggle.** One dialog, one slider primitive, two data sources. Top-of-dialog tab switches between target types with live counts. Pose chip strip uses the active target's accent color (trans-blue for projection, trans-pink for inspo).
+- **Pose-aware compare-to-inspo flow.** Tap Compare → Inspiration on any progress photo to auto-pick a matching-pose inspo. Pose-mismatch UX with `View {other-pose}` fallback chips and `+ Capture inspo` CTA.
+- **Per-photo action menu.** Each photo tile gets an overflow `⋯` menu: Compare to projection, Compare to inspo, Adjust alignment, Delete. Compare items hide when there's nothing to compare against.
+- **Adjust source / Adjust target buttons** inside the Compare dialog so you can fine-tune both sides without leaving the comparison.
+
+### Changed
+- Sync layer (push + pull) now round-trips `crop_offset_y` for progress photos so manual adjusts persist across devices.
+- `CompareWithProjectionDialog` removed; replaced by the unified `CompareDialog` with a `defaultTarget` prop.
 
 ## [0.6.1] - 2026-05-02
 

@@ -311,7 +311,7 @@ async function fetchRows(table: SyncedTable, uuids: string[]): Promise<Array<Rec
         .map(r => ({ ...r, logged_at: toIso(r.logged_at) }));
     case 'progress_photos':
       return (await query<Record<string, unknown>>(
-        'SELECT uuid, blob_url, pose, notes, taken_at FROM progress_photos WHERE uuid = ANY($1::text[])', [uuids]))
+        'SELECT uuid, blob_url, pose, notes, taken_at, crop_offset_y FROM progress_photos WHERE uuid = ANY($1::text[])', [uuids]))
         .map(r => ({ ...r, taken_at: toIso(r.taken_at) }));
     case 'exercise_image_candidates':
       return (await query<Record<string, unknown>>(

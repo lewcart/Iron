@@ -2132,6 +2132,7 @@ function parseProgressPhoto(row: DbRow): ProgressPhoto {
     pose: row.pose as ProgressPhoto['pose'],
     notes: row.notes as string | null,
     taken_at: row.taken_at as string,
+    crop_offset_y: (row.crop_offset_y as number | null) ?? null,
   };
 }
 
@@ -2140,12 +2141,13 @@ export async function createProgressPhoto(data: {
   pose: string;
   notes?: string | null;
   taken_at?: string;
+  crop_offset_y?: number | null;
 }): Promise<ProgressPhoto> {
   const uuid = randomUUID();
   const row = await queryOne(
-    `INSERT INTO progress_photos (uuid, blob_url, pose, notes, taken_at)
-     VALUES ($1, $2, $3, $4, COALESCE($5::TIMESTAMP, NOW())) RETURNING *`,
-    [uuid, data.blob_url, data.pose, data.notes ?? null, data.taken_at ?? null],
+    `INSERT INTO progress_photos (uuid, blob_url, pose, notes, taken_at, crop_offset_y)
+     VALUES ($1, $2, $3, $4, COALESCE($5::TIMESTAMP, NOW()), $6) RETURNING *`,
+    [uuid, data.blob_url, data.pose, data.notes ?? null, data.taken_at ?? null, data.crop_offset_y ?? null],
   );
   return parseProgressPhoto(row!);
 }
@@ -2156,6 +2158,29 @@ export async function listProgressPhotos(limit = 50): Promise<ProgressPhoto[]> {
     [limit],
   );
   return rows.map(parseProgressPhoto);
+}
+
+export async function updateProgressPhoto(
+  uuid: string,
+  data: { crop_offset_y?: number | null; notes?: string | null },
+): Promise<ProgressPhoto | null> {
+  const sets: string[] = [];
+  const params: unknown[] = [];
+  if ('crop_offset_y' in data) {
+    params.push(data.crop_offset_y ?? null);
+    sets.push(`crop_offset_y = $${params.length}`);
+  }
+  if ('notes' in data) {
+    params.push(data.notes ?? null);
+    sets.push(`notes = $${params.length}`);
+  }
+  if (sets.length === 0) return null;
+  params.push(uuid);
+  const row = await queryOne(
+    `UPDATE progress_photos SET ${sets.join(', ')} WHERE uuid = $${params.length} RETURNING *`,
+    params,
+  );
+  return row ? parseProgressPhoto(row) : null;
 }
 
 export async function deleteProgressPhoto(uuid: string): Promise<void> {
@@ -2182,6 +2207,7 @@ function parseInspoPhoto(row: DbRow): InspoPhoto {
     taken_at: row.taken_at as string,
     burst_group_id: row.burst_group_id as string | null,
     pose: (row.pose as InspoPhoto['pose']) ?? null,
+    crop_offset_y: (row.crop_offset_y as number | null) ?? null,
   };
 }
 
@@ -2191,12 +2217,13 @@ export async function createInspoPhoto(data: {
   taken_at?: string;
   burst_group_id?: string | null;
   pose?: 'front' | 'side' | 'back' | 'other' | null;
+  crop_offset_y?: number | null;
 }): Promise<InspoPhoto> {
   const uuid = randomUUID();
   const row = await queryOne(
-    `INSERT INTO inspo_photos (uuid, blob_url, notes, taken_at, burst_group_id, pose)
-     VALUES ($1, $2, $3, COALESCE($4::TIMESTAMP, NOW()), $5, $6) RETURNING *`,
-    [uuid, data.blob_url, data.notes ?? null, data.taken_at ?? null, data.burst_group_id ?? null, data.pose ?? null],
+    `INSERT INTO inspo_photos (uuid, blob_url, notes, taken_at, burst_group_id, pose, crop_offset_y)
+     VALUES ($1, $2, $3, COALESCE($4::TIMESTAMP, NOW()), $5, $6, $7) RETURNING *`,
+    [uuid, data.blob_url, data.notes ?? null, data.taken_at ?? null, data.burst_group_id ?? null, data.pose ?? null, data.crop_offset_y ?? null],
   );
   return parseInspoPhoto(row!);
 }
@@ -2211,7 +2238,7 @@ export async function listInspoPhotos(limit = 50): Promise<InspoPhoto[]> {
 
 export async function updateInspoPhoto(
   uuid: string,
-  data: { pose?: 'front' | 'side' | 'back' | 'other' | null; notes?: string | null },
+  data: { pose?: 'front' | 'side' | 'back' | 'other' | null; notes?: string | null; crop_offset_y?: number | null },
 ): Promise<InspoPhoto | null> {
   const sets: string[] = [];
   const params: unknown[] = [];
@@ -2222,6 +2249,10 @@ export async function updateInspoPhoto(
   if ('notes' in data) {
     params.push(data.notes ?? null);
     sets.push(`notes = $${params.length}`);
+  }
+  if ('crop_offset_y' in data) {
+    params.push(data.crop_offset_y ?? null);
+    sets.push(`crop_offset_y = $${params.length}`);
   }
   if (sets.length === 0) return null;
   params.push(uuid);
@@ -2260,6 +2291,7 @@ function parseProjectionPhoto(row: DbRow): ProjectionPhoto {
     taken_at: row.taken_at as string,
     source_progress_photo_uuid: (row.source_progress_photo_uuid as string | null) ?? null,
     target_horizon: (row.target_horizon as string | null) ?? null,
+    crop_offset_y: (row.crop_offset_y as number | null) ?? null,
   };
 }
 
@@ -2270,12 +2302,13 @@ export async function createProjectionPhoto(data: {
   taken_at?: string;
   source_progress_photo_uuid?: string | null;
   target_horizon?: string | null;
+  crop_offset_y?: number | null;
 }): Promise<ProjectionPhoto> {
   const uuid = randomUUID();
   const row = await queryOne(
     `INSERT INTO projection_photos
-       (uuid, blob_url, pose, notes, taken_at, source_progress_photo_uuid, target_horizon)
-     VALUES ($1, $2, $3, $4, COALESCE($5::TIMESTAMPTZ, NOW()), $6, $7)
+       (uuid, blob_url, pose, notes, taken_at, source_progress_photo_uuid, target_horizon, crop_offset_y)
+     VALUES ($1, $2, $3, $4, COALESCE($5::TIMESTAMPTZ, NOW()), $6, $7, $8)
      RETURNING *`,
     [
       uuid,
@@ -2285,9 +2318,37 @@ export async function createProjectionPhoto(data: {
       data.taken_at ?? null,
       data.source_progress_photo_uuid ?? null,
       data.target_horizon ?? null,
+      data.crop_offset_y ?? null,
     ],
   );
   return parseProjectionPhoto(row!);
+}
+
+export async function updateProjectionPhoto(
+  uuid: string,
+  data: { crop_offset_y?: number | null; notes?: string | null; target_horizon?: string | null },
+): Promise<ProjectionPhoto | null> {
+  const sets: string[] = [];
+  const params: unknown[] = [];
+  if ('crop_offset_y' in data) {
+    params.push(data.crop_offset_y ?? null);
+    sets.push(`crop_offset_y = $${params.length}`);
+  }
+  if ('notes' in data) {
+    params.push(data.notes ?? null);
+    sets.push(`notes = $${params.length}`);
+  }
+  if ('target_horizon' in data) {
+    params.push(data.target_horizon ?? null);
+    sets.push(`target_horizon = $${params.length}`);
+  }
+  if (sets.length === 0) return null;
+  params.push(uuid);
+  const row = await queryOne(
+    `UPDATE projection_photos SET ${sets.join(', ')} WHERE uuid = $${params.length} RETURNING *`,
+    params,
+  );
+  return row ? parseProjectionPhoto(row) : null;
 }
 
 export async function listProjectionPhotos(opts: { pose?: 'front' | 'side' | 'back'; limit?: number } = {}): Promise<ProjectionPhoto[]> {

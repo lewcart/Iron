@@ -33,6 +33,10 @@ export async function POST(request: NextRequest) {
       { status: 400 },
     );
   }
+  const cropOffsetY =
+    typeof body.crop_offset_y === 'number' && body.crop_offset_y >= 0 && body.crop_offset_y <= 100
+      ? body.crop_offset_y
+      : null;
   const photo = await createProjectionPhoto({
     blob_url: body.blob_url,
     pose: body.pose,
@@ -40,6 +44,7 @@ export async function POST(request: NextRequest) {
     taken_at: body.taken_at,
     source_progress_photo_uuid: body.source_progress_photo_uuid ?? null,
     target_horizon: body.target_horizon ?? null,
+    crop_offset_y: cropOffsetY,
   });
   return NextResponse.json(photo, { status: 201 });
 }
