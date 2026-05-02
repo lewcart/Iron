@@ -55,3 +55,6 @@ next-env.d.ts
 .gstack/
 .maestro/
 /screenshot-*.png
+
+# bun lockfile (project uses npm)
+bun.lock
