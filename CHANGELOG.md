@@ -2,6 +2,21 @@
 
 All notable changes to Rebirth are documented here.
 
+## [0.7.1] - 2026-05-02
+
+### Added
+- **Custom notes textarea on regenerate.** Optional collapsible "Customize" section in the demo-image manager sheet, with a 280-char textarea labeled "Notes for this regeneration". Server validates the length and threads the trimmed text into BOTH frame 1 + frame 2 prompts as `Additional guidance from the user: …`, so the model sees the correction whether it's painting frame 1 from scratch or chaining frame 2 off it. Notes persist on the `exercise_image_generation_jobs` audit row. One-shot per generation: cleared after success so the next run starts fresh.
+- **Reference image upload on regenerate.** Optional file picker in the same Customize section. PNG/JPEG/WebP, ≤8MB. When attached, the route sends multipart form-data instead of JSON; the server resizes the reference to 600×800 PNG via sharp, uploads it to Vercel Blob at `exercise-images/{uuid}/{batchId}/ref.png`, and uses `openai.images.edit({ image: ref })` for **frame 1** instead of `images.generate`. Frame 2 still chains from frame 1 via the existing edit-call, so the reference's aesthetic flows through both panels. Reference URL is preserved on the jobs row even on rollback (it's a source artifact; retries can re-use it).
+- **All catalog steps now reach the prompt.** Previously capped at the first 3 steps; now every step on `exercises.steps` is included, joined as a single instruction string.
+- **Catalog tips now reach the prompt.** Surfaced as `Things to watch for: {tips.join('. ')}` so form-correctness hints (e.g. "back flat", "elbows tucked") guide the image generator the same way they'd guide a real athlete. Tips were previously invisible to the model.
+
+### Changed
+- **Soft cap on prompt length** (~2000 chars). When `steps` and/or `tips` are unusually long, the truncation prefers trimming the catalog content over the user's `notes` (the user's correction is the most valuable signal).
+- **Generate-images route accepts both JSON and `multipart/form-data` bodies.** JSON path stays the fast path for note-only customizations; multipart kicks in only when a reference image is attached. Validation (notes ≤280, reference ≤8MB, MIME in PNG/JPEG/WebP) returns 400 with a helpful message.
+
+### Schema
+- **Migration 033** adds two nullable columns to `exercise_image_generation_jobs`: `notes TEXT` and `reference_image_url TEXT`. Both are server-side audit fields; no CDC trigger and no client sync impact.
+
 ## [0.7.0] - 2026-05-02
 
 ### Added
