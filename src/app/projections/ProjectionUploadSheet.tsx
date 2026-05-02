@@ -5,6 +5,7 @@ import Image from 'next/image';
 import { Sparkles, Upload } from 'lucide-react';
 import { Sheet } from '@/components/ui/sheet';
 import { uploadBlobToVercel, isLocalStub } from '@/lib/photo-upload-queue';
+import { tryDetectFaceY } from '@/lib/face-detect';
 import { apiBase, fetchJsonAuthed } from '@/lib/api/client';
 import { useProgressPhotos } from '@/lib/useLocalDB-measurements';
 import type { ProgressPhotoPose, ProjectionPhoto } from '@/types';
@@ -61,12 +62,17 @@ export function ProjectionUploadSheet({ open, onClose, onUploaded }: Props) {
       const filename = `projection-${pose}-${Date.now()}.${
         file.name.split('.').pop() ?? 'jpg'
       }`;
-      const url = await uploadBlobToVercel({
-        table: 'projection_photos',
-        blob: file,
-        filename,
-        pose,
-      });
+      // Best-effort face detection in parallel with the blob upload —
+      // null on Safari/iOS or back-pose photos. Manual adjust is the safety net.
+      const [url, cropOffsetY] = await Promise.all([
+        uploadBlobToVercel({
+          table: 'projection_photos',
+          blob: file,
+          filename,
+          pose,
+        }),
+        tryDetectFaceY(file).catch(() => null),
+      ]);
       const photo = await fetchJsonAuthed<ProjectionPhoto>(
         `${apiBase()}/api/projection-photos`,
         {
@@ -78,6 +84,7 @@ export function ProjectionUploadSheet({ open, onClose, onUploaded }: Props) {
             taken_at: new Date().toISOString(),
             source_progress_photo_uuid: sourceUuid,
             target_horizon: horizon,
+            crop_offset_y: cropOffsetY,
           }),
         },
       );
