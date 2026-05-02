@@ -392,6 +392,44 @@ export async function getAutoFillValues(
   return { weight: null, repetitions: null };
 }
 
+/** Returns the working sets from the most recent completed session for this
+ *  exercise (canonical group), excluding the in-progress workout. Used by the
+ *  progression cue on the next session's exercise card. Returns [] if there's
+ *  no prior session. Sets keep min/max_target_reps + rir so the rule fn can
+ *  compare reps to range and average RIR. */
+export async function getLastSessionSetsForExercise(
+  exerciseUuid: string,
+  excludeWorkoutUuid: string,
+): Promise<LocalWorkoutSet[]> {
+  const groupUuids = await resolveCanonicalExerciseUuids(exerciseUuid, 'any');
+  if (groupUuids.size === 0) return [];
+
+  const allWes = await db.workout_exercises
+    .filter(we => groupUuids.has(we.exercise_uuid.toLowerCase())
+      && !we._deleted
+      && we.workout_uuid !== excludeWorkoutUuid)
+    .toArray();
+  if (allWes.length === 0) return [];
+
+  const allWorkouts = await db.workouts.toArray();
+  const workoutByUuid = new Map(allWorkouts.map(w => [w.uuid, w]));
+
+  const candidates = allWes
+    .map(we => ({ we, wo: workoutByUuid.get(we.workout_uuid) }))
+    .filter(({ wo }) => wo && !wo._deleted && wo.end_time != null)
+    .sort((a, b) =>
+      new Date(b.wo!.start_time).getTime() - new Date(a.wo!.start_time).getTime(),
+    );
+  if (candidates.length === 0) return [];
+
+  const lastWe = candidates[0].we;
+  return await db.workout_sets
+    .where('workout_exercise_uuid')
+    .equals(lastWe.uuid)
+    .filter(s => !s._deleted)
+    .sortBy('order_index');
+}
+
 // ─── Exercise history (Dexie-side, used by the in-workout [i] modal) ─────────
 //
 // These mirror the server-side queries in src/db/queries.ts but read from
