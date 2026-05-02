@@ -1556,6 +1556,7 @@ export function parseRoutineExercise(row: DbRow): WorkoutRoutineExercise {
     exercise_title: (row.exercise_title as string) ?? undefined,
     comment: row.comment as string | null,
     order_index: row.order_index as number,
+    goal_window: (row.goal_window as WorkoutRoutineExercise['goal_window']) ?? null,
   };
 }
 

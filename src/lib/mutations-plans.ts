@@ -202,6 +202,7 @@ export async function addRoutineExercise(opts: {
     exercise_uuid: opts.exercise_uuid.toLowerCase(),
     comment: opts.comment ?? null,
     order_index: max,
+    goal_window: null,
     ...syncMeta(),
   };
   await db.workout_routine_exercises.add(re);
