@@ -87,13 +87,17 @@ export function recommendForExercise(
   // then compare to the goal window. Diff > 0 = spilled up; diff < 0 = below.
   if (goalWindow) {
     const goalIdx = REP_WINDOW_ORDER.indexOf(goalWindow);
-    let inWindow = 0, upOne = 0, upTwoPlus = 0, belowGoal = 0;
+    // _inWindow is computed for symmetry/future use but isn't read by any
+    // recommendation branch below — the in-window case falls through to the
+    // RIR-based "more reps" / "hold" decision. Underscore prefix per the
+    // project's no-unused-vars lint allowance.
+    let _inWindow = 0, upOne = 0, upTwoPlus = 0, belowGoal = 0;
 
     for (const s of working) {
       const setWin = windowForReps(s.repetitions ?? 0);
       if (!setWin) { belowGoal++; continue; }
       const diff = REP_WINDOW_ORDER.indexOf(setWin) - goalIdx;
-      if (diff === 0) inWindow++;
+      if (diff === 0) _inWindow++;
       else if (diff === 1) upOne++;
       else if (diff >= 2) upTwoPlus++;
       else belowGoal++;
