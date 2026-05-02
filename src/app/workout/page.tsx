@@ -844,14 +844,21 @@ function RecommendationBadge({ rec }: { rec: ExerciseRecommendation }) {
         : rec.intensity === 'high'
           ? ChevronsUp
           : ChevronUp;
+  // Trans-mapped palette — solid bg + white text so the badge reads as ACTION
+  // against the soft tinted window pills (the GOAL). Same hue family across
+  // both surfaces, different intensity. more-reps uses purple (the build-zone
+  // bridge color); go-heavier/go-longer use pink (warm = push hard); back-off
+  // uses sky blue (cool = retreat); hold stays muted.
   const color =
     rec.kind === 'back-off'
-      ? 'text-blue-400 bg-blue-500/15'
+      ? 'bg-sky-500 text-white'
       : rec.kind === 'hold'
-        ? 'text-muted-foreground bg-secondary'
-        : rec.intensity === 'high'
-          ? 'text-red-400 bg-red-500/15'
-          : 'text-amber-400 bg-amber-400/15';
+        ? 'bg-secondary text-muted-foreground'
+        : rec.kind === 'more-reps'
+          ? 'bg-purple-500 text-white'
+          : rec.intensity === 'high'
+            ? 'bg-pink-500 text-white'
+            : 'bg-pink-400 text-white';
   return (
     <span
       className={
