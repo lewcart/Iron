@@ -837,9 +837,9 @@ function SetRow({
   workoutExerciseUuid: string;
   trackingMode: 'reps' | 'time';
   onUpdate: (weUuid: string, setUuid: string, weight: number, reps: number) => Promise<void>;
-  onUpdateDuration: (weUuid: string, setUuid: string, durationSeconds: number) => Promise<void>;
+  onUpdateDuration: (weUuid: string, setUuid: string, weight: number, durationSeconds: number) => Promise<void>;
   onEdit: (weUuid: string, setUuid: string, weight: number, reps: number) => Promise<void>;
-  onEditDuration: (weUuid: string, setUuid: string, durationSeconds: number) => Promise<void>;
+  onEditDuration: (weUuid: string, setUuid: string, weight: number, durationSeconds: number) => Promise<void>;
   onUpdateRir: (setUuid: string, rir: number | null) => Promise<void>;
   onDelete: (setUuid: string) => Promise<void>;
   allTimeBest1RM?: number | null;
@@ -867,11 +867,11 @@ function SetRow({
 
   const handleComplete = async () => {
     setSaving(true);
+    const weightKg = fromInput(parseFloat(weight) || 0);
     if (trackingMode === 'time') {
       const seconds = parseInt(duration) || 0;
-      await onUpdateDuration(workoutExerciseUuid, set.uuid, seconds);
+      await onUpdateDuration(workoutExerciseUuid, set.uuid, weightKg, seconds);
     } else {
-      const weightKg = fromInput(parseFloat(weight) || 0);
       await onUpdate(workoutExerciseUuid, set.uuid, weightKg, parseInt(reps) || 0);
     }
     setSaving(false);
@@ -890,11 +890,12 @@ function SetRow({
     await onEdit(workoutExerciseUuid, set.uuid, weightKg, repsInt);
   };
 
-  const handleDurationBlur = async () => {
+  const handleTimeBlur = async () => {
     if (!completed || trackingMode !== 'time') return;
+    const weightKg = fromInput(parseFloat(weight) || 0);
     const seconds = parseInt(duration) || 0;
-    if (seconds === (set.duration_seconds ?? 0)) return;
-    await onEditDuration(workoutExerciseUuid, set.uuid, seconds);
+    if (weightKg === (set.weight ?? 0) && seconds === (set.duration_seconds ?? 0)) return;
+    await onEditDuration(workoutExerciseUuid, set.uuid, weightKg, seconds);
   };
   const isPR = set.is_pr;
   const showPD = isPR || isLivePD;
@@ -913,19 +914,37 @@ function SetRow({
       <div className="w-5 text-center text-xs font-semibold text-muted-foreground">{setNumber}</div>
 
       {trackingMode === 'time' ? (
-        <div className="flex-1 flex items-center gap-1">
-          <input
-            type="number"
-            inputMode="numeric"
-            placeholder="60"
-            value={duration}
-            onChange={e => setDuration(e.target.value)}
-            onFocus={e => { e.target.scrollIntoView({ behavior: 'smooth', block: 'center' }); e.target.select(); }}
-            onBlur={handleDurationBlur}
-            className="w-full text-right text-sm font-medium bg-transparent outline-none min-h-[36px]"
-          />
-          <span className="text-[10px] text-muted-foreground">sec</span>
-        </div>
+        <>
+          <div className="flex-1 flex items-center gap-1">
+            <input
+              type="number"
+              inputMode="decimal"
+              placeholder="—"
+              value={weight}
+              onChange={e => setWeight(e.target.value)}
+              onFocus={e => { e.target.scrollIntoView({ behavior: 'smooth', block: 'center' }); e.target.select(); }}
+              onBlur={handleTimeBlur}
+              className="w-full text-right text-sm font-medium bg-transparent outline-none min-h-[36px]"
+            />
+            <span className="text-[10px] text-muted-foreground">{label}</span>
+          </div>
+
+          <span className="text-muted-foreground text-xs">×</span>
+
+          <div className="flex-1 flex items-center gap-1">
+            <input
+              type="number"
+              inputMode="numeric"
+              placeholder="60"
+              value={duration}
+              onChange={e => setDuration(e.target.value)}
+              onFocus={e => { e.target.scrollIntoView({ behavior: 'smooth', block: 'center' }); e.target.select(); }}
+              onBlur={handleTimeBlur}
+              className="w-full text-right text-sm font-medium bg-transparent outline-none min-h-[36px]"
+            />
+            <span className="text-[10px] text-muted-foreground">sec</span>
+          </div>
+        </>
       ) : (
         <>
           <div className="flex-1 flex items-center gap-1">
@@ -1075,9 +1094,9 @@ function SortableExerciseCard({
   onRemove: () => void;
   onAddSet: () => void;
   onUpdateSet: (workoutExerciseUuid: string, setUuid: string, weight: number, reps: number) => Promise<void>;
-  onUpdateSetDuration: (workoutExerciseUuid: string, setUuid: string, durationSeconds: number) => Promise<void>;
+  onUpdateSetDuration: (workoutExerciseUuid: string, setUuid: string, weight: number, durationSeconds: number) => Promise<void>;
   onEditSet: (workoutExerciseUuid: string, setUuid: string, weight: number, reps: number) => Promise<void>;
-  onEditSetDuration: (workoutExerciseUuid: string, setUuid: string, durationSeconds: number) => Promise<void>;
+  onEditSetDuration: (workoutExerciseUuid: string, setUuid: string, weight: number, durationSeconds: number) => Promise<void>;
   onUpdateSetRir: (setUuid: string, rir: number | null) => Promise<void>;
   onDeleteSet: (uuid: string) => Promise<void>;
   onShowInfo: () => void;
@@ -1174,18 +1193,17 @@ function SortableExerciseCard({
       {/* Collapsible sets */}
       {isExpanded && (
         <>
-          {/* Column headers — mirrors SetRow layout exactly. Branches on
-              tracking_mode so time-mode shows a single 'Time (sec)' column. */}
+          {/* Column headers — mirrors SetRow layout exactly. Time-mode uses
+              the same Weight × ? layout as reps so loaded holds (weighted
+              planks, dips, carries) capture both dimensions. */}
           <div className="flex items-center gap-2 px-3 py-1 border-t border-b border-border bg-secondary/30">
             <div className="w-5 text-center text-[10px] font-medium text-muted-foreground">Set</div>
+            <div className="flex-1 text-right text-[10px] font-medium text-muted-foreground">Weight</div>
+            <div className="w-3" />
             {(we.exercise?.tracking_mode ?? 'reps') === 'time' ? (
               <div className="flex-1 text-right text-[10px] font-medium text-muted-foreground">Time (sec)</div>
             ) : (
-              <>
-                <div className="flex-1 text-right text-[10px] font-medium text-muted-foreground">Weight</div>
-                <div className="w-3" />
-                <div className="flex-1 text-right text-[10px] font-medium text-muted-foreground">Reps</div>
-              </>
+              <div className="flex-1 text-right text-[10px] font-medium text-muted-foreground">Reps</div>
             )}
             <div className="w-8 flex-shrink-0" />
           </div>
@@ -1589,10 +1607,11 @@ export default function WorkoutPage() {
     await mutUpdateSet(setUuid, { weight, repetitions: reps });
   };
 
-  // Time-mode counterpart. Writes duration_seconds; weight + repetitions
-  // stay null. Same auto-rest-timer behavior so workflow is consistent.
-  const updateSetDuration = async (workoutExerciseUuid: string, setUuid: string, durationSeconds: number) => {
-    await mutUpdateSet(setUuid, { duration_seconds: durationSeconds, is_completed: true });
+  // Time-mode counterpart. Writes weight + duration_seconds (weight stays
+  // captured for loaded holds like weighted planks/dips). Same auto-rest-timer
+  // behavior as rep mode so the workflow is consistent.
+  const updateSetDuration = async (workoutExerciseUuid: string, setUuid: string, weight: number, durationSeconds: number) => {
+    await mutUpdateSet(setUuid, { weight, duration_seconds: durationSeconds, is_completed: true });
 
     const { defaultRest, autoStart } = getRestSettings();
     if (autoStart) {
@@ -1605,8 +1624,8 @@ export default function WorkoutPage() {
     }
   };
 
-  const editSetDuration = async (_workoutExerciseUuid: string, setUuid: string, durationSeconds: number) => {
-    await mutUpdateSet(setUuid, { duration_seconds: durationSeconds });
+  const editSetDuration = async (_workoutExerciseUuid: string, setUuid: string, weight: number, durationSeconds: number) => {
+    await mutUpdateSet(setUuid, { weight, duration_seconds: durationSeconds });
   };
 
   const handleAddSet = async (we: LocalWorkoutExerciseEntry) => {
