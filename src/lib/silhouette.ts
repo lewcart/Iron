@@ -27,6 +27,7 @@
  */
 
 import { isPersonSegmentationAvailable, segmentPerson } from './native/person-segmentation';
+import { apiBase } from './api/client';
 
 export type PhotoKind = 'progress' | 'projection' | 'inspo';
 
@@ -98,10 +99,23 @@ export async function ensureMask(
       throw new Error('Silhouette compare requires the iOS app');
     }
 
-    const imageBase64 = await fetchAsBase64(photo.blob_url);
+    // Each step prefixes its error so the surfaced message points at the
+    // failing layer instead of WebKit's generic "string did not match the
+    // expected pattern" or similar opaque errors.
+    let imageBase64: string;
+    try {
+      imageBase64 = await fetchAsBase64(photo.blob_url);
+    } catch (e) {
+      throw new Error(`fetch source image failed: ${e instanceof Error ? e.message : String(e)}`);
+    }
     if (signal?.aborted) throw new DOMException('aborted', 'AbortError');
 
-    const { maskPngBase64 } = await segmentPerson({ imageBase64 });
+    let maskPngBase64: string;
+    try {
+      ({ maskPngBase64 } = await segmentPerson({ imageBase64 }));
+    } catch (e) {
+      throw new Error(`segmentation failed: ${e instanceof Error ? e.message : String(e)}`);
+    }
     if (signal?.aborted) throw new DOMException('aborted', 'AbortError');
 
     const maskBlob = base64ToBlob(maskPngBase64, 'image/png');
@@ -113,12 +127,22 @@ export async function ensureMask(
       headers['X-Api-Key'] = process.env.NEXT_PUBLIC_REBIRTH_API_KEY;
     }
 
-    const res = await fetch(`${ROUTES[kind]}/${photo.uuid}/mask`, {
-      method: 'POST',
-      body: formData,
-      headers,
-      signal,
-    });
+    // CRITICAL: prefix with apiBase() so on iOS Capacitor the fetch resolves
+    // against the deployed origin (https://iron-swart.vercel.app) instead of
+    // capacitor://localhost — the latter trips WebKit's URL parser with
+    // "The string did not match the expected pattern" before the request
+    // even leaves the device.
+    let res: Response;
+    try {
+      res = await fetch(`${apiBase()}${ROUTES[kind]}/${photo.uuid}/mask`, {
+        method: 'POST',
+        body: formData,
+        headers,
+        signal,
+      });
+    } catch (e) {
+      throw new Error(`mask upload network error: ${e instanceof Error ? e.message : String(e)}`);
+    }
     if (!res.ok) throw new Error(`mask upload HTTP ${res.status}`);
     const { mask_url } = (await res.json()) as { mask_url: string };
     return { maskUrl: mask_url, computed: true };
