@@ -28,10 +28,14 @@ interface Props {
    *  pre-selected in the carousel. Used when launching from /strategy where
    *  Lou taps a specific projection/inspo thumb. */
   defaultTargetUuid?: string | null;
-  /** Open the adjust-offset dialog for this photo. Parent owns the dialog. */
+  /** Open the adjust-offset dialog for this photo. Parent owns the dialog.
+   *  `onSaved` (when supplied) fires after the parent's save side-effects so
+   *  the caller can patch its own view-state — without it the split view
+   *  renders the stale offset until the dialog is reopened. */
   onAdjust: (
     photo: { uuid: string; blob_url: string; crop_offset_y: number | null },
     kind: 'progress' | 'inspo' | 'projection',
+    onSaved?: (newOffset: number | null) => void,
   ) => void;
 }
 
@@ -172,6 +176,11 @@ export function CompareDialog({ open, onClose, source, defaultTarget = 'projecti
   const [error, setError] = useState<string | null>(null);
   const [pose, setPose] = useState<ProgressPhotoPose | null>(source?.pose ?? null);
   const [activeUuid, setActiveUuid] = useState<string | null>(null);
+  // Local override for the source progress photo offset. The parent passes
+  // `source` as a snapshot (not a live ref), so saves don't propagate back
+  // through the prop. Cleared on close / source change so it doesn't bleed
+  // across compare sessions.
+  const [sourceOffsetOverride, setSourceOffsetOverride] = useState<number | null | undefined>(undefined);
 
   // Fetch both target lists once on open.
   useEffect(() => {
@@ -194,6 +203,7 @@ export function CompareDialog({ open, onClose, source, defaultTarget = 'projecti
     if (open) {
       setPose(source?.pose ?? null);
       setTarget(defaultTarget);
+      setSourceOffsetOverride(undefined);
     }
   }, [open, source, defaultTarget]);
 
@@ -250,18 +260,21 @@ export function CompareDialog({ open, onClose, source, defaultTarget = 'projecti
 
   const active = candidates.find((p) => p.uuid === activeUuid) ?? candidates[0] ?? null;
 
+  // Initial selection from a caller-supplied uuid — only fires on open or
+  // when the prop itself changes. NOT on every activeUuid mutation, otherwise
+  // the user's carousel clicks get silently reverted to defaultTargetUuid.
+  useEffect(() => {
+    if (!open) return;
+    if (defaultTargetUuid) setActiveUuid(defaultTargetUuid);
+  }, [open, defaultTargetUuid]);
+
+  // Fallback: ensure activeUuid points to a real candidate (covers pose/target
+  // switches and the initial load when no defaultTargetUuid is supplied).
   useEffect(() => {
     if (candidates.length === 0) return;
-    // Prefer the caller-supplied default-target uuid when it lands at the
-    // active pose. Otherwise fall through to the first candidate.
-    if (defaultTargetUuid && candidates.some((p) => p.uuid === defaultTargetUuid)) {
-      if (activeUuid !== defaultTargetUuid) setActiveUuid(defaultTargetUuid);
-      return;
-    }
-    if (!activeUuid || !candidates.some((p) => p.uuid === activeUuid)) {
-      setActiveUuid(candidates[0].uuid);
-    }
-  }, [candidates, activeUuid, defaultTargetUuid]);
+    if (activeUuid && candidates.some((p) => p.uuid === activeUuid)) return;
+    setActiveUuid(candidates[0].uuid);
+  }, [candidates, activeUuid]);
 
   // Clear active selection when target type changes so we don't carry a uuid
   // from one list to the other.
@@ -383,7 +396,11 @@ export function CompareDialog({ open, onClose, source, defaultTarget = 'projecti
             <BeforeAfterSlider
               beforeUrl={source.blob_url}
               afterUrl={active.blob_url}
-              beforeOffset={source.crop_offset_y ?? null}
+              beforeOffset={
+                sourceOffsetOverride !== undefined
+                  ? sourceOffsetOverride
+                  : (source.crop_offset_y ?? null)
+              }
               afterOffset={active.crop_offset_y}
               beforeLabel="Now"
               afterLabel={
@@ -394,17 +411,51 @@ export function CompareDialog({ open, onClose, source, defaultTarget = 'projecti
               accent={accent}
             />
 
-            {/* Adjust controls — one button per side */}
+            {/* Adjust controls — one button per side. The onSaved callback
+                lets us refresh this dialog's view immediately after the
+                adjust dialog persists, so the split view shows the new
+                alignment without a reopen. */}
             <div className="flex gap-2">
               <button
-                onClick={() => onAdjust({ uuid: source.uuid, blob_url: source.blob_url, crop_offset_y: source.crop_offset_y ?? null }, 'progress')}
+                onClick={() => {
+                  const currentOffset =
+                    sourceOffsetOverride !== undefined
+                      ? sourceOffsetOverride
+                      : (source.crop_offset_y ?? null);
+                  onAdjust(
+                    { uuid: source.uuid, blob_url: source.blob_url, crop_offset_y: currentOffset },
+                    'progress',
+                    (newOffset) => setSourceOffsetOverride(newOffset),
+                  );
+                }}
                 className="flex items-center gap-1.5 px-3 py-1.5 border border-white/15 text-white/80 text-xs font-medium rounded-lg"
               >
                 <Move className="h-3.5 w-3.5" />
                 Adjust source
               </button>
               <button
-                onClick={() => onAdjust({ uuid: active.uuid, blob_url: active.blob_url, crop_offset_y: active.crop_offset_y }, target)}
+                onClick={() => {
+                  const activeUuidLocal = active.uuid;
+                  onAdjust(
+                    { uuid: active.uuid, blob_url: active.blob_url, crop_offset_y: active.crop_offset_y },
+                    target,
+                    (newOffset) => {
+                      if (target === 'projection') {
+                        setProjections((prev) =>
+                          prev?.map((p) =>
+                            p.uuid === activeUuidLocal ? { ...p, crop_offset_y: newOffset } : p,
+                          ) ?? null,
+                        );
+                      } else {
+                        setInspos((prev) =>
+                          prev?.map((p) =>
+                            p.uuid === activeUuidLocal ? { ...p, crop_offset_y: newOffset } : p,
+                          ) ?? null,
+                        );
+                      }
+                    },
+                  );
+                }}
                 className="flex items-center gap-1.5 px-3 py-1.5 border border-white/15 text-white/80 text-xs font-medium rounded-lg"
               >
                 <Move className="h-3.5 w-3.5" />

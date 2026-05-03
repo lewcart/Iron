@@ -72,9 +72,13 @@ export default function StrategyPage() {
   const [compareTargetUuid, setCompareTargetUuid] = useState<string | null>(null);
 
   // Adjust offset dialog (so the in-dialog "Adjust source/target" buttons work).
+  // `onSaved` (when set by the caller) lets the originating view refresh its
+  // own state — the CompareDialog uses this to update the displayed offset
+  // without a reopen.
   const [adjustState, setAdjustState] = useState<{
     photo: { uuid: string; blob_url: string; crop_offset_y: number | null };
     kind: AdjustablePhotoKind;
+    onSaved?: (newOffset: number | null) => void;
   } | null>(null);
 
   const latestProgressByPose = useMemo(() => {
@@ -166,14 +170,14 @@ export default function StrategyPage() {
         source={compareSource}
         defaultTarget={compareTarget}
         defaultTargetUuid={compareTargetUuid}
-        onAdjust={(photo, kind) => setAdjustState({ photo, kind })}
+        onAdjust={(photo, kind, onSaved) => setAdjustState({ photo, kind, onSaved })}
       />
       <AdjustOffsetDialog
         open={adjustState !== null}
         onClose={() => setAdjustState(null)}
         photo={adjustState?.photo ?? null}
         kind={adjustState?.kind ?? 'progress'}
-        onSaved={() => { /* no-op; Dexie sync engine carries through */ }}
+        onSaved={(newOffset) => adjustState?.onSaved?.(newOffset)}
       />
     </main>
   );

@@ -151,11 +151,14 @@ function MeasurementsInner() {
   }, []);
 
   // Adjust mode (manual head-y nudge). Holds the photo + its kind so the
-  // dialog knows which API route to PATCH on save.
+  // dialog knows which API route to PATCH on save. `onSaved` (when set by
+  // the caller) lets the originating view refresh its own state — e.g. the
+  // CompareDialog needs to update the displayed offset without reopening.
   const [adjustState, setAdjustState] = useState<{
     photo: { uuid: string; blob_url: string; crop_offset_y: number | null };
     kind: AdjustablePhotoKind;
     blob?: Blob | null;
+    onSaved?: (newOffset: number | null) => void;
   } | null>(null);
 
   const handleAdjustSaved = useCallback(async (newOffset: number | null) => {
@@ -172,6 +175,7 @@ function MeasurementsInner() {
         syncEngine.schedulePush();
       } catch { /* non-fatal */ }
     }
+    adjustState.onSaved?.(newOffset);
   }, [adjustState]);
 
   // Retag a progress photo's pose. Optimistic Dexie update so the gallery
@@ -1041,8 +1045,8 @@ function MeasurementsInner() {
         onClose={() => setCompareSource(null)}
         source={compareSource}
         defaultTarget={compareTarget}
-        onAdjust={(photo, kind) =>
-          setAdjustState({ photo, kind })
+        onAdjust={(photo, kind, onSaved) =>
+          setAdjustState({ photo, kind, onSaved })
         }
       />
       <AdjustOffsetDialog
