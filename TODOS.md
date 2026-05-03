@@ -1,3 +1,44 @@
+## Photos compare v1.1 follow-ups (deferred from 2026-05-03 v0.7.7 ship)
+
+Lou-requested after using the new /photos/compare page (chunks 1+2 shipped
+2026-05-03):
+
+- [ ] **Extend `target_horizon` to long-arc tags.** Current options are
+      `3mo / 6mo / 12mo`. Add `18mo / 2yr / 3yr` so projections aligned with
+      the Androgod(ess) 18-month plan + further-out vision photos can be
+      labelled accurately. Bump the upload sheet picker, the badge renderer
+      on PhotoCard / TimelapseViewer, and the `afterLabel` fallback in
+      `/photos/compare`.
+
+- [ ] **Inline edit of `target_horizon` and `pose` on a projection.** From
+      `/photos/compare`, surface a small edit affordance on the active
+      projection (next to the "Adjust projection" button or inside the
+      metadata strip) that opens a quick picker for both fields. Avoids
+      having to bounce out to `/projections` to retag. Existing
+      `update_projection_photo` MCP tool already accepts `pose` +
+      `target_horizon`, so the API is in place — just needs the UI surface.
+
+- [ ] **Render projection edit UI on /photos/compare itself ("in front,
+      without doc").** Lou's framing: every UI affordance for editing a
+      projection should live inside the compare page, not in a separate
+      docs page or a deep settings dive. Same place you're looking at the
+      photo is the same place you change its tags. Folds into the inline
+      edit item above.
+
+- [ ] **Horizontal alignment offset (`crop_offset_x`).** Current
+      `crop_offset_y` only solves head-y anchoring. For photos taken at
+      different camera distances or where Lou stood off-centre, the
+      person's body-centre line drifts horizontally and the comparison
+      modes (especially Side-by-side / Blend / Silhouette) misalign on the
+      x-axis. Add a second offset axis to mirror crop_offset_y semantics:
+      column on the 3 photo tables (migration), Dexie bump, types update,
+      `offsetTransform()` in `src/lib/photo-offset.ts` extends to take both
+      x + y, AdjustOffsetDialog gets a horizontal drag handle alongside the
+      existing vertical one. Same render path picks it up across all 5
+      modes.
+
+---
+
 ## Plan-progress: extend source-mapping for circ + InBody fields
 
 Surfaced 2026-05-03 during Androgod(ess) plan north_star rebuild. `get_plan_progress`
