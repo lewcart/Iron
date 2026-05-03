@@ -46,10 +46,18 @@ export function SilhouetteMode({
   const accentBg = accent === 'trans-blue' ? 'bg-trans-blue/80' : 'bg-trans-pink/80';
   const supported = isPersonSegmentationAvailable();
 
+  // Keep latest prop refs in a ref so the effect can read them without
+  // listing the (inline-constructed) objects in deps. Otherwise every parent
+  // re-render — Dexie liveQuery tick, router.replace URL sync, etc. —
+  // produces new object references, the effect re-fires, aborts the in-flight
+  // ensureMask, and the user sees "aborted" forever.
+  const propsRef = useRef({ beforePhoto, afterPhoto, onMaskCached });
+  propsRef.current = { beforePhoto, afterPhoto, onMaskCached };
+
+  // Effect re-runs only when the IDENTITY of the photo pair or its cached
+  // mask state actually changes (primitives), or when iOS support flips.
   useEffect(() => {
     if (!supported) return;
-    // Cancel any previous in-flight ensure when uuids change (mode-switch
-    // race: user changes active photo while a segmentation is mid-flight).
     abortRef.current?.abort();
     const controller = new AbortController();
     abortRef.current = controller;
@@ -57,14 +65,15 @@ export function SilhouetteMode({
     setState({ phase: 'loading' });
 
     (async () => {
+      const { beforePhoto: bp, afterPhoto: ap, onMaskCached: cb } = propsRef.current;
       try {
         const [b, a] = await Promise.all([
-          ensureMask(beforePhoto, beforePhoto.kind, controller.signal),
-          ensureMask(afterPhoto, afterPhoto.kind, controller.signal),
+          ensureMask(bp, bp.kind, controller.signal),
+          ensureMask(ap, ap.kind, controller.signal),
         ]);
         if (controller.signal.aborted) return;
-        if (b.computed) onMaskCached?.(beforePhoto.uuid, b.maskUrl);
-        if (a.computed) onMaskCached?.(afterPhoto.uuid, a.maskUrl);
+        if (b.computed) cb?.(bp.uuid, b.maskUrl);
+        if (a.computed) cb?.(ap.uuid, a.maskUrl);
         setState({ phase: 'ready', beforeMask: b.maskUrl, afterMask: a.maskUrl });
       } catch (err) {
         if (controller.signal.aborted) return;
@@ -76,7 +85,13 @@ export function SilhouetteMode({
     })();
 
     return () => controller.abort();
-  }, [beforePhoto, afterPhoto, supported, onMaskCached]);
+  }, [
+    supported,
+    beforePhoto.uuid,
+    afterPhoto.uuid,
+    beforePhoto.mask_url,
+    afterPhoto.mask_url,
+  ]);
 
   if (!supported) {
     return (
