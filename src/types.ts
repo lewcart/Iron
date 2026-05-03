@@ -334,6 +334,10 @@ export interface ProgressPhoto {
   taken_at: string;
   /** CSS object-position y%, 0-100. NULL = renderer defaults to 50 (center). */
   crop_offset_y: number | null;
+  /** Vercel Blob URL of a person-segmentation mask PNG (white = person, black =
+   *  background) at the source image's original dimensions. NULL = mask not
+   *  yet computed. Server-owned cache: clients never null this on push. */
+  mask_url: string | null;
 }
 
 // Inspo photos — physique inspiration captured discreetly.
@@ -354,6 +358,8 @@ export interface InspoPhoto {
   pose: InspoPhotoPose | null;
   /** CSS object-position y%, 0-100. NULL = renderer defaults to 50 (center). */
   crop_offset_y: number | null;
+  /** Vercel Blob URL of a person-segmentation mask PNG. See ProgressPhoto. */
+  mask_url: string | null;
 }
 
 // Projection photos — AI-generated images of Lou (made outside this app, e.g.
@@ -370,6 +376,8 @@ export interface ProjectionPhoto {
   target_horizon: string | null;
   /** CSS object-position y%, 0-100. NULL = renderer defaults to 50 (center). */
   crop_offset_y: number | null;
+  /** Vercel Blob URL of a person-segmentation mask PNG. See ProgressPhoto. */
+  mask_url: string | null;
 }
 
 // ── InBody scan catalog ──────────────────────────────────────────────────────
