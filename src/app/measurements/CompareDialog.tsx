@@ -2,9 +2,11 @@
 
 import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import Link from 'next/link';
-import { X, ChevronLeft, ChevronRight, Sparkles, Plus, Move } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Sparkles, Plus, Move } from 'lucide-react';
 import type { ProjectionPhoto, InspoPhoto, ProgressPhotoPose } from '@/types';
 import { apiBase, fetchJsonAuthed } from '@/lib/api/client';
+import { COMPARABLE_POSES, POSE_LABELS, isComparablePose } from '@/lib/poses';
+import { offsetTransform } from '@/lib/photo-offset';
 
 export type CompareTarget = 'projection' | 'inspo';
 
@@ -33,18 +35,17 @@ interface Props {
   ) => void;
 }
 
-const POSE_ORDER: ProgressPhotoPose[] = ['front', 'side', 'back'];
-
 function formatDate(iso: string) {
   return new Date(iso).toLocaleDateString('en-GB', {
     day: '2-digit',
     month: 'short',
     year: 'numeric',
+    timeZone: 'Europe/London',
   });
 }
 
 /** Draggable before/after divider with per-photo crop_offset_y applied via
- *  CSS object-position so heads line up across the slider. */
+ *  the same transform-based mapping AlignedPhoto uses, so heads line up. */
 function BeforeAfterSlider({
   beforeUrl,
   afterUrl,
@@ -87,8 +88,6 @@ function BeforeAfterSlider({
     draggingRef.current = false;
   };
 
-  const beforeY = beforeOffset ?? 50;
-  const afterY = afterOffset ?? 50;
   const accentBg = accent === 'trans-blue' ? 'bg-trans-blue/80' : 'bg-trans-pink/80';
 
   return (
@@ -106,7 +105,11 @@ function BeforeAfterSlider({
         src={afterUrl}
         alt={afterLabel}
         className="absolute inset-0 w-full h-full"
-        style={{ objectFit: 'cover', objectPosition: `center ${afterY}%` }}
+        style={{
+          objectFit: 'cover',
+          transform: offsetTransform(afterOffset),
+          transformOrigin: 'center',
+        }}
         draggable={false}
       />
       {/* Source (clipped to left half) */}
@@ -119,7 +122,11 @@ function BeforeAfterSlider({
           src={beforeUrl}
           alt={beforeLabel}
           className="absolute inset-0 w-full h-full"
-          style={{ objectFit: 'cover', objectPosition: `center ${beforeY}%` }}
+          style={{
+            objectFit: 'cover',
+            transform: offsetTransform(beforeOffset),
+            transformOrigin: 'center',
+          }}
           draggable={false}
         />
       </div>
@@ -190,6 +197,17 @@ export function CompareDialog({ open, onClose, source, defaultTarget = 'projecti
     }
   }, [open, source, defaultTarget]);
 
+  // Body scroll lock — page behind the dialog should NOT scroll when the
+  // user drags inside the slider on iOS.
+  useEffect(() => {
+    if (!open) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, [open]);
+
   // Active list of candidate target photos at the chosen pose, ordered with
   // any source-linked projection first, then newest first.
   const candidates: ActivePhoto[] = useMemo(() => {
@@ -256,25 +274,25 @@ export function CompareDialog({ open, onClose, source, defaultTarget = 'projecti
     if (!list) return [];
     const withAny = new Set<ProgressPhotoPose>();
     for (const p of list) {
-      if (p.pose === 'front' || p.pose === 'side' || p.pose === 'back') {
-        withAny.add(p.pose as ProgressPhotoPose);
-      }
+      if (isComparablePose(p.pose)) withAny.add(p.pose);
     }
-    return POSE_ORDER.filter((x) => x !== pose && withAny.has(x));
+    return COMPARABLE_POSES.filter((x) => x !== pose && withAny.has(x));
   }, [target, projections, inspos, pose]);
 
   const counts = useMemo(() => {
     const list = target === 'projection' ? projections : inspos;
-    const out: Record<ProgressPhotoPose, number> = { front: 0, side: 0, back: 0 };
+    const out: Partial<Record<ProgressPhotoPose, number>> = {};
     for (const p of list ?? []) {
-      if (p.pose === 'front' || p.pose === 'side' || p.pose === 'back') out[p.pose as ProgressPhotoPose]++;
+      if (isComparablePose(p.pose)) {
+        out[p.pose] = (out[p.pose] ?? 0) + 1;
+      }
     }
     return out;
   }, [target, projections, inspos]);
 
   const totalCounts = {
-    projection: projections?.length ?? 0,
-    inspo: inspos?.filter((p) => p.pose === 'front' || p.pose === 'side' || p.pose === 'back').length ?? 0,
+    projection: projections?.filter((p) => isComparablePose(p.pose)).length ?? 0,
+    inspo: inspos?.filter((p) => isComparablePose(p.pose)).length ?? 0,
   };
 
   const accent: 'trans-blue' | 'trans-pink' = target === 'projection' ? 'trans-blue' : 'trans-pink';
@@ -285,25 +303,26 @@ export function CompareDialog({ open, onClose, source, defaultTarget = 'projecti
   const dataLoaded = projections !== null && inspos !== null;
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/95 flex flex-col">
-      {/* Header */}
+    <div className="fixed inset-0 z-50 bg-black/95 flex flex-col overscroll-contain">
+      {/* Header — back button on the left, mirrors iOS push-nav. */}
       <div
-        className="flex items-center justify-between px-4 py-3 border-b border-white/10"
+        className="flex items-center gap-2 px-2 py-3 border-b border-white/10"
         style={{ paddingTop: 'calc(env(safe-area-inset-top, 0px) + 0.75rem)' }}
       >
-        <div>
-          <h2 className="text-sm font-semibold text-white">Compare with {targetLabel}</h2>
-          <p className="text-[11px] text-white/60">
-            {source.pose} · {formatDate(source.taken_at)}
-          </p>
-        </div>
         <button
           onClick={onClose}
-          className="text-white/80 p-2 -mr-2 min-h-[44px] min-w-[44px] flex items-center justify-center"
-          aria-label="Close"
+          className="text-white/90 px-2 -ml-1 min-h-[44px] flex items-center gap-1"
+          aria-label="Back"
         >
-          <X className="h-5 w-5" />
+          <ChevronLeft className="h-5 w-5" />
+          <span className="text-sm">Back</span>
         </button>
+        <div className="flex-1 text-center -ml-12">
+          <h2 className="text-sm font-semibold text-white">Compare with {targetLabel}</h2>
+          <p className="text-[11px] text-white/60">
+            {POSE_LABELS[source.pose]} · {formatDate(source.taken_at)}
+          </p>
+        </div>
       </div>
 
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
@@ -327,10 +346,11 @@ export function CompareDialog({ open, onClose, source, defaultTarget = 'projecti
           ))}
         </div>
 
-        {/* Pose chip strip */}
-        <div className="flex gap-2">
-          {POSE_ORDER.map((p) => {
-            const count = counts[p];
+        {/* Pose chip strip — single line, horizontally scrollable. Wrapping
+            to two rows looked sloppy on phone; keep one row + scroll. */}
+        <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-none flex-nowrap -mx-4 px-4">
+          {COMPARABLE_POSES.map((p) => {
+            const count = counts[p] ?? 0;
             const isSource = p === source.pose;
             const isActive = p === pose;
             const activeCls = target === 'projection'
@@ -340,11 +360,11 @@ export function CompareDialog({ open, onClose, source, defaultTarget = 'projecti
               <button
                 key={p}
                 onClick={() => setPose(p)}
-                className={`px-3 py-1.5 rounded-full text-xs font-medium capitalize border transition-colors ${
+                className={`shrink-0 px-3 py-1.5 rounded-full text-xs font-medium border transition-colors whitespace-nowrap ${
                   isActive ? activeCls : 'border-white/15 text-white/70'
                 }`}
               >
-                {p}
+                {POSE_LABELS[p]}
                 {isSource && <span className="ml-1 text-[9px] opacity-60">(source)</span>}
                 <span className="ml-1 text-[10px] opacity-60">{count}</span>
               </button>
@@ -407,7 +427,7 @@ export function CompareDialog({ open, onClose, source, defaultTarget = 'projecti
             {candidates.length > 1 && (
               <div>
                 <p className="text-[11px] uppercase tracking-wide text-white/50 mb-1.5">
-                  Other {pose} {target === 'projection' ? 'projections' : 'inspo'}
+                  Other {pose ? POSE_LABELS[pose].toLowerCase() : ''} {target === 'projection' ? 'projections' : 'inspo'}
                 </p>
                 <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-none">
                   {candidates.map((p) => {
@@ -426,7 +446,11 @@ export function CompareDialog({ open, onClose, source, defaultTarget = 'projecti
                           src={p.blob_url}
                           alt={p.notes ?? targetLabel}
                           className="absolute inset-0 w-full h-full"
-                          style={{ objectFit: 'cover', objectPosition: `center ${p.crop_offset_y ?? 50}%` }}
+                          style={{
+                            objectFit: 'cover',
+                            transform: offsetTransform(p.crop_offset_y),
+                            transformOrigin: 'center',
+                          }}
                           draggable={false}
                         />
                         {p.target_horizon && (
@@ -475,7 +499,7 @@ function PoseMismatchEmptyState({
   return (
     <div className="rounded-xl border border-dashed border-white/15 p-6 flex flex-col items-center gap-3 text-white/80">
       <Sparkles className={`h-8 w-8 ${accentText}`} />
-      <p className="text-sm font-medium">No {pose} {targetLabel} yet</p>
+      <p className="text-sm font-medium">No {POSE_LABELS[pose].toLowerCase()} {targetLabel} yet</p>
       <p className="text-xs text-white/50 text-center max-w-xs">
         {target === 'projection'
           ? 'Generate one elsewhere and upload it to compare against this photo.'
@@ -493,9 +517,9 @@ function PoseMismatchEmptyState({
           <button
             key={p}
             onClick={() => onSwitchPose(p)}
-            className="px-3 py-1.5 border border-white/15 text-white/80 text-xs font-medium rounded-lg capitalize"
+            className="px-3 py-1.5 border border-white/15 text-white/80 text-xs font-medium rounded-lg"
           >
-            View {p}
+            View {POSE_LABELS[p]}
           </button>
         ))}
       </div>

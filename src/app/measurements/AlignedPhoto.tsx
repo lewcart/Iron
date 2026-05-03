@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { isLocalStub } from '@/lib/photo-upload-queue';
+import { offsetTransform } from '@/lib/photo-offset';
 
 interface AlignedPhotoProps {
   /** Vercel Blob URL or `local:*` stub. */
@@ -45,7 +46,6 @@ export function AlignedPhoto({
   }, [blobUrl, blob]);
 
   const src = isLocalStub(blobUrl) ? objectUrl : blobUrl;
-  const objectPositionY = cropOffsetY ?? 50;
 
   if (!src) {
     return <div className={`bg-muted/40 ${className}`} style={{ aspectRatio }} />;
@@ -64,7 +64,8 @@ export function AlignedPhoto({
         className="absolute inset-0 w-full h-full select-none"
         style={{
           objectFit,
-          objectPosition: `center ${objectPositionY}%`,
+          transform: offsetTransform(cropOffsetY),
+          transformOrigin: 'center',
         }}
         draggable={false}
       />

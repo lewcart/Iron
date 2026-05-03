@@ -318,7 +318,13 @@ export interface ClothesTestLog {
 }
 
 // Module 7: Progress photos
-export type ProgressPhotoPose = 'front' | 'side' | 'back';
+export type ProgressPhotoPose =
+  | 'front'
+  | 'side'
+  | 'back'
+  | 'face_front'
+  | 'face_side'
+  | 'other';
 
 export interface ProgressPhoto {
   uuid: string;
@@ -335,7 +341,9 @@ export interface ProgressPhoto {
 // mix progress + inspo photos in the same pose-filtered chronological viewer.
 // `pose` may be null on legacy rows captured before migration 030 — UI prompts
 // to set it. New uploads should always provide a pose.
-export type InspoPhotoPose = 'front' | 'side' | 'back' | 'other';
+// Mirrors ProgressPhotoPose so progress + inspo can mix in pose-filtered
+// viewers. NULL on inspo_photos is allowed (legacy uncategorized rows).
+export type InspoPhotoPose = ProgressPhotoPose;
 
 export interface InspoPhoto {
   uuid: string;

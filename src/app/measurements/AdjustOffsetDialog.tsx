@@ -1,9 +1,10 @@
 'use client';
 
 import { useEffect, useState, useRef, type PointerEvent as ReactPointerEvent } from 'react';
-import { X, RotateCcw, Sparkles } from 'lucide-react';
+import { ChevronLeft, RotateCcw, Sparkles } from 'lucide-react';
 import { isLocalStub } from '@/lib/photo-upload-queue';
 import { tryDetectFaceY } from '@/lib/face-detect';
+import { offsetTransform } from '@/lib/photo-offset';
 
 export type AdjustablePhotoKind = 'progress' | 'inspo' | 'projection';
 
@@ -34,7 +35,8 @@ const ROUTES: Record<AdjustablePhotoKind, string> = {
  *  in frame). Higher number = bottom of source visible (photo "moves up").
  *
  *  Unlike the compare slider this is a vertical pan within a fixed frame —
- *  no zoom, no horizontal pan; we only need head-y alignment. */
+ *  no zoom (beyond the constant 1.3 we apply for headroom), no horizontal
+ *  pan; we only need head-y alignment. */
 export function AdjustOffsetDialog({ open, onClose, photo, kind, blob, onSaved }: Props) {
   const [offset, setOffset] = useState<number>(photo?.crop_offset_y ?? 50);
   const [saving, setSaving] = useState(false);
@@ -61,6 +63,17 @@ export function AdjustOffsetDialog({ open, onClose, photo, kind, blob, onSaved }
     }
     setObjectUrl(null);
   }, [photo, blob]);
+
+  // Body scroll lock while open — otherwise the page behind the dialog
+  // scrolls when the user drags inside the photo frame on iOS.
+  useEffect(() => {
+    if (!open) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, [open]);
 
   // Auto-detect on open when no offset has been set yet. Fetches the image
   // as a Blob (or uses the local Blob for `local:*` stubs) and runs the
@@ -156,23 +169,24 @@ export function AdjustOffsetDialog({ open, onClose, photo, kind, blob, onSaved }
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/95 flex flex-col">
-      {/* Header */}
+    <div className="fixed inset-0 z-50 bg-black/95 flex flex-col overscroll-contain">
+      {/* Header — back button on the left, mirrors iOS push-nav. */}
       <div
-        className="flex items-center justify-between px-4 py-3 border-b border-white/10"
+        className="flex items-center gap-2 px-2 py-3 border-b border-white/10"
         style={{ paddingTop: 'calc(env(safe-area-inset-top, 0px) + 0.75rem)' }}
       >
-        <div>
+        <button
+          onClick={onClose}
+          className="text-white/90 px-2 -ml-1 min-h-[44px] flex items-center gap-1"
+          aria-label="Back"
+        >
+          <ChevronLeft className="h-5 w-5" />
+          <span className="text-sm">Back</span>
+        </button>
+        <div className="flex-1 text-center -ml-12">
           <h2 className="text-sm font-semibold text-white">Adjust alignment</h2>
           <p className="text-[11px] text-white/60">Drag to position the head</p>
         </div>
-        <button
-          onClick={onClose}
-          className="text-white/80 p-2 -mr-2 min-h-[44px] min-w-[44px] flex items-center justify-center"
-          aria-label="Close"
-        >
-          <X className="h-5 w-5" />
-        </button>
       </div>
 
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
@@ -192,7 +206,8 @@ export function AdjustOffsetDialog({ open, onClose, photo, kind, blob, onSaved }
               className="absolute inset-0 w-full h-full"
               style={{
                 objectFit: 'cover',
-                objectPosition: `center ${offset}%`,
+                transform: offsetTransform(offset),
+                transformOrigin: 'center',
               }}
               draggable={false}
             />
@@ -203,10 +218,10 @@ export function AdjustOffsetDialog({ open, onClose, photo, kind, blob, onSaved }
           {/* Head anchor guide — a thin line at 25% from top to show where
               the face should land for compare-frame alignment. */}
           <div
-            className="absolute left-0 right-0 border-t border-trans-blue/50 pointer-events-none"
+            className="absolute left-0 right-0 border-t-2 border-trans-blue pointer-events-none"
             style={{ top: '25%' }}
           />
-          <span className="absolute top-[26%] left-2 text-[10px] uppercase tracking-wide text-trans-blue/80 pointer-events-none">
+          <span className="absolute top-[26%] left-2 text-[10px] uppercase tracking-wide text-trans-blue pointer-events-none font-semibold">
             Head anchor
           </span>
 

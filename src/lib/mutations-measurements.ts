@@ -12,6 +12,7 @@ import type {
   LocalBodyGoal,
   LocalProgressPhoto,
 } from '@/db/local';
+import type { ProgressPhotoPose } from '@/types';
 
 // Mutations for the measurements page surface:
 // - measurement_logs (circumference measurements, indexed by site)
@@ -140,7 +141,7 @@ export async function deleteBodyGoal(metric_key: string): Promise<void> {
 
 export async function recordProgressPhotoFromBlob(opts: {
   blob: Blob;
-  pose: 'front' | 'side' | 'back';
+  pose: ProgressPhotoPose;
   notes?: string | null;
   taken_at?: string;
 }): Promise<LocalProgressPhoto> {

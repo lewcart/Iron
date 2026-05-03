@@ -1,9 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { listProjectionPhotos, createProjectionPhoto } from '@/db/queries';
 import { requireApiKey } from '@/lib/api-auth';
-
-const VALID_POSES = ['front', 'side', 'back'] as const;
-type ValidPose = (typeof VALID_POSES)[number];
+import { ALL_POSES, isPose } from '@/lib/poses';
+import type { ProgressPhotoPose } from '@/types';
 
 export async function GET(request: NextRequest) {
   const denied = requireApiKey(request);
@@ -12,9 +11,7 @@ export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const limit = parseInt(searchParams.get('limit') ?? '50', 10);
   const poseParam = searchParams.get('pose');
-  const pose = poseParam && (VALID_POSES as readonly string[]).includes(poseParam)
-    ? (poseParam as ValidPose)
-    : undefined;
+  const pose: ProgressPhotoPose | undefined = isPose(poseParam) ? poseParam : undefined;
   const photos = await listProjectionPhotos({ pose, limit });
   return NextResponse.json(photos);
 }
@@ -27,9 +24,9 @@ export async function POST(request: NextRequest) {
   if (!body.blob_url || !body.pose) {
     return NextResponse.json({ error: 'blob_url and pose are required' }, { status: 400 });
   }
-  if (!(VALID_POSES as readonly string[]).includes(body.pose)) {
+  if (!isPose(body.pose)) {
     return NextResponse.json(
-      { error: `pose must be one of ${VALID_POSES.join(', ')}` },
+      { error: `pose must be one of ${ALL_POSES.join(', ')}` },
       { status: 400 },
     );
   }

@@ -1,9 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { deleteInspoPhoto, updateInspoPhoto } from '@/db/queries';
 import { requireApiKey } from '@/lib/api-auth';
-
-const VALID_POSES = ['front', 'side', 'back', 'other'] as const;
-type ValidPose = (typeof VALID_POSES)[number];
+import { ALL_POSES, isInspoPose } from '@/lib/poses';
+import type { InspoPhotoPose } from '@/types';
 
 export async function DELETE(
   request: NextRequest,
@@ -30,15 +29,15 @@ export async function PATCH(
     return NextResponse.json({ error: 'JSON body required' }, { status: 400 });
   }
 
-  const updates: { pose?: ValidPose | null; notes?: string | null; crop_offset_y?: number | null } = {};
+  const updates: { pose?: InspoPhotoPose | null; notes?: string | null; crop_offset_y?: number | null } = {};
   if ('pose' in body) {
     if (body.pose === null) {
       updates.pose = null;
-    } else if (typeof body.pose === 'string' && (VALID_POSES as readonly string[]).includes(body.pose)) {
-      updates.pose = body.pose as ValidPose;
+    } else if (isInspoPose(body.pose)) {
+      updates.pose = body.pose;
     } else {
       return NextResponse.json(
-        { error: `pose must be one of ${VALID_POSES.join(', ')} or null` },
+        { error: `pose must be one of ${ALL_POSES.join(', ')} or null` },
         { status: 400 },
       );
     }

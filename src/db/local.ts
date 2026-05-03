@@ -445,7 +445,7 @@ export interface LocalInspoPhoto extends Partial<SyncMeta> {
   /** Pose categorization — mirrors progress_photos.pose so the photos-compare
    *  feature can mix progress + inspo into the same pose-filtered viewer.
    *  Null = legacy row captured before migration 030 (UI prompts to set). */
-  pose: 'front' | 'side' | 'back' | 'other' | null;
+  pose: 'front' | 'side' | 'back' | 'face_front' | 'face_side' | 'other' | null;
   /** CSS object-position y%, 0-100. NULL = renderer defaults to 50 (center). */
   crop_offset_y?: number | null;
 }
@@ -461,7 +461,7 @@ export interface LocalInspoPhoto extends Partial<SyncMeta> {
 export interface LocalProgressPhoto extends SyncMeta {
   uuid: string;
   blob_url: string;
-  pose: 'front' | 'side' | 'back';
+  pose: 'front' | 'side' | 'back' | 'face_front' | 'face_side' | 'other';
   notes: string | null;
   taken_at: string;
   /** Raw JPEG Blob. Present while `uploaded='0'`; cleared once upload succeeds

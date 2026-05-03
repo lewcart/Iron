@@ -34,6 +34,8 @@ import type {
 } from '@/db/local';
 import type { InspoPhoto, ProjectionPhoto, ProgressPhotoPose } from '@/types';
 import { METRIC_LABEL } from '@/lib/inbody';
+import { isComparablePose, POSE_LABELS } from '@/lib/poses';
+import { offsetTransform } from '@/lib/photo-offset';
 import { apiBase, fetchJsonAuthed } from '@/lib/api/client';
 import { isLocalStub } from '@/lib/photo-upload-queue';
 import { CompareDialog, type CompareTarget } from '@/app/measurements/CompareDialog';
@@ -76,17 +78,16 @@ export default function StrategyPage() {
   } | null>(null);
 
   const latestProgressByPose = useMemo(() => {
-    const byPose: Record<ProgressPhotoPose, ProgressPhotoLike | null> = {
-      front: null, side: null, back: null,
-    };
+    const byPose: Partial<Record<ProgressPhotoPose, ProgressPhotoLike>> = {};
     for (const p of progressPhotos ?? []) {
       if (isLocalStub(p.blob_url)) continue;
-      const cur = byPose[p.pose as ProgressPhotoPose];
+      if (!isComparablePose(p.pose)) continue;
+      const cur = byPose[p.pose];
       if (!cur || p.taken_at > cur.taken_at) {
-        byPose[p.pose as ProgressPhotoPose] = {
+        byPose[p.pose] = {
           uuid: p.uuid,
           blob_url: p.blob_url,
-          pose: p.pose as ProgressPhotoPose,
+          pose: p.pose,
           taken_at: p.taken_at,
           crop_offset_y: p.crop_offset_y ?? null,
         };
@@ -97,13 +98,16 @@ export default function StrategyPage() {
 
   const openCompare = useCallback(
     (target: CompareTarget, pose: ProgressPhotoPose | null, targetUuid: string) => {
-      const matchingPose: ProgressPhotoPose = pose === 'front' || pose === 'side' || pose === 'back'
-        ? pose
-        : 'front';
+      const matchingPose: ProgressPhotoPose = isComparablePose(pose) ? pose : 'front';
       const src = latestProgressByPose[matchingPose];
       if (!src) {
         // No progress photo at this pose. Fall through to whichever pose has one.
-        const fallback = latestProgressByPose.front ?? latestProgressByPose.side ?? latestProgressByPose.back;
+        const fallback =
+          latestProgressByPose.front ??
+          latestProgressByPose.side ??
+          latestProgressByPose.back ??
+          latestProgressByPose.face_front ??
+          latestProgressByPose.face_side;
         if (!fallback) return; // no progress photos at all — nothing to compare
         setCompareSource(fallback);
       } else {
@@ -150,7 +154,7 @@ export default function StrategyPage() {
         onCompare={(p) =>
           openCompare(
             'inspo',
-            p.pose === 'front' || p.pose === 'side' || p.pose === 'back' ? p.pose : null,
+            isComparablePose(p.pose) ? p.pose : null,
             p.uuid,
           )
         }
@@ -658,9 +662,8 @@ function ProjectionsCard({
               <button
                 key={photo.uuid}
                 onClick={() => onCompare(photo)}
-                style={{ objectPosition: `center ${photo.crop_offset_y ?? 50}%` }}
                 className="relative aspect-[4/5] overflow-hidden rounded-lg bg-muted ring-1 ring-trans-blue/20 text-left"
-                aria-label={`Compare with ${photo.pose} projection`}
+                aria-label={`Compare with ${POSE_LABELS[photo.pose] ?? photo.pose} projection`}
               >
                 <Image
                   src={photo.blob_url}
@@ -668,12 +671,15 @@ function ProjectionsCard({
                   fill
                   sizes="(max-width: 640px) 50vw, 25vw"
                   className="object-cover"
-                  style={{ objectPosition: `center ${photo.crop_offset_y ?? 50}%` }}
+                  style={{
+                    transform: offsetTransform(photo.crop_offset_y),
+                    transformOrigin: 'center',
+                  }}
                   unoptimized
                 />
                 <div className="absolute bottom-1 left-1 flex gap-1">
                   <span className="text-[9px] uppercase tracking-wide font-semibold px-1.5 py-0.5 rounded bg-black/60 text-white">
-                    {photo.pose}
+                    {POSE_LABELS[photo.pose] ?? photo.pose}
                   </span>
                   {photo.target_horizon && (
                     <span className="text-[9px] uppercase tracking-wide font-semibold px-1.5 py-0.5 rounded bg-trans-blue/80 text-white">
@@ -729,13 +735,18 @@ function InspoCard({
         ) : (
           <div className="grid grid-cols-4 gap-2">
             {photos.slice(0, 8).map((photo) => {
-              const comparable = photo.pose === 'front' || photo.pose === 'side' || photo.pose === 'back';
+              const comparable = isComparablePose(photo.pose);
+              const transformStyle = {
+                transform: offsetTransform(photo.crop_offset_y),
+                transformOrigin: 'center' as const,
+              };
+              const poseLabel = photo.pose ? (POSE_LABELS[photo.pose] ?? photo.pose) : null;
               return comparable ? (
                 <button
                   key={photo.uuid}
                   onClick={() => onCompare(photo)}
                   className="relative aspect-[3/4] overflow-hidden rounded-lg bg-muted text-left"
-                  aria-label={`Compare with ${photo.pose} inspiration`}
+                  aria-label={`Compare with ${poseLabel} inspiration`}
                 >
                   <Image
                     src={photo.blob_url}
@@ -743,11 +754,11 @@ function InspoCard({
                     fill
                     sizes="(max-width: 640px) 25vw, 12vw"
                     className="object-cover"
-                    style={{ objectPosition: `center ${photo.crop_offset_y ?? 50}%` }}
+                    style={transformStyle}
                     unoptimized
                   />
                   <span className="absolute bottom-1 left-1 text-[9px] uppercase tracking-wide font-semibold px-1.5 py-0.5 rounded bg-black/60 text-white">
-                    {photo.pose}
+                    {poseLabel}
                   </span>
                 </button>
               ) : (
@@ -763,12 +774,12 @@ function InspoCard({
                     fill
                     sizes="(max-width: 640px) 25vw, 12vw"
                     className="object-cover"
-                    style={{ objectPosition: `center ${photo.crop_offset_y ?? 50}%` }}
+                    style={transformStyle}
                     unoptimized
                   />
-                  {photo.pose && (
+                  {poseLabel && (
                     <span className="absolute bottom-1 left-1 text-[9px] uppercase tracking-wide font-semibold px-1.5 py-0.5 rounded bg-black/60 text-white">
-                      {photo.pose}
+                      {poseLabel}
                     </span>
                   )}
                 </Link>

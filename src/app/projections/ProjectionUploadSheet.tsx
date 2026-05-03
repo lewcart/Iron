@@ -9,6 +9,7 @@ import { tryDetectFaceY } from '@/lib/face-detect';
 import { apiBase, fetchJsonAuthed } from '@/lib/api/client';
 import { useProgressPhotos } from '@/lib/useLocalDB-measurements';
 import type { ProgressPhotoPose, ProjectionPhoto } from '@/types';
+import { ALL_POSES, POSE_LABELS } from '@/lib/poses';
 
 const HORIZON_OPTIONS = ['3mo', '6mo', '12mo'] as const;
 type Horizon = (typeof HORIZON_OPTIONS)[number] | null;
@@ -101,21 +102,24 @@ export function ProjectionUploadSheet({ open, onClose, onUploaded }: Props) {
     <Sheet open={open} onClose={onClose} title="Add Projection" height="auto">
       <div className="p-4 space-y-3">
         <div className="ios-section">
-          {/* Pose selector */}
-          <div className="ios-row gap-2">
-            {(['front', 'side', 'back'] as const).map((p) => (
-              <button
-                key={p}
-                onClick={() => setPose(p)}
-                className={`flex-1 py-2 text-sm font-medium rounded-lg border capitalize transition-colors ${
-                  pose === p
-                    ? 'bg-primary text-white border-primary'
-                    : 'border-border text-muted-foreground'
-                }`}
-              >
-                {p}
-              </button>
-            ))}
+          {/* Pose selector — single-line, scrollable so 6 options don't
+              wrap to two rows on phones. */}
+          <div className="ios-row py-2 px-2">
+            <div className="flex-1 flex gap-2 overflow-x-auto scrollbar-none flex-nowrap">
+              {ALL_POSES.map((p) => (
+                <button
+                  key={p}
+                  onClick={() => setPose(p)}
+                  className={`shrink-0 px-3 py-2 text-xs font-medium rounded-lg border whitespace-nowrap transition-colors ${
+                    pose === p
+                      ? 'bg-primary text-white border-primary'
+                      : 'border-border text-muted-foreground'
+                  }`}
+                >
+                  {POSE_LABELS[p]}
+                </button>
+              ))}
+            </div>
           </div>
 
           {/* Source photo picker (optional) */}
@@ -125,7 +129,7 @@ export function ProjectionUploadSheet({ open, onClose, onUploaded }: Props) {
             </p>
             {sourceCandidates.length === 0 ? (
               <p className="text-xs italic text-muted-foreground">
-                No {pose} progress photos uploaded yet to link to.
+                No {POSE_LABELS[pose].toLowerCase()} progress photos uploaded yet to link to.
               </p>
             ) : (
               <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-none">

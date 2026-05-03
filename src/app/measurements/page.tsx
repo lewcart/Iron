@@ -9,7 +9,7 @@ import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   ReferenceLine, Legend,
 } from 'recharts';
-import type { InbodyScan, MeasurementLog, ProjectionPhoto, InspoPhoto } from '@/types';
+import type { InbodyScan, MeasurementLog, ProjectionPhoto, InspoPhoto, ProgressPhotoPose } from '@/types';
 import type { LocalProgressPhoto } from '@/db/local';
 import { useMeasurements, useProgressPhotos, useInbodyScans, useBodyGoal } from '@/lib/useLocalDB-measurements';
 import { logMeasurement, deleteMeasurement, deleteProgressPhoto } from '@/lib/mutations-measurements';
@@ -25,6 +25,7 @@ import { CompareDialog, type CompareTarget } from './CompareDialog';
 import { AdjustOffsetDialog, type AdjustablePhotoKind } from './AdjustOffsetDialog';
 import { AlignedPhoto } from './AlignedPhoto';
 import { apiBase, fetchJsonAuthed } from '@/lib/api/client';
+import { ALL_POSES, POSE_LABELS, isComparablePose } from '@/lib/poses';
 
 const SITES = [
   { key: 'shoulder_width', label: 'Shoulder Width' },
@@ -79,15 +80,22 @@ function humanizeSite(rawSite: string): string {
 // PBF% is the headline metric most users track; reference-line enrichment targets it.
 const INBODY_TREND_METRIC: keyof InbodyScan = 'pbf_pct';
 
+// Always render in Lou's London time. Without timeZone the formatter falls
+// through to the device's tz, which on a non-London Mac would emit a different
+// calendar date than the photoGroups grouping (which is forced to London),
+// producing two cards that both display as e.g. "15 Apr 2026" but were keyed
+// by different dates in the Map.
 function formatDate(isoStr: string) {
   return new Date(isoStr).toLocaleDateString('en-GB', {
     day: '2-digit', month: 'short', year: 'numeric',
+    timeZone: 'Europe/London',
   });
 }
 
 function formatChartDate(isoStr: string) {
   return new Date(isoStr).toLocaleDateString('en-GB', {
     day: '2-digit', month: 'short',
+    timeZone: 'Europe/London',
   });
 }
 
@@ -136,7 +144,7 @@ function MeasurementsInner() {
       .catch(() => setProjectionCount(0));
     fetchJsonAuthed<InspoPhoto[]>(`${apiBase()}/api/inspo-photos?limit=200`)
       .then((rows) => {
-        const posed = rows.filter((r) => r.pose === 'front' || r.pose === 'side' || r.pose === 'back');
+        const posed = rows.filter((r) => isComparablePose(r.pose));
         setInspoCount(posed.length);
       })
       .catch(() => setInspoCount(0));
@@ -170,7 +178,7 @@ function MeasurementsInner() {
   // re-groups instantly; PATCH the server in parallel so the change syncs.
   const handleRetagPose = useCallback(async (
     photo: LocalProgressPhoto,
-    pose: 'front' | 'side' | 'back',
+    pose: ProgressPhotoPose,
   ) => {
     if (photo.pose === pose) return;
     try {
@@ -611,12 +619,15 @@ function MeasurementsInner() {
     </div>
   );
 
-  // Group photos by calendar date (local) so a single front/side/back capture
-  // session reads as one entry rather than three. Within a group, sort poses
-  // in canonical order (front → side → back). Edge case: if Lou retakes a
-  // pose on the same day, all of those photos appear in the group.
+  // Group photos by calendar date (local) so a single capture session reads
+  // as one entry rather than 3-6. Within a group, sort poses in canonical
+  // order (front → side → back → face_front → face_side → other). Edge
+  // case: if Lou retakes a pose on the same day, all of those photos appear
+  // in the group.
   const photoGroups = useMemo(() => {
-    const POSE_ORDER: Record<string, number> = { front: 0, side: 1, back: 2 };
+    const POSE_ORDER: Record<string, number> = {
+      front: 0, side: 1, back: 2, face_front: 3, face_side: 4, other: 5,
+    };
     const byDate = new Map<string, LocalProgressPhoto[]>();
     // Group by Lou's local (London) date, not UTC. Photos taken near
     // midnight London time straddle UTC dates and would otherwise split
@@ -682,7 +693,10 @@ function MeasurementsInner() {
           <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1 px-1">Gallery</p>
           <div className="space-y-3">
             {photoGroups.map((group) => (
-              <div key={group.date} className="ios-section overflow-hidden">
+              // overflow-visible (not the default ios-section overflow-hidden)
+              // so per-tile action dropdowns can stack over neighbouring
+              // cells without being clipped.
+              <div key={group.date} className="rounded-xl bg-card relative">
                 <div className="px-4 py-2 flex items-center justify-between border-b border-border/40">
                   <span className="text-sm font-medium">{formatDate(group.sortKey)}</span>
                   <span className="text-[11px] text-muted-foreground">
@@ -1058,13 +1072,16 @@ function PhotoTile({
   onDelete: (uuid: string) => void;
   onCompare: (target: CompareTarget) => void;
   onAdjust: () => void;
-  onRetagPose: (pose: 'front' | 'side' | 'back') => void;
+  onRetagPose: (pose: ProgressPhotoPose) => void;
   hasProjection: boolean;
   hasInspo: boolean;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [poseEditOpen, setPoseEditOpen] = useState(false);
   const stub = isLocalStub(photo.blob_url);
+  // Compare only makes sense for poses that have a counterpart in the
+  // projection/inspo sets. 'other' is excluded.
+  const canCompare = isComparablePose(photo.pose);
 
   return (
     <div className="relative group">
@@ -1074,35 +1091,38 @@ function PhotoTile({
           blob={photo.blob}
           cropOffsetY={photo.crop_offset_y}
           aspectRatio="3 / 4"
-          alt={`${photo.pose} progress photo`}
+          alt={`${POSE_LABELS[photo.pose] ?? photo.pose} progress photo`}
           className="rounded-lg"
           sizes="(max-width: 768px) 33vw, 200px"
         />
         {/* Pose label */}
-        <span className="absolute bottom-1 left-1 text-[9px] uppercase tracking-wide font-semibold px-1.5 py-0.5 rounded bg-black/60 text-white capitalize">
-          {photo.pose}
+        <span className="absolute bottom-1 left-1 text-[9px] uppercase tracking-wide font-semibold px-1.5 py-0.5 rounded bg-black/60 text-white">
+          {POSE_LABELS[photo.pose] ?? photo.pose}
         </span>
         {photo.uploaded === '0' && (
-          <span className="absolute top-1 right-1 text-[9px] font-medium px-1.5 py-0.5 rounded bg-black/70 text-amber-300 uppercase tracking-wide">
+          <span className="absolute top-1 left-1 text-[9px] font-medium px-1.5 py-0.5 rounded bg-black/70 text-amber-300 uppercase tracking-wide">
             Queued
           </span>
         )}
       </div>
 
-      {/* Action triggers — small icons over the bottom-right corner */}
-      <div className="absolute top-1 right-1 flex gap-1">
+      {/* Action triggers — small icons over the top-right corner. The
+          button sits at z-20 on top of the queued badge / pose label. */}
+      <div className="absolute top-1 right-1 flex gap-1 z-20">
         <button
           onClick={() => setMenuOpen((v) => !v)}
-          className="h-7 w-7 rounded-full bg-black/60 text-white flex items-center justify-center"
+          className="h-7 w-7 rounded-full bg-black/70 text-white flex items-center justify-center shadow-md ring-1 ring-white/10"
           aria-label="Photo actions"
         >
           ⋯
         </button>
       </div>
 
+      {/* Dropdown menus — z-30 so they stack over neighbouring tiles. The
+          parent group card has overflow-visible so this isn't clipped. */}
       {menuOpen && !poseEditOpen && (
-        <div className="absolute top-9 right-1 z-10 w-44 rounded-lg bg-zinc-900 border border-white/10 shadow-lg overflow-hidden">
-          {hasProjection && !stub && (
+        <div className="absolute top-9 right-1 z-30 w-44 rounded-lg bg-zinc-900 border border-white/10 shadow-xl overflow-hidden">
+          {hasProjection && !stub && canCompare && (
             <button
               onClick={() => { onCompare('projection'); setMenuOpen(false); }}
               className="w-full text-left px-3 py-2 text-xs flex items-center gap-2 hover:bg-white/5 text-trans-blue"
@@ -1111,7 +1131,7 @@ function PhotoTile({
               Compare to projection
             </button>
           )}
-          {hasInspo && !stub && (
+          {hasInspo && !stub && canCompare && (
             <button
               onClick={() => { onCompare('inspo'); setMenuOpen(false); }}
               className="w-full text-left px-3 py-2 text-xs flex items-center gap-2 hover:bg-white/5 text-trans-pink"
@@ -1145,9 +1165,9 @@ function PhotoTile({
       )}
 
       {poseEditOpen && (
-        <div className="absolute top-9 right-1 z-10 w-44 rounded-lg bg-zinc-900 border border-white/10 shadow-lg overflow-hidden">
+        <div className="absolute top-9 right-1 z-30 w-48 rounded-lg bg-zinc-900 border border-white/10 shadow-xl overflow-hidden">
           <p className="px-3 pt-2 pb-1 text-[10px] uppercase tracking-wide text-white/50">Tag as…</p>
-          {(['front', 'side', 'back'] as const).map((p) => {
+          {ALL_POSES.map((p) => {
             const isCurrent = p === photo.pose;
             return (
               <button
@@ -1157,14 +1177,14 @@ function PhotoTile({
                   setPoseEditOpen(false);
                   setMenuOpen(false);
                 }}
-                className={`w-full text-left px-3 py-2 text-xs flex items-center gap-2 hover:bg-white/5 capitalize ${
+                className={`w-full text-left px-3 py-2 text-xs flex items-center gap-2 hover:bg-white/5 ${
                   isCurrent ? 'text-trans-blue' : 'text-white/80'
                 }`}
               >
                 <span className="w-3.5 h-3.5 inline-flex items-center justify-center">
                   {isCurrent && '✓'}
                 </span>
-                {p}
+                {POSE_LABELS[p]}
               </button>
             );
           })}

@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { deleteProgressPhoto, updateProgressPhoto } from '@/db/queries';
 import { requireApiKey } from '@/lib/api-auth';
+import { isPose, ALL_POSES } from '@/lib/poses';
+import type { ProgressPhotoPose } from '@/types';
 
 export async function DELETE(
   request: NextRequest,
@@ -27,7 +29,7 @@ export async function PATCH(
     return NextResponse.json({ error: 'JSON body required' }, { status: 400 });
   }
 
-  const updates: { crop_offset_y?: number | null; notes?: string | null; pose?: 'front' | 'side' | 'back' } = {};
+  const updates: { crop_offset_y?: number | null; notes?: string | null; pose?: ProgressPhotoPose } = {};
   if ('crop_offset_y' in body) {
     if (body.crop_offset_y === null) {
       updates.crop_offset_y = null;
@@ -44,9 +46,9 @@ export async function PATCH(
     updates.notes = body.notes == null ? null : String(body.notes);
   }
   if ('pose' in body) {
-    if (body.pose !== 'front' && body.pose !== 'side' && body.pose !== 'back') {
+    if (!isPose(body.pose)) {
       return NextResponse.json(
-        { error: 'pose must be one of front, side, back' },
+        { error: `pose must be one of ${ALL_POSES.join(', ')}` },
         { status: 400 },
       );
     }

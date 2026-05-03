@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { deleteProjectionPhoto, updateProjectionPhoto } from '@/db/queries';
 import { requireApiKey } from '@/lib/api-auth';
+import { isPose, ALL_POSES } from '@/lib/poses';
+import type { ProgressPhotoPose } from '@/types';
 
 export async function DELETE(
   request: NextRequest,
@@ -31,7 +33,7 @@ export async function PATCH(
     crop_offset_y?: number | null;
     notes?: string | null;
     target_horizon?: string | null;
-    pose?: 'front' | 'side' | 'back';
+    pose?: ProgressPhotoPose;
   } = {};
   if ('crop_offset_y' in body) {
     if (body.crop_offset_y === null) {
@@ -52,9 +54,9 @@ export async function PATCH(
     updates.target_horizon = body.target_horizon == null ? null : String(body.target_horizon);
   }
   if ('pose' in body) {
-    if (body.pose !== 'front' && body.pose !== 'side' && body.pose !== 'back') {
+    if (!isPose(body.pose)) {
       return NextResponse.json(
-        { error: 'pose must be one of front, side, back' },
+        { error: `pose must be one of ${ALL_POSES.join(', ')}` },
         { status: 400 },
       );
     }

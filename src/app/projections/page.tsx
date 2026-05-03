@@ -7,14 +7,16 @@ import { ChevronLeft, Plus, Trash2 } from 'lucide-react';
 import type { ProjectionPhoto, ProgressPhotoPose } from '@/types';
 import { apiBase, fetchJsonAuthed } from '@/lib/api/client';
 import { ProjectionUploadSheet } from './ProjectionUploadSheet';
+import { ALL_POSES, POSE_LABELS } from '@/lib/poses';
 
-const POSE_FILTERS: ('all' | ProgressPhotoPose)[] = ['all', 'front', 'side', 'back'];
+const POSE_FILTERS: ('all' | ProgressPhotoPose)[] = ['all', ...ALL_POSES];
 
 function formatDate(iso: string) {
   return new Date(iso).toLocaleDateString('en-GB', {
     day: '2-digit',
     month: 'short',
     year: 'numeric',
+    timeZone: 'Europe/London',
   });
 }
 
@@ -61,7 +63,7 @@ function PhotoCard({
         {/* Pose + horizon badges */}
         <div className="absolute bottom-1 left-1 flex gap-1">
           <span className="text-[9px] uppercase tracking-wide font-semibold px-1.5 py-0.5 rounded bg-black/60 text-white">
-            {photo.pose}
+            {POSE_LABELS[photo.pose] ?? photo.pose}
           </span>
           {photo.target_horizon && (
             <span className="text-[9px] uppercase tracking-wide font-semibold px-1.5 py-0.5 rounded bg-trans-blue/80 text-white">
@@ -147,19 +149,20 @@ export default function ProjectionsGalleryPage() {
           photos at the same pose.
         </p>
 
-        {/* Pose filter chips */}
-        <div className="flex gap-2 mb-4">
+        {/* Pose filter chips — single-line, scrollable so seven chips
+            (all + six poses) don't wrap on phones. */}
+        <div className="flex gap-2 mb-4 overflow-x-auto scrollbar-none flex-nowrap -mx-4 px-4">
           {POSE_FILTERS.map((f) => (
             <button
               key={f}
               onClick={() => setFilter(f)}
-              className={`px-3 py-1.5 rounded-full text-xs font-medium capitalize border transition-colors ${
+              className={`shrink-0 px-3 py-1.5 rounded-full text-xs font-medium border whitespace-nowrap transition-colors ${
                 filter === f
                   ? 'bg-trans-blue/10 text-trans-blue border-trans-blue'
                   : 'border-border text-muted-foreground'
               }`}
             >
-              {f}
+              {f === 'all' ? 'All' : POSE_LABELS[f]}
               {f !== 'all' && (
                 <span className="ml-1 text-[10px] opacity-60">
                   {photos.filter((p) => p.pose === f).length}

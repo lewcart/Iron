@@ -1641,6 +1641,8 @@ import {
   listProjectionPhotos as dbListProjectionPhotos,
   deleteProjectionPhoto as dbDeleteProjectionPhoto,
 } from '@/db/queries';
+import { ALL_POSES } from '@/lib/poses';
+import type { ProgressPhotoPose } from '@/types';
 
 const MIME_TO_EXT: Record<string, string> = {
   'image/jpeg': 'jpg',
@@ -1708,8 +1710,8 @@ async function resolveImageBuffer(
 
 async function uploadProgressPhotoTool(args: Record<string, unknown>) {
   const pose = args.pose;
-  if (pose !== 'front' && pose !== 'side' && pose !== 'back') {
-    return toolError('pose must be one of: front, side, back');
+  if (!ALL_POSES.includes(pose as never)) {
+    return toolError(`pose must be one of: ${ALL_POSES.join(', ')}`);
   }
   const resolved = await resolveImageBuffer(args);
   if ('error' in resolved) return toolError(resolved.error);
@@ -1722,7 +1724,7 @@ async function uploadProgressPhotoTool(args: Record<string, unknown>) {
 
   const photo = await dbCreateProgressPhoto({
     blob_url: blob.url,
-    pose,
+    pose: pose as string,
     notes: typeof args.notes === 'string' ? args.notes : null,
     taken_at: typeof args.taken_at === 'string' ? args.taken_at : undefined,
   });
@@ -1739,13 +1741,12 @@ async function uploadInspoPhotoTool(args: Record<string, unknown>) {
     contentType: resolved.contentType,
   });
 
-  const VALID_POSES = ['front', 'side', 'back', 'other'] as const;
-  let pose: (typeof VALID_POSES)[number] | null = null;
+  let pose: ProgressPhotoPose | null = null;
   if (typeof args.pose === 'string') {
-    if (!(VALID_POSES as readonly string[]).includes(args.pose)) {
-      return toolError(`pose must be one of ${VALID_POSES.join(', ')}`);
+    if (!ALL_POSES.includes(args.pose as ProgressPhotoPose)) {
+      return toolError(`pose must be one of ${ALL_POSES.join(', ')}`);
     }
-    pose = args.pose as (typeof VALID_POSES)[number];
+    pose = args.pose as ProgressPhotoPose;
   }
 
   const photo = await dbCreateInspoPhoto({
@@ -1772,8 +1773,8 @@ async function listInspoPhotosTool(args: Record<string, unknown>) {
 
 async function uploadProjectionPhotoTool(args: Record<string, unknown>) {
   const pose = args.pose;
-  if (pose !== 'front' && pose !== 'side' && pose !== 'back') {
-    return toolError('pose must be one of: front, side, back');
+  if (!ALL_POSES.includes(pose as never)) {
+    return toolError(`pose must be one of: ${ALL_POSES.join(', ')}`);
   }
   const resolved = await resolveImageBuffer(args);
   if ('error' in resolved) return toolError(resolved.error);
@@ -1786,7 +1787,7 @@ async function uploadProjectionPhotoTool(args: Record<string, unknown>) {
 
   const photo = await dbCreateProjectionPhoto({
     blob_url: blob.url,
-    pose,
+    pose: pose as ProgressPhotoPose,
     notes: typeof args.notes === 'string' ? args.notes : null,
     taken_at: typeof args.taken_at === 'string' ? args.taken_at : undefined,
     source_progress_photo_uuid:
@@ -1798,8 +1799,8 @@ async function uploadProjectionPhotoTool(args: Record<string, unknown>) {
 
 async function listProjectionPhotosTool(args: Record<string, unknown>) {
   const limit = typeof args.limit === 'number' ? args.limit : 50;
-  const pose = args.pose === 'front' || args.pose === 'side' || args.pose === 'back'
-    ? (args.pose as 'front' | 'side' | 'back')
+  const pose = ALL_POSES.includes(args.pose as ProgressPhotoPose)
+    ? (args.pose as ProgressPhotoPose)
     : undefined;
   const photos = await dbListProjectionPhotos({ pose, limit });
   return toolResult(photos);
@@ -3542,11 +3543,11 @@ export const tools: MCPTool[] = [
   {
     name: 'upload_progress_photo',
     description:
-      'Upload a body progress photo (front/side/back pose) to Vercel Blob and record it in progress_photos. Provide image bytes via image_base64 (raw base64 or data URL) OR image_url (the server fetches and re-hosts). Pose is required. Optional notes and taken_at (ISO).',
+      'Upload a body progress photo to Vercel Blob and record it in progress_photos. Provide image bytes via image_base64 (raw base64 or data URL) OR image_url (the server fetches and re-hosts). Pose is required (front/side/back for full-body, face_front/face_side for face crops, other for uncategorized). Optional notes and taken_at (ISO).',
     inputSchema: {
       type: 'object',
       properties: {
-        pose: { type: 'string', enum: ['front', 'side', 'back'], description: 'Required pose tag' },
+        pose: { type: 'string', enum: ALL_POSES, description: 'Required pose tag' },
         image_base64: {
           type: 'string',
           description: 'Base64-encoded image bytes. Accepts raw base64 or "data:image/...;base64,..." form.',
@@ -3590,7 +3591,7 @@ export const tools: MCPTool[] = [
         },
         pose: {
           type: 'string',
-          enum: ['front', 'side', 'back', 'other'],
+          enum: ALL_POSES,
           description: 'Optional pose categorization. Mirrors progress_photos.pose so the compare viewer can mix progress + inspo at the same pose.',
         },
       },
@@ -3622,7 +3623,7 @@ export const tools: MCPTool[] = [
     inputSchema: {
       type: 'object',
       properties: {
-        pose: { type: 'string', enum: ['front', 'side', 'back'], description: 'Required pose tag' },
+        pose: { type: 'string', enum: ALL_POSES, description: 'Required pose tag' },
         image_base64: {
           type: 'string',
           description: 'Base64-encoded image bytes. Accepts raw base64 or "data:image/...;base64,..." form.',
@@ -3654,7 +3655,7 @@ export const tools: MCPTool[] = [
     inputSchema: {
       type: 'object',
       properties: {
-        pose: { type: 'string', enum: ['front', 'side', 'back'] },
+        pose: { type: 'string', enum: ALL_POSES },
         limit: { type: 'number', description: 'Default 50.' },
       },
     },

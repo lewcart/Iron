@@ -4,11 +4,16 @@ import { useEffect, useRef, useState } from 'react';
 import { Camera } from 'lucide-react';
 import { Sheet } from '@/components/ui/sheet';
 import { recordProgressPhotoFromBlob } from '@/lib/mutations-measurements';
+import { ALL_POSES, POSE_LABELS } from '@/lib/poses';
+import type { ProgressPhotoPose } from '@/types';
 
-const POSE_GUIDANCE: Record<string, string> = {
-  front: 'Face the camera, arms slightly away from your body, feet hip-width apart.',
-  side:  'Stand sideways, arms relaxed, feet together, looking straight ahead.',
-  back:  'Back to the camera, arms slightly away from your body, feet hip-width apart.',
+const POSE_GUIDANCE: Record<ProgressPhotoPose, string> = {
+  front:      'Face the camera, arms slightly away from your body, feet hip-width apart.',
+  side:       'Stand sideways, arms relaxed, feet together, looking straight ahead.',
+  back:       'Back to the camera, arms slightly away from your body, feet hip-width apart.',
+  face_front: 'Camera at eye level, neutral expression, hair clear of the face.',
+  face_side:  'Profile shot, ear and jawline visible, eyes forward.',
+  other:      'Anything else worth tracking — outfit, lighting, angle.',
 };
 
 interface Props {
@@ -17,7 +22,7 @@ interface Props {
 }
 
 export function PhotoSheet({ open, onClose }: Props) {
-  const [selectedPose, setSelectedPose] = useState<'front' | 'side' | 'back'>('front');
+  const [selectedPose, setSelectedPose] = useState<ProgressPhotoPose>('front');
   const [photoNote, setPhotoNote] = useState('');
   const [saving, setSaving] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -56,21 +61,25 @@ export function PhotoSheet({ open, onClose }: Props) {
     <Sheet open={open} onClose={onClose} title="Add Photo" height="auto">
       <div className="p-4 space-y-3">
         <div className="ios-section">
-          {/* Pose selector */}
-          <div className="ios-row gap-2">
-            {(['front', 'side', 'back'] as const).map(pose => (
-              <button
-                key={pose}
-                onClick={() => setSelectedPose(pose)}
-                className={`flex-1 py-2 text-sm font-medium rounded-lg border capitalize transition-colors ${
-                  selectedPose === pose
-                    ? 'bg-primary text-white border-primary'
-                    : 'border-border text-muted-foreground'
-                }`}
-              >
-                {pose}
-              </button>
-            ))}
+          {/* Pose selector — single line, scrollable on phones. Six chips
+              don't fit at full width on a 375pt iPhone, so wrap is avoided
+              by horizontal scroll. */}
+          <div className="ios-row py-2 px-2">
+            <div className="flex-1 flex gap-2 overflow-x-auto scrollbar-none flex-nowrap">
+              {ALL_POSES.map(pose => (
+                <button
+                  key={pose}
+                  onClick={() => setSelectedPose(pose)}
+                  className={`shrink-0 px-3 py-2 text-xs font-medium rounded-lg border whitespace-nowrap transition-colors ${
+                    selectedPose === pose
+                      ? 'bg-primary text-white border-primary'
+                      : 'border-border text-muted-foreground'
+                  }`}
+                >
+                  {POSE_LABELS[pose]}
+                </button>
+              ))}
+            </div>
           </div>
 
           {/* Pose guidance */}

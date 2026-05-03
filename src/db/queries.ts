@@ -20,6 +20,7 @@ import type {
   DysphoriaLog,
   ClothesTestLog,
   ProgressPhoto,
+  ProgressPhotoPose,
   InspoPhoto,
   ProjectionPhoto,
   InbodyScan,
@@ -2164,7 +2165,7 @@ export async function listProgressPhotos(limit = 50): Promise<ProgressPhoto[]> {
 
 export async function updateProgressPhoto(
   uuid: string,
-  data: { crop_offset_y?: number | null; notes?: string | null; pose?: 'front' | 'side' | 'back' },
+  data: { crop_offset_y?: number | null; notes?: string | null; pose?: ProgressPhotoPose },
 ): Promise<ProgressPhoto | null> {
   const sets: string[] = [];
   const params: unknown[] = [];
@@ -2222,7 +2223,7 @@ export async function createInspoPhoto(data: {
   notes?: string | null;
   taken_at?: string;
   burst_group_id?: string | null;
-  pose?: 'front' | 'side' | 'back' | 'other' | null;
+  pose?: ProgressPhotoPose | null;
   crop_offset_y?: number | null;
 }): Promise<InspoPhoto> {
   const uuid = randomUUID();
@@ -2244,7 +2245,7 @@ export async function listInspoPhotos(limit = 50): Promise<InspoPhoto[]> {
 
 export async function updateInspoPhoto(
   uuid: string,
-  data: { pose?: 'front' | 'side' | 'back' | 'other' | null; notes?: string | null; crop_offset_y?: number | null },
+  data: { pose?: ProgressPhotoPose | null; notes?: string | null; crop_offset_y?: number | null },
 ): Promise<InspoPhoto | null> {
   const sets: string[] = [];
   const params: unknown[] = [];
@@ -2303,7 +2304,7 @@ function parseProjectionPhoto(row: DbRow): ProjectionPhoto {
 
 export async function createProjectionPhoto(data: {
   blob_url: string;
-  pose: 'front' | 'side' | 'back';
+  pose: ProgressPhotoPose;
   notes?: string | null;
   taken_at?: string;
   source_progress_photo_uuid?: string | null;
@@ -2336,7 +2337,7 @@ export async function updateProjectionPhoto(
     crop_offset_y?: number | null;
     notes?: string | null;
     target_horizon?: string | null;
-    pose?: 'front' | 'side' | 'back';
+    pose?: ProgressPhotoPose;
   },
 ): Promise<ProjectionPhoto | null> {
   const sets: string[] = [];
@@ -2366,7 +2367,7 @@ export async function updateProjectionPhoto(
   return row ? parseProjectionPhoto(row) : null;
 }
 
-export async function listProjectionPhotos(opts: { pose?: 'front' | 'side' | 'back'; limit?: number } = {}): Promise<ProjectionPhoto[]> {
+export async function listProjectionPhotos(opts: { pose?: ProgressPhotoPose; limit?: number } = {}): Promise<ProjectionPhoto[]> {
   const limit = opts.limit ?? 50;
   if (opts.pose) {
     const rows = await query(
