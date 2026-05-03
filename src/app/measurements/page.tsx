@@ -157,27 +157,29 @@ function MeasurementsInner() {
   // the caller) lets the originating view refresh its own state — e.g. the
   // CompareDialog needs to update the displayed offset without reopening.
   const [adjustState, setAdjustState] = useState<{
-    photo: { uuid: string; blob_url: string; crop_offset_y: number | null };
+    photo: { uuid: string; blob_url: string; crop_offset_y: number | null; crop_offset_x: number | null };
     kind: AdjustablePhotoKind;
     blob?: Blob | null;
-    onSaved?: (newOffset: number | null) => void;
+    mask_url?: string | null;
+    onSaved?: (offsets: { x: number | null; y: number | null }) => void;
   } | null>(null);
 
-  const handleAdjustSaved = useCallback(async (newOffset: number | null) => {
+  const handleAdjustSaved = useCallback(async (offsets: { x: number | null; y: number | null }) => {
     if (!adjustState) return;
     // For progress photos we also write to Dexie so live queries reflect the
-    // change instantly and the sync engine pushes the same value next pass.
+    // change instantly and the sync engine pushes both axes next pass.
     if (adjustState.kind === 'progress') {
       try {
         await db.progress_photos.update(adjustState.photo.uuid, {
-          crop_offset_y: newOffset,
+          crop_offset_y: offsets.y,
+          crop_offset_x: offsets.x,
           _synced: false,
           _updated_at: Date.now(),
         });
         syncEngine.schedulePush();
       } catch { /* non-fatal */ }
     }
-    adjustState.onSaved?.(newOffset);
+    adjustState.onSaved?.(offsets);
   }, [adjustState]);
 
   // Retag a progress photo's pose. Optimistic Dexie update so the gallery
@@ -722,9 +724,11 @@ function MeasurementsInner() {
                             uuid: photo.uuid,
                             blob_url: photo.blob_url,
                             crop_offset_y: photo.crop_offset_y,
+                            crop_offset_x: photo.crop_offset_x ?? null,
                           },
                           kind: 'progress',
                           blob: photo.blob,
+                          mask_url: photo.mask_url ?? null,
                         })
                       }
                       onRetagPose={(pose) => handleRetagPose(photo, pose)}
@@ -1044,6 +1048,7 @@ function MeasurementsInner() {
         photo={adjustState?.photo ?? null}
         kind={adjustState?.kind ?? 'progress'}
         blob={adjustState?.blob ?? null}
+        mask_url={adjustState?.mask_url ?? null}
         onSaved={handleAdjustSaved}
       />
     </main>
