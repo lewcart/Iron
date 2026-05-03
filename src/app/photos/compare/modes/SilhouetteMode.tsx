@@ -32,8 +32,10 @@ export function SilhouetteMode({
   // beforePhoto / afterPhoto.blob_url when needed.
   beforeUrl: _beforeUrl,
   afterUrl,
-  beforeOffset,
-  afterOffset,
+  beforeOffsetX,
+  beforeOffsetY,
+  afterOffsetX,
+  afterOffsetY,
   beforeLabel,
   afterLabel,
   accent,
@@ -128,7 +130,7 @@ export function SilhouetteMode({
             className="absolute inset-0 w-full h-full opacity-30"
             style={{
               objectFit: 'cover',
-              transform: offsetTransform(afterOffset),
+              transform: offsetTransform(afterOffsetX, afterOffsetY),
               transformOrigin: 'center',
             }}
             draggable={false}
@@ -168,7 +170,7 @@ export function SilhouetteMode({
               maskSize: 'cover',
               maskRepeat: 'no-repeat',
               maskPosition: 'center',
-              transform: offsetTransform(afterOffset),
+              transform: offsetTransform(afterOffsetX, afterOffsetY),
               transformOrigin: 'center',
             }}
           />
@@ -184,7 +186,7 @@ export function SilhouetteMode({
               maskSize: 'cover',
               maskRepeat: 'no-repeat',
               maskPosition: 'center',
-              transform: offsetTransform(beforeOffset),
+              transform: offsetTransform(beforeOffsetX, beforeOffsetY),
               transformOrigin: 'center',
               mixBlendMode: 'plus-lighter',
             }}

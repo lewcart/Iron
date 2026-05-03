@@ -448,6 +448,8 @@ export interface LocalInspoPhoto extends Partial<SyncMeta> {
   pose: 'front' | 'side' | 'back' | 'face_front' | 'face_side' | 'other' | null;
   /** CSS object-position y%, 0-100. NULL = renderer defaults to 50 (center). */
   crop_offset_y?: number | null;
+  /** CSS object-position x%, 0-100. See migration 039. */
+  crop_offset_x?: number | null;
   /** Server-cached person-segmentation mask URL (Vercel Blob). NULL = not yet
    *  computed. See migration 038. Read-only client-side; server-owned cache. */
   mask_url?: string | null;
@@ -478,6 +480,10 @@ export interface LocalProgressPhoto extends SyncMeta {
    *  Auto-filled on capture via best-effort face detection where supported;
    *  manual drag-to-nudge in adjust mode also writes here. */
   crop_offset_y: number | null;
+  /** CSS object-position x%, 0-100. See migration 039. Auto-filled by
+   *  silhouette-centroid detection (mask_url required) or face-detect
+   *  fallback when no mask is cached. */
+  crop_offset_x?: number | null;
   /** Server-cached person-segmentation mask URL (Vercel Blob). NULL = not yet
    *  computed. See migration 038. Read-only client-side; server-owned cache. */
   mask_url?: string | null;
@@ -799,6 +805,18 @@ export class IronDB extends Dexie {
       });
       await tx.table('inspo_photos').toCollection().modify(row => {
         if (row.mask_url === undefined) row.mask_url = null;
+      });
+    });
+    // v19: horizontal alignment offset for the silhouette venn (positional
+    // drift was reading as shape change). Stores shape unchanged
+    // (crop_offset_x not indexed). Backfill crop_offset_x=null on existing
+    // rows so reads after upgrade get a defined value, not undefined.
+    this.version(19).stores(v16Stores).upgrade(async tx => {
+      await tx.table('progress_photos').toCollection().modify(row => {
+        if (row.crop_offset_x === undefined) row.crop_offset_x = null;
+      });
+      await tx.table('inspo_photos').toCollection().modify(row => {
+        if (row.crop_offset_x === undefined) row.crop_offset_x = null;
       });
     });
   }

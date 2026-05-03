@@ -35,9 +35,17 @@ interface ActivePhoto {
   taken_at: string;
   notes: string | null;
   crop_offset_y: number | null;
+  crop_offset_x: number | null;
   mask_url: string | null;
   target_horizon?: string | null;
   source_progress_photo_uuid?: string | null;
+}
+
+/** Saved offsets from AdjustOffsetDialog. Both axes always present (UI may
+ *  let the user manipulate either independently but Save commits both). */
+interface SavedOffsets {
+  x: number | null;
+  y: number | null;
 }
 
 function formatDate(iso: string) {
@@ -71,28 +79,30 @@ function ComparePageInner() {
   const source = useMemo(() => allProgress.find((p) => p.uuid === sourceUuid) ?? null, [allProgress, sourceUuid]);
 
   // Adjust dialog state. onSaved patches local projection/inspo state so the
-  // active mode renders the new offset without reopening — same pattern as
-  // shipped fix in commit 864ecd3.
+  // active mode renders the new offsets without reopening — same pattern as
+  // shipped fix in commit 864ecd3, now carrying both axes.
   const [adjustState, setAdjustState] = useState<{
-    photo: { uuid: string; blob_url: string; crop_offset_y: number | null };
+    photo: { uuid: string; blob_url: string; crop_offset_y: number | null; crop_offset_x: number | null };
     kind: AdjustablePhotoKind;
     blob?: Blob | null;
-    onSaved?: (newOffset: number | null) => void;
+    mask_url?: string | null;
+    onSaved?: (offsets: SavedOffsets) => void;
   } | null>(null);
 
-  const handleAdjustSaved = useCallback(async (newOffset: number | null) => {
+  const handleAdjustSaved = useCallback(async (offsets: SavedOffsets) => {
     if (!adjustState) return;
     if (adjustState.kind === 'progress') {
       try {
         await db.progress_photos.update(adjustState.photo.uuid, {
-          crop_offset_y: newOffset,
+          crop_offset_y: offsets.y,
+          crop_offset_x: offsets.x,
           _synced: false,
           _updated_at: Date.now(),
         });
         syncEngine.schedulePush();
       } catch { /* non-fatal */ }
     }
-    adjustState.onSaved?.(newOffset);
+    adjustState.onSaved?.(offsets);
   }, [adjustState]);
 
   // Initialize pose from source as soon as it's available.
@@ -146,6 +156,7 @@ function ComparePageInner() {
           taken_at: p.taken_at,
           notes: p.notes,
           crop_offset_y: p.crop_offset_y,
+          crop_offset_x: p.crop_offset_x,
           mask_url: p.mask_url,
           target_horizon: p.target_horizon,
           source_progress_photo_uuid: p.source_progress_photo_uuid,
@@ -162,6 +173,7 @@ function ComparePageInner() {
         taken_at: p.taken_at,
         notes: p.notes,
         crop_offset_y: p.crop_offset_y,
+        crop_offset_x: p.crop_offset_x,
         mask_url: p.mask_url,
       }));
   }, [kind, projections, inspos, pose, source]);
@@ -208,7 +220,8 @@ function ComparePageInner() {
       .map((p) => ({
         uuid: p.uuid,
         url: p.blob_url,
-        offset: p.crop_offset_y,
+        offsetY: p.crop_offset_y,
+        offsetX: p.crop_offset_x ?? null,
         date: p.taken_at,
       }));
   }, [allProgress, pose]);
@@ -233,7 +246,8 @@ function ComparePageInner() {
     );
   }
 
-  const beforeOffsetForActive = source?.crop_offset_y ?? null;
+  const beforeOffsetY = source?.crop_offset_y ?? null;
+  const beforeOffsetX = source?.crop_offset_x ?? null;
 
   return (
     <div className="fixed inset-0 z-30 bg-black/95 flex flex-col overscroll-contain">
@@ -335,8 +349,10 @@ function ComparePageInner() {
               <SlideMode
                 beforeUrl={source.blob_url}
                 afterUrl={active.blob_url}
-                beforeOffset={beforeOffsetForActive}
-                afterOffset={active.crop_offset_y}
+                beforeOffsetX={beforeOffsetX}
+                beforeOffsetY={beforeOffsetY}
+                afterOffsetX={active.crop_offset_x}
+                afterOffsetY={active.crop_offset_y}
                 beforeLabel="Now"
                 afterLabel={kind === 'projection' ? (active.target_horizon ?? 'Projection') : 'Inspiration'}
                 accent={accent}
@@ -346,8 +362,10 @@ function ComparePageInner() {
               <SideBySideMode
                 beforeUrl={source.blob_url}
                 afterUrl={active.blob_url}
-                beforeOffset={beforeOffsetForActive}
-                afterOffset={active.crop_offset_y}
+                beforeOffsetX={beforeOffsetX}
+                beforeOffsetY={beforeOffsetY}
+                afterOffsetX={active.crop_offset_x}
+                afterOffsetY={active.crop_offset_y}
                 beforeLabel="Now"
                 afterLabel={kind === 'projection' ? (active.target_horizon ?? 'Projection') : 'Inspiration'}
                 accent={accent}
@@ -357,8 +375,10 @@ function ComparePageInner() {
               <BlendMode
                 beforeUrl={source.blob_url}
                 afterUrl={active.blob_url}
-                beforeOffset={beforeOffsetForActive}
-                afterOffset={active.crop_offset_y}
+                beforeOffsetX={beforeOffsetX}
+                beforeOffsetY={beforeOffsetY}
+                afterOffsetX={active.crop_offset_x}
+                afterOffsetY={active.crop_offset_y}
                 beforeLabel="Now"
                 afterLabel={kind === 'projection' ? (active.target_horizon ?? 'Projection') : 'Inspiration'}
                 accent={accent}
@@ -368,8 +388,10 @@ function ComparePageInner() {
               <DifferenceMode
                 beforeUrl={source.blob_url}
                 afterUrl={active.blob_url}
-                beforeOffset={beforeOffsetForActive}
-                afterOffset={active.crop_offset_y}
+                beforeOffsetX={beforeOffsetX}
+                beforeOffsetY={beforeOffsetY}
+                afterOffsetX={active.crop_offset_x}
+                afterOffsetY={active.crop_offset_y}
                 beforeLabel="Now"
                 afterLabel={kind === 'projection' ? (active.target_horizon ?? 'Projection') : 'Inspiration'}
                 accent={accent}
@@ -379,8 +401,10 @@ function ComparePageInner() {
               <SilhouetteMode
                 beforeUrl={source.blob_url}
                 afterUrl={active.blob_url}
-                beforeOffset={beforeOffsetForActive}
-                afterOffset={active.crop_offset_y}
+                beforeOffsetX={beforeOffsetX}
+                beforeOffsetY={beforeOffsetY}
+                afterOffsetX={active.crop_offset_x}
+                afterOffsetY={active.crop_offset_y}
                 beforeLabel="Now"
                 afterLabel={kind === 'projection' ? (active.target_horizon ?? 'Projection') : 'Inspiration'}
                 accent={accent}
@@ -409,9 +433,11 @@ function ComparePageInner() {
                       uuid: source.uuid,
                       blob_url: source.blob_url,
                       crop_offset_y: source.crop_offset_y,
+                      crop_offset_x: source.crop_offset_x ?? null,
                     },
                     kind: 'progress',
                     blob: source.blob,
+                    mask_url: source.mask_url ?? null,
                   });
                 }}
                 className="flex items-center gap-1.5 px-3 border border-white/15 text-white/80 text-xs font-medium rounded-lg min-h-[44px]"
@@ -423,16 +449,23 @@ function ComparePageInner() {
                 onClick={() => {
                   const activeUuidLocal = active.uuid;
                   setAdjustState({
-                    photo: { uuid: active.uuid, blob_url: active.blob_url, crop_offset_y: active.crop_offset_y },
+                    photo: {
+                      uuid: active.uuid,
+                      blob_url: active.blob_url,
+                      crop_offset_y: active.crop_offset_y,
+                      crop_offset_x: active.crop_offset_x,
+                    },
                     kind,
-                    onSaved: (newOffset) => {
+                    mask_url: active.mask_url,
+                    onSaved: (offsets) => {
+                      const patch = { crop_offset_y: offsets.y, crop_offset_x: offsets.x };
                       if (kind === 'projection') {
                         setProjections((prev) =>
-                          prev?.map((p) => p.uuid === activeUuidLocal ? { ...p, crop_offset_y: newOffset } : p) ?? null,
+                          prev?.map((p) => p.uuid === activeUuidLocal ? { ...p, ...patch } : p) ?? null,
                         );
                       } else {
                         setInspos((prev) =>
-                          prev?.map((p) => p.uuid === activeUuidLocal ? { ...p, crop_offset_y: newOffset } : p) ?? null,
+                          prev?.map((p) => p.uuid === activeUuidLocal ? { ...p, ...patch } : p) ?? null,
                         );
                       }
                     },
@@ -454,9 +487,10 @@ function ComparePageInner() {
                   <span className="ml-2 text-trans-blue">· linked to this photo</span>
                 )}
               </p>
-              {(source.crop_offset_y === null || active.crop_offset_y === null) && (
+              {(source.crop_offset_y === null || active.crop_offset_y === null
+                || source.crop_offset_x == null || active.crop_offset_x == null) && (
                 <p className="text-amber-400/80 text-[11px]">
-                  ⚠ Heads not aligned — Adjust to compare shape accurately.
+                  ⚠ Alignment incomplete — Adjust both photos to compare shape accurately.
                 </p>
               )}
             </div>
@@ -487,7 +521,7 @@ function ComparePageInner() {
                           className="absolute inset-0 w-full h-full"
                           style={{
                             objectFit: 'cover',
-                            transform: offsetTransform(p.crop_offset_y),
+                            transform: offsetTransform(p.crop_offset_x, p.crop_offset_y),
                             transformOrigin: 'center',
                           }}
                           draggable={false}

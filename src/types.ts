@@ -334,6 +334,10 @@ export interface ProgressPhoto {
   taken_at: string;
   /** CSS object-position y%, 0-100. NULL = renderer defaults to 50 (center). */
   crop_offset_y: number | null;
+  /** CSS object-position x%, 0-100. NULL = renderer defaults to 50 (center).
+   *  Mirror axis of crop_offset_y — added with the silhouette venn so
+   *  positional drift doesn't read as shape change. */
+  crop_offset_x: number | null;
   /** Vercel Blob URL of a person-segmentation mask PNG (white = person, black =
    *  background) at the source image's original dimensions. NULL = mask not
    *  yet computed. Server-owned cache: clients never null this on push. */
@@ -358,6 +362,8 @@ export interface InspoPhoto {
   pose: InspoPhotoPose | null;
   /** CSS object-position y%, 0-100. NULL = renderer defaults to 50 (center). */
   crop_offset_y: number | null;
+  /** CSS object-position x%, 0-100. See ProgressPhoto. */
+  crop_offset_x: number | null;
   /** Vercel Blob URL of a person-segmentation mask PNG. See ProgressPhoto. */
   mask_url: string | null;
 }
@@ -376,6 +382,8 @@ export interface ProjectionPhoto {
   target_horizon: string | null;
   /** CSS object-position y%, 0-100. NULL = renderer defaults to 50 (center). */
   crop_offset_y: number | null;
+  /** CSS object-position x%, 0-100. See ProgressPhoto. */
+  crop_offset_x: number | null;
   /** Vercel Blob URL of a person-segmentation mask PNG. See ProgressPhoto. */
   mask_url: string | null;
 }

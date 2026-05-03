@@ -25,7 +25,7 @@
 const ANCHOR_Y_PCT = 25;
 
 interface DetectedFace {
-  boundingBox: { y: number; height: number };
+  boundingBox: { x: number; y: number; width: number; height: number };
 }
 
 interface FaceDetectorCtor {
@@ -35,7 +35,7 @@ interface FaceDetectorCtor {
 // TFJS detector + import are cached at module scope so the lazy import + model
 // load only happens once per session.
 type TfjsDetector = {
-  estimateFaces(input: ImageBitmap): Promise<Array<{ box: { yMin: number; height: number } }>>;
+  estimateFaces(input: ImageBitmap): Promise<Array<{ box: { xMin: number; yMin: number; width: number; height: number } }>>;
 };
 let tfjsDetectorPromise: Promise<TfjsDetector | null> | null = null;
 
@@ -73,17 +73,24 @@ async function loadTfjsDetector(): Promise<TfjsDetector | null> {
 }
 
 /** Best-effort face detection. Returns CSS object-position y% (0-100), or null
- *  when no face is detected by any path. */
+ *  when no face is detected by any path. Kept as a thin wrapper for callers
+ *  that only need vertical alignment. */
 export async function tryDetectFaceY(blob: Blob): Promise<number | null> {
-  // Path 1: native FaceDetector (fast, free).
-  const native = await tryNativeFaceDetector(blob);
-  if (native !== null) return native;
-
-  // Path 2: TFJS + MediaPipe long-range. Loaded on demand.
-  return tryTfjsFaceDetector(blob);
+  const center = await tryDetectFaceCenter(blob);
+  return center?.y ?? null;
 }
 
-async function tryNativeFaceDetector(blob: Blob): Promise<number | null> {
+/** Best-effort face detection returning both axes as CSS object-position
+ *  percentages (0-100). NULL when no face is detected by any path. Used by
+ *  AdjustOffsetDialog when no silhouette mask is available for body-centroid
+ *  detection. */
+export async function tryDetectFaceCenter(blob: Blob): Promise<{ x: number; y: number } | null> {
+  const native = await tryNativeFaceDetectorCenter(blob);
+  if (native !== null) return native;
+  return tryTfjsFaceDetectorCenter(blob);
+}
+
+async function tryNativeFaceDetectorCenter(blob: Blob): Promise<{ x: number; y: number } | null> {
   const Ctor =
     typeof window !== 'undefined'
       ? ((window as unknown as { FaceDetector?: FaceDetectorCtor }).FaceDetector ?? null)
@@ -100,7 +107,11 @@ async function tryNativeFaceDetector(blob: Blob): Promise<number | null> {
       a.boundingBox.height > b.boundingBox.height ? a : b,
     );
     const faceCenterY = face.boundingBox.y + face.boundingBox.height / 2;
-    return faceCenterToObjectPositionY(faceCenterY, bitmap.height);
+    const faceCenterX = face.boundingBox.x + face.boundingBox.width / 2;
+    return {
+      x: pctFromCenter(faceCenterX, bitmap.width),
+      y: faceCenterToObjectPositionY(faceCenterY, bitmap.height),
+    };
   } catch {
     return null;
   } finally {
@@ -108,7 +119,7 @@ async function tryNativeFaceDetector(blob: Blob): Promise<number | null> {
   }
 }
 
-async function tryTfjsFaceDetector(blob: Blob): Promise<number | null> {
+async function tryTfjsFaceDetectorCenter(blob: Blob): Promise<{ x: number; y: number } | null> {
   if (typeof window === 'undefined') return null;
   const detector = await loadTfjsDetector();
   if (!detector) return null;
@@ -120,13 +131,24 @@ async function tryTfjsFaceDetector(blob: Blob): Promise<number | null> {
     if (!faces || faces.length === 0) return null;
     const face = faces.reduce((a, b) => (a.box.height > b.box.height ? a : b));
     const faceCenterY = face.box.yMin + face.box.height / 2;
-    return faceCenterToObjectPositionY(faceCenterY, bitmap.height);
+    const faceCenterX = face.box.xMin + face.box.width / 2;
+    return {
+      x: pctFromCenter(faceCenterX, bitmap.width),
+      y: faceCenterToObjectPositionY(faceCenterY, bitmap.height),
+    };
   } catch (err) {
     console.warn('[face-detect] tfjs estimateFaces failed:', err);
     return null;
   } finally {
     bitmap?.close?.();
   }
+}
+
+/** For x: face-center pixel → CSS object-position x%. Unlike y, there's no
+ *  "anchor" concept — we just want the face horizontally centered, so map the
+ *  face's pixel x straight to a percentage. */
+function pctFromCenter(pixel: number, dim: number): number {
+  return Math.round(clamp((pixel / dim) * 100, 0, 100) * 10) / 10;
 }
 
 /** Convert a detected face center (in image pixels) to a CSS object-position

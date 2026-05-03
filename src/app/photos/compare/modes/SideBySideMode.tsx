@@ -9,8 +9,10 @@ import type { BaseCompareProps } from './types';
 export function SideBySideMode({
   beforeUrl,
   afterUrl,
-  beforeOffset,
-  afterOffset,
+  beforeOffsetX,
+  beforeOffsetY,
+  afterOffsetX,
+  afterOffsetY,
   beforeLabel,
   afterLabel,
   accent,
@@ -27,7 +29,7 @@ export function SideBySideMode({
           className="absolute inset-0 w-full h-full select-none"
           style={{
             objectFit: 'cover',
-            transform: offsetTransform(beforeOffset),
+            transform: offsetTransform(beforeOffsetX, beforeOffsetY),
             transformOrigin: 'center',
           }}
           draggable={false}
@@ -44,7 +46,7 @@ export function SideBySideMode({
           className="absolute inset-0 w-full h-full select-none"
           style={{
             objectFit: 'cover',
-            transform: offsetTransform(afterOffset),
+            transform: offsetTransform(afterOffsetX, afterOffsetY),
             transformOrigin: 'center',
           }}
           draggable={false}

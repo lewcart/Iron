@@ -793,12 +793,14 @@ async function pushProgressPhoto(r: Record<string, unknown>): Promise<void> {
   // client push would null a freshly-cached mask. New rows get NULL by
   // Postgres default, which is the right empty state.
   await query(
-    `INSERT INTO progress_photos (uuid, blob_url, pose, notes, taken_at, crop_offset_y, updated_at)
-     VALUES ($1, $2, $3, $4, $5, $6, NOW())
+    `INSERT INTO progress_photos (uuid, blob_url, pose, notes, taken_at, crop_offset_y, crop_offset_x, updated_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
      ON CONFLICT (uuid) DO UPDATE SET
        blob_url = EXCLUDED.blob_url, pose = EXCLUDED.pose,
        notes = EXCLUDED.notes, taken_at = EXCLUDED.taken_at,
-       crop_offset_y = EXCLUDED.crop_offset_y, updated_at = NOW()`,
-    [r.uuid, r.blob_url, r.pose, r.notes, r.taken_at, r.crop_offset_y ?? null],
+       crop_offset_y = EXCLUDED.crop_offset_y,
+       crop_offset_x = EXCLUDED.crop_offset_x,
+       updated_at = NOW()`,
+    [r.uuid, r.blob_url, r.pose, r.notes, r.taken_at, r.crop_offset_y ?? null, r.crop_offset_x ?? null],
   );
 }

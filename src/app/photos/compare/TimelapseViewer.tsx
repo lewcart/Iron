@@ -7,7 +7,8 @@ import { offsetTransform } from '@/lib/photo-offset';
 export interface TimelapseFrame {
   uuid: string;
   url: string;
-  offset: number | null;
+  offsetY: number | null;
+  offsetX: number | null;
   date: string; // ISO
 }
 
@@ -107,7 +108,7 @@ export function TimelapseViewer({ open, onClose, frames }: Props) {
             className="absolute inset-0 w-full h-full"
             style={{
               objectFit: 'cover',
-              transform: offsetTransform(active.offset),
+              transform: offsetTransform(active.offsetX, active.offsetY),
               transformOrigin: 'center',
             }}
             draggable={false}

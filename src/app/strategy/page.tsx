@@ -635,7 +635,7 @@ function ProjectionsCard({
                   sizes="(max-width: 640px) 50vw, 25vw"
                   className="object-cover"
                   style={{
-                    transform: offsetTransform(photo.crop_offset_y),
+                    transform: offsetTransform(photo.crop_offset_x, photo.crop_offset_y),
                     transformOrigin: 'center',
                   }}
                   unoptimized
@@ -700,7 +700,7 @@ function InspoCard({
             {photos.slice(0, 8).map((photo) => {
               const comparable = isComparablePose(photo.pose);
               const transformStyle = {
-                transform: offsetTransform(photo.crop_offset_y),
+                transform: offsetTransform(photo.crop_offset_x, photo.crop_offset_y),
                 transformOrigin: 'center' as const,
               };
               const poseLabel = photo.pose ? (POSE_LABELS[photo.pose] ?? photo.pose) : null;

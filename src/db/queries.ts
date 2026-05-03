@@ -2136,6 +2136,7 @@ function parseProgressPhoto(row: DbRow): ProgressPhoto {
     notes: row.notes as string | null,
     taken_at: row.taken_at as string,
     crop_offset_y: (row.crop_offset_y as number | null) ?? null,
+    crop_offset_x: (row.crop_offset_x as number | null) ?? null,
     mask_url: (row.mask_url as string | null) ?? null,
   };
 }
@@ -2166,13 +2167,17 @@ export async function listProgressPhotos(limit = 50): Promise<ProgressPhoto[]> {
 
 export async function updateProgressPhoto(
   uuid: string,
-  data: { crop_offset_y?: number | null; notes?: string | null; pose?: ProgressPhotoPose; mask_url?: string | null },
+  data: { crop_offset_y?: number | null; crop_offset_x?: number | null; notes?: string | null; pose?: ProgressPhotoPose; mask_url?: string | null },
 ): Promise<ProgressPhoto | null> {
   const sets: string[] = [];
   const params: unknown[] = [];
   if ('crop_offset_y' in data) {
     params.push(data.crop_offset_y ?? null);
     sets.push(`crop_offset_y = $${params.length}`);
+  }
+  if ('crop_offset_x' in data) {
+    params.push(data.crop_offset_x ?? null);
+    sets.push(`crop_offset_x = $${params.length}`);
   }
   if ('notes' in data) {
     params.push(data.notes ?? null);
@@ -2220,6 +2225,7 @@ function parseInspoPhoto(row: DbRow): InspoPhoto {
     burst_group_id: row.burst_group_id as string | null,
     pose: (row.pose as InspoPhoto['pose']) ?? null,
     crop_offset_y: (row.crop_offset_y as number | null) ?? null,
+    crop_offset_x: (row.crop_offset_x as number | null) ?? null,
     mask_url: (row.mask_url as string | null) ?? null,
   };
 }
@@ -2251,7 +2257,7 @@ export async function listInspoPhotos(limit = 50): Promise<InspoPhoto[]> {
 
 export async function updateInspoPhoto(
   uuid: string,
-  data: { pose?: ProgressPhotoPose | null; notes?: string | null; crop_offset_y?: number | null; mask_url?: string | null },
+  data: { pose?: ProgressPhotoPose | null; notes?: string | null; crop_offset_y?: number | null; crop_offset_x?: number | null; mask_url?: string | null },
 ): Promise<InspoPhoto | null> {
   const sets: string[] = [];
   const params: unknown[] = [];
@@ -2266,6 +2272,10 @@ export async function updateInspoPhoto(
   if ('crop_offset_y' in data) {
     params.push(data.crop_offset_y ?? null);
     sets.push(`crop_offset_y = $${params.length}`);
+  }
+  if ('crop_offset_x' in data) {
+    params.push(data.crop_offset_x ?? null);
+    sets.push(`crop_offset_x = $${params.length}`);
   }
   if ('mask_url' in data) {
     params.push(data.mask_url ?? null);
@@ -2309,6 +2319,7 @@ function parseProjectionPhoto(row: DbRow): ProjectionPhoto {
     source_progress_photo_uuid: (row.source_progress_photo_uuid as string | null) ?? null,
     target_horizon: (row.target_horizon as string | null) ?? null,
     crop_offset_y: (row.crop_offset_y as number | null) ?? null,
+    crop_offset_x: (row.crop_offset_x as number | null) ?? null,
     mask_url: (row.mask_url as string | null) ?? null,
   };
 }
@@ -2346,6 +2357,7 @@ export async function updateProjectionPhoto(
   uuid: string,
   data: {
     crop_offset_y?: number | null;
+    crop_offset_x?: number | null;
     notes?: string | null;
     target_horizon?: string | null;
     pose?: ProgressPhotoPose;
@@ -2357,6 +2369,10 @@ export async function updateProjectionPhoto(
   if ('crop_offset_y' in data) {
     params.push(data.crop_offset_y ?? null);
     sets.push(`crop_offset_y = $${params.length}`);
+  }
+  if ('crop_offset_x' in data) {
+    params.push(data.crop_offset_x ?? null);
+    sets.push(`crop_offset_x = $${params.length}`);
   }
   if ('notes' in data) {
     params.push(data.notes ?? null);
