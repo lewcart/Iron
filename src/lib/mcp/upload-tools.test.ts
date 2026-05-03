@@ -129,9 +129,11 @@ const putMock = vi.fn(async (pathname: string, _body: Buffer, _opts: unknown) =>
   url: `https://blob.example.com/${pathname}`,
   pathname,
 }));
+const delMock = vi.fn(async (_url: string) => undefined);
 
 vi.mock('@vercel/blob', () => ({
   put: (...args: unknown[]) => putMock(args[0] as string, args[1] as Buffer, args[2]),
+  del: (...args: unknown[]) => delMock(args[0] as string),
 }));
 
 // ── DB create helpers mock ───────────────────────────────────────────────────
@@ -182,6 +184,7 @@ beforeEach(() => {
   queryMock.mockClear();
   queryOneMock.mockClear();
   putMock.mockClear();
+  delMock.mockClear();
   createProgressPhotoMock.mockClear();
   createInspoPhotoMock.mockClear();
   createProjectionPhotoMock.mockClear();
@@ -209,9 +212,9 @@ describe('start_upload', () => {
   });
 
   it('S3: GC deletes orphan sessions older than horizon on next start_upload', async () => {
-    // Manually insert an old orphan (created_at = 2h ago).
-    const orphanId = 'orphan-1';
-    const ancientTs = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
+    // Manually insert an old orphan (well past the 24h horizon).
+    const orphanId = '11111111-1111-4111-8111-111111111111';
+    const ancientTs = new Date(Date.now() - 25 * 60 * 60 * 1000).toISOString();
     sessions.set(orphanId, {
       upload_id: orphanId,
       kind: 'progress',
@@ -228,7 +231,7 @@ describe('start_upload', () => {
   });
 
   it('S4: GC does NOT delete fresh orphans (within horizon)', async () => {
-    const freshId = 'fresh-1';
+    const freshId = '22222222-2222-4222-8222-222222222222';
     sessions.set(freshId, {
       upload_id: freshId,
       kind: 'progress',
@@ -299,9 +302,11 @@ describe('upload_chunk', () => {
     expect((body.error as { code: string }).code).toBe('SIZE_CAP_EXCEEDED');
   });
 
-  it('UC4: unknown upload_id → SESSION_NOT_FOUND', async () => {
+  it('UC4: well-formed but unknown upload_id → SESSION_NOT_FOUND (FK path)', async () => {
+    // Valid UUID shape passes the pre-validate, hits the CTE,
+    // FK violation translates to SESSION_NOT_FOUND.
     const r = await call('upload_chunk', {
-      upload_id: 'does-not-exist',
+      upload_id: '00000000-0000-4000-8000-000000000000',
       sequence: 0,
       data_b64: 'aGk=',
     });
@@ -309,12 +314,15 @@ describe('upload_chunk', () => {
     expect((parse(r).error as { code: string }).code).toBe('SESSION_NOT_FOUND');
   });
 
-  it('UC5: missing args → INVALID_ARGS', async () => {
+  it('UC5: missing or malformed args → INVALID_ARGS', async () => {
+    // Need a real session so we get past UUID pre-validate to the
+    // sequence/data checks.
+    const id = (parse(await call('start_upload', { kind: 'projection' })).upload_id) as string;
     const r1 = await call('upload_chunk', { sequence: 0, data_b64: 'aGk=' });
     expect((parse(r1).error as { code: string }).code).toBe('INVALID_ARGS');
-    const r2 = await call('upload_chunk', { upload_id: 'x', sequence: -1, data_b64: 'aGk=' });
+    const r2 = await call('upload_chunk', { upload_id: id, sequence: -1, data_b64: 'aGk=' });
     expect((parse(r2).error as { code: string }).code).toBe('INVALID_ARGS');
-    const r3 = await call('upload_chunk', { upload_id: 'x', sequence: 0, data_b64: '' });
+    const r3 = await call('upload_chunk', { upload_id: id, sequence: 0, data_b64: '' });
     expect((parse(r3).error as { code: string }).code).toBe('INVALID_ARGS');
   });
 });
@@ -479,10 +487,67 @@ describe('finalize — failure modes', () => {
 
   it('FX5: SESSION_NOT_FOUND on bogus upload_id', async () => {
     const r = await call('finalize_projection_photo', {
-      upload_id: 'bogus-uuid',
+      upload_id: '00000000-0000-4000-8000-000000000000',
       pose: 'front',
     });
     expect((parse(r).error as { code: string }).code).toBe('SESSION_NOT_FOUND');
+  });
+});
+
+// ── Adversarial-review hardening ─────────────────────────────────────────────
+
+describe('hardening (adversarial review)', () => {
+  it('UC6: sequence > MAX_CHUNK_SEQUENCE → INVALID_ARGS (DoS guard)', async () => {
+    const id = (parse(await call('start_upload', { kind: 'projection' })).upload_id) as string;
+    const r = await call('upload_chunk', {
+      upload_id: id,
+      sequence: 2_147_483_647,
+      data_b64: 'aGk=',
+    });
+    expect(r.isError).toBe(true);
+    expect((parse(r).error as { code: string }).code).toBe('INVALID_ARGS');
+  });
+
+  it('UC7: non-UUID upload_id → SESSION_NOT_FOUND without hitting Postgres', async () => {
+    const r = await call('upload_chunk', {
+      upload_id: 'not-a-uuid',
+      sequence: 0,
+      data_b64: 'aGk=',
+    });
+    expect(r.isError).toBe(true);
+    expect((parse(r).error as { code: string }).code).toBe('SESSION_NOT_FOUND');
+    // Mock would throw "Unhandled SQL" if we'd reached the CTE.
+  });
+
+  it('FX9: finalize re-checks the cap (caller bypassed upload_chunk error)', async () => {
+    const id = (parse(await call('start_upload', { kind: 'projection' })).upload_id) as string;
+    // Manually stuff over-cap chunks into the staging map (simulating a
+    // caller that ignored SIZE_CAP_EXCEEDED and wrote them out-of-band).
+    const half = Math.floor(__test.MAX_TOTAL_B64_CHARS / 2) + 1;
+    chunks.set(id, [
+      { sequence: 0, data_b64: 'x'.repeat(half), byte_length: half },
+      { sequence: 1, data_b64: 'x'.repeat(half), byte_length: half },
+    ]);
+    const r = await call('finalize_projection_photo', { upload_id: id, pose: 'front' });
+    expect(r.isError).toBe(true);
+    expect((parse(r).error as { code: string }).code).toBe('SIZE_CAP_EXCEEDED');
+    expect(putMock).not.toHaveBeenCalled();
+  });
+
+  it('FX10: orphan blob is deleted when createPhoto throws after blob upload', async () => {
+    const id = (parse(await call('start_upload', { kind: 'projection' })).upload_id) as string;
+    await call('upload_chunk', { upload_id: id, sequence: 0, data_b64: 'aGk=' });
+    createProjectionPhotoMock.mockRejectedValueOnce(new Error('Postgres timeout'));
+    let threw = false;
+    try {
+      await call('finalize_projection_photo', { upload_id: id, pose: 'front' });
+    } catch {
+      threw = true;
+    }
+    expect(threw).toBe(true);
+    expect(putMock).toHaveBeenCalledTimes(1);
+    expect(delMock).toHaveBeenCalledTimes(1);
+    expect(delMock.mock.calls[0][0]).toMatch(/^https:\/\/blob\.example\.com\/projection-photos\//);
   });
 });
 

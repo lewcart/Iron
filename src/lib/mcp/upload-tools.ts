@@ -75,11 +75,23 @@ const CHUNK_SIZE_RECOMMENDED = 30_000;
 const MAX_TOTAL_B64_CHARS = 33_000_000;
 
 /**
- * Sweep horizon for orphan sessions (1 hour). Any mcp_upload_sessions row
- * with finalized_at IS NULL and created_at older than this gets DELETEd by
- * GC, which cascades to its chunks.
+ * Sweep horizon for orphan sessions (24 hours). The horizon is from
+ * created_at — not last activity — so a 24h ceiling gives plenty of room
+ * for an upload that pauses across a phone call, app backgrounding, or a
+ * day of "I'll come back to that". A typical full upload completes in
+ * seconds, so this only ever fires on truly abandoned sessions.
  */
-const GC_HORIZON_MS = 60 * 60 * 1000;
+const GC_HORIZON_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Hard cap on chunk sequence number. Stops a single legitimate row at
+ * INT_MAX from making the missing-chunk loop allocate billions of ints.
+ * 10000 chunks at 30k chars each = 300MB of upload, well above
+ * MAX_TOTAL_B64_CHARS — so this is only ever a sanity bound.
+ */
+const MAX_CHUNK_SEQUENCE = 10_000;
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const VALID_KINDS = ['progress', 'projection', 'inspo'] as const;
 type UploadKind = typeof VALID_KINDS[number];
@@ -145,6 +157,18 @@ async function loadAndAssemble(
   | { ok: true; buffer: Buffer; mime_type: string; session: SessionRow }
   | { ok: false; error: ReturnType<typeof toolErrorEnvelope> }
 > {
+  // Pre-validate UUID — same reasoning as in upload_chunk.
+  if (!UUID_RE.test(uploadId)) {
+    return {
+      ok: false,
+      error: toolErrorEnvelope(
+        'SESSION_NOT_FOUND',
+        `upload_id is not a valid UUID. Call start_upload first.`,
+        'start_upload',
+      ),
+    };
+  }
+
   type JoinedRow = {
     upload_id: string;
     kind: UploadKind;
@@ -213,7 +237,9 @@ async function loadAndAssemble(
     };
   }
 
-  // Contiguity check: sequences must be exactly 0..N-1.
+  // Contiguity check: sequences must be exactly 0..N-1. The MAX_CHUNK_SEQUENCE
+  // bound on upload_chunk means chunks.length is also <= MAX_CHUNK_SEQUENCE+1,
+  // so the missing-chunk enumeration can't allocate billions of entries.
   const missing: number[] = [];
   for (let i = 0; i < chunks.length; i++) {
     if (chunks[i].sequence !== i) {
@@ -232,6 +258,22 @@ async function loadAndAssemble(
         ),
       };
     }
+  }
+
+  // Re-check the cap at finalize time. upload_chunk rejects over-cap
+  // additions, but a caller could ignore that error and call finalize
+  // anyway. Without this check, an over-cap session would reach
+  // Buffer.from() and OOM the function.
+  const totalBytes = chunks.reduce((sum, c) => sum + c.byte_length, 0);
+  if (totalBytes > MAX_TOTAL_B64_CHARS) {
+    return {
+      ok: false,
+      error: toolErrorEnvelope(
+        'SIZE_CAP_EXCEEDED',
+        `Cumulative upload size ${totalBytes} chars exceeds cap of ${MAX_TOTAL_B64_CHARS}. Start a fresh upload with start_upload.`,
+        'start_upload',
+      ),
+    };
   }
 
   // Must join the b64 string first, THEN decode — chunks can split mid-
@@ -273,6 +315,31 @@ async function putToBlob(
 ): Promise<{ url: string }> {
   const { put } = await import('@vercel/blob');
   return put(pathname, body, { access: 'public', contentType });
+}
+
+/**
+ * Run a DB-create helper after a successful blob upload. If the create
+ * fails (Postgres timeout, FK violation on source_progress_photo_uuid,
+ * invalid taken_at, etc.), delete the orphan blob so we don't leak storage
+ * + $$. Best-effort delete — if cleanup itself fails, the original DB
+ * error still propagates to the caller (they retry → new blob → first
+ * blob remains an orphan, but at most one until the next failure).
+ */
+async function createPhotoOrCleanupBlob<T>(
+  blobUrl: string,
+  createFn: () => Promise<T>,
+): Promise<T> {
+  try {
+    return await createFn();
+  } catch (e) {
+    try {
+      const { del } = await import('@vercel/blob');
+      await del(blobUrl);
+    } catch {
+      // Best-effort. Log channel TBD; for now the original error wins.
+    }
+    throw e;
+  }
 }
 
 /**
@@ -343,8 +410,26 @@ async function uploadChunk(args: Record<string, unknown>) {
   if (typeof uploadId !== 'string' || uploadId.length === 0) {
     return toolErrorEnvelope('INVALID_ARGS', 'upload_id is required (string)');
   }
-  if (typeof sequence !== 'number' || !Number.isInteger(sequence) || sequence < 0) {
-    return toolErrorEnvelope('INVALID_ARGS', 'sequence must be a non-negative integer');
+  // Pre-validate UUID shape. Without this, a non-UUID upload_id throws
+  // Postgres 22P02 (invalid_text_representation) BEFORE the FK check fires,
+  // and the user sees a raw SQL error instead of SESSION_NOT_FOUND.
+  if (!UUID_RE.test(uploadId)) {
+    return toolErrorEnvelope(
+      'SESSION_NOT_FOUND',
+      `upload_id is not a valid UUID. Call start_upload first.`,
+      'start_upload',
+    );
+  }
+  if (
+    typeof sequence !== 'number' ||
+    !Number.isInteger(sequence) ||
+    sequence < 0 ||
+    sequence > MAX_CHUNK_SEQUENCE
+  ) {
+    return toolErrorEnvelope(
+      'INVALID_ARGS',
+      `sequence must be an integer in [0, ${MAX_CHUNK_SEQUENCE}]`,
+    );
   }
   if (typeof dataB64 !== 'string' || dataB64.length === 0) {
     return toolErrorEnvelope('INVALID_ARGS', 'data_b64 must be a non-empty base64 string');
@@ -450,12 +535,14 @@ async function finalizeProgressPhoto(args: Record<string, unknown>) {
   const pathname = pathnameFor('progress', pose, ext);
   const blob = await putToBlob(pathname, assembled.buffer, assembled.mime_type);
 
-  const photo = await createProgressPhoto({
-    blob_url: blob.url,
-    pose,
-    notes: typeof args.notes === 'string' ? args.notes : null,
-    taken_at: typeof args.taken_at === 'string' ? args.taken_at : undefined,
-  });
+  const photo = await createPhotoOrCleanupBlob(blob.url, () =>
+    createProgressPhoto({
+      blob_url: blob.url,
+      pose,
+      notes: typeof args.notes === 'string' ? args.notes : null,
+      taken_at: typeof args.taken_at === 'string' ? args.taken_at : undefined,
+    }),
+  );
 
   await cleanupSession(uploadId);
   return toolResult(photo);
@@ -486,14 +573,16 @@ async function finalizeInspoPhoto(args: Record<string, unknown>) {
   const pathname = pathnameFor('inspo', pose, ext);
   const blob = await putToBlob(pathname, assembled.buffer, assembled.mime_type);
 
-  const photo = await createInspoPhoto({
-    blob_url: blob.url,
-    notes: typeof args.notes === 'string' ? args.notes : null,
-    taken_at: typeof args.taken_at === 'string' ? args.taken_at : undefined,
-    burst_group_id:
-      typeof args.burst_group_id === 'string' ? args.burst_group_id : null,
-    pose,
-  });
+  const photo = await createPhotoOrCleanupBlob(blob.url, () =>
+    createInspoPhoto({
+      blob_url: blob.url,
+      notes: typeof args.notes === 'string' ? args.notes : null,
+      taken_at: typeof args.taken_at === 'string' ? args.taken_at : undefined,
+      burst_group_id:
+        typeof args.burst_group_id === 'string' ? args.burst_group_id : null,
+      pose,
+    }),
+  );
 
   await cleanupSession(uploadId);
   return toolResult(photo);
@@ -519,18 +608,20 @@ async function finalizeProjectionPhoto(args: Record<string, unknown>) {
   const pathname = pathnameFor('projection', pose, ext);
   const blob = await putToBlob(pathname, assembled.buffer, assembled.mime_type);
 
-  const photo = await createProjectionPhoto({
-    blob_url: blob.url,
-    pose,
-    notes: typeof args.notes === 'string' ? args.notes : null,
-    taken_at: typeof args.taken_at === 'string' ? args.taken_at : undefined,
-    source_progress_photo_uuid:
-      typeof args.source_progress_photo_uuid === 'string'
-        ? args.source_progress_photo_uuid
-        : null,
-    target_horizon:
-      typeof args.target_horizon === 'string' ? args.target_horizon : null,
-  });
+  const photo = await createPhotoOrCleanupBlob(blob.url, () =>
+    createProjectionPhoto({
+      blob_url: blob.url,
+      pose,
+      notes: typeof args.notes === 'string' ? args.notes : null,
+      taken_at: typeof args.taken_at === 'string' ? args.taken_at : undefined,
+      source_progress_photo_uuid:
+        typeof args.source_progress_photo_uuid === 'string'
+          ? args.source_progress_photo_uuid
+          : null,
+      target_horizon:
+        typeof args.target_horizon === 'string' ? args.target_horizon : null,
+    }),
+  );
 
   await cleanupSession(uploadId);
   return toolResult(photo);
