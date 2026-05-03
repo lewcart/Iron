@@ -31,7 +31,13 @@ beforeEach(() => {
         headers: { 'content-type': 'application/json' },
       });
     }
-    return new Response(new Blob([new Uint8Array([1, 2, 3])], { type: 'image/jpeg' }));
+    // Pass Uint8Array directly (don't wrap in Blob) — Node 20's Blob doesn't
+    // expose .stream() the way Node 22+ does, and undici's Response reader
+    // calls input.stream() during await res.blob(). Set content-type
+    // explicitly so the JPEG type metadata isn't lost.
+    return new Response(new Uint8Array([1, 2, 3]), {
+      headers: { 'content-type': 'image/jpeg' },
+    });
   }) as typeof fetch;
 });
 
