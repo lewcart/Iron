@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { listNutritionWeekMeals, createNutritionWeekMeal } from '@/db/queries';
 import { requireApiKey } from '@/lib/api-auth';
+import type { MealSlot } from '@/types';
 
 export async function GET(request: NextRequest) {
   const denied = requireApiKey(request);
@@ -21,9 +22,17 @@ export async function POST(request: NextRequest) {
   if (body.day_of_week == null || !body.meal_name) {
     return NextResponse.json({ error: 'day_of_week and meal_name are required' }, { status: 400 });
   }
+  const ALLOWED_SLOTS = new Set(['breakfast', 'lunch', 'dinner', 'snack']);
+  const slot = typeof body.meal_slot === 'string' ? body.meal_slot.toLowerCase() : '';
+  if (!ALLOWED_SLOTS.has(slot)) {
+    return NextResponse.json(
+      { error: 'meal_slot must be one of breakfast | lunch | dinner | snack' },
+      { status: 400 },
+    );
+  }
   const meal = await createNutritionWeekMeal({
     day_of_week: parseInt(body.day_of_week, 10),
-    meal_slot: body.meal_slot ?? '',
+    meal_slot: slot as MealSlot,
     meal_name: body.meal_name,
     protein_g: body.protein_g != null ? parseFloat(body.protein_g) : null,
     calories: body.calories != null ? parseFloat(body.calories) : null,

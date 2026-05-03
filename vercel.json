@@ -1,5 +1,8 @@
 {
   "git": { "deploymentEnabled": false },
   "github": { "silent": true },
-  "ignoreCommand": "[ \"$VERCEL_GIT_COMMIT_REF\" != \"main\" ]"
+  "ignoreCommand": "[ \"$VERCEL_GIT_COMMIT_REF\" != \"main\" ]",
+  "crons": [
+    { "path": "/api/cron/nutrition-template-fill", "schedule": "0 1 * * *" }
+  ]
 }

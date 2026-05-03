@@ -3,6 +3,8 @@
 import { db } from '@/db/local';
 import { syncEngine } from '@/lib/sync';
 import { uuid as genUUID } from '@/lib/uuid';
+import { dateToDayOfWeek } from '@/lib/api/nutrition';
+import type { MealSlot } from '@/types';
 import type {
   LocalNutritionLog,
   LocalNutritionWeekMeal,
@@ -76,7 +78,7 @@ export async function deleteMeal(uuid: string): Promise<void> {
 export async function setWeekMeal(opts: {
   uuid?: string;
   day_of_week: number;
-  meal_slot: string;
+  meal_slot: MealSlot;
   meal_name: string;
   protein_g?: number | null;
   carbs_g?: number | null;
@@ -126,6 +128,7 @@ export async function setDayNote(opts: {
     notes: opts.notes?.trim() ?? existing?.notes ?? null,
     approved_status: existing?.approved_status ?? 'pending',
     approved_at: existing?.approved_at ?? null,
+    template_applied_at: existing?.template_applied_at ?? null,
     ...syncMeta(),
   };
   await db.nutrition_day_notes.put(note);
@@ -142,9 +145,96 @@ export async function approveDayNote(date: string): Promise<void> {
     notes: existing?.notes ?? null,
     approved_status: 'approved',
     approved_at: new Date().toISOString(),
+    template_applied_at: existing?.template_applied_at ?? null,
     ...syncMeta(),
   };
   await db.nutrition_day_notes.put(note);
+  syncEngine.schedulePush();
+}
+
+// ─── Standard-week template auto-fill ────────────────────────────────────────
+
+/**
+ * Materializes the standard-week template into nutrition_logs for a single
+ * date. Idempotent — once nutrition_day_notes.template_applied_at is set for
+ * the date, this is a no-op, even if the user later deletes the resulting
+ * logs (deletes are intentional; we don't resurrect them).
+ *
+ * Created rows carry status='planned' and template_meal_id pointing back to
+ * the source week_meal. They count toward macro totals exactly like added
+ * logs — Lou's expectation: "if i don't action that day it auto-logs by
+ * default; i can adjust if need be".
+ *
+ * Safe to call multiple times per render.
+ */
+export async function ensurePlannedLogsForDate(date: string): Promise<void> {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return;
+
+  const existingNote = await db.nutrition_day_notes
+    .filter(d => d.date === date && !d._deleted)
+    .first();
+
+  if (existingNote?.template_applied_at) return;
+
+  const dow = dateToDayOfWeek(date);
+  const templateMeals = await db.nutrition_week_meals
+    .filter(m => m.day_of_week === dow && !m._deleted)
+    .toArray();
+
+  const stampedNote: LocalNutritionDayNote = {
+    uuid: existingNote?.uuid ?? genUUID(),
+    date,
+    hydration_ml: existingNote?.hydration_ml ?? null,
+    notes: existingNote?.notes ?? null,
+    approved_status: existingNote?.approved_status ?? 'pending',
+    approved_at: existingNote?.approved_at ?? null,
+    template_applied_at: new Date().toISOString(),
+    ...syncMeta(),
+  };
+
+  // No template for this DOW: still stamp so we don't re-scan on every open.
+  if (templateMeals.length === 0) {
+    await db.nutrition_day_notes.put(stampedNote);
+    syncEngine.schedulePush();
+    return;
+  }
+
+  // Cross-device safety: another client may have already auto-filled this
+  // date and the user may have edited or deleted some of those rows since.
+  // Skip any template_meal_id that already shows up in nutrition_logs for
+  // this date (including soft-deleted rows, so deletes are not undone).
+  const existingLogs = await db.nutrition_logs
+    .filter(l => typeof l.logged_at === 'string' && l.logged_at.startsWith(date))
+    .toArray();
+  const usedTemplateIds = new Set(
+    existingLogs.map(l => l.template_meal_id).filter((v): v is string => !!v),
+  );
+
+  // Stable noon-local logged_at so rows sort predictably and slot ordering
+  // is preserved via the template's sort_order (1s offset per row).
+  const baseMs = Date.parse(`${date}T12:00:00.000Z`);
+  const sorted = templateMeals.sort((a, b) => a.sort_order - b.sort_order);
+  for (let i = 0; i < sorted.length; i++) {
+    const meal = sorted[i];
+    if (usedTemplateIds.has(meal.uuid)) continue;
+    const log: LocalNutritionLog = {
+      uuid: genUUID(),
+      logged_at: new Date(baseMs + i * 1000).toISOString(),
+      meal_type: meal.meal_slot,
+      meal_name: meal.meal_name,
+      calories: meal.calories,
+      protein_g: meal.protein_g,
+      carbs_g: meal.carbs_g,
+      fat_g: meal.fat_g,
+      notes: null,
+      template_meal_id: meal.uuid,
+      status: 'planned',
+      ...syncMeta(),
+    };
+    await db.nutrition_logs.add(log);
+  }
+
+  await db.nutrition_day_notes.put(stampedNote);
   syncEngine.schedulePush();
 }
 

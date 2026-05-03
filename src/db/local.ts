@@ -1,4 +1,5 @@
 import Dexie, { type Table } from 'dexie';
+import type { MealSlot } from '@/types';
 
 // ─── Sync metadata (shared by every synced table) ─────────────────────────────
 
@@ -315,7 +316,7 @@ export interface LocalNutritionLog extends SyncMeta {
 export interface LocalNutritionWeekMeal extends SyncMeta {
   uuid: string;
   day_of_week: number;
-  meal_slot: string;
+  meal_slot: MealSlot;
   meal_name: string;
   protein_g: number | null;
   carbs_g: number | null;
@@ -332,6 +333,12 @@ export interface LocalNutritionDayNote extends SyncMeta {
   notes: string | null;
   approved_status: 'pending' | 'approved';
   approved_at: string | null;
+  /**
+   * ISO timestamp set the first time the standard-week template materialized
+   * into nutrition_logs for this date. Once non-null, ensurePlannedLogsForDate
+   * is a no-op for this date — even if the user deletes the resulting logs.
+   */
+  template_applied_at: string | null;
 }
 
 export interface MacroBand {
@@ -758,6 +765,24 @@ export class IronDB extends Dexie {
         'uuid, exercise_uuid, batch_id, [exercise_uuid+is_active], created_at',
     };
     this.version(16).stores(v16Stores);
+
+    // v17: standard-week template auto-fill (mirrors Postgres migration
+    // 036_nutrition_week_template_autofill). Backfills meal_slot to the
+    // strict enum {breakfast,lunch,dinner,snack} — anything not matching
+    // breakfast/lunch/dinner falls into snack, matching the SQL backfill.
+    // Also adds template_applied_at on day notes (default null).
+    this.version(17).stores(v16Stores).upgrade(async tx => {
+      await tx.table('nutrition_week_meals').toCollection().modify(row => {
+        const raw = String(row.meal_slot ?? '').toLowerCase();
+        if (raw.includes('breakfast')) row.meal_slot = 'breakfast';
+        else if (raw.includes('lunch')) row.meal_slot = 'lunch';
+        else if (raw.includes('dinner')) row.meal_slot = 'dinner';
+        else row.meal_slot = 'snack';
+      });
+      await tx.table('nutrition_day_notes').toCollection().modify(row => {
+        if (row.template_applied_at === undefined) row.template_applied_at = null;
+      });
+    });
   }
 }
 

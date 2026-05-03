@@ -178,6 +178,12 @@ export interface MeasurementLog {
 }
 
 export type MealType = 'breakfast' | 'lunch' | 'dinner' | 'snack' | 'other';
+/**
+ * The slot taxonomy shared between the Standard Week template
+ * (nutrition_week_meals.meal_slot) and the Today log groupings. Mirrors
+ * MealType but excludes 'other' — templates always belong to a real meal.
+ */
+export type MealSlot = 'breakfast' | 'lunch' | 'dinner' | 'snack';
 export type NutritionLogStatus = 'planned' | 'deviation' | 'added';
 
 export interface NutritionLog {
@@ -242,7 +248,7 @@ export interface FitbeeImportSummary {
 export interface NutritionWeekMeal {
   uuid: string;
   day_of_week: number; // 0=Mon … 6=Sun
-  meal_slot: string;
+  meal_slot: MealSlot;
   meal_name: string;
   protein_g: number | null;
   calories: number | null;
@@ -257,6 +263,13 @@ export interface NutritionDayNote {
   date: string; // YYYY-MM-DD
   hydration_ml: number | null;
   notes: string | null;
+  /**
+   * Set the first time the standard-week template materialized into
+   * nutrition_logs for this date. Idempotency stamp — once non-null, the
+   * auto-fill never re-runs for this date, even if the user later deletes
+   * the resulting logs.
+   */
+  template_applied_at: string | null;
   approved_status: NutritionDayApprovedStatus;
   approved_at: string | null;
   updated_at: string;

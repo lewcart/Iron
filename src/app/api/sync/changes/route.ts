@@ -268,9 +268,14 @@ async function fetchRows(table: SyncedTable, uuids: string[]): Promise<Array<Rec
          FROM nutrition_week_meals WHERE uuid = ANY($1::text[])`, [uuids]);
     case 'nutrition_day_notes':
       return (await query<Record<string, unknown>>(
-        `SELECT uuid, date, hydration_ml, notes, approved_status, approved_at
+        `SELECT uuid, date, hydration_ml, notes, approved_status, approved_at,
+                template_applied_at
          FROM nutrition_day_notes WHERE uuid = ANY($1::text[])`, [uuids]))
-        .map(r => ({ ...r, approved_at: r.approved_at ? toIso(r.approved_at) : null }));
+        .map(r => ({
+          ...r,
+          approved_at: r.approved_at ? toIso(r.approved_at) : null,
+          template_applied_at: r.template_applied_at ? toIso(r.template_applied_at) : null,
+        }));
     case 'nutrition_targets':
       // Singleton — uuids contains '1'. Map id→id.
       return (await query<Record<string, unknown>>(

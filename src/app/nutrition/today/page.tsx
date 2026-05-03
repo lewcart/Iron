@@ -4,7 +4,7 @@ import { Suspense, useEffect, useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { ChevronLeft, ChevronRight, Calendar, Settings } from 'lucide-react';
 import { useNutritionLogsForDate, useDayNote, useNutritionTargets } from '@/lib/useLocalDB-nutrition';
-import { deleteMeal } from '@/lib/mutations-nutrition';
+import { deleteMeal, ensurePlannedLogsForDate } from '@/lib/mutations-nutrition';
 import {
   todayLocal,
   offsetDate,
@@ -58,6 +58,19 @@ function NutritionTodayContent() {
     const interval = setInterval(tick, 60_000);
     return () => clearInterval(interval);
   }, []);
+
+  // Materialize the standard-week template into nutrition_logs the first
+  // time each date is opened. Idempotent — once template_applied_at is
+  // stamped on the day note, this is a no-op even if Lou later deletes
+  // the resulting rows. Also fires for "yesterday" on every mount so
+  // untouched days self-populate without requiring an explicit visit.
+  useEffect(() => {
+    void ensurePlannedLogsForDate(date);
+  }, [date]);
+
+  useEffect(() => {
+    void ensurePlannedLogsForDate(offsetDate(today, -1));
+  }, [today]);
 
   const rawLogs = useNutritionLogsForDate(date);
   const logs = useMemo(() => rawLogs ?? [], [rawLogs]);

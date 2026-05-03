@@ -15,6 +15,7 @@ import type {
   NutritionLog,
   NutritionWeekMeal,
   NutritionDayNote,
+  MealSlot,
   WellbeingLog,
   DysphoriaLog,
   ClothesTestLog,
@@ -1834,7 +1835,7 @@ function parseNutritionWeekMeal(row: DbRow): NutritionWeekMeal {
   return {
     uuid: row.uuid as string,
     day_of_week: row.day_of_week as number,
-    meal_slot: row.meal_slot as string,
+    meal_slot: row.meal_slot as MealSlot,
     meal_name: row.meal_name as string,
     protein_g: row.protein_g != null ? parseFloat(row.protein_g as string) : null,
     calories: row.calories != null ? parseFloat(row.calories as string) : null,
@@ -1895,6 +1896,7 @@ function parseNutritionDayNote(row: DbRow): NutritionDayNote {
     date: row.date as string,
     hydration_ml: row.hydration_ml != null ? parseInt(row.hydration_ml as string, 10) : null,
     notes: row.notes as string | null,
+    template_applied_at: row.template_applied_at != null ? String(row.template_applied_at) : null,
     approved_status: status === 'approved' ? 'approved' : 'pending',
     approved_at: row.approved_at != null ? String(row.approved_at) : null,
     updated_at: row.updated_at as string,
@@ -2492,7 +2494,7 @@ export async function swapExerciseInPlan(
 
 export interface NutritionWeekMealInput {
   day_of_week: number;  // 0=Sun … 6=Sat
-  meal_slot: string;    // 'breakfast' | 'lunch' | 'dinner' | 'snack'
+  meal_slot: MealSlot;
   meal_name: string;
   protein_g?: number | null;
   calories?: number | null;

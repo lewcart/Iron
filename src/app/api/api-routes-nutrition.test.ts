@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { NextRequest } from 'next/server';
-import type { NutritionLog } from '@/types';
+import type { NutritionLog, NutritionWeekMeal, NutritionDayNote } from '@/types';
 
 // ===== Mock @/db/queries =====
 
@@ -32,20 +32,21 @@ const mockNutritionLog: NutritionLog = {
   external_ref: null,
 };
 
-const mockDayNote = {
+const mockDayNote: NutritionDayNote = {
   uuid: 'dn-uuid-1',
   date: '2026-03-26',
   hydration_ml: 2000,
   notes: 'Felt good today',
-  approved_status: 'pending' as const,
+  template_applied_at: null,
+  approved_status: 'pending',
   approved_at: null,
   updated_at: '2026-03-26T10:00:00.000Z',
 };
 
-const mockWeekMeal = {
+const mockWeekMeal: NutritionWeekMeal = {
   uuid: 'wm-uuid-1',
   day_of_week: 1,
-  meal_slot: 'morning',
+  meal_slot: 'breakfast',
   meal_name: 'Protein Shake',
   protein_g: 40.0,
   calories: 300.0,
@@ -312,6 +313,24 @@ describe('POST /api/nutrition/week', () => {
     expect(data.error).toMatch(/meal_name/);
   });
 
+  it('returns 400 when meal_slot is not a recognized slot', async () => {
+    const { POST } = await import('./nutrition/week/route');
+    const req = new NextRequest('http://localhost/api/nutrition/week', {
+      method: 'POST',
+      body: JSON.stringify({
+        day_of_week: 1,
+        meal_slot: 'morning',
+        meal_name: 'Protein Shake',
+      }),
+      headers: { 'Content-Type': 'application/json' },
+    });
+    const response = await POST(req);
+    const data = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(data.error).toMatch(/meal_slot/);
+  });
+
   it('creates week meal and returns 201', async () => {
     const queries = await import('@/db/queries');
     vi.mocked(queries.createNutritionWeekMeal).mockResolvedValue(mockWeekMeal);
@@ -321,7 +340,7 @@ describe('POST /api/nutrition/week', () => {
       method: 'POST',
       body: JSON.stringify({
         day_of_week: '1',
-        meal_slot: 'morning',
+        meal_slot: 'breakfast',
         meal_name: 'Protein Shake',
         protein_g: '40',
         calories: '300',
@@ -337,7 +356,7 @@ describe('POST /api/nutrition/week', () => {
     expect(data).toEqual(mockWeekMeal);
     expect(queries.createNutritionWeekMeal).toHaveBeenCalledWith({
       day_of_week: 1,
-      meal_slot: 'morning',
+      meal_slot: 'breakfast',
       meal_name: 'Protein Shake',
       protein_g: 40,
       calories: 300,

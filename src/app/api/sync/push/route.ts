@@ -589,6 +589,20 @@ async function pushNutritionLog(r: Record<string, unknown>): Promise<void> {
   );
 }
 
+// Whitelist for nutrition_week_meals.meal_slot — matches the CHECK constraint
+// added in migration 036. Pre-036 rows arriving from a stale client get
+// normalized so the constraint doesn't reject the push.
+const NUTRITION_WEEK_MEAL_SLOTS = new Set(['breakfast', 'lunch', 'dinner', 'snack']);
+function sanitizeMealSlot(v: unknown): string {
+  if (typeof v !== 'string') return 'snack';
+  const lower = v.toLowerCase();
+  if (NUTRITION_WEEK_MEAL_SLOTS.has(lower)) return lower;
+  if (lower.includes('breakfast')) return 'breakfast';
+  if (lower.includes('lunch')) return 'lunch';
+  if (lower.includes('dinner')) return 'dinner';
+  return 'snack';
+}
+
 async function pushNutritionWeekMeal(r: Record<string, unknown>): Promise<void> {
   if (r._deleted) {
     await query('DELETE FROM nutrition_week_meals WHERE uuid = $1', [r.uuid]);
@@ -604,7 +618,7 @@ async function pushNutritionWeekMeal(r: Record<string, unknown>): Promise<void> 
        calories = EXCLUDED.calories, quality_rating = EXCLUDED.quality_rating,
        sort_order = EXCLUDED.sort_order, updated_at = NOW()`,
     [
-      r.uuid, r.day_of_week, r.meal_slot, r.meal_name,
+      r.uuid, r.day_of_week, sanitizeMealSlot(r.meal_slot), r.meal_name,
       r.protein_g, r.carbs_g ?? null, r.fat_g ?? null,
       r.calories, r.quality_rating, r.sort_order,
     ],
@@ -625,18 +639,20 @@ async function pushNutritionDayNote(r: Record<string, unknown>): Promise<void> {
   // created row for the same calendar day merge instead of throwing on the
   // date UNIQUE constraint. The row's uuid is preserved on UPDATE.
   await query(
-    `INSERT INTO nutrition_day_notes (uuid, date, hydration_ml, notes, approved_status, approved_at, updated_at)
-     VALUES ($1, $2, $3, $4, $5, $6, NOW())
+    `INSERT INTO nutrition_day_notes (uuid, date, hydration_ml, notes, approved_status, approved_at, template_applied_at, updated_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
      ON CONFLICT (date) DO UPDATE SET
        hydration_ml = EXCLUDED.hydration_ml,
        notes = EXCLUDED.notes,
        approved_status = EXCLUDED.approved_status,
        approved_at = EXCLUDED.approved_at,
+       template_applied_at = COALESCE(EXCLUDED.template_applied_at, nutrition_day_notes.template_applied_at),
        updated_at = NOW()`,
     [
       r.uuid, r.date, r.hydration_ml, r.notes,
       sanitizeApprovedStatus(r.approved_status),
       r.approved_at ?? null,
+      r.template_applied_at ?? null,
     ],
   );
 }

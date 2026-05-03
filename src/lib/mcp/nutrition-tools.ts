@@ -592,6 +592,16 @@ async function loadNutritionPlan(args: Record<string, unknown>) {
     { text: 'DELETE FROM nutrition_week_meals' },
   ];
 
+  const ALLOWED_WEEK_SLOTS = new Set(['breakfast', 'lunch', 'dinner', 'snack']);
+  const normalizeSlot = (raw: string): string => {
+    const s = raw.toLowerCase().trim();
+    if (ALLOWED_WEEK_SLOTS.has(s)) return s;
+    if (s.includes('breakfast')) return 'breakfast';
+    if (s.includes('lunch')) return 'lunch';
+    if (s.includes('dinner')) return 'dinner';
+    return 'snack';
+  };
+
   let mealCount = 0;
   for (const d of days) {
     const dow = parseDayOfWeek(d.day as string | number);
@@ -603,7 +613,7 @@ async function loadNutritionPlan(args: Record<string, unknown>) {
             protein_g, carbs_g, fat_g, calories, quality_rating, sort_order)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
         params: [
-          crypto.randomUUID(), dow, m.slot, m.description,
+          crypto.randomUUID(), dow, normalizeSlot(m.slot), m.description,
           m.protein_g ?? null, m.carbs_g ?? null, m.fat_g ?? null,
           m.calories ?? null, m.quality_rating ?? null, i,
         ],
@@ -730,7 +740,13 @@ async function updateWeekMeal(args: Record<string, unknown>) {
     params.push(val);
   };
 
-  if (typeof args.meal_slot === 'string') pushField('meal_slot', args.meal_slot);
+  if (typeof args.meal_slot === 'string') {
+    const slot = args.meal_slot.toLowerCase().trim();
+    if (!['breakfast', 'lunch', 'dinner', 'snack'].includes(slot)) {
+      return toolError('INVALID_INPUT', 'meal_slot must be one of breakfast | lunch | dinner | snack');
+    }
+    pushField('meal_slot', slot);
+  }
   if (typeof args.meal_name === 'string') pushField('meal_name', args.meal_name);
   if (args.calories !== undefined) pushField('calories', args.calories ?? null);
   if (args.protein_g !== undefined) pushField('protein_g', args.protein_g ?? null);
