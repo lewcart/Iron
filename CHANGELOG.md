@@ -2,6 +2,20 @@
 
 All notable changes to Rebirth are documented here.
 
+## [0.7.3] - 2026-05-03
+
+### Fixed
+- **Duplicate custom exercises in /exercises/custom collapsed.** 13 case-insensitive title clusters (28 rows) merged into one row each. Smart merge preserves any descriptions and muscle tags split across the duplicates, so nothing is lost. Workout history is repointed onto the keeper before the loser rows are deleted, so set logs and routines stay attached. Warm-up cues normalized to "(Warm-Up)" to match the rest of the catalog.
+- **Two cross-type duplicates also collapsed:** "Cable Hip Adduction" and "Cable Kickback" each had a stub custom row sitting alongside the richer stock catalog row. The custom rows are gone, the stock rows kept their workout history, and the custom's unique aliases were unioned into the stock row's alias list.
+
+### Changed
+- **Tapping "Add Custom Exercise" with a name you already have now fails fast** with an inline "You already have a custom exercise named X" message, instead of silently creating row #2. Case-insensitive and trim-aware, so "Warm-Up" vs "Warm-up" and " Cable Kickback " vs "Cable Kickback" all collide.
+- **MCP `create_exercise` returns a structured `DUPLICATE_TITLE` envelope** with a `find_exercises` hint when an agent tries to create a duplicate, instead of a 500 from the unique-violation.
+
+### Schema
+- **Migration 034** smart-merges within-custom duplicates and adds `exercises_custom_lower_title_unique` — a partial UNIQUE on `LOWER(TRIM(title))` scoped to `WHERE is_custom = true`. From now on the database rejects a duplicate-title custom write regardless of whether it came from the sync push, the MCP server, or hand-rolled SQL.
+- **Migration 035** repoints two cross-type custom rows onto their stock catalog twins, unions their alias arrays, and drops the orphans.
+
 ## [0.7.2] - 2026-05-03
 
 ### Added

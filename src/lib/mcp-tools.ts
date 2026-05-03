@@ -818,28 +818,50 @@ async function createExercise(args: Record<string, unknown>) {
   }
 
   const uuid = crypto.randomUUID();
-  const row = await queryOne(
-    `INSERT INTO exercises
-       (uuid, everkinetic_id, title, alias, description, primary_muscles, secondary_muscles, equipment,
-        steps, tips, is_custom, movement_pattern, tracking_mode, youtube_url, image_count)
-     VALUES ($1, 0, $2, $3, $4, $5, $6, $7, $8, $9, true, $10, $11, $12, 0)
-     RETURNING uuid, title, primary_muscles, secondary_muscles, equipment, description,
-               steps, tips, tracking_mode, youtube_url, image_count`,
-    [
-      uuid,
-      title.trim(),
-      JSON.stringify(alias ?? []),
-      description ?? null,
-      JSON.stringify(primary_muscles),
-      JSON.stringify(secondary_muscles ?? []),
-      JSON.stringify(equipment ?? []),
-      JSON.stringify(steps ?? []),
-      JSON.stringify(tips ?? []),
-      movement_pattern ?? null,
-      tracking_mode === 'time' ? 'time' : 'reps',
-      ytClean,
-    ]
-  );
+  let row;
+  try {
+    row = await queryOne(
+      `INSERT INTO exercises
+         (uuid, everkinetic_id, title, alias, description, primary_muscles, secondary_muscles, equipment,
+          steps, tips, is_custom, movement_pattern, tracking_mode, youtube_url, image_count)
+       VALUES ($1, 0, $2, $3, $4, $5, $6, $7, $8, $9, true, $10, $11, $12, 0)
+       RETURNING uuid, title, primary_muscles, secondary_muscles, equipment, description,
+                 steps, tips, tracking_mode, youtube_url, image_count`,
+      [
+        uuid,
+        title.trim(),
+        JSON.stringify(alias ?? []),
+        description ?? null,
+        JSON.stringify(primary_muscles),
+        JSON.stringify(secondary_muscles ?? []),
+        JSON.stringify(equipment ?? []),
+        JSON.stringify(steps ?? []),
+        JSON.stringify(tips ?? []),
+        movement_pattern ?? null,
+        tracking_mode === 'time' ? 'time' : 'reps',
+        ytClean,
+      ]
+    );
+  } catch (err) {
+    // Partial UNIQUE on (LOWER(TRIM(title))) WHERE is_custom=true — see
+    // migration 034. Surface as a structured envelope with a `find_exercises`
+    // hint so the agent retries by looking up the existing row.
+    const msg = err instanceof Error ? err.message : String(err);
+    if (/exercises_custom_lower_title_unique/.test(msg)) {
+      const existing = await queryOne<{ uuid: string; title: string }>(
+        `SELECT uuid, title FROM exercises
+          WHERE is_custom = true AND LOWER(TRIM(title)) = LOWER(TRIM($1))
+          LIMIT 1`,
+        [title.trim()],
+      );
+      return toolErrorEnvelope(
+        'DUPLICATE_TITLE',
+        `A custom exercise named "${existing?.title ?? title.trim()}" already exists (uuid ${existing?.uuid ?? 'unknown'}).`,
+        'find_exercises',
+      );
+    }
+    throw err;
+  }
 
   return toolResult(row);
 }

@@ -16,6 +16,20 @@ import type { LocalExercise } from '@/db/local';
 
 function now() { return Date.now(); }
 
+/** Thrown by createCustomExercise when a custom exercise with the same
+ *  case-insensitive trimmed title already exists in Dexie. The UI catches
+ *  this to show "you already have this" instead of letting the sync push
+ *  fail later against the partial UNIQUE index in Postgres
+ *  (exercises_custom_lower_title_unique, migration 034). */
+export class DuplicateCustomTitleError extends Error {
+  existing: LocalExercise;
+  constructor(existing: LocalExercise) {
+    super(`A custom exercise named "${existing.title}" already exists.`);
+    this.name = 'DuplicateCustomTitleError';
+    this.existing = existing;
+  }
+}
+
 export async function createCustomExercise(opts: {
   title: string;
   primary_muscles?: string[];
@@ -28,6 +42,16 @@ export async function createCustomExercise(opts: {
   tracking_mode?: 'reps' | 'time';
   youtube_url?: string | null;
 }): Promise<LocalExercise> {
+  const normalized = opts.title.trim().toLowerCase();
+  const existing = await db.exercises
+    .filter((e) =>
+      e.is_custom === true
+      && (e as unknown as { _deleted?: boolean })._deleted !== true
+      && e.title.trim().toLowerCase() === normalized,
+    )
+    .first();
+  if (existing) throw new DuplicateCustomTitleError(existing);
+
   const ex: LocalExercise = {
     uuid: genUUID().toLowerCase(),
     everkinetic_id: 0, // 0 = custom, never collides with everkinetic catalog

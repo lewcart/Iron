@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { X } from 'lucide-react';
-import { createCustomExercise } from '@/lib/mutations-exercises';
+import { createCustomExercise, DuplicateCustomTitleError } from '@/lib/mutations-exercises';
 import { MUSCLE_SLUGS, MUSCLE_DEFS, type MuscleSlug } from '@/lib/muscles';
 
 const EQUIPMENT_OPTIONS = [
@@ -182,6 +182,7 @@ export default function CreateExerciseForm({ onClose, onCreated }: Props) {
   const [trackingMode, setTrackingMode] = useState<'reps' | 'time'>('reps');
   const [youtubeUrl, setYoutubeUrl] = useState('');
   const [youtubeError, setYoutubeError] = useState<string | null>(null);
+  const [titleError, setTitleError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   const canSubmit = title.trim().length > 0 && primaryMuscles.length > 0;
@@ -218,6 +219,12 @@ export default function CreateExerciseForm({ onClose, onCreated }: Props) {
         youtube_url: ytClean,
       });
       onCreated();
+    } catch (err) {
+      if (err instanceof DuplicateCustomTitleError) {
+        setTitleError(`You already have a custom exercise named "${err.existing.title}".`);
+        return;
+      }
+      throw err;
     } finally {
       setSubmitting(false);
     }
@@ -245,11 +252,14 @@ export default function CreateExerciseForm({ onClose, onCreated }: Props) {
             <input
               type="text"
               value={title}
-              onChange={(e) => setTitle(e.target.value)}
+              onChange={(e) => { setTitle(e.target.value); setTitleError(null); }}
               placeholder='e.g. "Romanian Deadlift: Dumbbell"'
               autoFocus
               className="mt-1 w-full px-3 py-2 bg-secondary rounded-lg text-sm outline-none"
             />
+            {titleError && (
+              <p className="mt-1 text-xs text-destructive">{titleError}</p>
+            )}
           </div>
 
           {/* Primary muscles — canonical-only multi-select grouped by area */}
