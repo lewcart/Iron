@@ -29,6 +29,7 @@
 		HK0000000000000000000001 /* HealthKitPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = HK0000000000000000000002 /* HealthKitPlugin.swift */; };
 		HK0000000000000000000003 /* HealthKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = HK0000000000000000000004 /* HealthKit.framework */; settings = {ATTRIBUTES = (Required, ); }; };
 		HK0000000000000000000007 /* HealthKitTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = HK0000000000000000000008 /* HealthKitTypes.swift */; };
+		PS0000000000000000000001 /* PersonSegmentationPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = PS0000000000000000000002 /* PersonSegmentationPlugin.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -91,6 +92,7 @@
 		HK0000000000000000000004 /* HealthKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = HealthKit.framework; path = System/Library/Frameworks/HealthKit.framework; sourceTree = SDKROOT; };
 		HK0000000000000000000005 /* App.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = App.entitlements; sourceTree = "<group>"; };
 		HK0000000000000000000008 /* HealthKitTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthKitTypes.swift; sourceTree = "<group>"; };
+		PS0000000000000000000002 /* PersonSegmentationPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersonSegmentationPlugin.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -150,6 +152,7 @@
 				504EC3071FED79650016851F /* AppDelegate.swift */,
 				HK0000000000000000000002 /* HealthKitPlugin.swift */,
 				HK0000000000000000000008 /* HealthKitTypes.swift */,
+				PS0000000000000000000002 /* PersonSegmentationPlugin.swift */,
 				HK0000000000000000000005 /* App.entitlements */,
 				504EC30B1FED79650016851F /* Main.storyboard */,
 				504EC30E1FED79650016851F /* Assets.xcassets */,
@@ -357,6 +360,7 @@
 				504EC3081FED79650016851F /* AppDelegate.swift in Sources */,
 				HK0000000000000000000001 /* HealthKitPlugin.swift in Sources */,
 				HK0000000000000000000007 /* HealthKitTypes.swift in Sources */,
+				PS0000000000000000000001 /* PersonSegmentationPlugin.swift in Sources */,
 				BCDB60B1669B43B1F7D02C66 /* InspoBurstPlugin.swift in Sources */,
 				35976665B93CB7279F053E62 /* RestTimerPlugin.swift in Sources */,
 				6E5DE5F1666A3B2916B5D955 /* RestTimerAttributes.swift in Sources */,
