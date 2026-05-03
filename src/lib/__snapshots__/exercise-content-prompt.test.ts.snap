@@ -1,0 +1,34 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`buildContentPrompt — golden snapshots (regression catch) > kind='all' golden snapshot (CreateForm path, no cross-field) 1`] = `
+{
+  "systemPrompt": "You generate a complete first draft of an exercise catalog entry: a factual description, imperative setup-and-execution steps, and short coaching cues. See the per-field schemas for length and count bounds. description: third-person factual, 1-2 sentences. steps: second-person imperative, 3-7 actions, no numbering. tips: short cues for common form mistakes, 2-5 items.",
+  "userPrompt": "Title: Romanian Deadlift
+Primary muscles: hamstrings, glutes
+Secondary muscles: lower_back
+Equipment: barbell
+Movement pattern: hinge
+Tracking mode: reps × weight
+
+Task: write a complete first-draft entry — description, steps, and tips — for this exercise. Return JSON matching the schema.",
+}
+`;
+
+exports[`buildContentPrompt — golden snapshots (regression catch) > kind='steps' golden snapshot 1`] = `
+{
+  "systemPrompt": "You write imperative, second-person setup-and-execution steps for strength exercises. One discrete action per step. No numbering (the UI numbers them). Aim for 3-7 steps total. Each step under 120 characters. Setup first, then execution, then return.",
+  "userPrompt": "Title: Romanian Deadlift
+Primary muscles: hamstrings, glutes
+Secondary muscles: lower_back
+Equipment: barbell
+Movement pattern: hinge
+Tracking mode: reps × weight
+
+<exercise_context>
+Description: A hip-hinge exercise loading the posterior chain.
+Tips: Don't let the lower back round.. Keep the bar close to the legs throughout.
+</exercise_context>
+
+Task: write fresh setup-and-execution steps for this exercise. Return JSON matching the schema.",
+}
+`;

@@ -4,7 +4,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { ChevronLeft, Trophy, Medal, Award, Timer } from 'lucide-react';
 import type { Exercise } from '@/types';
 import { useUnit } from '@/context/UnitContext';
-import { apiBase } from '@/lib/api/client';
+import { apiBase, fetchJsonAuthed } from '@/lib/api/client';
+import type { ContentKind } from '@/lib/exercise-content-prompt';
 import { ExerciseDemoStrip } from '@/components/ExerciseDemoStrip';
 import { ExerciseImageManager } from '@/components/ExerciseImageManager';
 import { EditableTextSection } from '@/components/EditableTextSection';
@@ -338,6 +339,35 @@ const RANGES: { label: string; value: Range }[] = [
   { label: '6M', value: '6m' },
   { label: 'All', value: 'all' },
 ];
+
+// ── Magic-content generator ────────────────────────────────────────────────
+// Sends the LIVE exercise object (not just the uuid) so the route doesn't
+// have to look up Postgres state — Dexie may have unsynced edits.
+async function generateContent(
+  kind: ContentKind,
+  exercise: Exercise,
+  signal: AbortSignal,
+): Promise<unknown> {
+  return fetchJsonAuthed('/api/exercises/generate-content', {
+    method: 'POST',
+    body: JSON.stringify({
+      kind,
+      exercise: {
+        uuid: exercise.uuid,
+        title: exercise.title,
+        primary_muscles: exercise.primary_muscles,
+        secondary_muscles: exercise.secondary_muscles,
+        equipment: exercise.equipment,
+        movement_pattern: exercise.movement_pattern,
+        tracking_mode: exercise.tracking_mode,
+        description: exercise.description,
+        steps: exercise.steps,
+        tips: exercise.tips,
+      },
+    }),
+    signal,
+  });
+}
 
 // ── Main component ─────────────────────────────────────────────────────────
 
@@ -962,6 +992,10 @@ export default function ExerciseDetail({
           onSave={async (next) => {
             await updateExercise(exercise.uuid, { description: next });
           }}
+          onMagicGenerate={async (signal) => {
+            const out = await generateContent('description', exercise, signal);
+            return (out as { description: string }).description;
+          }}
         />
 
         {(() => {
@@ -1044,6 +1078,10 @@ export default function ExerciseDetail({
           onSave={async (next) => {
             await updateExercise(exercise.uuid, { steps: next });
           }}
+          onMagicGenerate={async (signal) => {
+            const out = await generateContent('steps', exercise, signal);
+            return (out as { steps: string[] }).steps;
+          }}
         />
 
         <EditableTextSection
@@ -1054,6 +1092,10 @@ export default function ExerciseDetail({
           editable={chrome === 'page'}
           onSave={async (next) => {
             await updateExercise(exercise.uuid, { tips: next });
+          }}
+          onMagicGenerate={async (signal) => {
+            const out = await generateContent('tips', exercise, signal);
+            return (out as { tips: string[] }).tips;
           }}
         />
 

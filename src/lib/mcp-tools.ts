@@ -2900,7 +2900,10 @@ export const tools: MCPTool[] = [
     description:
       'Creates a new custom exercise in the library. Use this to add exercises that do not already exist before adding them to a routine. ' +
       'primary_muscles is required and must be a non-empty array of CANONICAL slugs (call list_muscles for the full taxonomy). ' +
-      'Unknown slugs are rejected with an UNKNOWN_MUSCLE error envelope — no auto-translation from legacy names.',
+      'Unknown slugs are rejected with an UNKNOWN_MUSCLE error envelope — no auto-translation from legacy names. ' +
+      'ALWAYS populate steps + tips when you create an exercise — they appear in the in-workout reference UI and feed image generation. ' +
+      'Skipping them produces empty sections that the user has to fill in by hand later. ' +
+      'Aim for 3-7 imperative second-person steps and 2-5 short coaching tips.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -2929,12 +2932,16 @@ export const tools: MCPTool[] = [
         steps: {
           type: 'array',
           items: { type: 'string' },
-          description: 'Numbered steps describing how to perform the exercise',
+          description:
+            'Setup-and-execution steps as imperative second-person sentences, one action per step, no numbering (UI numbers them). ' +
+            'Aim for 3-7 steps. Example: ["Plant feet shoulder-width apart, bar at hip crease.", "Hinge at the hips with soft knees, lower bar to mid-shin.", "Drive hips forward to return to standing."]',
         },
         tips: {
           type: 'array',
           items: { type: 'string' },
-          description: 'Coaching tips and things to watch out for',
+          description:
+            'Short coaching cues for common form mistakes or things to watch for. Imperative or warning voice. ' +
+            'Aim for 2-5 cues. Example: ["Don\'t let the lower back round.", "Keep the bar close to the legs throughout.", "Drive through the heels, not the toes."]',
         },
         movement_pattern: { type: 'string', description: 'Movement pattern (push, pull, hinge, squat, etc.)' },
         tracking_mode: {
@@ -2953,7 +2960,11 @@ export const tools: MCPTool[] = [
   },
   {
     name: 'update_exercise',
-    description: 'Updates an existing exercise (catalog or custom). Pass uuid + only the fields you want to change. Server validates youtube_url format and rejects garbage.',
+    description:
+      'Updates an existing exercise (catalog or custom). Pass uuid + only the fields you want to change. ' +
+      'Server validates youtube_url format and rejects garbage. ' +
+      'When the user asks "fill in the steps/tips" or "add steps to this exercise", populate steps + tips here directly — ' +
+      'do not ask the user to write them. Same voice as create_exercise: imperative second-person, 3-7 steps and 2-5 tips.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -2963,12 +2974,16 @@ export const tools: MCPTool[] = [
         steps: {
           type: 'array',
           items: { type: 'string' },
-          description: 'Replace the full steps list',
+          description:
+            'Replace the full steps list. Imperative second-person, one action per step. ' +
+            'Example: ["Plant feet shoulder-width apart.", "Hinge at the hips, soft knees.", "Drive hips forward to return."]',
         },
         tips: {
           type: 'array',
           items: { type: 'string' },
-          description: 'Replace the full tips list',
+          description:
+            'Replace the full tips list. Short coaching cues for common form mistakes. ' +
+            'Example: ["Don\'t let the lower back round.", "Keep the bar close to the legs."]',
         },
         equipment: { type: 'array', items: { type: 'string' } },
         primary_muscles: { type: 'array', items: { type: 'string' } },

@@ -1,7 +1,7 @@
 'use client';
 
-import { useState } from 'react';
-import { Pencil, Check, X } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { Pencil, Check, X, Sparkles, Loader2 } from 'lucide-react';
 
 // Inline edit affordance for ExerciseDetail's About / Steps / Tips sections.
 // Read mode renders the existing layout (paragraph for prose, numbered list
@@ -12,6 +12,13 @@ import { Pencil, Check, X } from 'lucide-react';
 // The pencil icon is only rendered when `editable` is true. Modal mode
 // (`chrome='modal'`) passes editable=false so the in-workout reference
 // surface stays read-only.
+//
+// Optional `onMagicGenerate` adds a Sparkles button next to the Pencil that
+// AI-generates new content for this section. The handler returns the new
+// value (string for prose, string[] for lists). On click: enter edit mode,
+// disable the textarea(s) during loading, populate the draft on response.
+// AbortController lets Cancel actually stop the spend, not just hide the
+// spinner. Hidden when offline or when the prop isn't provided.
 
 type Mode = 'prose' | 'numbered-list' | 'bullet-list';
 
@@ -22,6 +29,7 @@ interface ProseProps {
   emptyPlaceholder?: string;
   editable: boolean;
   onSave: (next: string | null) => Promise<void>;
+  onMagicGenerate?: (signal: AbortSignal) => Promise<string | null>;
 }
 
 interface ListProps {
@@ -31,6 +39,7 @@ interface ListProps {
   emptyPlaceholder?: string;
   editable: boolean;
   onSave: (next: string[]) => Promise<void>;
+  onMagicGenerate?: (signal: AbortSignal) => Promise<string[]>;
 }
 
 type Props = ProseProps | ListProps;
@@ -42,6 +51,27 @@ export function EditableTextSection(props: Props) {
   // union throughout the body. The Mode discriminator drives the render.
   const [draft, setDraft] = useState<string | string[] | null>(null);
   const [saving, setSaving] = useState(false);
+  const [magicLoading, setMagicLoading] = useState(false);
+  const [magicError, setMagicError] = useState<string | null>(null);
+  const [online, setOnline] = useState(true);
+  const magicAbortRef = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    // Initial state + listen for connectivity changes. Magic is server-only.
+    const update = () => setOnline(typeof navigator === 'undefined' ? true : navigator.onLine);
+    update();
+    if (typeof window !== 'undefined') {
+      window.addEventListener('online', update);
+      window.addEventListener('offline', update);
+      return () => {
+        window.removeEventListener('online', update);
+        window.removeEventListener('offline', update);
+      };
+    }
+  }, []);
+
+  // Cancel any in-flight magic request on unmount.
+  useEffect(() => () => magicAbortRef.current?.abort(), []);
 
   const startEdit = () => {
     if (props.mode === 'prose') {
@@ -50,11 +80,17 @@ export function EditableTextSection(props: Props) {
       setDraft([...props.value]);
     }
     setEditing(true);
+    setMagicError(null);
   };
 
   const cancelEdit = () => {
+    // Abort an in-flight magic request, if any. Cancel actually stops the
+    // upstream spend, not just the spinner.
+    if (magicLoading) magicAbortRef.current?.abort();
     setEditing(false);
     setDraft(null);
+    setMagicLoading(false);
+    setMagicError(null);
   };
 
   const save = async () => {
@@ -71,8 +107,35 @@ export function EditableTextSection(props: Props) {
       }
       setEditing(false);
       setDraft(null);
+      setMagicError(null);
     } finally {
       setSaving(false);
+    }
+  };
+
+  const runMagic = async () => {
+    if (!props.onMagicGenerate || magicLoading) return;
+    if (!editing) startEdit();
+    setMagicError(null);
+    setMagicLoading(true);
+    const controller = new AbortController();
+    magicAbortRef.current = controller;
+    try {
+      if (props.mode === 'prose') {
+        const next = await props.onMagicGenerate(controller.signal);
+        // Asymmetric stomp policy: detail page = always stomp on response.
+        // Editing was disabled during loading so no race with user keystrokes.
+        setDraft(next ?? '');
+      } else {
+        const next = await (props as ListProps).onMagicGenerate!(controller.signal);
+        setDraft([...next]);
+      }
+    } catch (err) {
+      if ((err as { name?: string })?.name === 'AbortError') return; // user cancelled
+      setMagicError(err instanceof Error ? err.message : 'Generation failed');
+    } finally {
+      setMagicLoading(false);
+      magicAbortRef.current = null;
     }
   };
 
@@ -83,24 +146,55 @@ export function EditableTextSection(props: Props) {
   // Hide entirely when read-only AND empty. Edit mode always renders.
   if (!props.editable && isEmpty) return null;
 
+  const showMagic = props.editable && !!props.onMagicGenerate;
+  const magicDisabled = magicLoading || !online;
+
   return (
     <div>
       <div className="flex items-center justify-between mb-1 px-1">
         <p className="text-xs font-semibold text-primary uppercase tracking-wide">{props.label}</p>
         {props.editable && !editing && (
-          <button
-            onClick={startEdit}
-            className="text-muted-foreground hover:text-primary p-0.5"
-            aria-label={`Edit ${props.label}`}
-          >
-            <Pencil className="h-3.5 w-3.5" />
-          </button>
+          <div className="flex items-center gap-1">
+            {showMagic && (
+              <button
+                onClick={runMagic}
+                disabled={magicDisabled}
+                className="text-muted-foreground hover:text-primary p-0.5 disabled:opacity-40"
+                aria-label={online ? `Generate ${props.label} with AI` : 'Magic needs internet'}
+                title={online ? `Generate ${props.label} with AI` : 'Magic needs internet'}
+              >
+                {magicLoading
+                  ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  : <Sparkles className="h-3.5 w-3.5" />}
+              </button>
+            )}
+            <button
+              onClick={startEdit}
+              className="text-muted-foreground hover:text-primary p-0.5"
+              aria-label={`Edit ${props.label}`}
+            >
+              <Pencil className="h-3.5 w-3.5" />
+            </button>
+          </div>
         )}
         {props.editable && editing && (
           <div className="flex items-center gap-1">
+            {showMagic && (
+              <button
+                onClick={runMagic}
+                disabled={magicDisabled}
+                className="text-muted-foreground hover:text-primary p-1 disabled:opacity-40"
+                aria-label={online ? `Regenerate ${props.label} with AI` : 'Magic needs internet'}
+                title={online ? `Regenerate ${props.label} with AI` : 'Magic needs internet'}
+              >
+                {magicLoading
+                  ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  : <Sparkles className="h-3.5 w-3.5" />}
+              </button>
+            )}
             <button
               onClick={save}
-              disabled={saving}
+              disabled={saving || magicLoading}
               className="text-primary p-1 disabled:opacity-50"
               aria-label="Save"
             >
@@ -119,12 +213,25 @@ export function EditableTextSection(props: Props) {
       </div>
 
       {editing ? (
-        <ProseOrListEditor
-          mode={props.mode}
-          draft={draft}
-          setDraft={setDraft}
-          placeholder={props.emptyPlaceholder ?? ''}
-        />
+        <>
+          <ProseOrListEditor
+            mode={props.mode}
+            draft={draft}
+            setDraft={setDraft}
+            placeholder={props.emptyPlaceholder ?? ''}
+            disabled={magicLoading}
+          />
+          {magicLoading && (
+            <p className="mt-1 px-1 text-xs text-muted-foreground italic">
+              ✨ Generating…
+            </p>
+          )}
+          {magicError && (
+            <p className="mt-1 px-1 text-xs text-destructive">
+              {magicError}. Tap ✨ to try again.
+            </p>
+          )}
+        </>
       ) : isEmpty ? (
         <div className="ios-section p-4">
           <p className="text-sm text-muted-foreground italic">
@@ -173,16 +280,21 @@ function ProseOrListReader({
   );
 }
 
-function ProseOrListEditor({
+// Exported so CreateExerciseForm can reuse the same list-editor UX without
+// duplicating ~60 lines. Already cleanly parent-controlled (takes draft +
+// setDraft only), so reuse is safe.
+export function ProseOrListEditor({
   mode,
   draft,
   setDraft,
   placeholder,
+  disabled = false,
 }: {
   mode: Mode;
   draft: string | string[] | null;
   setDraft: (v: string | string[] | null) => void;
   placeholder: string;
+  disabled?: boolean;
 }) {
   if (mode === 'prose') {
     const v = (draft as string | null) ?? '';
@@ -194,7 +306,8 @@ function ProseOrListEditor({
           onChange={e => setDraft(e.target.value)}
           placeholder={placeholder}
           rows={4}
-          className="w-full bg-transparent text-sm text-foreground outline-none resize-none leading-relaxed"
+          disabled={disabled}
+          className="w-full bg-transparent text-sm text-foreground outline-none resize-none leading-relaxed disabled:opacity-50"
         />
       </div>
     );
@@ -217,11 +330,13 @@ function ProseOrListEditor({
             }}
             placeholder={placeholder}
             rows={1}
-            className="flex-1 bg-transparent text-sm text-foreground outline-none resize-none leading-snug"
+            disabled={disabled}
+            className="flex-1 bg-transparent text-sm text-foreground outline-none resize-none leading-snug disabled:opacity-50"
           />
           <button
             onClick={() => setDraft(items.filter((_, j) => j !== i))}
-            className="text-muted-foreground hover:text-destructive p-1"
+            disabled={disabled}
+            className="text-muted-foreground hover:text-destructive p-1 disabled:opacity-40"
             aria-label="Remove item"
           >
             <X className="h-3.5 w-3.5" />
@@ -230,7 +345,8 @@ function ProseOrListEditor({
       ))}
       <button
         onClick={() => setDraft([...items, ''])}
-        className="w-full text-left px-3 py-2 text-sm text-primary"
+        disabled={disabled}
+        className="w-full text-left px-3 py-2 text-sm text-primary disabled:opacity-40"
       >
         + Add {mode === 'numbered-list' ? 'step' : 'tip'}
       </button>

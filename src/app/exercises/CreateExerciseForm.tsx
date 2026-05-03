@@ -1,9 +1,11 @@
 'use client';
 
-import { useState } from 'react';
-import { X } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { X, Sparkles, Loader2 } from 'lucide-react';
 import { createCustomExercise, DuplicateCustomTitleError } from '@/lib/mutations-exercises';
 import { MUSCLE_SLUGS, MUSCLE_DEFS, type MuscleSlug } from '@/lib/muscles';
+import { ProseOrListEditor } from '@/components/EditableTextSection';
+import { fetchJsonAuthed } from '@/lib/api/client';
 
 const EQUIPMENT_OPTIONS = [
   'barbell', 'dumbbell', 'cable', 'machine',
@@ -179,13 +181,77 @@ export default function CreateExerciseForm({ onClose, onCreated }: Props) {
   const [equipment, setEquipment] = useState<string[]>([]);
   const [movementPattern, setMovementPattern] = useState('');
   const [description, setDescription] = useState('');
+  const [steps, setSteps] = useState<string[]>([]);
+  const [tips, setTips] = useState<string[]>([]);
   const [trackingMode, setTrackingMode] = useState<'reps' | 'time'>('reps');
   const [youtubeUrl, setYoutubeUrl] = useState('');
   const [youtubeError, setYoutubeError] = useState<string | null>(null);
   const [titleError, setTitleError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [magicLoading, setMagicLoading] = useState(false);
+  const [magicError, setMagicError] = useState<string | null>(null);
+  const [online, setOnline] = useState(true);
+  const magicAbortRef = useRef<AbortController | null>(null);
+
+  // Connectivity tracking — magic is server-only, gate the button on it.
+  useEffect(() => {
+    const update = () => setOnline(typeof navigator === 'undefined' ? true : navigator.onLine);
+    update();
+    if (typeof window !== 'undefined') {
+      window.addEventListener('online', update);
+      window.addEventListener('offline', update);
+      return () => {
+        window.removeEventListener('online', update);
+        window.removeEventListener('offline', update);
+      };
+    }
+  }, []);
+  useEffect(() => () => magicAbortRef.current?.abort(), []);
 
   const canSubmit = title.trim().length > 0 && primaryMuscles.length > 0;
+  const canMagic = canSubmit && online && !magicLoading;
+
+  // Auto-fill: bundled call to the same /generate-content route the detail
+  // page uses, with kind='all'. Asymmetric stomp policy — fill empties only,
+  // never overwrite a field the user has already typed into.
+  const runMagic = async () => {
+    if (!canMagic) return;
+    setMagicLoading(true);
+    setMagicError(null);
+    const controller = new AbortController();
+    magicAbortRef.current = controller;
+    try {
+      const out = await fetchJsonAuthed<{ description: string; steps: string[]; tips: string[] }>(
+        '/api/exercises/generate-content',
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            kind: 'all',
+            exercise: {
+              title: title.trim(),
+              primary_muscles: primaryMuscles,
+              secondary_muscles: secondaryMuscles.length > 0 ? secondaryMuscles : undefined,
+              equipment: equipment.length > 0 ? equipment : undefined,
+              movement_pattern: movementPattern || undefined,
+              tracking_mode: trackingMode,
+            },
+          }),
+          signal: controller.signal,
+        },
+      );
+      // Asymmetric stomp policy: fill empties only. CreateForm is itself a
+      // draft form — overwriting a typed-in description/step would surprise.
+      if (!description.trim()) setDescription(out.description);
+      if (steps.length === 0) setSteps([...out.steps]);
+      if (tips.length === 0) setTips([...out.tips]);
+    } catch (err) {
+      if ((err as { name?: string })?.name === 'AbortError') return;
+      setMagicError(err instanceof Error ? err.message : 'Generation failed');
+    } finally {
+      setMagicLoading(false);
+      magicAbortRef.current = null;
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -215,6 +281,8 @@ export default function CreateExerciseForm({ onClose, onCreated }: Props) {
         equipment: equipment.length > 0 ? equipment : undefined,
         movement_pattern: movementPattern || undefined,
         description: description.trim() || undefined,
+        steps: steps.length > 0 ? steps.map(s => s.trim()).filter(Boolean) : undefined,
+        tips: tips.length > 0 ? tips.map(t => t.trim()).filter(Boolean) : undefined,
         tracking_mode: trackingMode,
         youtube_url: ytClean,
       });
@@ -237,9 +305,36 @@ export default function CreateExerciseForm({ onClose, onCreated }: Props) {
         {/* Header */}
         <div className="flex items-center justify-between px-4 pt-4 pb-3 border-b border-border shrink-0">
           <h2 className="text-lg font-semibold">New Exercise</h2>
-          <button onClick={onClose} className="p-1 rounded-full hover:bg-secondary">
-            <X className="h-5 w-5" />
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={runMagic}
+              disabled={!canMagic}
+              className="flex items-center gap-1 px-2 py-1 text-xs font-medium text-primary rounded-full bg-primary/10 hover:bg-primary/20 disabled:opacity-40 disabled:cursor-not-allowed"
+              aria-label={
+                !online
+                  ? 'Magic needs internet'
+                  : !canSubmit
+                    ? 'Add a name and at least one primary muscle to enable Auto-fill'
+                    : 'Auto-fill description, steps, and tips with AI'
+              }
+              title={
+                !online
+                  ? 'Magic needs internet'
+                  : !canSubmit
+                    ? 'Add a name + primary muscles first'
+                    : 'Auto-fill description, steps, and tips with AI'
+              }
+            >
+              {magicLoading
+                ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                : <Sparkles className="h-3.5 w-3.5" />}
+              <span>{magicLoading ? 'Generating…' : 'Auto-fill'}</span>
+            </button>
+            <button onClick={onClose} className="p-1 rounded-full hover:bg-secondary">
+              <X className="h-5 w-5" />
+            </button>
+          </div>
         </div>
 
         {/* Form */}
@@ -333,7 +428,11 @@ export default function CreateExerciseForm({ onClose, onCreated }: Props) {
             </select>
           </div>
 
-          {/* Notes */}
+          {magicError && (
+            <p className="text-xs text-destructive">{magicError}. Tap Auto-fill to retry.</p>
+          )}
+
+          {/* Notes / Description */}
           <div>
             <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
               Notes / Description
@@ -345,6 +444,36 @@ export default function CreateExerciseForm({ onClose, onCreated }: Props) {
               rows={3}
               className="mt-1 w-full px-3 py-2 bg-secondary rounded-lg text-sm outline-none resize-none"
             />
+          </div>
+
+          {/* Steps */}
+          <div>
+            <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+              Steps
+            </label>
+            <div className="mt-1">
+              <ProseOrListEditor
+                mode="numbered-list"
+                draft={steps}
+                setDraft={(v) => setSteps((v as string[]) ?? [])}
+                placeholder="Add a step…"
+              />
+            </div>
+          </div>
+
+          {/* Tips */}
+          <div>
+            <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+              Tips
+            </label>
+            <div className="mt-1">
+              <ProseOrListEditor
+                mode="bullet-list"
+                draft={tips}
+                setDraft={(v) => setTips((v as string[]) ?? [])}
+                placeholder="Add a tip or thing to watch out for…"
+              />
+            </div>
           </div>
 
           {/* YouTube URL — optional. Tap on the demo strip later opens this.

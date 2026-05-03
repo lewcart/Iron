@@ -2,6 +2,18 @@
 
 All notable changes to Rebirth are documented here.
 
+## [0.7.4] - 2026-05-03
+
+### Added
+- **Magic ✨ button on exercise content fields.** A Sparkles icon next to the Pencil on About / Steps / Tips opens the editor and AI-fills the section in ~3-5s. Single-shot draft mode — generated content goes into the editable draft, never auto-saves. User reviews, tweaks, and Checks to commit (or Cancels to discard). Editing is disabled during the spinner so generation can't stomp mid-keystroke. Cancel actually aborts the OpenAI call (signal threaded into the SDK), not just the spinner. Cross-field context: tips generation sees existing description + steps but never the existing tips (rephrase trap). Cross-field is wrapped in `<exercise_context>` data tags so user-typed content can't act as instructions. Hidden in modal chrome (mid-workout reference is read-only). Disabled when offline with a clear "Magic needs internet" tooltip.
+- **Auto-fill ✨ button on the new-exercise creation form.** Single bundled call (kind='all') populates description + steps + tips in one OpenAI roundtrip, gated on title + at least one primary muscle being set. Asymmetric stomp policy: only fills empty fields, preserving anything the user has already typed (the create form is itself a draft, unlike the detail page's section editor).
+- **CreateExerciseForm now has Steps and Tips fields** (previously you had to add them later on the detail page). Reuses the same `ProseOrListEditor` sub-component as the detail page so the editor behaviour is identical across both surfaces.
+- **MCP `create_exercise` and `update_exercise` tool descriptions punched up** with concrete example outputs to nudge agents (Claude in chat) to populate steps + tips at creation time. Today they default to title + muscles only because the schema marked steps/tips silently optional; examples in the prose shape behaviour where bare prose nudges don't.
+
+### Changed
+- **`/api/exercises/generate-content` route added.** Discriminated body: `{ uuid, kind: 'description'|'steps'|'tips', exercise: {...} }` for existing exercises, `{ kind: 'all', exercise: {...} }` for the create-form draft. Client always passes the **live** exercise object (not just the uuid) — Rebirth is local-first; Dexie has the truth and Postgres lags any unsynced edits, so a server-side lookup would feed stale data to the LLM. Strict OpenAI structured outputs (gpt-4o-mini) with bounds (description ≤280, steps 3–8 × ≤120, tips 2–6 × ≤100) plus defensive post-parse validation. AbortController wired end-to-end; per-call 30s timeout, route maxDuration 60s.
+- **Test infra: `@testing-library/react` + `jsdom`** added to support component tests. vitest 4.x deprecated `environmentMatchGlobs`; the `.tsx` test files opt into jsdom via the `// @vitest-environment jsdom` docblock comment. node-env tests are unaffected.
+
 ## [0.7.3] - 2026-05-03
 
 ### Fixed
