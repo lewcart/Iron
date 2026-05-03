@@ -1,8 +1,9 @@
 'use client';
 
 import { useEffect, useState, useRef, type PointerEvent as ReactPointerEvent } from 'react';
-import { X, RotateCcw } from 'lucide-react';
+import { X, RotateCcw, Sparkles } from 'lucide-react';
 import { isLocalStub } from '@/lib/photo-upload-queue';
+import { tryDetectFaceY } from '@/lib/face-detect';
 
 export type AdjustablePhotoKind = 'progress' | 'inspo' | 'projection';
 
@@ -39,6 +40,8 @@ export function AdjustOffsetDialog({ open, onClose, photo, kind, blob, onSaved }
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [objectUrl, setObjectUrl] = useState<string | null>(null);
+  const [detecting, setDetecting] = useState(false);
+  const [autoDetected, setAutoDetected] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const dragStartRef = useRef<{ y: number; offset: number } | null>(null);
 
@@ -46,6 +49,7 @@ export function AdjustOffsetDialog({ open, onClose, photo, kind, blob, onSaved }
     if (open && photo) {
       setOffset(photo.crop_offset_y ?? 50);
       setError(null);
+      setAutoDetected(false);
     }
   }, [open, photo]);
 
@@ -57,6 +61,40 @@ export function AdjustOffsetDialog({ open, onClose, photo, kind, blob, onSaved }
     }
     setObjectUrl(null);
   }, [photo, blob]);
+
+  // Auto-detect on open when no offset has been set yet. Fetches the image
+  // as a Blob (or uses the local Blob for `local:*` stubs) and runs the
+  // FaceDetector → TFJS fallback chain. First successful detection wins.
+  // Treat both null and undefined (legacy Dexie rows) as "no offset".
+  useEffect(() => {
+    if (!open || !photo) return;
+    if (typeof photo.crop_offset_y === 'number') return;
+    let cancelled = false;
+    (async () => {
+      setDetecting(true);
+      try {
+        let detectionBlob: Blob | null = blob ?? null;
+        if (!detectionBlob && !isLocalStub(photo.blob_url)) {
+          // Fetch the Vercel Blob image. Cross-origin is fine — Vercel Blob
+          // serves with permissive CORS.
+          const res = await fetch(photo.blob_url);
+          if (res.ok) detectionBlob = await res.blob();
+        }
+        if (!detectionBlob || cancelled) return;
+        const detected = await tryDetectFaceY(detectionBlob);
+        if (cancelled) return;
+        if (detected !== null) {
+          setOffset(detected);
+          setAutoDetected(true);
+        }
+      } finally {
+        if (!cancelled) setDetecting(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [open, photo, blob]);
 
   if (!open || !photo) return null;
 
@@ -171,6 +209,21 @@ export function AdjustOffsetDialog({ open, onClose, photo, kind, blob, onSaved }
           <span className="absolute top-[26%] left-2 text-[10px] uppercase tracking-wide text-trans-blue/80 pointer-events-none">
             Head anchor
           </span>
+
+          {/* Auto-detection hint — overlay while running, badge when
+              the prefilled offset came from detection. */}
+          {detecting && (
+            <div className="absolute top-2 right-2 flex items-center gap-1 rounded-full bg-black/70 px-2 py-1 text-[10px] uppercase tracking-wide text-trans-blue">
+              <Sparkles className="h-3 w-3 animate-pulse" />
+              Auto-detecting…
+            </div>
+          )}
+          {!detecting && autoDetected && (
+            <div className="absolute top-2 right-2 flex items-center gap-1 rounded-full bg-trans-blue/80 px-2 py-1 text-[10px] uppercase tracking-wide text-white">
+              <Sparkles className="h-3 w-3" />
+              Auto
+            </div>
+          )}
         </div>
 
         {error && <p className="text-sm text-red-400">{error}</p>}
