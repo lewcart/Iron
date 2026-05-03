@@ -27,7 +27,10 @@ type LoadState =
  *  AND mask render with the SAME offsetTransform so heads stay anchored
  *  identically across the silhouette and the source frame. */
 export function SilhouetteMode({
-  beforeUrl,
+  // beforeUrl is part of BaseCompareProps for symmetry with the other modes,
+  // but Silhouette only renders mask layers; image URLs accessed via
+  // beforePhoto / afterPhoto.blob_url when needed.
+  beforeUrl: _beforeUrl,
   afterUrl,
   beforeOffset,
   afterOffset,
