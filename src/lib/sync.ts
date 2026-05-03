@@ -374,13 +374,33 @@ class SyncEngine {
     this._pushDebounceTimer = setTimeout(() => this.push(), delayMs);
   }
 
+  // ─── Cursor reset for newly-tracked tables ───────────────────────────────
+  //
+  // When a new table is added to SYNCED_TABLES, devices that already advanced
+  // last_seq past the table's CDC inserts will never see those rows — sync
+  // only pulls forward, and the prior pull silently dropped any change_log
+  // entries for tables it didn't recognise. Bump SYNC_RESET_VERSION on every
+  // such addition: each device runs the reset exactly once and re-pulls from
+  // seq 0. Existing rows survive (sync is idempotent bulkPut). Unsynced
+  // dirty rows survive (last_seq doesn't gate push).
+  //
+  //   v1 (2026-05-03): backfill body_vision/body_plan/plan_checkpoint added
+  //                    to SYNCED_TABLES on 2026-05-01 (commit 36a4f41).
+  private static readonly SYNC_RESET_VERSION = 1;
+  private async ensureSyncResetBaseline(): Promise<void> {
+    const current = Number(await getMeta('sync_reset_version') ?? 0);
+    if (current >= SyncEngine.SYNC_RESET_VERSION) return;
+    await setMeta('last_seq', 0);
+    await setMeta('sync_reset_version', SyncEngine.SYNC_RESET_VERSION);
+  }
+
   // ─── Lifecycle (idempotent) ──────────────────────────────────────────────
 
   start(): void {
     if (this._started) return;
     this._started = true;
 
-    this.sync();
+    void this.ensureSyncResetBaseline().then(() => this.sync());
 
     // Poll every 15s, but only when document is visible — backgrounded tabs
     // shouldn't burn cellular data. visibilitychange listener picks up the
