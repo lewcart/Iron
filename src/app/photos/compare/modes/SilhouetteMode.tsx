@@ -141,37 +141,46 @@ export function SilhouetteMode({
 
       {state.phase === 'ready' && (
         <>
-          {/* After (background) — dim grayscale fill via the mask. */}
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={state.afterMask}
-            alt={`${afterLabel} silhouette`}
-            className="absolute inset-0 w-full h-full"
+          {/* Two-color venn: 12mo silhouette (after) tinted trans-blue,
+              Now silhouette (before) tinted trans-pink with plus-lighter
+              blend on top. Trans-flag palette is designed so #5BCEFA +
+              #F5A9B8 = (255, 255, 255) per channel — overlap renders pure
+              white, non-overlap stays its tint. The shape delta IS the
+              colored fringe at the boundary. */}
+          <div
+            className="absolute inset-0"
             style={{
-              objectFit: 'cover',
+              backgroundColor: '#5BCEFA',
+              WebkitMaskImage: `url(${state.afterMask})`,
+              WebkitMaskSize: 'cover',
+              WebkitMaskRepeat: 'no-repeat',
+              WebkitMaskPosition: 'center',
+              maskImage: `url(${state.afterMask})`,
+              maskSize: 'cover',
+              maskRepeat: 'no-repeat',
+              maskPosition: 'center',
+              maskMode: 'luminance',
               transform: offsetTransform(afterOffset),
               transformOrigin: 'center',
-              filter: accent === 'trans-blue'
-                ? 'drop-shadow(0 0 1px #60a5fa) brightness(0.9)'
-                : 'drop-shadow(0 0 1px #f9a8d4) brightness(0.9)',
-              opacity: 0.85,
             }}
-            draggable={false}
           />
-          {/* Before (overlay) — second outline at 70% opacity, blended. */}
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={state.beforeMask}
-            alt={`${beforeLabel} silhouette`}
-            className="absolute inset-0 w-full h-full mix-blend-screen"
+          <div
+            className="absolute inset-0"
             style={{
-              objectFit: 'cover',
+              backgroundColor: '#F5A9B8',
+              WebkitMaskImage: `url(${state.beforeMask})`,
+              WebkitMaskSize: 'cover',
+              WebkitMaskRepeat: 'no-repeat',
+              WebkitMaskPosition: 'center',
+              maskImage: `url(${state.beforeMask})`,
+              maskSize: 'cover',
+              maskRepeat: 'no-repeat',
+              maskPosition: 'center',
+              maskMode: 'luminance',
               transform: offsetTransform(beforeOffset),
               transformOrigin: 'center',
-              filter: 'brightness(0.7)',
-              opacity: 0.7,
+              mixBlendMode: 'plus-lighter',
             }}
-            draggable={false}
           />
         </>
       )}
