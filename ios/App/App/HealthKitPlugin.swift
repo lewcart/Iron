@@ -467,10 +467,18 @@ public class HealthKitPlugin: CAPPlugin, CAPBridgedPlugin {
         let anchor = Self.decodeAnchor(call.getString("anchor"))
         let predicate = HKQuery.predicateForSamples(withStart: startDate, end: endDate, options: [])
 
-        // Step 1 — accumulate concept-id → display name mapping. The query's
-        // result handler is invoked once per medication, then once more with
-        // done=true; only after that do we issue the dose-event query.
-        var nameMap: [HKHealthConceptIdentifier: String] = [:]
+        // Two-phase fetch:
+        //   1. HKUserAnnotatedMedicationQuery → list of named medications (nickname,
+        //      schedule, archived state). Emitted as the `annotatedMedications` array.
+        //   2. HKAnchoredObjectQuery on HKMedicationDoseEvent → the dose events
+        //      themselves with timestamps and log_status. Emitted as `medications`.
+        //
+        // We CAN'T link a dose to its parent medication on iOS 26.3.1 — see
+        // docs/healthkit-medications-name-linkage.md for the full investigation.
+        // Per-dose `medication_name` stays "Unknown medication" until Apple closes
+        // the API gap. Callers should aggregate per-medication metrics from the
+        // two arrays separately.
+        var annotatedMedications: [[String: Any]] = []
         let nameQuery = HKUserAnnotatedMedicationQuery(
             predicate: nil,
             limit: HKObjectQueryNoLimit
@@ -478,7 +486,12 @@ public class HealthKitPlugin: CAPPlugin, CAPBridgedPlugin {
             guard let self = self else { return }
             if let med = med {
                 let name = med.nickname ?? med.medication.displayText
-                nameMap[med.medication.identifier] = name
+                annotatedMedications.append([
+                    "name": name,
+                    "is_archived": med.isArchived,
+                    "has_schedule": med.hasSchedule,
+                    "concept_display_text": med.medication.displayText,
+                ])
             }
             if done {
                 let doseQuery = HKAnchoredObjectQuery(
@@ -493,7 +506,6 @@ public class HealthKitPlugin: CAPPlugin, CAPBridgedPlugin {
                     }
                     let doseSamples = (samples as? [HKMedicationDoseEvent]) ?? []
                     let medications: [[String: Any]] = doseSamples.map { dose in
-                        let displayName = nameMap[dose.medicationConceptIdentifier] ?? "Unknown medication"
                         let doseString = Self.formatDoseString(dose: dose)
                         let scheduledMs: Double? = dose.scheduledDate.map { $0.timeIntervalSince1970 * 1000.0 }
                         let logStatusStr = Self.logStatusString(dose.logStatus)
@@ -505,7 +517,7 @@ public class HealthKitPlugin: CAPPlugin, CAPBridgedPlugin {
                         ])
                         var dict: [String: Any] = [
                             "hk_uuid": dose.uuid.uuidString,
-                            "medication_name": displayName,
+                            "medication_name": "Unknown medication",
                             "taken_at": dose.startDate.timeIntervalSince1970 * 1000.0,
                             "source_name": dose.sourceRevision.source.name,
                             "source_bundle_id": dose.sourceRevision.source.bundleIdentifier,
@@ -521,6 +533,7 @@ public class HealthKitPlugin: CAPPlugin, CAPBridgedPlugin {
                         "medications": medications,
                         "deleted": deletedUuids,
                         "nextAnchor": anchorString,
+                        "annotatedMedications": annotatedMedications,
                     ])
                 }
                 self.healthStore.execute(doseQuery)

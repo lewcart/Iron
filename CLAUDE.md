@@ -105,11 +105,14 @@ To add a new HealthKit type Rebirth requests: edit the JSON entry array, run
 `npm run gen:healthkit`, commit both files, push. iOS will surface a new toggle
 on the next `requestPermissions()` call.
 
-The medications entry (`medicationDoseEvent`, iOS 26+) is gated by both an
+The medications entry (`medicationDoseEvent`, iOS 26+) is gated by an
 `@available(iOS 26.0, *)` Swift check AND the `rebirth.medications.enabled`
-UserDefaults flag (default OFF). Flipping the flag on requires a real-device
-crash log to confirm the iOS 26 launch crash is resolved first. Use
-`HealthKit.setMedicationsEnabled({enabled: true})` from the JS bridge.
+UserDefaults flag (default OFF). Use `HealthKit.setMedicationsEnabled({enabled: true})`
+from the JS bridge — that flips the flag AND triggers iOS's per-object
+medication chooser. The dose-to-medication-name linkage is unsolved on iOS
+26.3.1 (Apple API gap); see `docs/healthkit-medications-name-linkage.md`.
+Per-dose `medication_name` is "Unknown medication" today; medication NAMES
+come back via the response's `annotatedMedications` array.
 
 ## Projection workflow (for MCP agents)
 
