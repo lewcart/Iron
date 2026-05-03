@@ -1,8 +1,29 @@
 # Rebirth — agent guide
 
-This is a single-user (Lewis only) Next.js App Router PWA with a Drizzle +
+This is a single-user (Lou only) Next.js App Router PWA with a Drizzle +
 Postgres backend, Dexie + sync-engine local-first layer, and an MCP server
 that exposes the same surface to AI agents.
+
+## Ship policy: direct-to-main, no PRs
+
+**This project ships straight to `main`. Do not create PRs.** Lou is the only
+user and will not review them — branches with open PRs accumulate and work gets
+lost. This overrides the default `/ship` skill behavior.
+
+When Lou says "ship" / "deploy" / "send it" / "push it":
+1. If currently on a feature branch, merge it into `main` locally first
+   (`git checkout main && git merge --no-ff <branch>`), then delete the branch
+   (local + remote). If on `main` already, skip this.
+2. Run the project's existing ship steps (tests, version bump, CHANGELOG, commit).
+3. `git push origin main` — done. No `gh pr create`.
+4. If the `/ship` skill tries to open a PR, stop and push to main directly.
+
+Exception: if Lou explicitly says "open a PR" or "make a PR for this", do that
+instead — but the default is direct-to-main.
+
+When you find a feature branch sitting around with unmerged commits, surface it
+to Lou ("branch X has N unmerged commits — merge to main or drop?") rather than
+leaving it.
 
 ## Nutrition workflow (for MCP agents)
 
