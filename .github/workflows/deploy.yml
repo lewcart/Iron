@@ -26,6 +26,13 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # Run the test suite before building. This catches regressions on
+      # main even if the PR Build workflow was bypassed (admin merges,
+      # skipped checks, paths-ignore overlap). The full vitest run is
+      # ~2s — cheap belt-and-suspenders.
+      - name: Test
+        run: npm run test
+
       - name: Pull Vercel environment
         run: npx vercel pull --yes --environment=production --token=${{ secrets.VERCEL_TOKEN }}
         env:
