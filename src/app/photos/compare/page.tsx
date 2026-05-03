@@ -3,7 +3,7 @@
 import { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { ChevronLeft, GitCompare, Move, Play, Plus, Sparkles } from 'lucide-react';
+import { ChevronLeft, GitCompare, Move, Play, Plus } from 'lucide-react';
 import type { ProjectionPhoto, InspoPhoto, ProgressPhotoPose } from '@/types';
 import { apiBase, fetchJsonAuthed } from '@/lib/api/client';
 import { COMPARABLE_POSES, POSE_LABELS, isComparablePose } from '@/lib/poses';
@@ -17,7 +17,14 @@ import { SlideMode } from './modes/SlideMode';
 import { SideBySideMode } from './modes/SideBySideMode';
 import { BlendMode } from './modes/BlendMode';
 import { DifferenceMode } from './modes/DifferenceMode';
+import { SilhouetteMode } from './modes/SilhouetteMode';
 import { TimelapseViewer, type TimelapseFrame } from './TimelapseViewer';
+import { isPersonSegmentationAvailable } from '@/lib/native/person-segmentation';
+
+// Feature flag — flip to false (NEXT_PUBLIC_SILHOUETTE_ENABLED=false) to
+// hide the Outline mode entirely if a Vision API regression appears in
+// production without rolling back the route + 4 CSS modes. Default ON.
+const SILHOUETTE_ENABLED = process.env.NEXT_PUBLIC_SILHOUETTE_ENABLED !== 'false';
 
 type CompareKind = 'projection' | 'inspo';
 
@@ -28,6 +35,7 @@ interface ActivePhoto {
   taken_at: string;
   notes: string | null;
   crop_offset_y: number | null;
+  mask_url: string | null;
   target_horizon?: string | null;
   source_progress_photo_uuid?: string | null;
 }
@@ -138,6 +146,7 @@ function ComparePageInner() {
           taken_at: p.taken_at,
           notes: p.notes,
           crop_offset_y: p.crop_offset_y,
+          mask_url: p.mask_url,
           target_horizon: p.target_horizon,
           source_progress_photo_uuid: p.source_progress_photo_uuid,
         }));
@@ -153,6 +162,7 @@ function ComparePageInner() {
         taken_at: p.taken_at,
         notes: p.notes,
         crop_offset_y: p.crop_offset_y,
+        mask_url: p.mask_url,
       }));
   }, [kind, projections, inspos, pose, source]);
 
@@ -204,7 +214,15 @@ function ComparePageInner() {
   }, [allProgress, pose]);
 
   const dataLoaded = projections !== null && inspos !== null;
-  const silhouetteAvailable = false; // chunk 2 — wired with Capacitor plugin check
+  const silhouetteAvailable = SILHOUETTE_ENABLED && isPersonSegmentationAvailable();
+
+  // Mask cache patcher — when SilhouetteMode freshly computes a mask, we
+  // patch the local projection/inspo array so the next mode-toggle round-trip
+  // doesn't re-run the segmentation.
+  const handleMaskCached = useCallback((uuid: string, maskUrl: string) => {
+    setProjections((prev) => prev?.map((p) => p.uuid === uuid ? { ...p, mask_url: maskUrl } : p) ?? null);
+    setInspos((prev) => prev?.map((p) => p.uuid === uuid ? { ...p, mask_url: maskUrl } : p) ?? null);
+  }, []);
 
   if (!sourceUuid) {
     return (
@@ -358,20 +376,28 @@ function ComparePageInner() {
               />
             )}
             {mode === 'silhouette' && (
-              <div className="rounded-xl border border-dashed border-white/15 p-6 flex flex-col items-center gap-3 text-white/80 aspect-[3/4]">
-                <Sparkles className="h-8 w-8 text-white/40" />
-                <p className="text-sm font-medium">Silhouette compare — coming soon</p>
-                <p className="text-xs text-white/50 text-center max-w-xs">
-                  Outline-only overlay using on-device person segmentation.
-                  Requires the iOS app (next release).
-                </p>
-                <button
-                  onClick={() => setMode('side')}
-                  className="px-3 py-1.5 border border-white/15 text-white/80 text-xs font-medium rounded-lg min-h-[44px]"
-                >
-                  Switch to Side-by-side
-                </button>
-              </div>
+              <SilhouetteMode
+                beforeUrl={source.blob_url}
+                afterUrl={active.blob_url}
+                beforeOffset={beforeOffsetForActive}
+                afterOffset={active.crop_offset_y}
+                beforeLabel="Now"
+                afterLabel={kind === 'projection' ? (active.target_horizon ?? 'Projection') : 'Inspiration'}
+                accent={accent}
+                beforePhoto={{
+                  uuid: source.uuid,
+                  blob_url: source.blob_url,
+                  mask_url: source.mask_url ?? null,
+                  kind: 'progress',
+                }}
+                afterPhoto={{
+                  uuid: active.uuid,
+                  blob_url: active.blob_url,
+                  mask_url: active.mask_url,
+                  kind,
+                }}
+                onMaskCached={handleMaskCached}
+              />
             )}
 
             {/* Adjust controls */}

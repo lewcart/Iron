@@ -787,6 +787,11 @@ async function pushProgressPhoto(r: Record<string, unknown>): Promise<void> {
   // Note: progress_photos.blob is not part of sync push — JPEGs go through
   // /api/progress-photos/upload separately. Push only carries metadata
   // (URL pointer, pose, notes, taken_at) once the upload is complete.
+  //
+  // INVARIANT: mask_url is server-owned cache (set by POST .../mask via the
+  // silhouette pipeline). Do NOT add it to the SET list below — a stale
+  // client push would null a freshly-cached mask. New rows get NULL by
+  // Postgres default, which is the right empty state.
   await query(
     `INSERT INTO progress_photos (uuid, blob_url, pose, notes, taken_at, crop_offset_y, updated_at)
      VALUES ($1, $2, $3, $4, $5, $6, NOW())
