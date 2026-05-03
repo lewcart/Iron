@@ -15,6 +15,7 @@ import {
   type SleepSummaryField,
   type SleepSummaryArgs,
 } from '@/lib/health-sleep-summary';
+import { computeCardioWeek } from '@/lib/server/health-data';
 import { getWeekSetsPerMuscle } from '@/db/queries';
 import { resolveMuscleSlug } from '@/lib/muscles';
 
@@ -2153,6 +2154,57 @@ async function getHealthSleepSummary(args: Record<string, unknown>) {
   return toolResult(await computeSleepSummary(summaryArgs));
 }
 
+async function getHealthCardioWeek(args: Record<string, unknown>) {
+  const status = await getHealthKitStatus();
+  if (status.status !== 'connected') return toolResult(notConnectedResponse(status.status));
+
+  const today = new Date().toISOString().slice(0, 10);
+  const endDateRaw = typeof args.end_date === 'string' ? args.end_date.slice(0, 10) : today;
+  if (endDateRaw > today) {
+    return toolResult({
+      status: 'invalid_input',
+      message: 'end_date cannot be in the future',
+      hint: 'Use today or earlier.',
+    });
+  }
+
+  const startDateRaw = typeof args.start_date === 'string' ? args.start_date.slice(0, 10) : null;
+  const windowDaysRaw = typeof args.window_days === 'number' ? args.window_days : null;
+
+  let startDate: string;
+  if (startDateRaw) {
+    if (startDateRaw > endDateRaw) {
+      return toolResult({
+        status: 'invalid_input',
+        message: 'start_date must be on or before end_date',
+        hint: 'Swap the two values.',
+      });
+    }
+    const days = Math.round((Date.parse(endDateRaw) - Date.parse(startDateRaw)) / 86_400_000) + 1;
+    if (days > 90) {
+      return toolResult({
+        status: 'invalid_input',
+        message: 'Window cannot exceed 90 days',
+        hint: 'Narrow start_date.',
+      });
+    }
+    startDate = startDateRaw;
+  } else {
+    const windowDays = windowDaysRaw ?? 7;
+    if (!Number.isFinite(windowDays) || windowDays < 1 || windowDays > 90) {
+      return toolResult({
+        status: 'invalid_input',
+        message: 'window_days must be 1..90',
+        hint: 'Default 7.',
+      });
+    }
+    const startMs = Date.parse(endDateRaw) - (windowDays - 1) * 86_400_000;
+    startDate = new Date(startMs).toISOString().slice(0, 10);
+  }
+
+  return toolResult(await computeCardioWeek(startDate, endDateRaw));
+}
+
 // ── HRT Timeline tools ────────────────────────────────────────────────────────
 
 interface HrtTimelinePeriodRow {
@@ -3751,6 +3803,20 @@ export const tools: MCPTool[] = [
       },
     },
     execute: getHealthSleepSummary,
+  },
+  {
+    name: 'get_health_cardio_week',
+    description:
+      'Returns cardio compliance for a date window: total minutes vs the active body_plan\'s cardio target, plus optional zone-2 / intervals split when sub-targets are set on programming_dose. Server-side aggregation over healthkit_workouts (server-only table). Activity-type classification only — HR-zone path requires per-second HR samples not in schema yet (workout-avg HR systematically misclassifies HIIT). Strength workouts are excluded silently. Status envelopes mirror get_health_sleep_summary: {status:"not_connected", reason, message}, {status:"invalid_input", message, hint}, {status:"no_targets", message} (the active plan has no cardio targets — render an empty state, not an error), or {status:"ok", range, totals, daily, targets}.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        start_date:  { type: 'string', description: 'YYYY-MM-DD inclusive (Europe/London). Optional if window_days is set.' },
+        end_date:    { type: 'string', description: 'YYYY-MM-DD inclusive; defaults to today.' },
+        window_days: { type: 'number', description: 'Alternative to start_date. Default 7. Range 1..90.' },
+      },
+    },
+    execute: getHealthCardioWeek,
   },
 
   // ── HRT Timeline tools ──────────────────────────────────────────────────────
