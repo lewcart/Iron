@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { App } from '@capacitor/app';
 import { SwipeToDelete } from '@/components/SwipeToDelete';
 import {
@@ -873,6 +873,101 @@ function RecommendationBadge({ rec }: { rec: ExerciseRecommendation }) {
   );
 }
 
+// RIR fallback when no prior session exists. RIR 2 (≈ 2 reps in reserve) is a
+// reasonable mid-difficulty assumption that the slider lets the user adjust.
+const RIR_DEFAULT_FALLBACK = 2;
+const RIR_PX_PER_STEP = 16;
+
+// Press-and-hold slider for capturing Reps in Reserve (0–5). Vertical drag:
+// up = +1, down = -1, clamped 0–5. The pointer is captured on press so the
+// drag survives even if the finger leaves the pill bounds. Live value is
+// rendered from `dragValue` during the gesture; we only commit (call onChange)
+// on pointerup, which avoids spamming Dexie writes mid-drag and mirrors how
+// native sliders settle.
+function RirSlider({
+  value,
+  defaultValue,
+  onChange,
+}: {
+  value: number | null;
+  defaultValue: number;
+  onChange: (rir: number) => Promise<void>;
+}) {
+  const [dragging, setDragging] = useState(false);
+  const [dragValue, setDragValue] = useState<number | null>(null);
+  const startY = useRef(0);
+  const startVal = useRef(0);
+
+  const display = dragValue ?? value ?? defaultValue;
+  const isExplicit = value != null || dragValue != null;
+
+  const onPointerDown = (e: React.PointerEvent<HTMLButtonElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    e.currentTarget.setPointerCapture(e.pointerId);
+    startY.current = e.clientY;
+    startVal.current = value ?? defaultValue;
+    setDragValue(startVal.current);
+    setDragging(true);
+  };
+
+  const onPointerMove = (e: React.PointerEvent<HTMLButtonElement>) => {
+    if (!dragging) return;
+    const dy = startY.current - e.clientY;
+    const steps = Math.round(dy / RIR_PX_PER_STEP);
+    const next = Math.max(0, Math.min(5, startVal.current + steps));
+    setDragValue(next);
+  };
+
+  const finish = async (e: React.PointerEvent<HTMLButtonElement>) => {
+    if (!dragging) return;
+    const target = e.currentTarget;
+    try { target.releasePointerCapture(e.pointerId); } catch {}
+    const finalVal = dragValue ?? value ?? defaultValue;
+    setDragging(false);
+    setDragValue(null);
+    if (finalVal !== value) {
+      await onChange(finalVal);
+    }
+  };
+
+  const onKeyDown = async (e: React.KeyboardEvent<HTMLButtonElement>) => {
+    if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
+    e.preventDefault();
+    const cur = value ?? defaultValue;
+    const next = Math.max(0, Math.min(5, cur + (e.key === 'ArrowUp' ? 1 : -1)));
+    if (next !== value) await onChange(next);
+  };
+
+  const stopTouch = (e: React.TouchEvent) => e.stopPropagation();
+
+  return (
+    <button
+      type="button"
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={finish}
+      onPointerCancel={finish}
+      onTouchStart={stopTouch}
+      onTouchMove={stopTouch}
+      onTouchEnd={stopTouch}
+      onKeyDown={onKeyDown}
+      aria-label={`RIR ${display}, hold and slide up or down to change`}
+      className={
+        'flex-shrink-0 h-7 px-2.5 rounded-full text-[11px] flex items-center gap-1.5 select-none touch-none transition-all ' +
+        (dragging
+          ? 'bg-primary text-primary-foreground scale-110 ring-2 ring-primary/30'
+          : isExplicit
+            ? 'bg-primary/15 text-primary'
+            : 'bg-secondary text-muted-foreground')
+      }
+    >
+      <span className="text-[9px] tracking-wide uppercase opacity-70">RIR</span>
+      <span className="font-bold tabular-nums text-sm leading-none w-3 text-center">{display}</span>
+    </button>
+  );
+}
+
 function SetRow({
   setNumber,
   set,
@@ -885,6 +980,7 @@ function SetRow({
   onUpdateRir,
   onDelete,
   allTimeBest1RM,
+  previousRir,
 }: {
   setNumber: number;
   set: LocalWorkoutSet;
@@ -897,6 +993,7 @@ function SetRow({
   onUpdateRir: (setUuid: string, rir: number | null) => Promise<void>;
   onDelete: (setUuid: string) => Promise<void>;
   allTimeBest1RM?: number | null;
+  previousRir?: number | null;
 }) {
   const { toDisplay, fromInput, label } = useUnit();
   const [weight, setWeight] = useState(
@@ -907,7 +1004,6 @@ function SetRow({
     set.duration_seconds != null ? String(set.duration_seconds) : ''
   );
   const [saving, setSaving] = useState(false);
-  const [rirOpen, setRirOpen] = useState(false);
 
   // Live PD detection — compare current estimated 1RM against all-time best.
   // No is_completed guard: badge persists naturally after completion since
@@ -919,14 +1015,24 @@ function SetRow({
     && allTimeBest1RM != null
     && isNewEstimated1RM(currentWeightKg, currentReps, allTimeBest1RM);
 
+  const rirDefault = previousRir ?? RIR_DEFAULT_FALLBACK;
+
   const handleComplete = async () => {
     setSaving(true);
+    const wasCompleted = set.is_completed;
     const weightKg = fromInput(parseFloat(weight) || 0);
     if (trackingMode === 'time') {
       const seconds = parseInt(duration) || 0;
       await onUpdateDuration(workoutExerciseUuid, set.uuid, weightKg, seconds);
     } else {
       await onUpdate(workoutExerciseUuid, set.uuid, weightKg, parseInt(reps) || 0);
+    }
+    // First-completion auto-fill: write the previous-session RIR for this set
+    // position (or RIR_DEFAULT_FALLBACK) so a single tap captures completion +
+    // a sensible RIR. The inline slider lets the user adjust without a second
+    // tap-to-open step.
+    if (!wasCompleted && set.rir == null) {
+      await onUpdateRir(set.uuid, rirDefault);
     }
     setSaving(false);
   };
@@ -963,13 +1069,17 @@ function SetRow({
     return '—';
   })();
 
+  // Each set row packs weight + reps/time on the left so the freed area on
+  // the right can host the RIR slider once the set is ticked. Pre-completion
+  // that area is empty — the row stays uncluttered while the user is still
+  // entering numbers.
   const inner = (
     <div className={`flex items-center gap-2 py-1.5 px-3 border-b border-border last:border-0 ${completed ? 'opacity-60' : ''}`}>
       <div className="w-5 text-center text-xs font-semibold text-muted-foreground">{setNumber}</div>
 
       {trackingMode === 'time' ? (
         <>
-          <div className="flex-1 flex items-center gap-1">
+          <div className="flex items-center gap-1 flex-shrink-0">
             <input
               type="number"
               inputMode="decimal"
@@ -978,14 +1088,14 @@ function SetRow({
               onChange={e => setWeight(e.target.value)}
               onFocus={e => { e.target.scrollIntoView({ behavior: 'smooth', block: 'center' }); e.target.select(); }}
               onBlur={handleTimeBlur}
-              className="w-full text-right text-sm font-medium bg-transparent outline-none min-h-[36px]"
+              className="w-12 text-left text-sm font-medium bg-transparent outline-none min-h-[36px]"
             />
             <span className="text-[10px] text-muted-foreground">{label}</span>
           </div>
 
           <span className="text-muted-foreground text-xs">×</span>
 
-          <div className="flex-1 flex items-center gap-1">
+          <div className="flex items-center gap-1 flex-shrink-0">
             <input
               type="number"
               inputMode="numeric"
@@ -994,14 +1104,14 @@ function SetRow({
               onChange={e => setDuration(e.target.value)}
               onFocus={e => { e.target.scrollIntoView({ behavior: 'smooth', block: 'center' }); e.target.select(); }}
               onBlur={handleTimeBlur}
-              className="w-full text-right text-sm font-medium bg-transparent outline-none min-h-[36px]"
+              className="w-12 text-left text-sm font-medium bg-transparent outline-none min-h-[36px]"
             />
             <span className="text-[10px] text-muted-foreground">sec</span>
           </div>
         </>
       ) : (
         <>
-          <div className="flex-1 flex items-center gap-1">
+          <div className="flex items-center gap-1 flex-shrink-0">
             <input
               type="number"
               inputMode="decimal"
@@ -1010,14 +1120,14 @@ function SetRow({
               onChange={e => setWeight(e.target.value)}
               onFocus={e => { e.target.scrollIntoView({ behavior: 'smooth', block: 'center' }); e.target.select(); }}
               onBlur={handleRepsBlur}
-              className="w-full text-right text-sm font-medium bg-transparent outline-none min-h-[36px]"
+              className="w-12 text-left text-sm font-medium bg-transparent outline-none min-h-[36px]"
             />
             <span className="text-[10px] text-muted-foreground">{label}</span>
           </div>
 
           <span className="text-muted-foreground text-xs">×</span>
 
-          <div className="flex-1 flex items-center gap-1">
+          <div className="flex items-center gap-1 flex-shrink-0">
             <input
               type="number"
               inputMode="numeric"
@@ -1026,32 +1136,22 @@ function SetRow({
               onChange={e => setReps(e.target.value)}
               onFocus={e => { e.target.scrollIntoView({ behavior: 'smooth', block: 'center' }); e.target.select(); }}
               onBlur={handleRepsBlur}
-              className="w-full text-right text-sm font-medium bg-transparent outline-none min-h-[36px]"
+              className="w-12 text-left text-sm font-medium bg-transparent outline-none min-h-[36px]"
             />
             <span className="text-[10px] text-muted-foreground">reps</span>
           </div>
         </>
       )}
 
-      {completed && (
-        <button
-          type="button"
-          onClick={() => setRirOpen(o => !o)}
-          aria-expanded={rirOpen}
-          aria-label={set.rir != null ? `RIR ${set.rir}, tap to change` : 'Set RIR'}
-          className={
-            'flex-shrink-0 h-7 px-2 rounded-full text-[11px] flex items-center gap-1 transition-colors ' +
-            (set.rir != null
-              ? 'bg-primary/15 text-primary'
-              : rirOpen
-                ? 'bg-secondary text-foreground'
-                : 'text-muted-foreground/70 border border-dashed border-border hover:bg-secondary')
-          }
-        >
-          <span className="text-[9px] tracking-wide uppercase opacity-70">RIR</span>
-          {set.rir != null && <span className="font-bold tabular-nums">{set.rir}</span>}
-        </button>
-      )}
+      <div className="flex-1 flex items-center justify-end">
+        {completed && (
+          <RirSlider
+            value={set.rir ?? null}
+            defaultValue={rirDefault}
+            onChange={(n) => onUpdateRir(set.uuid, n)}
+          />
+        )}
+      </div>
 
       <div className="relative flex-shrink-0">
         <button
@@ -1074,42 +1174,9 @@ function SetRow({
     </div>
   );
 
-  // RIR picker — Reps in Reserve 0–5 (0 = failure, 5 = 5+ left). Hidden by
-  // default to keep the set list compact; expanded via the inline pill on the
-  // set row. Tap a chip to set+collapse; tap an active chip to clear+collapse.
-  const rirPicker = completed && rirOpen ? (
-    <div className="flex items-center justify-end gap-1 pb-1.5 px-3 -mt-0.5">
-      {[0, 1, 2, 3, 4, 5].map(n => {
-        const active = set.rir === n;
-        return (
-          <button
-            type="button"
-            key={n}
-            onClick={async () => {
-              await onUpdateRir(set.uuid, active ? null : n);
-              setRirOpen(false);
-            }}
-            className={
-              'w-7 h-7 rounded-full text-[11px] font-medium transition-colors ' +
-              (active
-                ? 'bg-primary text-primary-foreground'
-                : 'bg-secondary text-muted-foreground hover:bg-primary/15')
-            }
-            aria-label={`RIR ${n}${active ? ' (selected — tap to clear)' : ''}`}
-          >
-            {n}
-          </button>
-        );
-      })}
-    </div>
-  ) : null;
-
   return (
     <SwipeToDelete onDelete={() => onDelete(set.uuid)}>
-      <div>
-        {inner}
-        {rirPicker}
-      </div>
+      {inner}
     </SwipeToDelete>
   );
 }
@@ -1183,19 +1250,27 @@ function SortableExerciseCard({
     return () => { cancelled = true; };
   }, [we.workout_uuid, we.exercise_uuid]);
 
-  // Progression cue from the most-recent prior session. Window-aware when
-  // goal_window is set; falls back to set-level min/max otherwise. Recomputes
-  // when goalWindow resolves so the rule uses the right path.
-  const [recommendation, setRecommendation] = useState<ExerciseRecommendation | null>(null);
+  // Last session's sets for this exercise (canonical-key matched). Used both
+  // for the progression cue and to seed RIR defaults per set position so the
+  // slider opens at the user's previous answer rather than asking from zero.
+  const [prevSets, setPrevSets] = useState<LocalWorkoutSet[]>([]);
   useEffect(() => {
     let cancelled = false;
-    getLastSessionSetsForExercise(we.exercise_uuid, we.workout_uuid).then(prevSets => {
-      if (cancelled) return;
-      const mode = we.exercise?.tracking_mode ?? 'reps';
-      setRecommendation(recommendForExercise(prevSets, mode, goalWindow));
+    getLastSessionSetsForExercise(we.exercise_uuid, we.workout_uuid).then(s => {
+      if (!cancelled) setPrevSets(s);
     });
     return () => { cancelled = true; };
-  }, [we.exercise_uuid, we.workout_uuid, we.exercise?.tracking_mode, goalWindow]);
+  }, [we.exercise_uuid, we.workout_uuid]);
+
+  const recommendation = useMemo<ExerciseRecommendation | null>(() => {
+    const mode = we.exercise?.tracking_mode ?? 'reps';
+    return recommendForExercise(prevSets, mode, goalWindow);
+  }, [prevSets, we.exercise?.tracking_mode, goalWindow]);
+
+  const previousRirs = useMemo<(number | null)[]>(
+    () => prevSets.map(s => s.rir ?? null),
+    [prevSets],
+  );
 
   return (
     <div ref={setNodeRef} style={style} className="ios-section">
@@ -1264,13 +1339,12 @@ function SortableExerciseCard({
               planks, dips, carries) capture both dimensions. */}
           <div className="flex items-center gap-2 px-3 py-1 border-t border-b border-border bg-secondary/30">
             <div className="w-5 text-center text-[10px] font-medium text-muted-foreground">Set</div>
-            <div className="flex-1 text-right text-[10px] font-medium text-muted-foreground">Weight</div>
-            <div className="w-3" />
-            {(we.exercise?.tracking_mode ?? 'reps') === 'time' ? (
-              <div className="flex-1 text-right text-[10px] font-medium text-muted-foreground">Time (sec)</div>
-            ) : (
-              <div className="flex-1 text-right text-[10px] font-medium text-muted-foreground">Reps</div>
-            )}
+            <div className="text-left text-[10px] font-medium text-muted-foreground flex-shrink-0" style={{ width: '4rem' }}>Weight</div>
+            <span className="text-xs invisible">×</span>
+            <div className="text-left text-[10px] font-medium text-muted-foreground flex-shrink-0" style={{ width: '4rem' }}>
+              {(we.exercise?.tracking_mode ?? 'reps') === 'time' ? 'Time (sec)' : 'Reps'}
+            </div>
+            <div className="flex-1 text-right text-[10px] font-medium text-muted-foreground pr-1">RIR</div>
             <div className="w-8 flex-shrink-0" />
           </div>
 
@@ -1289,6 +1363,7 @@ function SortableExerciseCard({
               onUpdateRir={onUpdateSetRir}
               onDelete={onDeleteSet}
               allTimeBest1RM={allTimeBest1RM}
+              previousRir={previousRirs[idx] ?? null}
             />
           ))}
 

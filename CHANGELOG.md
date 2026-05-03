@@ -2,6 +2,11 @@
 
 All notable changes to Rebirth are documented here.
 
+## [0.7.5] - 2026-05-03
+
+### Changed
+- **RIR capture is now a one-tap, in-row drag slider.** The old flow took two taps — tick the green check, then tap a separate "RIR" pill that expanded a 0–5 chip strip below the row. Now ticking the set immediately writes a default RIR (your previous-session RIR for that set position, or 2 if there's no prior session) and surfaces a compact "RIR N" pill inline on the right of the same row. Press-and-hold the pill and slide vertically to adjust — up = more reps in reserve, down = fewer, clamped 0–5. Commits on release; arrow keys also work for keyboard. Weight and reps/time are now left-aligned on the row to free up the right-hand space for the slider, so post-completion rows don't expand vertically the way the old chip strip did.
+
 ## [0.7.4] - 2026-05-03
 
 ### Added
