@@ -27,7 +27,12 @@ export async function PATCH(
     return NextResponse.json({ error: 'JSON body required' }, { status: 400 });
   }
 
-  const updates: { crop_offset_y?: number | null; notes?: string | null; target_horizon?: string | null } = {};
+  const updates: {
+    crop_offset_y?: number | null;
+    notes?: string | null;
+    target_horizon?: string | null;
+    pose?: 'front' | 'side' | 'back';
+  } = {};
   if ('crop_offset_y' in body) {
     if (body.crop_offset_y === null) {
       updates.crop_offset_y = null;
@@ -45,6 +50,15 @@ export async function PATCH(
   }
   if ('target_horizon' in body) {
     updates.target_horizon = body.target_horizon == null ? null : String(body.target_horizon);
+  }
+  if ('pose' in body) {
+    if (body.pose !== 'front' && body.pose !== 'side' && body.pose !== 'back') {
+      return NextResponse.json(
+        { error: 'pose must be one of front, side, back' },
+        { status: 400 },
+      );
+    }
+    updates.pose = body.pose;
   }
 
   if (Object.keys(updates).length === 0) {

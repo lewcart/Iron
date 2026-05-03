@@ -1,7 +1,7 @@
 'use client';
 
 import { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
-import { ChevronLeft, Trash2, ImageIcon, Activity, Target, Plus, GitCompare, Move } from 'lucide-react';
+import { ChevronLeft, Trash2, ImageIcon, Activity, Target, Plus, GitCompare, Move, Tag } from 'lucide-react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { useUnit } from '@/context/UnitContext';
@@ -165,6 +165,34 @@ function MeasurementsInner() {
       } catch { /* non-fatal */ }
     }
   }, [adjustState]);
+
+  // Retag a progress photo's pose. Optimistic Dexie update so the gallery
+  // re-groups instantly; PATCH the server in parallel so the change syncs.
+  const handleRetagPose = useCallback(async (
+    photo: LocalProgressPhoto,
+    pose: 'front' | 'side' | 'back',
+  ) => {
+    if (photo.pose === pose) return;
+    try {
+      // Local-first: Dexie write triggers useLiveQuery re-render. Mark
+      // dirty so the sync engine carries the value forward on next push.
+      await db.progress_photos.update(photo.uuid, {
+        pose,
+        _synced: false,
+        _updated_at: Date.now(),
+      });
+      syncEngine.schedulePush();
+    } catch { /* non-fatal — server PATCH is the source of truth anyway */ }
+    // Server PATCH (best-effort; sync engine will retry if this fails).
+    if (!isLocalStub(photo.blob_url)) {
+      try {
+        await fetchJsonAuthed(`${apiBase()}/api/progress-photos/${photo.uuid}`, {
+          method: 'PATCH',
+          body: JSON.stringify({ pose }),
+        });
+      } catch { /* non-fatal */ }
+    }
+  }, []);
 
   const handleSaveMeasurements = async () => {
     const hasAny = SITES.some(s => inputs[s.key]) || !!weightInput;
@@ -590,8 +618,13 @@ function MeasurementsInner() {
   const photoGroups = useMemo(() => {
     const POSE_ORDER: Record<string, number> = { front: 0, side: 1, back: 2 };
     const byDate = new Map<string, LocalProgressPhoto[]>();
+    // Group by Lou's local (London) date, not UTC. Photos taken near
+    // midnight London time straddle UTC dates and would otherwise split
+    // a single capture session across two cards. en-CA gives YYYY-MM-DD.
+    const LOCALE = 'en-CA';
+    const TZ = 'Europe/London';
     for (const p of photos) {
-      const date = p.taken_at.slice(0, 10); // YYYY-MM-DD
+      const date = new Date(p.taken_at).toLocaleDateString(LOCALE, { timeZone: TZ });
       if (!byDate.has(date)) byDate.set(date, []);
       byDate.get(date)!.push(p);
     }
@@ -677,6 +710,7 @@ function MeasurementsInner() {
                           blob: photo.blob,
                         })
                       }
+                      onRetagPose={(pose) => handleRetagPose(photo, pose)}
                       hasProjection={(projectionCount ?? 0) > 0}
                       hasInspo={(inspoCount ?? 0) > 0}
                     />
@@ -717,6 +751,24 @@ function MeasurementsInner() {
           <Target className="h-4 w-4" />
           Goals
         </Link>
+        {photos.length > 0 && ((projectionCount ?? 0) > 0 || (inspoCount ?? 0) > 0) && (
+          <button
+            onClick={() => {
+              // Pick the newest non-stub progress photo regardless of pose.
+              const usable = photos
+                .filter((p) => !isLocalStub(p.blob_url))
+                .sort((a, b) => b.taken_at.localeCompare(a.taken_at));
+              const src = usable[0];
+              if (!src) return;
+              setCompareTarget((projectionCount ?? 0) > 0 ? 'projection' : 'inspo');
+              setCompareSource(src);
+            }}
+            className="flex items-center gap-2 px-3 py-2 border border-trans-blue/30 text-trans-blue text-sm font-medium rounded-lg"
+          >
+            <GitCompare className="h-4 w-4" />
+            Compare photos
+          </button>
+        )}
       </div>
 
       {inbodyLoading && <p className="text-xs text-muted-foreground px-1">Loading scans…</p>}
@@ -998,6 +1050,7 @@ function PhotoTile({
   onDelete,
   onCompare,
   onAdjust,
+  onRetagPose,
   hasProjection,
   hasInspo,
 }: {
@@ -1005,10 +1058,12 @@ function PhotoTile({
   onDelete: (uuid: string) => void;
   onCompare: (target: CompareTarget) => void;
   onAdjust: () => void;
+  onRetagPose: (pose: 'front' | 'side' | 'back') => void;
   hasProjection: boolean;
   hasInspo: boolean;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
+  const [poseEditOpen, setPoseEditOpen] = useState(false);
   const stub = isLocalStub(photo.blob_url);
 
   return (
@@ -1045,7 +1100,7 @@ function PhotoTile({
         </button>
       </div>
 
-      {menuOpen && (
+      {menuOpen && !poseEditOpen && (
         <div className="absolute top-9 right-1 z-10 w-44 rounded-lg bg-zinc-900 border border-white/10 shadow-lg overflow-hidden">
           {hasProjection && !stub && (
             <button
@@ -1073,11 +1128,51 @@ function PhotoTile({
             Adjust alignment
           </button>
           <button
+            onClick={() => setPoseEditOpen(true)}
+            className="w-full text-left px-3 py-2 text-xs flex items-center gap-2 hover:bg-white/5 text-white/80"
+          >
+            <Tag className="h-3.5 w-3.5" />
+            Change pose
+          </button>
+          <button
             onClick={() => { onDelete(photo.uuid); setMenuOpen(false); }}
             className="w-full text-left px-3 py-2 text-xs flex items-center gap-2 hover:bg-white/5 text-red-400"
           >
             <Trash2 className="h-3.5 w-3.5" />
             Delete
+          </button>
+        </div>
+      )}
+
+      {poseEditOpen && (
+        <div className="absolute top-9 right-1 z-10 w-44 rounded-lg bg-zinc-900 border border-white/10 shadow-lg overflow-hidden">
+          <p className="px-3 pt-2 pb-1 text-[10px] uppercase tracking-wide text-white/50">Tag as…</p>
+          {(['front', 'side', 'back'] as const).map((p) => {
+            const isCurrent = p === photo.pose;
+            return (
+              <button
+                key={p}
+                onClick={() => {
+                  if (!isCurrent) onRetagPose(p);
+                  setPoseEditOpen(false);
+                  setMenuOpen(false);
+                }}
+                className={`w-full text-left px-3 py-2 text-xs flex items-center gap-2 hover:bg-white/5 capitalize ${
+                  isCurrent ? 'text-trans-blue' : 'text-white/80'
+                }`}
+              >
+                <span className="w-3.5 h-3.5 inline-flex items-center justify-center">
+                  {isCurrent && '✓'}
+                </span>
+                {p}
+              </button>
+            );
+          })}
+          <button
+            onClick={() => { setPoseEditOpen(false); }}
+            className="w-full text-left px-3 py-2 text-xs flex items-center gap-2 hover:bg-white/5 text-white/40 border-t border-white/10"
+          >
+            Cancel
           </button>
         </div>
       )}

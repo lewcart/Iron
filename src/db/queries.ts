@@ -2162,7 +2162,7 @@ export async function listProgressPhotos(limit = 50): Promise<ProgressPhoto[]> {
 
 export async function updateProgressPhoto(
   uuid: string,
-  data: { crop_offset_y?: number | null; notes?: string | null },
+  data: { crop_offset_y?: number | null; notes?: string | null; pose?: 'front' | 'side' | 'back' },
 ): Promise<ProgressPhoto | null> {
   const sets: string[] = [];
   const params: unknown[] = [];
@@ -2173,6 +2173,10 @@ export async function updateProgressPhoto(
   if ('notes' in data) {
     params.push(data.notes ?? null);
     sets.push(`notes = $${params.length}`);
+  }
+  if ('pose' in data && data.pose) {
+    params.push(data.pose);
+    sets.push(`pose = $${params.length}`);
   }
   if (sets.length === 0) return null;
   params.push(uuid);
@@ -2326,7 +2330,12 @@ export async function createProjectionPhoto(data: {
 
 export async function updateProjectionPhoto(
   uuid: string,
-  data: { crop_offset_y?: number | null; notes?: string | null; target_horizon?: string | null },
+  data: {
+    crop_offset_y?: number | null;
+    notes?: string | null;
+    target_horizon?: string | null;
+    pose?: 'front' | 'side' | 'back';
+  },
 ): Promise<ProjectionPhoto | null> {
   const sets: string[] = [];
   const params: unknown[] = [];
@@ -2341,6 +2350,10 @@ export async function updateProjectionPhoto(
   if ('target_horizon' in data) {
     params.push(data.target_horizon ?? null);
     sets.push(`target_horizon = $${params.length}`);
+  }
+  if ('pose' in data && data.pose) {
+    params.push(data.pose);
+    sets.push(`pose = $${params.length}`);
   }
   if (sets.length === 0) return null;
   params.push(uuid);

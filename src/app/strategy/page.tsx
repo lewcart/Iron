@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import Image from 'next/image';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import {
@@ -22,7 +22,7 @@ import {
   useActivePlan,
   useCheckpointsForPlan,
 } from '@/lib/useLocalDB-strategy';
-import { useBodyGoals, useInbodyScans } from '@/lib/useLocalDB-measurements';
+import { useBodyGoals, useInbodyScans, useProgressPhotos } from '@/lib/useLocalDB-measurements';
 import type {
   LocalBodyVision,
   LocalBodyPlan,
@@ -32,9 +32,12 @@ import type {
   NorthStarMetric,
   ProgrammingDose,
 } from '@/db/local';
-import type { InspoPhoto, ProjectionPhoto } from '@/types';
+import type { InspoPhoto, ProjectionPhoto, ProgressPhotoPose } from '@/types';
 import { METRIC_LABEL } from '@/lib/inbody';
 import { apiBase, fetchJsonAuthed } from '@/lib/api/client';
+import { isLocalStub } from '@/lib/photo-upload-queue';
+import { CompareDialog, type CompareTarget } from '@/app/measurements/CompareDialog';
+import { AdjustOffsetDialog, type AdjustablePhotoKind } from '@/app/measurements/AdjustOffsetDialog';
 import {
   EditVisionButton,
   EditPlanButton,
@@ -50,6 +53,67 @@ export default function StrategyPage() {
   const latestScan = scans[0] ?? null;
   const inspoPhotos = useInspoPhotosFeed(8);
   const projections = useProjectionsFeed(4);
+  const progressPhotos = useProgressPhotos(50);
+
+  // Compare state — opens when Lou taps a Projection or Inspiration thumb.
+  // Source = latest matching-pose progress photo. defaultTargetUuid pre-
+  // selects the specific thumb in the carousel so the dialog shows what
+  // Lou tapped, not just "newest at this pose".
+  const [compareSource, setCompareSource] = useState<{
+    uuid: string;
+    blob_url: string;
+    pose: ProgressPhotoPose;
+    taken_at: string;
+    crop_offset_y: number | null;
+  } | null>(null);
+  const [compareTarget, setCompareTarget] = useState<CompareTarget>('projection');
+  const [compareTargetUuid, setCompareTargetUuid] = useState<string | null>(null);
+
+  // Adjust offset dialog (so the in-dialog "Adjust source/target" buttons work).
+  const [adjustState, setAdjustState] = useState<{
+    photo: { uuid: string; blob_url: string; crop_offset_y: number | null };
+    kind: AdjustablePhotoKind;
+  } | null>(null);
+
+  const latestProgressByPose = useMemo(() => {
+    const byPose: Record<ProgressPhotoPose, ProgressPhotoLike | null> = {
+      front: null, side: null, back: null,
+    };
+    for (const p of progressPhotos ?? []) {
+      if (isLocalStub(p.blob_url)) continue;
+      const cur = byPose[p.pose as ProgressPhotoPose];
+      if (!cur || p.taken_at > cur.taken_at) {
+        byPose[p.pose as ProgressPhotoPose] = {
+          uuid: p.uuid,
+          blob_url: p.blob_url,
+          pose: p.pose as ProgressPhotoPose,
+          taken_at: p.taken_at,
+          crop_offset_y: p.crop_offset_y ?? null,
+        };
+      }
+    }
+    return byPose;
+  }, [progressPhotos]);
+
+  const openCompare = useCallback(
+    (target: CompareTarget, pose: ProgressPhotoPose | null, targetUuid: string) => {
+      const matchingPose: ProgressPhotoPose = pose === 'front' || pose === 'side' || pose === 'back'
+        ? pose
+        : 'front';
+      const src = latestProgressByPose[matchingPose];
+      if (!src) {
+        // No progress photo at this pose. Fall through to whichever pose has one.
+        const fallback = latestProgressByPose.front ?? latestProgressByPose.side ?? latestProgressByPose.back;
+        if (!fallback) return; // no progress photos at all — nothing to compare
+        setCompareSource(fallback);
+      } else {
+        setCompareSource(src);
+      }
+      setCompareTarget(target);
+      setCompareTargetUuid(targetUuid);
+    },
+    [latestProgressByPose],
+  );
 
   // useLiveQuery returns undefined while loading, null/[] when nothing matches.
   const loading = vision === undefined || plan === undefined;
@@ -77,10 +141,46 @@ export default function StrategyPage() {
       {vision && <VisionCard vision={vision} />}
       {plan && <PlanCard plan={plan} checkpoints={checkpoints} />}
       {goals.length > 0 && <GoalsCard goals={goals} latestScan={latestScan} />}
-      <ProjectionsCard photos={projections} />
-      <InspoCard photos={inspoPhotos} />
+      <ProjectionsCard
+        photos={projections}
+        onCompare={(p) => openCompare('projection', p.pose, p.uuid)}
+      />
+      <InspoCard
+        photos={inspoPhotos}
+        onCompare={(p) =>
+          openCompare(
+            'inspo',
+            p.pose === 'front' || p.pose === 'side' || p.pose === 'back' ? p.pose : null,
+            p.uuid,
+          )
+        }
+      />
+
+      <CompareDialog
+        open={compareSource !== null}
+        onClose={() => { setCompareSource(null); setCompareTargetUuid(null); }}
+        source={compareSource}
+        defaultTarget={compareTarget}
+        defaultTargetUuid={compareTargetUuid}
+        onAdjust={(photo, kind) => setAdjustState({ photo, kind })}
+      />
+      <AdjustOffsetDialog
+        open={adjustState !== null}
+        onClose={() => setAdjustState(null)}
+        photo={adjustState?.photo ?? null}
+        kind={adjustState?.kind ?? 'progress'}
+        onSaved={() => { /* no-op; Dexie sync engine carries through */ }}
+      />
     </main>
   );
+}
+
+interface ProgressPhotoLike {
+  uuid: string;
+  blob_url: string;
+  pose: ProgressPhotoPose;
+  taken_at: string;
+  crop_offset_y: number | null;
 }
 
 // ─── Projections (REST — projection_photos is REST-only, like inspo) ────────
@@ -509,7 +609,13 @@ function GoalRow({
 
 // ─── Projections (Lou, AI-generated) ────────────────────────────────────────
 
-function ProjectionsCard({ photos }: { photos: ProjectionPhoto[] | undefined }) {
+function ProjectionsCard({
+  photos,
+  onCompare,
+}: {
+  photos: ProjectionPhoto[] | undefined;
+  onCompare: (photo: ProjectionPhoto) => void;
+}) {
   if (photos === undefined) {
     return (
       <section className="rounded-2xl bg-card border border-border shadow-sm h-40 animate-pulse" />
@@ -545,13 +651,16 @@ function ProjectionsCard({ photos }: { photos: ProjectionPhoto[] | undefined }) 
           </Link>
         ) : (
           // Larger, landscape-leaning thumbs so the section feels distinct from
-          // the 4-col Inspiration strip below. Show last 4, dominant.
+          // the 4-col Inspiration strip below. Show last 4, dominant. Tap →
+          // open compare with the latest matching-pose progress photo.
           <div className="grid grid-cols-2 gap-2">
             {photos.slice(0, 4).map((photo) => (
-              <Link
+              <button
                 key={photo.uuid}
-                href="/projections"
-                className="relative aspect-[4/5] overflow-hidden rounded-lg bg-muted ring-1 ring-trans-blue/20"
+                onClick={() => onCompare(photo)}
+                style={{ objectPosition: `center ${photo.crop_offset_y ?? 50}%` }}
+                className="relative aspect-[4/5] overflow-hidden rounded-lg bg-muted ring-1 ring-trans-blue/20 text-left"
+                aria-label={`Compare with ${photo.pose} projection`}
               >
                 <Image
                   src={photo.blob_url}
@@ -559,6 +668,7 @@ function ProjectionsCard({ photos }: { photos: ProjectionPhoto[] | undefined }) 
                   fill
                   sizes="(max-width: 640px) 50vw, 25vw"
                   className="object-cover"
+                  style={{ objectPosition: `center ${photo.crop_offset_y ?? 50}%` }}
                   unoptimized
                 />
                 <div className="absolute bottom-1 left-1 flex gap-1">
@@ -571,7 +681,7 @@ function ProjectionsCard({ photos }: { photos: ProjectionPhoto[] | undefined }) 
                     </span>
                   )}
                 </div>
-              </Link>
+              </button>
             ))}
           </div>
         )}
@@ -582,7 +692,13 @@ function ProjectionsCard({ photos }: { photos: ProjectionPhoto[] | undefined }) 
 
 // ─── Inspo photos ────────────────────────────────────────────────────────────
 
-function InspoCard({ photos }: { photos: InspoPhoto[] | undefined }) {
+function InspoCard({
+  photos,
+  onCompare,
+}: {
+  photos: InspoPhoto[] | undefined;
+  onCompare: (photo: InspoPhoto) => void;
+}) {
   // undefined = loading, [] = no photos yet, otherwise render strip.
   if (photos === undefined) {
     return (
@@ -612,27 +728,52 @@ function InspoCard({ photos }: { photos: InspoPhoto[] | undefined }) {
           </p>
         ) : (
           <div className="grid grid-cols-4 gap-2">
-            {photos.slice(0, 8).map((photo) => (
-              <Link
-                key={photo.uuid}
-                href="/inspo"
-                className="relative aspect-[3/4] overflow-hidden rounded-lg bg-muted"
-              >
-                <Image
-                  src={photo.blob_url}
-                  alt={photo.notes ?? 'Inspo photo'}
-                  fill
-                  sizes="(max-width: 640px) 25vw, 12vw"
-                  className="object-cover"
-                  unoptimized
-                />
-                {photo.pose && (
+            {photos.slice(0, 8).map((photo) => {
+              const comparable = photo.pose === 'front' || photo.pose === 'side' || photo.pose === 'back';
+              return comparable ? (
+                <button
+                  key={photo.uuid}
+                  onClick={() => onCompare(photo)}
+                  className="relative aspect-[3/4] overflow-hidden rounded-lg bg-muted text-left"
+                  aria-label={`Compare with ${photo.pose} inspiration`}
+                >
+                  <Image
+                    src={photo.blob_url}
+                    alt={photo.notes ?? 'Inspo photo'}
+                    fill
+                    sizes="(max-width: 640px) 25vw, 12vw"
+                    className="object-cover"
+                    style={{ objectPosition: `center ${photo.crop_offset_y ?? 50}%` }}
+                    unoptimized
+                  />
                   <span className="absolute bottom-1 left-1 text-[9px] uppercase tracking-wide font-semibold px-1.5 py-0.5 rounded bg-black/60 text-white">
                     {photo.pose}
                   </span>
-                )}
-              </Link>
-            ))}
+                </button>
+              ) : (
+                // Untagged or 'other' — no comparable pose. Fall back to gallery link.
+                <Link
+                  key={photo.uuid}
+                  href="/inspo"
+                  className="relative aspect-[3/4] overflow-hidden rounded-lg bg-muted"
+                >
+                  <Image
+                    src={photo.blob_url}
+                    alt={photo.notes ?? 'Inspo photo'}
+                    fill
+                    sizes="(max-width: 640px) 25vw, 12vw"
+                    className="object-cover"
+                    style={{ objectPosition: `center ${photo.crop_offset_y ?? 50}%` }}
+                    unoptimized
+                  />
+                  {photo.pose && (
+                    <span className="absolute bottom-1 left-1 text-[9px] uppercase tracking-wide font-semibold px-1.5 py-0.5 rounded bg-black/60 text-white">
+                      {photo.pose}
+                    </span>
+                  )}
+                </Link>
+              );
+            })}
           </div>
         )}
       </div>

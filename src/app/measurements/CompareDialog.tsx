@@ -22,6 +22,10 @@ interface Props {
   source: ProgressPhotoLike | null;
   /** Defaults to 'projection'. */
   defaultTarget?: CompareTarget;
+  /** When set + matches a target at the active pose, this specific item is
+   *  pre-selected in the carousel. Used when launching from /strategy where
+   *  Lou taps a specific projection/inspo thumb. */
+  defaultTargetUuid?: string | null;
   /** Open the adjust-offset dialog for this photo. Parent owns the dialog. */
   onAdjust: (
     photo: { uuid: string; blob_url: string; crop_offset_y: number | null },
@@ -154,7 +158,7 @@ interface ActivePhoto {
   source_progress_photo_uuid?: string | null;
 }
 
-export function CompareDialog({ open, onClose, source, defaultTarget = 'projection', onAdjust }: Props) {
+export function CompareDialog({ open, onClose, source, defaultTarget = 'projection', defaultTargetUuid, onAdjust }: Props) {
   const [target, setTarget] = useState<CompareTarget>(defaultTarget);
   const [projections, setProjections] = useState<ProjectionPhoto[] | null>(null);
   const [inspos, setInspos] = useState<InspoPhoto[] | null>(null);
@@ -229,10 +233,17 @@ export function CompareDialog({ open, onClose, source, defaultTarget = 'projecti
   const active = candidates.find((p) => p.uuid === activeUuid) ?? candidates[0] ?? null;
 
   useEffect(() => {
-    if (candidates.length > 0 && (!activeUuid || !candidates.some((p) => p.uuid === activeUuid))) {
+    if (candidates.length === 0) return;
+    // Prefer the caller-supplied default-target uuid when it lands at the
+    // active pose. Otherwise fall through to the first candidate.
+    if (defaultTargetUuid && candidates.some((p) => p.uuid === defaultTargetUuid)) {
+      if (activeUuid !== defaultTargetUuid) setActiveUuid(defaultTargetUuid);
+      return;
+    }
+    if (!activeUuid || !candidates.some((p) => p.uuid === activeUuid)) {
       setActiveUuid(candidates[0].uuid);
     }
-  }, [candidates, activeUuid]);
+  }, [candidates, activeUuid, defaultTargetUuid]);
 
   // Clear active selection when target type changes so we don't carry a uuid
   // from one list to the other.
