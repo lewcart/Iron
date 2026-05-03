@@ -2,6 +2,24 @@
 
 All notable changes to Rebirth are documented here.
 
+## [0.7.6] - 2026-05-03
+
+### Added
+- **Week page (`/feed`, dock label "Week").** Replaces the old Feed accretion with a science-grounded weekly training dashboard. Five tiles (Priority Muscles vs MEV/MAV/MRV using RP-2025 landmarks, Effective-Set Quality % at RIR ≤3, Anchor-Lift e1RM trend, Recovery via HRV vs personal 28-day baseline, Weight 10-day EWMA), then a 12-Week Trends section (5 sparklines with inline direction chips and tap-to-expand chart modal showing axis labels, numbers panel, and rule explanation), then top-of-page entry-point chips for Strategy / Sleep / Photos. Honest data-needs flags per tile when data is insufficient, with per-source actionable copy (no generic "Fix this"). Anchor lifts resolve via muscle-tag-first lookup (most-frequent exercise tagged with the priority muscle), so user's actual lifts surface instead of name-match misses.
+- **MCP `update_vision` now validates muscle slugs against the canonical taxonomy.** Accepts canonical slugs ("delts") and legacy synonyms ("rear delts" → "delts"); rejects unknowns with `UNKNOWN_MUSCLE` + `list_muscles()` hint; dedupes after normalization.
+- **Edit pencil on Priority Muscles tile** links to `/strategy` for editing build_emphasis / deemphasize.
+- **Color key on Priority Muscles tile** (priority pink / de-emphasis blue / other gray / over-MAV amber / at-MRV red).
+- **`/api/health/snapshot` REST route** mirroring existing sleep-summary route, wraps HealthKit HRV / sleep snapshot for client use.
+
+### Changed
+- **TabBar first tab "Feed" → "Week"** (icon `BarChart2` → `LineChart`). Route stays `/feed` to keep URLs stable.
+- **`/api/feed` defensive guard** for HRT timeline rows with missing `started_at` (pre-existing RangeError 500 in `timeline-entries.ts:141` exposed by Week-page polling, now returns 200 with the bad row filtered).
+- **RIR-quality wait threshold:** Effective-Set Quality tile no longer nags below 3 sessions in the last 14 days; quiet bootstrap message instead.
+
+### Documented
+- **`TODOS.md` Week page V1.1 follow-ups:** catalog audit (hip-abduction tagging), per-muscle landmark personalization UI, anchor-lift configurability UI, mesocycle / deload state machine, cardio compliance tile, photo cadence prompt.
+- **`TODOS.md` Dark mode (app-wide):** pre-existing — `globals.css:37-58` defines `.dark { ... }` correctly but no code ever applies the class to `<html>`. Affects every page equally; not a Week-page regression.
+
 ## [0.7.5] - 2026-05-03
 
 ### Changed

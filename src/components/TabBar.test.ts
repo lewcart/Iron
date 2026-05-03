@@ -7,7 +7,7 @@ import { describe, it, expect } from 'vitest';
 
 /** Main dock tabs (settings is a separate control above the row in TabBar.tsx). */
 const tabs = [
-  { href: '/feed', label: 'Feed' },
+  { href: '/feed', label: 'Week' },
   { href: '/hrt', label: 'HRT' },
   { href: '/workout', label: 'Workout' },
   { href: '/measurements', label: 'Measure' },

@@ -1,3 +1,73 @@
+## Dark mode (app-wide)
+
+Surfaced during 2026-05-03 Week page /qa verify pass. **Pre-existing — not a
+Week page regression.** Manually setting `<html class="dark">` in DevTools
+does not flip any page (body stays `rgb(246,247,248)`, cards stay
+`rgb(255,255,255)`).
+
+Root cause: nothing ever applies the `.dark` class to `<html>`.
+- `src/app/globals.css:37-58` — `.dark { ... }` token block exists and is
+  correct (deep-navy palette inside `@layer base`).
+- `tailwind.config.ts:4` — `darkMode: ["class"]` is set correctly.
+- `src/app/layout.tsx:46` — `<html lang="en">` ships with no class management.
+- Repo-wide search: zero call sites for `classList.add('dark')`,
+  `next-themes`, `prefers-color-scheme` listeners, or any theme toggle.
+
+Result: every `dark:*` Tailwind utility on every page is dead code (it
+compiles to a CSS rule that never matches because `.dark` is never on the
+ancestor chain). The token-level `--background` / `--card` overrides
+inside `.dark` likewise never fire. The QA report's note that the runtime
+`.dark` rule "is missing from the loaded stylesheet" is consistent with
+PostCSS / Tailwind purging it as unused content during JIT — the source
+is fine, it just gets dropped because no runtime DOM ever matches it.
+
+One-line fix sketch (to be done as a separate small PR — out of scope for
+the Week page commit):
+1. Add a tiny ThemeProvider in `src/app/layout.tsx` that reads
+   `prefers-color-scheme` (and optionally a stored preference from
+   localStorage) and sets `document.documentElement.classList.toggle('dark', isDark)`
+   on mount + on `change` of the media query.
+2. Add a Settings → Appearance toggle (System / Light / Dark) that writes
+   to localStorage.
+3. Verify by visiting `/strategy` and `/feed` in both modes — both should
+   flip card + body backgrounds in tandem.
+
+Until then, the entire app is light-mode-only by design (just not by
+deliberate decision). Defer the toggle wiring rather than blocking the
+Week page on it.
+
+## Week page follow-ups (deferred from 2026-05-03 /autoplan, post-rebrief)
+
+Plan: `~/.gstack/projects/lewcart-Iron/feat-week-page-plan-20260503-125153.md`
+Test plan: `~/.gstack/projects/lewcart-Iron/lewis-week-page-test-plan-20260503-125153.md`
+
+V1.1 follow-ups (after Week page V1 ships):
+- [ ] **Catalog audit: hip abduction exercise.** No exact match in `src/db/exercises.json` today (only `Cable Hip Adduction` — opposite muscle). Add a hip-abduction exercise + tag it so the e1RM trend row for hip abductors has a target. ~15 min.
+- [ ] **Per-muscle landmark personalization UI.** V1 uses RP-2025 defaults from `src/lib/training/volume-landmarks.ts`. After Lou has 2-3 mesocycles of data, add a UI to override per-muscle MEV/MAV/MRV based on personal recovery curves.
+- [ ] **Anchor-lift configurability UI.** V1 uses seed config in `src/lib/training/anchor-lifts.ts`. UI lets Lou pick a different anchor lift per priority muscle (e.g., switch glute anchor from Hip Thrust to RDL during a hinge mesocycle).
+- [ ] **Mesocycle / deload state machine.** Combine HRV trend + RIR drift + e1RM stagnation into a "you're at MRV, deload next week" surface.
+- [ ] **Cardio compliance tile.** Plan dose says 240 min/week cardio floor; add a small ring once we're sure we have reliable cardio session tagging.
+- [ ] **Photo cadence prompt.** Monthly footer prompt: "front-pose photo due in 6 days" — tied to projection comparison workflow. Surface on Week page footer, not as an inbox.
+
+## Old Today + Inbox follow-ups (superseded by Week page rebrief 2026-05-03)
+
+Plan artifact: `~/.gstack/projects/lewcart-Iron/feat-feed-redesign-plan-20260503-114052.md`.
+Tests artifact: `~/.gstack/projects/lewcart-Iron/lewis-feed-redesign-test-plan-20260503-114052.md`.
+
+V1.1 inbox sources to add after V1 ships:
+
+- [ ] **Coaching note inbox source.** Needs migration: add `coaching_notes.actioned_at TIMESTAMPTZ` + `dismissed_at TIMESTAMPTZ`; include `coaching_notes` in `SYNCED_TABLES` (`src/lib/sync.ts`); bump Dexie version (v17). Then add inbox rule + `markActioned` mutation. ~1 day CC.
+- [ ] **"Tonight: <routine>" Hero priority.** Implement `summary.todayPlanned` derivation: pick the routine with the longest gap since its exercises were last logged in the active plan. ~4-6 hr CC. See Codex eng review notes for the heuristic.
+- [ ] **Plan reevaluation trigger evaluator.** Implement "BF% stalled 8 weeks" rule: read last 4 InBody scans, compute |Δ pbf_pct|, fire if < 0.5 over ≥ 56 days. ~3 hr CC.
+- [ ] **HRT inbox source — product decision required.** `hrt_logs` was dropped (migration 020); CLAUDE.md says HRT adherence lives outside Rebirth. Options: (a) re-add an adherence schema; (b) integrate HealthKit medications via `get_hk_medication_summary`; (c) drop entirely and remove from Inbox spec. Currently dropped from V1.
+- [ ] **Cross-page invalidation: photo upload.** Add `queryClient.invalidateQueries({ queryKey: ['feed'] })` to the progress photo upload mutation so projection nudge clears immediately on photo capture.
+- [ ] **Pull-to-refresh haptic.** Wire `@capacitor/haptics` light impact on PTR trigger. Confirm whether plugin is already installed.
+- [ ] **Mount-stagger animation.** Optional polish. CSS-only stagger using `transition-delay` per card; only if it improves the feel.
+- [ ] **Time-of-day adaptive Today.** Telemetry-driven: morning vs evening surface different inbox priorities. Consider after 2 weeks of V1 telemetry.
+- [ ] **Kill-the-/feed-tab decision.** After 2 weeks of V1 telemetry, evaluate whether Today tab pulls weight vs the dock. If Lou opens it <30% of sessions, drop it and make Workout the default landing.
+
+---
+
 ## Exercise image generation follow-ups (deferred from 2026-05-02 in-app gen ship)
 
 - [ ] **Tests for the new image-gen flow.** Test plan artifact is on disk at

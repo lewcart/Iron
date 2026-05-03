@@ -18,6 +18,7 @@
 
 import { queryOne } from '@/db/db';
 import type { MCPTool } from '@/lib/mcp-tools';
+import { resolveMuscleSlug, MUSCLE_SLUGS } from '@/lib/muscles';
 
 // ─── Result helpers (mirror mcp-tools.ts) ────────────────────────────────────
 
@@ -47,6 +48,51 @@ function asStringArray(v: unknown): string[] | undefined {
   if (v === undefined) return undefined;
   if (!Array.isArray(v)) return undefined;
   return v.filter((x): x is string => typeof x === 'string');
+}
+
+/**
+ * Validate + normalize a muscle-emphasis array against the canonical
+ * 18-slug taxonomy. Accepts both canonical slugs ("delts") and legacy
+ * synonyms ("rear delts" → "delts"). Returns a tool-error result when ANY
+ * value can't be resolved to a canonical slug — the agent should fix the
+ * input rather than silently dropping unknown muscles.
+ *
+ * Rationale: emphasis arrays drive the Week-page priority sort + the MCP
+ * agents' build/maintain/deemphasize reasoning. Free-form strings here
+ * undermine both surfaces. The legacy strategy UI accepted free-form chip
+ * input for older vision rows; that's been migrated separately.
+ */
+function normalizeMuscleEmphasis(
+  values: string[],
+  field: 'build_emphasis' | 'maintain_emphasis' | 'deemphasize',
+): { ok: true; normalized: string[] } | { ok: false; error: ReturnType<typeof toolError> } {
+  const out: string[] = [];
+  const unknown: string[] = [];
+  const seen = new Set<string>();
+  for (const raw of values) {
+    const trimmed = raw.trim();
+    if (!trimmed) continue;
+    const slug = resolveMuscleSlug(trimmed);
+    if (!slug) {
+      unknown.push(trimmed);
+      continue;
+    }
+    if (!seen.has(slug)) {
+      out.push(slug);
+      seen.add(slug);
+    }
+  }
+  if (unknown.length > 0) {
+    return {
+      ok: false,
+      error: toolError(
+        'UNKNOWN_MUSCLE',
+        `${field} contains values that do not resolve to a canonical muscle: ${unknown.join(', ')}.`,
+        `Use canonical slugs from the 18-muscle taxonomy. Valid: ${MUSCLE_SLUGS.join(', ')}. Call list_muscles() to see synonyms.`,
+      ),
+    };
+  }
+  return { ok: true, normalized: out };
 }
 
 function genUUID(): string {
@@ -92,9 +138,15 @@ async function updateVision(args: Record<string, unknown>) {
     }
     const newUuid = genUUID();
     const principles = asStringArray(args.principles) ?? [];
-    const build_emphasis = asStringArray(args.build_emphasis) ?? [];
-    const maintain_emphasis = asStringArray(args.maintain_emphasis) ?? [];
-    const deemphasize = asStringArray(args.deemphasize) ?? [];
+    const buildRaw = asStringArray(args.build_emphasis) ?? [];
+    const maintainRaw = asStringArray(args.maintain_emphasis) ?? [];
+    const deempRaw = asStringArray(args.deemphasize) ?? [];
+    const buildN = normalizeMuscleEmphasis(buildRaw, 'build_emphasis');
+    if (!buildN.ok) return buildN.error;
+    const maintainN = normalizeMuscleEmphasis(maintainRaw, 'maintain_emphasis');
+    if (!maintainN.ok) return maintainN.error;
+    const deempN = normalizeMuscleEmphasis(deempRaw, 'deemphasize');
+    if (!deempN.ok) return deempN.error;
     const body_md = typeof args.body_md === 'string' ? args.body_md : null;
     const summary = typeof args.summary === 'string' ? args.summary : null;
 
@@ -103,7 +155,7 @@ async function updateVision(args: Record<string, unknown>) {
                                 build_emphasis, maintain_emphasis, deemphasize, status)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'active')
        RETURNING *`,
-      [newUuid, title, body_md, summary, principles, build_emphasis, maintain_emphasis, deemphasize],
+      [newUuid, title, body_md, summary, principles, buildN.normalized, maintainN.normalized, deempN.normalized],
     );
     return toolResult(row);
   }
@@ -137,17 +189,23 @@ async function updateVision(args: Record<string, unknown>) {
   if ('build_emphasis' in args) {
     const arr = asStringArray(args.build_emphasis);
     if (arr === undefined) return toolError('INVALID_INPUT', 'build_emphasis must be an array of strings.');
-    push('build_emphasis', arr);
+    const n = normalizeMuscleEmphasis(arr, 'build_emphasis');
+    if (!n.ok) return n.error;
+    push('build_emphasis', n.normalized);
   }
   if ('maintain_emphasis' in args) {
     const arr = asStringArray(args.maintain_emphasis);
     if (arr === undefined) return toolError('INVALID_INPUT', 'maintain_emphasis must be an array of strings.');
-    push('maintain_emphasis', arr);
+    const n = normalizeMuscleEmphasis(arr, 'maintain_emphasis');
+    if (!n.ok) return n.error;
+    push('maintain_emphasis', n.normalized);
   }
   if ('deemphasize' in args) {
     const arr = asStringArray(args.deemphasize);
     if (arr === undefined) return toolError('INVALID_INPUT', 'deemphasize must be an array of strings.');
-    push('deemphasize', arr);
+    const n = normalizeMuscleEmphasis(arr, 'deemphasize');
+    if (!n.ok) return n.error;
+    push('deemphasize', n.normalized);
   }
   if ('status' in args) {
     if (typeof args.status !== 'string' || !VISION_STATUSES.has(args.status)) {
@@ -538,7 +596,7 @@ export const strategyWriteTools: MCPTool[] = [
   {
     name: 'update_vision',
     description:
-      'Upsert the active body Vision (long-arc aesthetic concept). With `uuid`, targets that row; without uuid, targets the active vision (or creates one if none exists — title required in that branch). Whitelisted fields only: title, body_md, summary, principles, build_emphasis, maintain_emphasis, deemphasize, status. Use after get_active_vision so you have the current uuid.',
+      'Upsert the active body Vision (long-arc aesthetic concept). With `uuid`, targets that row; without uuid, targets the active vision (or creates one if none exists — title required in that branch). Whitelisted fields only: title, body_md, summary, principles, build_emphasis, maintain_emphasis, deemphasize, status. Muscle-emphasis arrays (build/maintain/deemphasize) are validated + normalized against the canonical 18-slug taxonomy: legacy synonyms ("rear delts" → "delts") are accepted, but truly unknown values trigger UNKNOWN_MUSCLE — call list_muscles() to see valid slugs. Use after get_active_vision so you have the current uuid.',
     inputSchema: {
       type: 'object',
       properties: {

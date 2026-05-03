@@ -234,6 +234,37 @@ describe('GET /api/timeline', () => {
     });
   });
 
+  it('skips HRT rows with missing/empty started_at instead of throwing RangeError (regression)', async () => {
+    const db = await import('@/db/db');
+    vi.mocked(db.query)
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        // null started_at — would have caused `new Date(null + 'T00:00:00Z').toISOString()` to throw
+        { uuid: 'h-bad-1', started_at: null as unknown as string, ended_at: null, name: 'Broken row', doses_e: null },
+        // empty string started_at — same shape of bug
+        { uuid: 'h-bad-2', started_at: '', ended_at: null, name: 'Broken row 2', doses_e: null },
+        // valid row alongside the broken ones — should still come through
+        { uuid: 'h-ok', started_at: '2026-03-25', ended_at: null, name: 'Real protocol', doses_e: null },
+      ])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([]);
+
+    const { GET } = await import('./route');
+    const response = await GET(new NextRequest('http://localhost/api/timeline'));
+    const data = await response.json();
+
+    // Endpoint must NOT 500; the well-formed row must still surface.
+    expect(response.status).toBe(200);
+    expect(data).toHaveLength(1);
+    expect(data[0].id).toBe('h-ok');
+  });
+
   it('formats HRT timeline entry without estrogen dose', async () => {
     const db = await import('@/db/db');
     vi.mocked(db.query)

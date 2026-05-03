@@ -131,6 +131,13 @@ export async function getTimelineEntries(days: number, limit: number): Promise<T
   }
 
   for (const h of hrtRows) {
+    // Skip rows missing a started_at — `new Date(undefined + 'T00:00:00Z')`
+    // throws RangeError on .toISOString(), which 500'd /api/feed when the
+    // Week page polled. Defensive guard here keeps the timeline endpoint
+    // resilient to historical / malformed period rows.
+    if (!h.started_at || typeof h.started_at !== 'string') continue;
+    const parsedMs = Date.parse(`${h.started_at}T00:00:00Z`);
+    if (!Number.isFinite(parsedMs)) continue;
     const dose = h.doses_e ? ` · ${h.doses_e}` : '';
     entries.push({
       id: h.uuid,
@@ -138,7 +145,7 @@ export async function getTimelineEntries(days: number, limit: number): Promise<T
       icon: 'pill',
       // Treat the period start as the timeline event timestamp. Convert
       // YYYY-MM-DD → ISO so the global sort with workouts/etc still works.
-      timestamp: new Date(h.started_at + 'T00:00:00Z').toISOString(),
+      timestamp: new Date(parsedMs).toISOString(),
       summary: `Protocol started: ${h.name}${dose}`,
     });
   }
