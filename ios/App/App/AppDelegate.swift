@@ -1,5 +1,6 @@
 import UIKit
 import Capacitor
+import UserNotifications
 
 @UIApplicationMain
 class AppDelegate: UIResponder, UIApplicationDelegate {
@@ -10,6 +11,14 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         // When iOS relaunches the app in the background due to a CLRegion boundary crossing,
         // GeofencePlugin.load() re-creates the CLLocationManager and re-registers the monitored
         // region so the didDetermineState callback fires within the ~10 s background window.
+
+        // Register the notification-action delegate at app-launch (not plugin load). When iOS
+        // delivers a notification action via cold launch, the plugin instance may not exist
+        // yet — but the delegate must be set before the system asks who handles the action.
+        // The delegate handles the Cancel action on walk-active notifications via the
+        // persisted WalkTrackerState, independent of the JS bridge.
+        UNUserNotificationCenter.current().delegate = AppLaunchNotificationDelegate.shared
+
         return true
     }
 
@@ -56,4 +65,28 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         return ApplicationDelegateProxy.shared.application(application, continue: userActivity, restorationHandler: restorationHandler)
     }
 
+}
+
+/// Standalone UNUserNotificationCenterDelegate that survives cold-launch via
+/// notification action. Operates entirely from persisted state — does NOT
+/// depend on Capacitor plugins being loaded yet.
+class AppLaunchNotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
+    static let shared = AppLaunchNotificationDelegate()
+
+    func userNotificationCenter(_ center: UNUserNotificationCenter,
+                                 willPresent notification: UNNotification,
+                                 withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
+        completionHandler([.banner, .sound])
+    }
+
+    func userNotificationCenter(_ center: UNUserNotificationCenter,
+                                 didReceive response: UNNotificationResponse,
+                                 withCompletionHandler completionHandler: @escaping () -> Void) {
+        if response.actionIdentifier == "REBIRTH_WALK_CANCEL" {
+            // Cancel the active walk using only persisted state — works even if
+            // the plugin instance hasn't been created yet.
+            WalkTracker().cancelFromPersistedState()
+        }
+        completionHandler()
+    }
 }

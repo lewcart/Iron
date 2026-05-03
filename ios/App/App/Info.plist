@@ -62,11 +62,11 @@
 
 	<!-- Location permissions — geofence monitoring requires Always authorization -->
 	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>Rebirth uses your location to detect when you arrive home so it can automatically end your workout.</string>
+	<string>Rebirth uses your location to auto-log morning walks to and from the gym, and to detect when you arrive home so it can end your workout.</string>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
-	<string>Rebirth monitors your location in the background to detect when you arrive home and automatically end your active workout — even when the app is closed.</string>
+	<string>Rebirth monitors your location in the background to auto-log morning walks (departing home and arriving at the gym, then back home) and to end your active workout when you arrive home — even when the app is closed.</string>
 	<key>NSLocationAlwaysUsageDescription</key>
-	<string>Rebirth monitors your location in the background to detect when you arrive home and automatically end your active workout — even when the app is closed.</string>
+	<string>Rebirth monitors your location in the background to auto-log morning walks (departing home and arriving at the gym, then back home) and to end your active workout when you arrive home — even when the app is closed.</string>
 
 	<!-- Background modes required for CLRegion monitoring to survive app termination -->
 	<key>UIBackgroundModes</key>

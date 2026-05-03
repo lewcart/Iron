@@ -1,15 +1,9 @@
 /**
- * Geofence — home arrival detection via CLCircularRegion monitoring.
+ * Geofence — home + gym arrival/exit detection via CLCircularRegion monitoring,
+ * plus morning-walk auto-logging (depart-home → walk → gym → strength → walk → home).
  *
  * Wraps the native GeofencePlugin Capacitor plugin.  Falls back gracefully on
  * web (no-op) so the app remains functional outside native shells.
- *
- * Usage:
- *   await setHomeLocation({ lat: 51.5, lon: -0.1 });
- *   const unsub = onHomeArrival(() => finishWorkout(currentWorkoutUuid));
- *   // later…
- *   unsub();
- *   await removeHomeLocation();
  */
 
 import { registerPlugin, Capacitor } from '@capacitor/core';
@@ -24,110 +18,218 @@ export interface HomeLocationOptions {
   radius?: number;
 }
 
-export interface GeofenceStatus {
-  monitoring: boolean;
-  lat?: number;
-  lon?: number;
+export interface GymLocationOptions {
+  lat: number;
+  lon: number;
+  /** Geofence radius in metres. Defaults to 100 on the native side. */
   radius?: number;
 }
 
+export interface DepartWindow {
+  /** "HH:mm" in user's local timezone. */
+  start: string;
+  /** "HH:mm" in user's local timezone. */
+  end: string;
+}
+
+export interface DepartWindows {
+  weekday: DepartWindow;
+  weekend: DepartWindow;
+}
+
+export interface GeofenceStatus {
+  monitoring: boolean;
+  homeMonitored?: boolean;
+  gymMonitored?: boolean;
+  autoWalkEnabled?: boolean;
+  /** Home coordinates if set */
+  lat?: number;
+  lon?: number;
+  radius?: number;
+  /** Gym coordinates if set */
+  gymLat?: number;
+  gymLon?: number;
+  gymRadius?: number;
+}
+
 export interface HomeArrivalEvent {
-  timestamp: string; // ISO-8601
+  timestamp: string;
+}
+
+export type WalkPhase =
+  | 'idle'
+  | 'walkOutboundActive'
+  | 'atGymWalkSaved'
+  | 'strengthActive'
+  | 'walkInboundActive'
+  | 'completed'
+  | 'partialMissedInbound'
+  | 'failedSaveAwaitingRetry'
+  | 'permissionRevoked';
+
+export interface WalkSnapshot {
+  phase: WalkPhase;
+  flowId: string | null;
+  startedAt: string | null;
+  distanceMeters: number;
+  durationSeconds: number;
+  lastSampleAt: string | null;
+  hkWriteLikelyDenied?: boolean;
+}
+
+export interface WalkStateChangedEvent {
+  phase: WalkPhase;
+  flowId: string | null;
+  startedAt: string | null;
+  distanceMeters: number;
+  durationSeconds: number;
+  lastSampleAt: string | null;
 }
 
 interface GeofencePluginInterface {
   setHomeLocation(options: HomeLocationOptions): Promise<GeofenceStatus>;
   removeHomeLocation(): Promise<{ monitoring: false }>;
+  setGymLocation(options: GymLocationOptions): Promise<GeofenceStatus>;
+  removeGymLocation(): Promise<{ monitoring: false }>;
+  setDepartWindows(options: DepartWindows): Promise<{ ok: true }>;
+  setAutoWalkEnabled(options: { enabled: boolean }): Promise<{ enabled: boolean }>;
+  startWalkNow(): Promise<{ started: boolean; reason?: string }>;
+  cancelActiveWalk(): Promise<{ cancelled: true }>;
+  getActiveWalkState(): Promise<WalkSnapshot>;
   getStatus(): Promise<GeofenceStatus>;
   addListener(
     event: 'homeArrival',
     handler: (data: HomeArrivalEvent) => void
+  ): Promise<PluginListenerHandle>;
+  addListener(
+    event: 'walkStateChanged',
+    handler: (data: WalkStateChangedEvent) => void
   ): Promise<PluginListenerHandle>;
 }
 
 // ── Plugin registration ───────────────────────────────────────────────────────
 
 const GeofencePluginNative = registerPlugin<GeofencePluginInterface>('Geofence', {
-  // Web stub — all methods are no-ops that resolve immediately.
   web: {
     setHomeLocation: async (options: HomeLocationOptions): Promise<GeofenceStatus> => {
       console.info('[Geofence] Web stub: setHomeLocation', options);
       return { monitoring: false };
     },
-    removeHomeLocation: async () => {
-      return { monitoring: false as const };
-    },
-    getStatus: async (): Promise<GeofenceStatus> => {
+    removeHomeLocation: async () => ({ monitoring: false as const }),
+    setGymLocation: async (options: GymLocationOptions): Promise<GeofenceStatus> => {
+      console.info('[Geofence] Web stub: setGymLocation', options);
       return { monitoring: false };
     },
-    addListener: async (
-      _event: string,
-      _handler: (data: HomeArrivalEvent) => void
-    ): Promise<PluginListenerHandle> => {
-      return { remove: async () => {} };
-    },
+    removeGymLocation: async () => ({ monitoring: false as const }),
+    setDepartWindows: async () => ({ ok: true as const }),
+    setAutoWalkEnabled: async (opts: { enabled: boolean }) => ({ enabled: opts.enabled }),
+    startWalkNow: async () => ({ started: false, reason: 'web' }),
+    cancelActiveWalk: async () => ({ cancelled: true as const }),
+    getActiveWalkState: async (): Promise<WalkSnapshot> => ({
+      phase: 'idle',
+      flowId: null,
+      startedAt: null,
+      distanceMeters: 0,
+      durationSeconds: 0,
+      lastSampleAt: null,
+    }),
+    getStatus: async (): Promise<GeofenceStatus> => ({ monitoring: false }),
+    addListener: async (): Promise<PluginListenerHandle> => ({ remove: async () => {} }),
   },
 });
 
-// ── Public API ────────────────────────────────────────────────────────────────
+// ── Public API — home / gym ──────────────────────────────────────────────────
 
-/**
- * Register the home geofence region.
- *
- * On iOS, prompts for "Always" location permission if not already granted.
- * Persists the region so it survives app termination and is re-registered on
- * background relaunch.
- */
 export async function setHomeLocation(
   options: HomeLocationOptions
 ): Promise<GeofenceStatus> {
   return GeofencePluginNative.setHomeLocation(options);
 }
 
-/**
- * Remove the home geofence region and stop monitoring.
- */
 export async function removeHomeLocation(): Promise<{ monitoring: false }> {
   return GeofencePluginNative.removeHomeLocation();
 }
 
-/**
- * Get the current geofence monitoring status.
- */
+export async function setGymLocation(
+  options: GymLocationOptions
+): Promise<GeofenceStatus> {
+  return GeofencePluginNative.setGymLocation(options);
+}
+
+export async function removeGymLocation(): Promise<{ monitoring: false }> {
+  return GeofencePluginNative.removeGymLocation();
+}
+
+// ── Public API — windows + master toggle ─────────────────────────────────────
+
+export async function setDepartWindows(
+  windows: DepartWindows
+): Promise<{ ok: true }> {
+  return GeofencePluginNative.setDepartWindows(windows);
+}
+
+export async function setAutoWalkEnabled(
+  enabled: boolean
+): Promise<{ enabled: boolean }> {
+  return GeofencePluginNative.setAutoWalkEnabled({ enabled });
+}
+
+// ── Public API — walk control ────────────────────────────────────────────────
+
+/** Begin walk-2 immediately. Called from finishWorkout hook. */
+export async function startWalkNow(): Promise<{ started: boolean; reason?: string }> {
+  return GeofencePluginNative.startWalkNow();
+}
+
+/** User-initiated cancel (settings button or notification action falls back to this). */
+export async function cancelActiveWalk(): Promise<{ cancelled: true }> {
+  return GeofencePluginNative.cancelActiveWalk();
+}
+
+/** Pull the current walk snapshot. Use on app foreground/resume to reconcile. */
+export async function getActiveWalkState(): Promise<WalkSnapshot> {
+  return GeofencePluginNative.getActiveWalkState();
+}
+
+// ── Public API — status ──────────────────────────────────────────────────────
+
 export async function getGeofenceStatus(): Promise<GeofenceStatus> {
   return GeofencePluginNative.getStatus();
 }
 
-/**
- * Subscribe to home-arrival events.
- *
- * The callback fires after the 30-second dwell threshold is met (i.e. the user
- * has remained inside the geofence for ≥30 s — not just a brief pass-through).
- *
- * Returns an unsubscribe function.
- */
+// ── Public API — listeners ───────────────────────────────────────────────────
+
 export function onHomeArrival(
   handler: (event: HomeArrivalEvent) => void
 ): () => void {
   let handle: PluginListenerHandle | null = null;
-
   GeofencePluginNative.addListener('homeArrival', handler).then((h) => {
     handle = h;
   });
-
   return () => {
     handle?.remove();
   };
 }
 
-/**
- * Returns true when the geofence plugin is available (native iOS only).
- */
+export function onWalkStateChanged(
+  handler: (event: WalkStateChangedEvent) => void
+): () => void {
+  let handle: PluginListenerHandle | null = null;
+  GeofencePluginNative.addListener('walkStateChanged', handler).then((h) => {
+    handle = h;
+  });
+  return () => {
+    handle?.remove();
+  };
+}
+
+// ── Availability ─────────────────────────────────────────────────────────────
+
 export function isGeofenceAvailable(): boolean {
   return Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'ios';
 }
 
-// ── LocalStorage keys for persisting user-configured home location ────────────
+// ── LocalStorage — home ──────────────────────────────────────────────────────
 
 const LS_HOME_LAT = 'rebirth-geofence-lat';
 const LS_HOME_LON = 'rebirth-geofence-lon';
@@ -151,4 +253,69 @@ export function clearHomeLocationFromLS(): void {
   localStorage.removeItem(LS_HOME_LAT);
   localStorage.removeItem(LS_HOME_LON);
   localStorage.removeItem(LS_HOME_RADIUS);
+}
+
+// ── LocalStorage — gym ───────────────────────────────────────────────────────
+
+const LS_GYM_LAT = 'rebirth-geofence-gym-lat';
+const LS_GYM_LON = 'rebirth-geofence-gym-lon';
+const LS_GYM_RADIUS = 'rebirth-geofence-gym-radius';
+
+export function saveGymLocationToLS(lat: number, lon: number, radius: number): void {
+  localStorage.setItem(LS_GYM_LAT, String(lat));
+  localStorage.setItem(LS_GYM_LON, String(lon));
+  localStorage.setItem(LS_GYM_RADIUS, String(radius));
+}
+
+export function loadGymLocationFromLS(): GymLocationOptions | null {
+  const lat = parseFloat(localStorage.getItem(LS_GYM_LAT) ?? '');
+  const lon = parseFloat(localStorage.getItem(LS_GYM_LON) ?? '');
+  const radius = parseFloat(localStorage.getItem(LS_GYM_RADIUS) ?? '100');
+  if (isNaN(lat) || isNaN(lon)) return null;
+  return { lat, lon, radius };
+}
+
+export function clearGymLocationFromLS(): void {
+  localStorage.removeItem(LS_GYM_LAT);
+  localStorage.removeItem(LS_GYM_LON);
+  localStorage.removeItem(LS_GYM_RADIUS);
+}
+
+// ── LocalStorage — windows + master toggle ───────────────────────────────────
+
+const LS_DEPART_WINDOWS = 'rebirth-geofence-depart-windows';
+const LS_AUTO_WALK_ENABLED = 'rebirth-geofence-auto-walk-enabled';
+
+export const DEFAULT_DEPART_WINDOWS: DepartWindows = {
+  weekday: { start: '04:30', end: '06:00' },
+  weekend: { start: '05:00', end: '08:00' },
+};
+
+export function saveDepartWindowsToLS(windows: DepartWindows): void {
+  localStorage.setItem(LS_DEPART_WINDOWS, JSON.stringify(windows));
+}
+
+export function loadDepartWindowsFromLS(): DepartWindows {
+  const raw = localStorage.getItem(LS_DEPART_WINDOWS);
+  if (!raw) return DEFAULT_DEPART_WINDOWS;
+  try {
+    const parsed = JSON.parse(raw);
+    if (
+      parsed?.weekday?.start && parsed?.weekday?.end &&
+      parsed?.weekend?.start && parsed?.weekend?.end
+    ) {
+      return parsed as DepartWindows;
+    }
+  } catch {
+    // fall through
+  }
+  return DEFAULT_DEPART_WINDOWS;
+}
+
+export function isAutoWalkEnabledFromLS(): boolean {
+  return localStorage.getItem(LS_AUTO_WALK_ENABLED) === 'true';
+}
+
+export function saveAutoWalkEnabledToLS(enabled: boolean): void {
+  localStorage.setItem(LS_AUTO_WALK_ENABLED, enabled ? 'true' : 'false');
 }

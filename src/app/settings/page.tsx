@@ -40,6 +40,7 @@ import {
 } from '@/lib/geofence';
 import { GeofenceOnboarding } from '@/components/GeofenceOnboarding';
 import { HealthKitSettings } from '@/components/HealthKitSettings';
+import { MorningWalkSettings } from '@/components/MorningWalkSettings';
 
 const REST_TIMES = [30, 60, 90, 120, 150, 180, 210, 240, 300];
 
@@ -681,6 +682,9 @@ export default function SettingsPage() {
             )}
           </div>
         )}
+
+        {/* ── Auto-log Morning Walks ──────────────────── */}
+        <MorningWalkSettings />
 
         {/* ── Apple Health ────────────────────────────── */}
         <HealthKitSettings />
