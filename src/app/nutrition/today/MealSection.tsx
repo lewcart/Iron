@@ -22,7 +22,12 @@ interface Props {
 }
 
 export function MealSection({ slot, logs, onAdd, onEditLog, onDeleteLog }: Props) {
-  const total = logs.reduce((sum, l) => sum + (l.calories ?? 0), 0);
+  // Number() guards against string-typed NUMERICs that snuck in via sync pull
+  // before the changes-route fix; without it, 571 + 114 string-concatenates.
+  const total = logs.reduce((sum, l) => {
+    const n = l.calories == null ? 0 : Number(l.calories);
+    return sum + (Number.isFinite(n) ? n : 0);
+  }, 0);
   const hasLogs = logs.length > 0;
 
   // Empty section: collapse to a thin add-prompt header. Less visual noise on

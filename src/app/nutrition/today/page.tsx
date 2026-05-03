@@ -80,12 +80,21 @@ function NutritionTodayContent() {
   const bands = (targets?.bands ?? DEFAULT_BANDS) as MacroBands;
 
   const totals = useMemo(() => {
+    // Number() coerces strings → numbers defensively. Postgres NUMERIC pulled
+    // via sync arrived as strings before the changes-route fix, so any rows
+    // already in Dexie from that window need this guard or `+` concatenates
+    // ("571" + "114" = "571114"). Safe for new rows too — Number(0.5) = 0.5.
+    const num = (v: number | string | null | undefined): number => {
+      if (v == null) return 0;
+      const n = typeof v === 'number' ? v : Number(v);
+      return Number.isFinite(n) ? n : 0;
+    };
     let cal = 0, pro = 0, carb = 0, fat = 0;
     for (const l of logs) {
-      cal += l.calories ?? 0;
-      pro += l.protein_g ?? 0;
-      carb += l.carbs_g ?? 0;
-      fat += l.fat_g ?? 0;
+      cal += num(l.calories);
+      pro += num(l.protein_g);
+      carb += num(l.carbs_g);
+      fat += num(l.fat_g);
     }
     return { cal, pro, carb, fat };
   }, [logs]);

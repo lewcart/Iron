@@ -260,12 +260,28 @@ async function fetchRows(table: SyncedTable, uuids: string[]): Promise<Array<Rec
         `SELECT uuid, logged_at, meal_type, meal_name, calories, protein_g, carbs_g, fat_g,
                 notes, template_meal_id, status
          FROM nutrition_logs WHERE uuid = ANY($1::text[])`, [uuids]))
-        .map(r => ({ ...r, logged_at: toIso(r.logged_at) }));
+        .map(r => ({
+          ...r,
+          logged_at: toIso(r.logged_at),
+          // Postgres NUMERIC → string by default in node-postgres. Without the
+          // cast, the client sums them with `+` and gets "571"+"114" = "571114".
+          calories: r.calories != null ? Number(r.calories) : null,
+          protein_g: r.protein_g != null ? Number(r.protein_g) : null,
+          carbs_g: r.carbs_g != null ? Number(r.carbs_g) : null,
+          fat_g: r.fat_g != null ? Number(r.fat_g) : null,
+        }));
     case 'nutrition_week_meals':
-      return query<Record<string, unknown>>(
+      return (await query<Record<string, unknown>>(
         `SELECT uuid, day_of_week, meal_slot, meal_name, protein_g, carbs_g, fat_g,
                 calories, quality_rating, sort_order
-         FROM nutrition_week_meals WHERE uuid = ANY($1::text[])`, [uuids]);
+         FROM nutrition_week_meals WHERE uuid = ANY($1::text[])`, [uuids]))
+        .map(r => ({
+          ...r,
+          calories: r.calories != null ? Number(r.calories) : null,
+          protein_g: r.protein_g != null ? Number(r.protein_g) : null,
+          carbs_g: r.carbs_g != null ? Number(r.carbs_g) : null,
+          fat_g: r.fat_g != null ? Number(r.fat_g) : null,
+        }));
     case 'nutrition_day_notes':
       return (await query<Record<string, unknown>>(
         `SELECT uuid, date, hydration_ml, notes, approved_status, approved_at,
