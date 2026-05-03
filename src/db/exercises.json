@@ -3203,6 +3203,42 @@
     ]
   },
   {
+    "uuid": "B9D6C4E2-7A3F-4D8B-9E2A-1F5C8D7E0A4B",
+    "id": 9101,
+    "name": "cable-hip-abduction",
+    "title": "Cable Hip Abduction",
+    "alias": [
+      "Standing Hip Abduction",
+      "Cable Glute Abduction"
+    ],
+    "primer": "Targets hip abductors (gluteus medius / minimus and tensor fasciae latae). Pair with hip thrust + RDL work for complete hip development.",
+    "type": "isolation",
+    "primary": [
+      "hip_abductors"
+    ],
+    "secondary": [
+      "glutes"
+    ],
+    "equipment": [
+      "cable"
+    ],
+    "steps": [
+      "Attach an ankle cuff to a low cable pulley.",
+      "Stand sideways to the stack with the cable cuff on your outside leg.",
+      "Hold the stack for balance; keep a soft bend in the standing knee.",
+      "Lift the cuffed leg out to the side, leading with the heel, until you feel a strong contraction at the top of the hip.",
+      "Lower under control. Complete reps, then switch legs."
+    ],
+    "tips": [
+      "Keep your torso upright — leaning away inflates ROM but reduces glute medius work.",
+      "Pause briefly at the top of each rep to maximize tension.",
+      "Lighter loads with full ROM beat heavier loads with momentum for this muscle."
+    ],
+    "references": [],
+    "pdf": [],
+    "png": []
+  },
+  {
     "uuid": "0EE3033B-5E17-4F16-B8C4-85569F0C1C14",
     "id": 138,
     "name": "front-squat-with-barbell",

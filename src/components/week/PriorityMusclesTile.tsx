@@ -5,6 +5,7 @@ import { useState } from 'react';
 import { ChevronDown, ChevronUp, Info, Pencil } from 'lucide-react';
 import type { PriorityMuscleRow, PriorityMusclesTileData } from '@/lib/api/resolveWeekTiles';
 import type { Zone } from '@/lib/training/volume-landmarks';
+import { SufficiencyBadge } from './SufficiencyBadge';
 
 /** Tile 1 — Priority Muscles vs MEV/MAV/MRV (the headline tile). */
 export function PriorityMusclesTile({ data }: { data: PriorityMusclesTileData }) {
@@ -151,10 +152,11 @@ function MuscleRow({ row, priority = false }: { row: PriorityMuscleRow; priority
         <span className="font-medium text-foreground">
           {row.display_name}{sourceMark}
         </span>
-        <span className="tabular-nums text-muted-foreground">
+        <span className="tabular-nums text-muted-foreground inline-flex items-baseline gap-1">
           <span className={zoneTextClass(row.zone)}>{row.effective_set_count.toFixed(1)}</span>
           {' '}
           <span className="text-[10px]">eff sets</span>
+          <SufficiencyBadge weeks={row.weeks_with_data} muscleName={row.display_name} />
         </span>
       </div>
       <div className="relative h-2 w-full rounded-full bg-muted overflow-hidden">

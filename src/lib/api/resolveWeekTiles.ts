@@ -65,6 +65,10 @@ export interface PriorityMuscleRow {
   isDeemphasis: boolean;
   /** True when no exercise in the catalog tags this muscle (data-needs). */
   needsTagging: boolean;
+  /** v1.1: Number of recent weeks (out of last 8) with ≥1 effective set
+   *  logged for this muscle. Drives the inline data-sufficiency badge.
+   *  null when not computed (callers can omit; badge stays hidden). */
+  weeks_with_data?: number | null;
 }
 
 export interface PriorityMusclesTileData {

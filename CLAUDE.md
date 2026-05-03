@@ -70,6 +70,39 @@ Notes:
   - `{status:'not_connected', reason, message}` — same shape as snapshot's not_connected branch.
   - `{status:'invalid_range'|'invalid_input', message, hint}` — for date / window_days / fields validation.
 
+## Cardio workflow (for MCP agents)
+
+Same date conventions as nutrition / sleep (`YYYY-MM-DD` in user's local timezone for `start_date`/`end_date`).
+
+Tool selection:
+- `get_health_workouts` → raw workout records (cardio + strength, source-filterable)
+- `get_health_cardio_week` → weekly compliance vs `body_plan.programming_dose` cardio targets, with optional zone-2 / intervals split + 7-day breakdown. Mirrors `get_health_sleep_summary`'s shape.
+
+Common workflows:
+- **"Did I hit cardio targets this week?"** → `get_health_cardio_week({ window_days: 7 })`
+- **"Compare cardio this week vs last"** → two `get_health_cardio_week` calls with shifted `start_date`
+- **"What activity types did I do?"** → `get_health_workouts({ from, to })` + group by `activity_type`
+
+Notes:
+- Activity-type classification only in v1.1 (HR-zone path requires per-second HR samples not in `healthkit_workouts` schema yet — see `docs` follow-up). Strength workouts are excluded silently from cardio totals.
+- `{status:'no_targets', message}` (200) returns when neither umbrella nor sub-targets are set on `programming_dose` — surface to Lou as "you haven't set cardio targets yet" rather than empty data.
+- Errors mirror sleep summary: `{status:'not_connected'|'invalid_input', ...}`.
+
+## Prescription engine note for MCP agents
+
+Lou sees a synthesized weekly prescription on `/feed` (PUSH/REDUCE/DELOAD per priority muscle, with HRT-context lines). Do NOT independently prescribe weekly set/load changes via chat — that creates a "two coaches disagreeing" failure mode the v1.1 prescription card was designed to eliminate.
+
+You may:
+- Explain logged facts (sets vs MEV/MAV via `get_sets_per_muscle`, RIR drift, HRV via `get_health_snapshot`, HRT phase via `list_hrt_timeline`).
+- Reference what the Week page prescription card shows if the user asks.
+
+You should NOT:
+- Generate your own next-week set/load prescription.
+- Suggest set/load changes that conflict with what the Week page shows.
+- Re-derive the prescription engine's logic with your own heuristics.
+
+The engine is intentionally not exposed via MCP in v1.1 — the verdict stays UI-side; only the inputs are MCP-queryable.
+
 ## Strength workflow (for MCP agents)
 
 Canonical muscle taxonomy: 18 slugs. Always use canonical slugs (`chest`, `lats`, `glutes`, etc.) — legacy values like `pectoralis major` are accepted by `find_exercises(muscle_group)` via synonyms, but `create_exercise` rejects non-canonical input with `UNKNOWN_MUSCLE`.
