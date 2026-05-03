@@ -2,6 +2,12 @@
 
 All notable changes to Rebirth are documented here.
 
+## [0.7.2] - 2026-05-03
+
+### Added
+- **Cross-browser auto face-detection for photo alignment.** Adjust alignment now auto-detects the face on open and prefills `crop_offset_y` so heads land at the comparison head-anchor automatically. Works on iOS Safari (incl. Capacitor) via lazy-loaded `@tensorflow-models/face-detection` with MediaPipe's long-range "full" model — the variant designed for full-body shots where faces are small in frame. Native `window.FaceDetector` is still tried first on Chromium-on-Android for the zero-cost path. Bundle cost: ~630KB JS + ~250KB model on first call, browser-cached after that.
+- **`AUTO-DETECTING…` overlay** while detection runs and a trans-blue **AUTO** badge when the prefilled offset came from auto-detection. Drag-to-nudge still overrides without losing the badge until save.
+
 ## [0.7.1] - 2026-05-02
 
 ### Added
