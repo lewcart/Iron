@@ -15,7 +15,6 @@ interface SessionRow {
   kind: 'progress' | 'projection' | 'inspo';
   mime_type: string | null;
   created_at: string;
-  finalized_at: string | null;
 }
 
 interface ChunkRow {
@@ -32,11 +31,16 @@ const chunks = new Map<string, ChunkRow[]>();
 const queryMock = vi.fn(async (sql: string, params: unknown[] = []) => {
   const s = sql.trim();
 
-  // GC
-  if (s.startsWith('DELETE FROM mcp_upload_sessions') && s.includes('finalized_at IS NULL')) {
+  // GC sweep — DELETE all sessions older than cutoff. cleanupSession is
+  // already responsible for removing finalized sessions, so the GC sweep
+  // only catches abandoned ones.
+  if (
+    s.startsWith('DELETE FROM mcp_upload_sessions WHERE created_at') ||
+    (s.startsWith('DELETE FROM mcp_upload_sessions') && s.includes('finalized_at IS NULL'))
+  ) {
     const cutoff = params[0] as string;
     for (const [id, sess] of sessions) {
-      if (sess.finalized_at === null && sess.created_at < cutoff) {
+      if (sess.created_at < cutoff) {
         sessions.delete(id);
         chunks.delete(id);
       }
@@ -52,14 +56,21 @@ const queryMock = vi.fn(async (sql: string, params: unknown[] = []) => {
       kind,
       mime_type,
       created_at: new Date().toISOString(),
-      finalized_at: null,
     });
     return [];
   }
 
-  // INSERT chunk (upsert)
-  if (s.startsWith('INSERT INTO mcp_upload_chunks')) {
+  // upload_chunk: combined CTE (INSERT chunk + SELECT totals).
+  // The SUT calls this as `WITH ins AS (INSERT ...) SELECT total, chunks FROM ins`.
+  // We model FK enforcement by throwing if the session doesn't exist.
+  if (s.startsWith('WITH ins AS') && s.includes('INSERT INTO mcp_upload_chunks')) {
     const [upload_id, sequence, data_b64, byte_length] = params as [string, number, string, number];
+    if (!sessions.has(upload_id)) {
+      const err = new Error(
+        `insert or update on table "mcp_upload_chunks" violates foreign key constraint (Postgres code 23503)`,
+      );
+      throw err;
+    }
     const arr = chunks.get(upload_id) ?? [];
     const idx = arr.findIndex(c => c.sequence === sequence);
     if (idx >= 0) {
@@ -68,26 +79,23 @@ const queryMock = vi.fn(async (sql: string, params: unknown[] = []) => {
       arr.push({ sequence, data_b64, byte_length });
     }
     chunks.set(upload_id, arr);
-    return [];
-  }
-
-  // SELECT chunks for assembly
-  if (s.startsWith('SELECT sequence, data_b64, byte_length')) {
-    const [upload_id] = params as [string];
-    const arr = (chunks.get(upload_id) ?? []).slice();
-    arr.sort((a, b) => a.sequence - b.sequence);
-    return arr;
-  }
-
-  // SELECT totals
-  if (s.includes("COALESCE(SUM(byte_length)") && s.includes('FROM mcp_upload_chunks')) {
-    const [upload_id] = params as [string];
-    const arr = chunks.get(upload_id) ?? [];
     const total = arr.reduce((a, c) => a + c.byte_length, 0);
     return [{ total: String(total), chunks: String(arr.length) }];
   }
 
-  // SELECT session
+  // loadAndAssemble: LEFT JOIN session+chunks in one shot.
+  if (s.startsWith('SELECT s.upload_id, s.kind, s.mime_type')) {
+    const [upload_id] = params as [string];
+    const sess = sessions.get(upload_id);
+    if (!sess) return [];
+    const arr = (chunks.get(upload_id) ?? []).slice().sort((a, b) => a.sequence - b.sequence);
+    if (arr.length === 0) {
+      return [{ ...sess, sequence: null, data_b64: null, byte_length: null }];
+    }
+    return arr.map(c => ({ ...sess, sequence: c.sequence, data_b64: c.data_b64, byte_length: c.byte_length }));
+  }
+
+  // SELECT session (still used by getSession helper if anyone else calls it)
   if (s.startsWith('SELECT upload_id, kind, mime_type')) {
     const [upload_id] = params as [string];
     const sess = sessions.get(upload_id);
@@ -201,7 +209,7 @@ describe('start_upload', () => {
   });
 
   it('S3: GC deletes orphan sessions older than horizon on next start_upload', async () => {
-    // Manually insert an old orphan (created_at = 2h ago, finalized_at = null).
+    // Manually insert an old orphan (created_at = 2h ago).
     const orphanId = 'orphan-1';
     const ancientTs = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
     sessions.set(orphanId, {
@@ -209,7 +217,6 @@ describe('start_upload', () => {
       kind: 'progress',
       mime_type: null,
       created_at: ancientTs,
-      finalized_at: null,
     });
     chunks.set(orphanId, [{ sequence: 0, data_b64: 'aGVsbG8=', byte_length: 8 }]);
     expect(sessions.has(orphanId)).toBe(true);
@@ -227,10 +234,27 @@ describe('start_upload', () => {
       kind: 'progress',
       mime_type: null,
       created_at: new Date().toISOString(),
-      finalized_at: null,
     });
     await call('start_upload', { kind: 'progress' });
     expect(sessions.has(freshId)).toBe(true);
+  });
+
+  it('S5: rejects invalid mime_type with MIME_INVALID', async () => {
+    const r = await call('start_upload', { kind: 'projection', mime_type: 'text/html' });
+    expect(r.isError).toBe(true);
+    const body = parse(r);
+    expect((body.error as { code: string }).code).toBe('MIME_INVALID');
+  });
+
+  it('S6: accepts uppercase mime_type and lowercases it', async () => {
+    const r = await call('start_upload', { kind: 'inspo', mime_type: 'IMAGE/PNG' });
+    expect(r.isError).toBeUndefined();
+    const id = parse(r).upload_id as string;
+    await call('upload_chunk', { upload_id: id, sequence: 0, data_b64: 'aGk=' });
+    await call('finalize_inspo_photo', { upload_id: id });
+    const [pathname, , opts] = putMock.mock.calls[0];
+    expect(pathname).toMatch(/\.png$/);
+    expect((opts as { contentType: string }).contentType).toBe('image/png');
   });
 });
 

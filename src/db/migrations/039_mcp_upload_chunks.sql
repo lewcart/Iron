@@ -21,9 +21,13 @@ CREATE TABLE IF NOT EXISTS mcp_upload_sessions (
   upload_id    UUID PRIMARY KEY,
   kind         TEXT NOT NULL CHECK (kind IN ('progress', 'projection', 'inspo')),
   mime_type    TEXT,
-  created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
-  finalized_at TIMESTAMPTZ
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- Older versions of this migration also added a finalized_at column. We
+-- never wrote to it (finalize DELETEs the row outright), so drop it on
+-- existing dev DBs. New installs never see it.
+ALTER TABLE mcp_upload_sessions DROP COLUMN IF EXISTS finalized_at;
 
 CREATE TABLE IF NOT EXISTS mcp_upload_chunks (
   upload_id   UUID NOT NULL REFERENCES mcp_upload_sessions(upload_id) ON DELETE CASCADE,
@@ -34,9 +38,14 @@ CREATE TABLE IF NOT EXISTS mcp_upload_chunks (
   PRIMARY KEY (upload_id, sequence)
 );
 
--- Partial index supports the GC sweep efficiently. Only orphan sessions
--- (those still pending finalize) are indexed, so the index stays tiny —
--- typically <10 rows at any moment for a single-user app.
-CREATE INDEX IF NOT EXISTS mcp_upload_sessions_orphan_idx
-  ON mcp_upload_sessions (created_at)
-  WHERE finalized_at IS NULL;
+-- base64 chunks compress poorly — store EXTERNAL (out-of-line, no LZ
+-- compression) so finalize's SELECT-all-chunks doesn't pay LZ-decode cost
+-- for every chunk. Rows are deleted within seconds anyway.
+ALTER TABLE mcp_upload_chunks ALTER COLUMN data_b64 SET STORAGE EXTERNAL;
+
+-- Drop the partial-predicate version (older migration draft used WHERE
+-- finalized_at IS NULL); recreate as a plain index on created_at to
+-- support the GC sweep. Single-user means the table is tiny anyway.
+DROP INDEX IF EXISTS mcp_upload_sessions_orphan_idx;
+CREATE INDEX IF NOT EXISTS mcp_upload_sessions_created_at_idx
+  ON mcp_upload_sessions (created_at);

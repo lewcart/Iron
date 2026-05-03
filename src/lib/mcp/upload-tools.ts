@@ -24,7 +24,6 @@
  */
 
 import { randomUUID } from 'crypto';
-import { put } from '@vercel/blob';
 import { query, queryOne } from '@/db/db';
 import type { MCPTool } from '@/lib/mcp-tools';
 import { ALL_POSES, isPose } from '@/lib/poses';
@@ -102,7 +101,6 @@ interface SessionRow {
   kind: UploadKind;
   mime_type: string | null;
   created_at: string;
-  finalized_at: string | null;
 }
 
 interface ChunkRow {
@@ -112,16 +110,16 @@ interface ChunkRow {
 }
 
 /**
- * Sweep orphan sessions (created > 1h ago, never finalized). Cheap one-shot
- * DELETE with a partial-index scan. Safe to call from any tool — does not
- * throw on Postgres errors (best-effort cleanup).
+ * Sweep orphan sessions (created > 1h ago, still in the staging table).
+ * Cheap one-shot DELETE — finalized sessions are already removed by
+ * cleanupSession, so this only catches abandoned uploads. Safe to call
+ * from any tool; does not throw on Postgres errors (best-effort cleanup).
  */
 async function gcOrphans(): Promise<void> {
   try {
     const cutoff = new Date(Date.now() - GC_HORIZON_MS).toISOString();
     await query(
-      `DELETE FROM mcp_upload_sessions
-       WHERE finalized_at IS NULL AND created_at < $1`,
+      `DELETE FROM mcp_upload_sessions WHERE created_at < $1`,
       [cutoff],
     );
   } catch {
@@ -129,17 +127,13 @@ async function gcOrphans(): Promise<void> {
   }
 }
 
-async function getSession(uploadId: string): Promise<SessionRow | null> {
-  return queryOne<SessionRow>(
-    `SELECT upload_id, kind, mime_type, created_at, finalized_at
-       FROM mcp_upload_sessions
-      WHERE upload_id = $1`,
-    [uploadId],
-  );
-}
-
 /**
  * Load all chunks for a session, verify contiguity, concat + decode.
+ *
+ * Single roundtrip: a LEFT JOIN pulls the session row + all chunk rows in
+ * one shot. Session columns repeat on every row (denormalized), which is
+ * fine for the ~30 rows we typically see and saves a Postgres roundtrip on
+ * the finalize hot path.
  *
  * Returns either the assembled buffer (with kind + mime_type lifted from the
  * session row) or a structured error envelope ready to return from the tool.
@@ -151,8 +145,26 @@ async function loadAndAssemble(
   | { ok: true; buffer: Buffer; mime_type: string; session: SessionRow }
   | { ok: false; error: ReturnType<typeof toolErrorEnvelope> }
 > {
-  const session = await getSession(uploadId);
-  if (!session) {
+  type JoinedRow = {
+    upload_id: string;
+    kind: UploadKind;
+    mime_type: string | null;
+    created_at: string;
+    sequence: number | null;
+    data_b64: string | null;
+    byte_length: number | null;
+  };
+  const rows = await query<JoinedRow>(
+    `SELECT s.upload_id, s.kind, s.mime_type, s.created_at,
+            c.sequence, c.data_b64, c.byte_length
+       FROM mcp_upload_sessions s
+       LEFT JOIN mcp_upload_chunks c ON c.upload_id = s.upload_id
+      WHERE s.upload_id = $1
+      ORDER BY c.sequence ASC NULLS FIRST`,
+    [uploadId],
+  );
+
+  if (rows.length === 0) {
     return {
       ok: false,
       error: toolErrorEnvelope(
@@ -162,6 +174,14 @@ async function loadAndAssemble(
       ),
     };
   }
+
+  const session: SessionRow = {
+    upload_id: rows[0].upload_id,
+    kind: rows[0].kind,
+    mime_type: rows[0].mime_type,
+    created_at: rows[0].created_at,
+  };
+
   if (session.kind !== expectedKind) {
     return {
       ok: false,
@@ -173,13 +193,14 @@ async function loadAndAssemble(
     };
   }
 
-  const chunks = await query<ChunkRow>(
-    `SELECT sequence, data_b64, byte_length
-       FROM mcp_upload_chunks
-      WHERE upload_id = $1
-      ORDER BY sequence ASC`,
-    [uploadId],
-  );
+  // LEFT JOIN gives us one row with NULL chunk fields when no chunks exist.
+  const chunks: ChunkRow[] = rows
+    .filter(r => r.sequence !== null)
+    .map(r => ({
+      sequence: r.sequence as number,
+      data_b64: r.data_b64 as string,
+      byte_length: r.byte_length as number,
+    }));
 
   if (chunks.length === 0) {
     return {
@@ -213,25 +234,18 @@ async function loadAndAssemble(
     }
   }
 
+  // Must join the b64 string first, THEN decode — chunks can split mid-
+  // quartet and per-chunk decode would corrupt the assembly. Buffer.from
+  // silently skips invalid chars rather than throwing, so the only
+  // meaningful "decode failed" signal is an empty result buffer.
   const joined = chunks.map(c => c.data_b64).join('');
-  let buffer: Buffer;
-  try {
-    buffer = Buffer.from(joined, 'base64');
-    if (buffer.length === 0) {
-      return {
-        ok: false,
-        error: toolErrorEnvelope(
-          'DECODE_FAILED',
-          'Reassembled chunks decoded to an empty buffer. Check that each upload_chunk passed raw base64 (no data: URL prefix, no surrounding JSON).',
-        ),
-      };
-    }
-  } catch (e) {
+  const buffer = Buffer.from(joined, 'base64');
+  if (buffer.length === 0) {
     return {
       ok: false,
       error: toolErrorEnvelope(
         'DECODE_FAILED',
-        `Failed to decode reassembled base64: ${e instanceof Error ? e.message : String(e)}`,
+        'Reassembled chunks decoded to an empty buffer. Check that each upload_chunk passed raw base64 (no data: URL prefix, no surrounding JSON).',
       ),
     };
   }
@@ -249,9 +263,22 @@ function extForMime(mime: string): string {
 }
 
 /**
- * On success: mark session finalized, then explicitly DELETE so storage
- * stays tight (cascade clears chunks). Two writes, but the explicit delete
- * means the staging tables only ever hold pending uploads.
+ * Lazy-load @vercel/blob so the SDK stays out of the cold-start path for
+ * every other MCP tool call (read tools vastly outnumber finalize calls).
+ */
+async function putToBlob(
+  pathname: string,
+  body: Buffer,
+  contentType: string,
+): Promise<{ url: string }> {
+  const { put } = await import('@vercel/blob');
+  return put(pathname, body, { access: 'public', contentType });
+}
+
+/**
+ * Explicit DELETE on finalize success — cascade clears chunks. Keeps the
+ * staging tables holding only pending uploads. Best-effort; if it fails,
+ * gcOrphans() will sweep the row within GC_HORIZON_MS.
  */
 async function cleanupSession(uploadId: string): Promise<void> {
   try {
@@ -271,10 +298,22 @@ async function startUpload(args: Record<string, unknown>) {
       `kind must be one of: ${VALID_KINDS.join(', ')}`,
     );
   }
-  const mimeType =
-    typeof args.mime_type === 'string' && args.mime_type.length > 0
-      ? args.mime_type.toLowerCase()
-      : null;
+
+  // Allowlist mime_type. If unset we default to image/jpeg at finalize.
+  // Validating here means the contentType served back by Vercel Blob can
+  // never be set to text/html or application/javascript by the caller —
+  // a small defense even with a single trusted operator.
+  let mimeType: string | null = null;
+  if (typeof args.mime_type === 'string' && args.mime_type.length > 0) {
+    const lowered = args.mime_type.toLowerCase();
+    if (!(lowered in MIME_TO_EXT)) {
+      return toolErrorEnvelope(
+        'MIME_INVALID',
+        `mime_type "${args.mime_type}" is not in the image allowlist. Accepted: ${Object.keys(MIME_TO_EXT).join(', ')}.`,
+      );
+    }
+    mimeType = lowered;
+  }
 
   // Fire GC opportunistically. Don't block on it.
   await gcOrphans();
@@ -311,41 +350,47 @@ async function uploadChunk(args: Record<string, unknown>) {
     return toolErrorEnvelope('INVALID_ARGS', 'data_b64 must be a non-empty base64 string');
   }
 
-  const session = await getSession(uploadId);
-  if (!session) {
-    return toolErrorEnvelope(
-      'SESSION_NOT_FOUND',
-      `No upload session for upload_id=${uploadId}. Call start_upload first.`,
-      'start_upload',
+  // Single-roundtrip insert + totals via CTEs. The FK constraint on
+  // mcp_upload_chunks(upload_id) → mcp_upload_sessions(upload_id) makes
+  // this throw 23503 if the session doesn't exist; we translate to
+  // SESSION_NOT_FOUND below. ON CONFLICT makes re-sends idempotent.
+  //
+  // The trailing SELECT reads from a snapshot taken before `ins` ran, so
+  // it would otherwise miss the just-inserted row. We compute totals by
+  // unioning the snapshot (excluding this sequence to avoid double-count
+  // on overwrite) with the RETURNING from `ins` itself.
+  let totals: { total: string; chunks: string } | null;
+  try {
+    totals = await queryOne<{ total: string; chunks: string }>(
+      `WITH ins AS (
+         INSERT INTO mcp_upload_chunks (upload_id, sequence, data_b64, byte_length)
+         VALUES ($1, $2, $3, $4)
+         ON CONFLICT (upload_id, sequence)
+         DO UPDATE SET data_b64 = EXCLUDED.data_b64, byte_length = EXCLUDED.byte_length
+         RETURNING sequence, byte_length
+       )
+       SELECT
+         (COALESCE((SELECT SUM(byte_length) FROM mcp_upload_chunks
+                     WHERE upload_id = $1 AND sequence != $2), 0)
+          + (SELECT byte_length FROM ins))::TEXT AS total,
+         ((SELECT COUNT(*) FROM mcp_upload_chunks
+            WHERE upload_id = $1 AND sequence != $2)
+          + (SELECT COUNT(*) FROM ins))::TEXT AS chunks
+       FROM ins`,
+      [uploadId, sequence, dataB64, dataB64.length],
     );
+  } catch (e) {
+    // Postgres 23503 = foreign_key_violation → session row doesn't exist.
+    const msg = e instanceof Error ? e.message : String(e);
+    if (/23503|foreign key|violates foreign/i.test(msg)) {
+      return toolErrorEnvelope(
+        'SESSION_NOT_FOUND',
+        `No upload session for upload_id=${uploadId}. Call start_upload first.`,
+        'start_upload',
+      );
+    }
+    throw e;
   }
-  if (session.finalized_at) {
-    return toolErrorEnvelope(
-      'SESSION_FINALIZED',
-      'This upload session has already been finalized. Start a new one with start_upload.',
-      'start_upload',
-    );
-  }
-
-  // Idempotent insert. If Anthropic retries the same chunk, the latest data
-  // wins — simpler than rejecting the duplicate.
-  await query(
-    `INSERT INTO mcp_upload_chunks (upload_id, sequence, data_b64, byte_length)
-     VALUES ($1, $2, $3, $4)
-     ON CONFLICT (upload_id, sequence)
-     DO UPDATE SET data_b64 = EXCLUDED.data_b64, byte_length = EXCLUDED.byte_length`,
-    [uploadId, sequence, dataB64, dataB64.length],
-  );
-
-  // Re-aggregate to enforce the cap. One row per chunk, single user, this is
-  // a tiny scan against an indexed PK.
-  const totals = await queryOne<{ total: string; chunks: string }>(
-    `SELECT COALESCE(SUM(byte_length), 0)::TEXT AS total,
-            COUNT(*)::TEXT AS chunks
-       FROM mcp_upload_chunks
-      WHERE upload_id = $1`,
-    [uploadId],
-  );
   const totalChars = Number(totals?.total ?? 0);
   const chunkCount = Number(totals?.chunks ?? 0);
 
@@ -403,10 +448,7 @@ async function finalizeProgressPhoto(args: Record<string, unknown>) {
 
   const ext = extForMime(assembled.mime_type);
   const pathname = pathnameFor('progress', pose, ext);
-  const blob = await put(pathname, assembled.buffer, {
-    access: 'public',
-    contentType: assembled.mime_type,
-  });
+  const blob = await putToBlob(pathname, assembled.buffer, assembled.mime_type);
 
   const photo = await createProgressPhoto({
     blob_url: blob.url,
@@ -416,7 +458,6 @@ async function finalizeProgressPhoto(args: Record<string, unknown>) {
   });
 
   await cleanupSession(uploadId);
-  await gcOrphans();
   return toolResult(photo);
 }
 
@@ -443,10 +484,7 @@ async function finalizeInspoPhoto(args: Record<string, unknown>) {
 
   const ext = extForMime(assembled.mime_type);
   const pathname = pathnameFor('inspo', pose, ext);
-  const blob = await put(pathname, assembled.buffer, {
-    access: 'public',
-    contentType: assembled.mime_type,
-  });
+  const blob = await putToBlob(pathname, assembled.buffer, assembled.mime_type);
 
   const photo = await createInspoPhoto({
     blob_url: blob.url,
@@ -458,7 +496,6 @@ async function finalizeInspoPhoto(args: Record<string, unknown>) {
   });
 
   await cleanupSession(uploadId);
-  await gcOrphans();
   return toolResult(photo);
 }
 
@@ -480,14 +517,11 @@ async function finalizeProjectionPhoto(args: Record<string, unknown>) {
 
   const ext = extForMime(assembled.mime_type);
   const pathname = pathnameFor('projection', pose, ext);
-  const blob = await put(pathname, assembled.buffer, {
-    access: 'public',
-    contentType: assembled.mime_type,
-  });
+  const blob = await putToBlob(pathname, assembled.buffer, assembled.mime_type);
 
   const photo = await createProjectionPhoto({
     blob_url: blob.url,
-    pose: pose as ProgressPhotoPose,
+    pose,
     notes: typeof args.notes === 'string' ? args.notes : null,
     taken_at: typeof args.taken_at === 'string' ? args.taken_at : undefined,
     source_progress_photo_uuid:
@@ -499,7 +533,6 @@ async function finalizeProjectionPhoto(args: Record<string, unknown>) {
   });
 
   await cleanupSession(uploadId);
-  await gcOrphans();
   return toolResult(photo);
 }
 
