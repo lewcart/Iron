@@ -13,7 +13,6 @@ import { query, queryOne } from '@/db/db';
 import {
   classifyActivityType,
   aggregateMinutes,
-  type CardioCategory,
   type CardioMinutesByCategory,
 } from '@/lib/training/cardio-classification';
 import {

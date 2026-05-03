@@ -169,7 +169,7 @@ function SingleMode({
       </div>
 
       <div className="flex items-center gap-4">
-        <Ring pct={pct} tone={tone} />
+        <Ring pct={pct} />
         <div className="min-w-0">
           <div className="flex items-baseline gap-1">
             <span className={`text-2xl font-semibold tabular-nums ${tone}`}>
@@ -224,8 +224,9 @@ function CardioRow({
   );
 }
 
-function Ring({ pct, tone }: { pct: number; tone: string }) {
-  // Simple SVG ring. 56pt diameter outer, 8pt stroke.
+function Ring({ pct }: { pct: number }) {
+  // Simple SVG ring. 56pt diameter outer, 8pt stroke. Color tone is derived
+  // from `pct` directly — no separate `tone` prop needed.
   const size = 56;
   const stroke = 8;
   const radius = (size - stroke) / 2;
