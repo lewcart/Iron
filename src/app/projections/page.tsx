@@ -45,13 +45,7 @@ function PhotoCard({
 
   return (
     <div className="relative group">
-      <div
-        className="relative aspect-[3/4] overflow-hidden rounded-xl bg-zinc-800"
-        onContextMenu={(e) => {
-          e.preventDefault();
-          setConfirming(true);
-        }}
-      >
+      <div className="relative aspect-[3/4] overflow-hidden rounded-xl bg-zinc-800">
         <Image
           src={photo.blob_url}
           alt={photo.notes ?? `Projection ${formatDate(photo.taken_at)}`}
@@ -71,23 +65,34 @@ function PhotoCard({
             </span>
           )}
         </div>
+
+        {/* Tap-target delete affordance — iOS WebView has no context menu so
+            the long-press fallback was unreachable. ⋯ button mirrors the
+            pattern in /measurements PhotoTile. */}
+        <button
+          onClick={() => setConfirming(true)}
+          className="absolute top-1 right-1 h-7 w-7 rounded-full bg-black/70 text-white flex items-center justify-center shadow-md ring-1 ring-white/10 z-10"
+          aria-label="Projection actions"
+        >
+          ⋯
+        </button>
       </div>
 
       {confirming && (
-        <div className="absolute inset-0 rounded-xl bg-black/70 flex flex-col items-center justify-center gap-3 z-10">
-          <p className="text-white text-xs font-medium">Delete?</p>
+        <div className="absolute inset-0 rounded-xl bg-black/70 flex flex-col items-center justify-center gap-3 z-20">
+          <p className="text-white text-xs font-medium text-center px-2">Delete this projection?</p>
           <div className="flex gap-2">
             <button
               onClick={handleDelete}
               disabled={deleting}
-              className="flex items-center gap-1 px-3 py-1.5 bg-red-600 text-white text-xs rounded-lg disabled:opacity-50"
+              className="flex items-center gap-1 px-3 py-2 bg-red-600 text-white text-xs rounded-lg disabled:opacity-50 min-h-[44px]"
             >
               <Trash2 className="h-3.5 w-3.5" />
               Delete
             </button>
             <button
               onClick={() => setConfirming(false)}
-              className="px-3 py-1.5 bg-zinc-700 text-white text-xs rounded-lg"
+              className="px-3 py-2 bg-zinc-700 text-white text-xs rounded-lg min-h-[44px]"
             >
               Cancel
             </button>
