@@ -2758,10 +2758,12 @@ async function getPlanProgressTool() {
 
 import { nutritionTools } from './mcp/nutrition-tools';
 import { strategyWriteTools } from './mcp/strategy-tools';
+import { uploadChunkedTools } from './mcp/upload-tools';
 
 export const tools: MCPTool[] = [
   ...nutritionTools,
   ...strategyWriteTools,
+  ...uploadChunkedTools,
   {
     name: 'ping',
     description: 'Health check — confirms the MCP server is reachable.',
@@ -3595,7 +3597,7 @@ export const tools: MCPTool[] = [
   {
     name: 'upload_progress_photo',
     description:
-      'Upload a body progress photo to Vercel Blob and record it in progress_photos. Provide image bytes via image_base64 (raw base64 or data URL) OR image_url (the server fetches and re-hosts). Pose is required (front/side/back for full-body, face_front/face_side for face crops, other for uncategorized). Optional notes and taken_at (ISO).',
+      'Upload a body progress photo to Vercel Blob and record it in progress_photos. Provide image bytes via image_base64 (raw base64 or data URL) OR image_url (the server fetches and re-hosts). Pose is required (front/side/back for full-body, face_front/face_side for face crops, other for uncategorized). Optional notes and taken_at (ISO). Claude clients: prefer the chunked path (start_upload kind=progress → upload_chunk → finalize_progress_photo) — image_base64 inlined here exceeds the mobile MCP approval gate (~64k char limit).',
     inputSchema: {
       type: 'object',
       properties: {
@@ -3622,7 +3624,7 @@ export const tools: MCPTool[] = [
   {
     name: 'upload_inspo_photo',
     description:
-      'Upload a physique inspiration photo to Vercel Blob and record it in inspo_photos. Provide image bytes via image_base64 OR image_url. Pass burst_group_id to attach this frame to an existing burst. Pose categorizes the photo for the photos-compare viewer (mixes with progress photos of the same pose).',
+      'Upload a physique inspiration photo to Vercel Blob and record it in inspo_photos. Provide image bytes via image_base64 OR image_url. Pass burst_group_id to attach this frame to an existing burst. Pose categorizes the photo for the photos-compare viewer (mixes with progress photos of the same pose). Claude clients: prefer the chunked path (start_upload kind=inspo → upload_chunk → finalize_inspo_photo) — image_base64 inlined here exceeds the mobile MCP approval gate (~64k char limit).',
     inputSchema: {
       type: 'object',
       properties: {
@@ -3671,7 +3673,7 @@ export const tools: MCPTool[] = [
   {
     name: 'upload_projection_photo',
     description:
-      'Upload an AI-generated projection (Lou\'s aspirational future-self image, generated outside this app — ChatGPT/Midjourney/etc.) to Vercel Blob and record it in projection_photos. Schema mirrors progress_photos so the compare viewer can line a projection up against a real progress photo at the same pose. Pose is required. Optional source_progress_photo_uuid links the projection to the photo it was generated from (the compare viewer prefers that pairing). Optional target_horizon is a label like "3mo" / "6mo" / "12mo" or freeform.',
+      'Upload an AI-generated projection (Lou\'s aspirational future-self image, generated outside this app — ChatGPT/Midjourney/etc.) to Vercel Blob and record it in projection_photos. Schema mirrors progress_photos so the compare viewer can line a projection up against a real progress photo at the same pose. Pose is required. Optional source_progress_photo_uuid links the projection to the photo it was generated from (the compare viewer prefers that pairing). Optional target_horizon is a label like "3mo" / "6mo" / "12mo" or freeform. Claude clients: prefer the chunked path (start_upload kind=projection → upload_chunk → finalize_projection_photo) — image_base64 inlined here exceeds the mobile MCP approval gate (~64k char limit).',
     inputSchema: {
       type: 'object',
       properties: {
