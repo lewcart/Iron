@@ -2,6 +2,26 @@
 
 All notable changes to Rebirth are documented here.
 
+## [0.8.1] - 2026-05-04
+
+### Added (MCP chunked-upload protocol)
+
+- **Five new MCP tools** (`start_upload`, `upload_chunk`, `finalize_progress_photo`, `finalize_inspo_photo`, `finalize_projection_photo`) that let Claude iOS upload images in chunks. Fixes "Error: No approval received" — Anthropic's mobile MCP client silently rejects tool calls whose serialized arguments exceed a sub-64k char threshold, which made the existing `image_base64` path unusable from chat for any image larger than ~48KB. Protocol: `start_upload(kind)` returns an `upload_id` + recommended chunk size; caller sends N chunks of ~30k base64 chars each via `upload_chunk(upload_id, sequence, data_b64)`; `finalize_<kind>_photo(upload_id, ...)` reassembles + pushes to Vercel Blob + creates the photo row. Three finalize tools (one per kind) over a single conditional schema for cleaner Claude tool-call accuracy. Existing `upload_progress_photo` / `upload_inspo_photo` / `upload_projection_photo` tools retain their `image_base64` / `image_url` paths for non-Claude clients (server-to-server, curl, future Codex agents); their descriptions now point Claude clients at the chunked path explicitly.
+- **`mime_type` allowlist on `start_upload`** — rejects non-image MIME types with `MIME_INVALID` so Vercel Blob can never be coerced into serving `text/html` or `application/javascript` from the public bucket. Defense in depth on a single-trusted-operator deployment.
+- **Migration 039 (`mcp_upload_chunks.sql`)** — adds two staging tables (`mcp_upload_sessions`, `mcp_upload_chunks`) with `STORAGE EXTERNAL` on the base64 chunk column to skip useless LZ compression, plus a `created_at` index for the GC sweep. Opportunistic GC runs on every `start_upload` (deletes orphan sessions older than 24h); explicit cleanup on every successful finalize.
+
+### Architecture notes
+
+- **Why chunked-tool-call protocol over presigned URLs:** The MCP spec has no native file-upload primitive, and Vercel Blob's client-direct path (`@vercel/blob/client`) requires the caller to issue real HTTP PUTs. Claude can't drive PUTs from chat, only MCP tool calls. Postgres staging is the only path that lets Claude complete an upload end-to-end inside the MCP boundary. (This already-investigated tradeoff is captured as a project learning.)
+- **SQL combine for latency:** `upload_chunk` does INSERT + SELECT-totals in a single CTE (1 Postgres roundtrip per chunk, not 2). `loadAndAssemble` does session lookup + chunk fetch in a single LEFT JOIN. For a 1MB image at ~47 chunks on Neon serverless HTTP, this saves ~10s of cumulative latency.
+- **Adversarial-review hardening (commit 5191f11):** Both /review's Claude adversarial subagent and the Codex pass independently flagged the same four issues that single-user trust does NOT neutralize — sequence DoS via INT_MAX (one legitimate row would make the missing-chunk loop allocate billions of ints), cap not re-checked at finalize (caller could ignore SIZE_CAP_EXCEEDED), invalid UUID hitting Postgres 22P02 before the FK check, and orphan blob on DB-create failure. All four are now guarded with dedicated tests.
+- **Lazy-load `@vercel/blob`** inside finalize via dynamic `await import()` — keeps the SDK out of the cold-start path for every other MCP tool call (read tools vastly outnumber finalize calls).
+- **`createPhotoOrCleanupBlob` helper** wraps each `dbCreate*Photo` in a try/catch that `del()`s the blob on any DB failure. Without this, a Postgres timeout / FK violation on `source_progress_photo_uuid` / invalid `taken_at` would leak a public blob and silently cost storage forever.
+
+### Tests
+
+- 29 new tests in `src/lib/mcp/upload-tools.test.ts` covering happy paths, every error envelope code (`KIND_INVALID`, `MIME_INVALID`, `SESSION_NOT_FOUND`, `MISSING_CHUNKS`, `EMPTY_UPLOAD`, `KIND_MISMATCH`, `POSE_REQUIRED`, `POSE_INVALID`, `SIZE_CAP_EXCEEDED`, `DECODE_FAILED`, `INVALID_ARGS`), idempotent chunk re-send, GC behavior, the four hardening guards (sequence cap, UUID pre-validate, finalize cap re-check, orphan blob cleanup), and tool-registration regressions for both new and existing surfaces. End-to-end QA: 30/30 scenarios passing live against the dev server + Neon DB + Vercel Blob.
+
 ## [0.8.0] - 2026-05-03
 
 ### Added (Week page v1.1)
