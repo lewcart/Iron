@@ -5,9 +5,11 @@ import { ExternalLink, RefreshCw, ShieldCheck, ShieldOff, ShieldQuestion } from 
 import { Sheet } from '@/components/ui/sheet';
 import { HealthKit } from '@/lib/healthkit';
 import { markPermissionsRequested } from '@/features/health/healthService';
+import { HK_TYPES, type HKTypeRow } from '@/lib/healthkit-catalog';
 
-// Catalog of HealthKit types Rebirth uses.
-// Status keys match what the Swift `checkPermissionStatus` returns (see HealthKitPlugin.swift).
+// HK_TYPES is derived from src/lib/healthkit-types.json — the same JSON that
+// generates ios/App/App/HealthKitTypes.swift via scripts/gen-healthkit-types.mjs.
+// Single source of truth: drift between TS and Swift is structurally impossible.
 //
 // READ status is opaque on iOS by design — Apple hides whether a read permission
 // was granted/denied for privacy reasons. The Swift bridge always reports
@@ -16,38 +18,7 @@ import { markPermissionsRequested } from '@/features/health/healthService';
 //
 // WRITE status reflects the real authorization state.
 
-interface HKTypeRow {
-  /** Status-map key returned by HealthKit.checkPermissionStatus. */
-  statusKey: string;
-  /** Human label for the row. */
-  label: string;
-  /** What the app uses this type for, in plain English. */
-  blurb: string;
-  /** Whether Rebirth reads this type. */
-  read: boolean;
-  /** Whether Rebirth writes this type. */
-  write: boolean;
-}
-
-const HK_TYPES: HKTypeRow[] = [
-  // Reads
-  { statusKey: 'stepCount', label: 'Steps', blurb: 'Daily activity totals', read: true, write: false },
-  { statusKey: 'activeEnergyBurned', label: 'Active Energy', blurb: 'Workout energy expenditure', read: true, write: true },
-  { statusKey: 'basalEnergyBurned', label: 'Basal Energy', blurb: 'Resting metabolism (TDEE math)', read: true, write: false },
-  { statusKey: 'appleExerciseTime', label: 'Exercise Minutes', blurb: 'Movement minutes per day', read: true, write: false },
-  { statusKey: 'heartRate', label: 'Heart Rate', blurb: 'Workout intensity, recovery', read: true, write: false },
-  { statusKey: 'heartRateVariabilitySDNN', label: 'HRV', blurb: 'Recovery score, autonomic balance', read: true, write: false },
-  { statusKey: 'restingHeartRate', label: 'Resting Heart Rate', blurb: 'Cardio fitness baseline', read: true, write: false },
-  { statusKey: 'vo2Max', label: 'VO2 Max', blurb: 'Aerobic capacity trend', read: true, write: false },
-  { statusKey: 'sleepAnalysis', label: 'Sleep', blurb: 'Stages, in-bed, consistency', read: true, write: false },
-  { statusKey: 'distanceWalkingRunning', label: 'Walking + Running Distance', blurb: 'Step distance, walk workouts', read: true, write: false },
-  { statusKey: 'workout', label: 'Workouts', blurb: 'Reads cardio, writes Rebirth strength', read: true, write: true },
-  // Writes only
-  { statusKey: 'bodyMass', label: 'Body Mass', blurb: 'Weight from InBody scans', read: false, write: true },
-  { statusKey: 'bodyFatPercentage', label: 'Body Fat %', blurb: 'Body composition from InBody', read: false, write: true },
-  { statusKey: 'leanBodyMass', label: 'Lean Mass', blurb: 'Lean mass from InBody', read: false, write: true },
-  { statusKey: 'dietaryEnergyConsumed', label: 'Dietary Energy', blurb: 'Logged meal calories', read: false, write: true },
-];
+export type { HKTypeRow };
 
 type StatusValue = 'granted' | 'denied' | 'notDetermined' | 'unknown';
 
@@ -100,6 +71,12 @@ export function HealthKitPermissionsSheet({ open, onClose }: Props) {
   const [statuses, setStatuses] = useState<Record<string, string> | null>(null);
   const [loading, setLoading] = useState(false);
   const [requesting, setRequesting] = useState(false);
+  // 'shouldRequest' = iOS will actually show the sheet (new types or first-ever ask).
+  // 'unnecessary'   = every type in the request set has already been answered;
+  //                   tapping Request will silently no-op. UI hides the button.
+  // 'unknown'       = iOS refused to answer (rare); treat like shouldRequest.
+  // null            = haven't asked yet / not on iOS.
+  const [requestStatus, setRequestStatus] = useState<'shouldRequest' | 'unnecessary' | 'unknown' | null>(null);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -107,12 +84,18 @@ export function HealthKitPermissionsSheet({ open, onClose }: Props) {
       const { available } = await HealthKit.isAvailable();
       if (!available) {
         setStatuses(null);
+        setRequestStatus(null);
         return;
       }
-      const { statuses } = await HealthKit.checkPermissionStatus();
+      const [{ statuses }, status] = await Promise.all([
+        HealthKit.checkPermissionStatus(),
+        HealthKit.getRequestStatus().catch(() => ({ status: 'unknown' as const, shouldRequest: true })),
+      ]);
       setStatuses(statuses);
+      setRequestStatus(status.status);
     } catch {
       setStatuses(null);
+      setRequestStatus(null);
     } finally {
       setLoading(false);
     }
@@ -206,23 +189,25 @@ export function HealthKitPermissionsSheet({ open, onClose }: Props) {
         <section>
           <p className="text-label-section mb-1 px-1">Actions</p>
           <div className="ios-section">
-            <button
-              onClick={handleRequest}
-              disabled={requesting}
-              className="ios-row justify-between w-full text-left disabled:opacity-50"
-            >
-              <div className="flex items-center gap-3">
-                <div className="w-8 h-8 rounded-[10px] flex items-center justify-center flex-shrink-0 bg-blue-500/20">
-                  <RefreshCw className={`w-4 h-4 text-blue-400 ${requesting ? 'animate-spin' : ''}`} />
+            {requestStatus !== 'unnecessary' && (
+              <button
+                onClick={handleRequest}
+                disabled={requesting}
+                className="ios-row justify-between w-full text-left disabled:opacity-50"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="w-8 h-8 rounded-[10px] flex items-center justify-center flex-shrink-0 bg-blue-500/20">
+                    <RefreshCw className={`w-4 h-4 text-blue-400 ${requesting ? 'animate-spin' : ''}`} />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium">Request authorization</p>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      iOS will show the sheet for any types you haven&rsquo;t answered yet.
+                    </p>
+                  </div>
                 </div>
-                <div className="min-w-0">
-                  <p className="text-sm font-medium">Request authorization</p>
-                  <p className="text-xs text-muted-foreground mt-0.5">
-                    Re-prompts for any types iOS hasn&rsquo;t recorded yet.
-                  </p>
-                </div>
-              </div>
-            </button>
+              </button>
+            )}
             <button
               onClick={openIosSettings}
               className="ios-row justify-between w-full text-left"
@@ -234,7 +219,9 @@ export function HealthKitPermissionsSheet({ open, onClose }: Props) {
                 <div className="min-w-0">
                   <p className="text-sm font-medium">Manage in Health app</p>
                   <p className="text-xs text-muted-foreground mt-0.5">
-                    Sources &rarr; Rebirth lets you toggle each type on or off.
+                    {requestStatus === 'unnecessary'
+                      ? 'You’ve already answered every type. Toggle access here.'
+                      : 'Sources → Rebirth lets you toggle each type on or off.'}
                   </p>
                 </div>
               </div>
@@ -242,8 +229,9 @@ export function HealthKitPermissionsSheet({ open, onClose }: Props) {
             </button>
           </div>
           <p className="text-[10px] text-muted-foreground px-1 mt-2 leading-relaxed">
-            iOS only re-prompts for types you&rsquo;ve never seen the sheet for. To revoke
-            an already-granted type, you have to open the Health app.
+            {requestStatus === 'unnecessary'
+              ? 'iOS won’t re-show the permission sheet once every type has an answer — by design, for privacy. Use Manage in Health app to flip individual toggles.'
+              : 'iOS only shows the sheet for types you haven’t answered yet. To revoke an already-granted type, open the Health app.'}
           </p>
         </section>
       </div>

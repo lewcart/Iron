@@ -108,10 +108,27 @@ export interface WrittenSample {
   hk_type: string;
 }
 
+export type HKRequestStatus = 'shouldRequest' | 'unnecessary' | 'unknown';
+
 interface HealthKitPlugin {
   isAvailable(): Promise<{ available: boolean }>;
   requestPermissions(): Promise<{ granted: boolean }>;
   checkPermissionStatus(): Promise<{ statuses: Record<string, string> }>;
+  /** Tells you whether iOS will actually show the permission sheet on next requestPermissions().
+   *  After the user has answered for every type in the request set, iOS returns 'unnecessary'
+   *  and requestPermissions becomes a silent no-op. Use this to decide whether to show the
+   *  in-app "Request Authorization" button or route to Settings/Health. */
+  getRequestStatus(): Promise<{ status: HKRequestStatus; shouldRequest: boolean }>;
+  /** Sets the runtime feature flag that gates iOS 26 Medications reads. When enabling,
+   *  this also triggers iOS's per-object medication chooser so the user can pick which
+   *  medications Rebirth can read. Returns whether the flag was set AND whether the user
+   *  authorized at least some medications. */
+  setMedicationsEnabled(options: { enabled: boolean }): Promise<{ enabled: boolean; authorized: boolean; reason?: 'ios_too_old' }>;
+  /** Requests per-object read authorization for iOS 26 Medications. Shows iOS's
+   *  medication chooser sheet so the user picks which meds the app can read.
+   *  Medications CANNOT use the standard requestAuthorization(toShare:read:) flow —
+   *  Apple's HealthKit aborts the process if you try. Per-object auth is mandatory. */
+  requestMedicationsAuthorization(): Promise<{ granted: boolean; reason?: 'not_available' | 'ios_too_old' }>;
 
   // Legacy reads (kept for HealthSection compat)
   saveWorkout(options: SaveWorkoutOptions): Promise<{ saved: boolean; hk_uuid?: string }>;

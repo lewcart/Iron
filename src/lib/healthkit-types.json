@@ -1,0 +1,66 @@
+{
+	"_doc": "Single source of truth for HealthKit types Rebirth requests. Edit this file and run `npm run gen:healthkit` to regenerate ios/App/App/HealthKitTypes.swift. The CI drift test fails if the generated file is out of date.",
+	"_fields": {
+		"tsKey": "Stable key used in checkPermissionStatus status map and TS UI catalog.",
+		"kind": "quantity | category | workout | medicationDoseEvent",
+		"identifier": "Swift identifier case (e.g. 'stepCount' for HKQuantityTypeIdentifier.stepCount). Omit for workout/medicationDoseEvent.",
+		"access": "read | write | readWrite",
+		"label": "Human label for the permissions sheet UI.",
+		"blurb": "What Rebirth uses this type for, plain English.",
+		"iosMin": "Minimum iOS major.minor (e.g. '26.0'). Generates an @available guard. Null = no guard.",
+		"featureFlag": "Optional UserDefaults bool key that gates this type at runtime. Null = always on.",
+		"category": "Bucket for the UI grouping. clinical | bodycomp | activity | workouts | sleep | nutrition | medications"
+	},
+	"types": [
+		{ "tsKey": "stepCount", "kind": "quantity", "identifier": "stepCount", "access": "read", "label": "Steps", "blurb": "Daily activity totals", "category": "activity" },
+		{ "tsKey": "activeEnergyBurned", "kind": "quantity", "identifier": "activeEnergyBurned", "access": "readWrite", "label": "Active Energy", "blurb": "Workout energy expenditure", "category": "activity" },
+		{ "tsKey": "basalEnergyBurned", "kind": "quantity", "identifier": "basalEnergyBurned", "access": "read", "label": "Basal Energy", "blurb": "Resting metabolism (TDEE math)", "category": "activity" },
+		{ "tsKey": "appleExerciseTime", "kind": "quantity", "identifier": "appleExerciseTime", "access": "read", "label": "Exercise Minutes", "blurb": "Movement minutes per day", "category": "activity" },
+		{ "tsKey": "appleStandTime", "kind": "quantity", "identifier": "appleStandTime", "access": "read", "label": "Stand Time", "blurb": "Sedentary tracking, NEAT", "category": "activity" },
+		{ "tsKey": "appleStandHour", "kind": "category", "identifier": "appleStandHour", "access": "read", "label": "Stand Hours", "blurb": "Stand-ring data, hourly movement", "category": "activity" },
+		{ "tsKey": "walkingHeartRateAverage", "kind": "quantity", "identifier": "walkingHeartRateAverage", "access": "read", "label": "Walking Heart Rate", "blurb": "Daily aerobic load proxy", "category": "activity" },
+		{ "tsKey": "walkingSpeed", "kind": "quantity", "identifier": "walkingSpeed", "access": "read", "label": "Walking Speed", "blurb": "Functional fitness signal", "category": "activity" },
+		{ "tsKey": "distanceWalkingRunning", "kind": "quantity", "identifier": "distanceWalkingRunning", "access": "read", "label": "Walking + Running Distance", "blurb": "Step distance, walk workouts", "category": "activity" },
+
+		{ "tsKey": "heartRate", "kind": "quantity", "identifier": "heartRate", "access": "read", "label": "Heart Rate", "blurb": "Workout intensity, recovery", "category": "clinical" },
+		{ "tsKey": "heartRateVariabilitySDNN", "kind": "quantity", "identifier": "heartRateVariabilitySDNN", "access": "read", "label": "HRV", "blurb": "Recovery score, autonomic balance", "category": "clinical" },
+		{ "tsKey": "restingHeartRate", "kind": "quantity", "identifier": "restingHeartRate", "access": "read", "label": "Resting Heart Rate", "blurb": "Cardio fitness baseline", "category": "clinical" },
+		{ "tsKey": "vo2Max", "kind": "quantity", "identifier": "vo2Max", "access": "read", "label": "VO2 Max", "blurb": "Aerobic capacity trend", "category": "clinical" },
+		{ "tsKey": "heartRateRecoveryOneMinute", "kind": "quantity", "identifier": "heartRateRecoveryOneMinute", "access": "read", "label": "HR Recovery (1 min)", "blurb": "Heart rate recovery after exercise", "category": "clinical", "iosMin": "16.0" },
+		{ "tsKey": "bloodPressureSystolic", "kind": "quantity", "identifier": "bloodPressureSystolic", "access": "readWrite", "label": "Blood Pressure (Systolic)", "blurb": "HRT users monitor BP; cuff data syncs from Omron etc.", "category": "clinical" },
+		{ "tsKey": "bloodPressureDiastolic", "kind": "quantity", "identifier": "bloodPressureDiastolic", "access": "readWrite", "label": "Blood Pressure (Diastolic)", "blurb": "HRT users monitor BP; cuff data syncs from Omron etc.", "category": "clinical" },
+		{ "tsKey": "oxygenSaturation", "kind": "quantity", "identifier": "oxygenSaturation", "access": "read", "label": "Blood Oxygen (SpO2)", "blurb": "Apple Watch SpO2; recovery / illness signal", "category": "clinical" },
+		{ "tsKey": "bodyTemperature", "kind": "quantity", "identifier": "bodyTemperature", "access": "readWrite", "label": "Body Temperature", "blurb": "Sick-day flag", "category": "clinical" },
+		{ "tsKey": "appleSleepingWristTemperature", "kind": "quantity", "identifier": "appleSleepingWristTemperature", "access": "read", "label": "Sleeping Wrist Temperature", "blurb": "Apple Watch overnight temperature deviation", "category": "clinical", "iosMin": "17.0" },
+		{ "tsKey": "respiratoryRate", "kind": "quantity", "identifier": "respiratoryRate", "access": "read", "label": "Respiratory Rate", "blurb": "Sleep quality input, illness signal", "category": "clinical" },
+		{ "tsKey": "bloodGlucose", "kind": "quantity", "identifier": "bloodGlucose", "access": "readWrite", "label": "Blood Glucose", "blurb": "CGM data if you ever wear one", "category": "clinical" },
+
+		{ "tsKey": "bodyMass", "kind": "quantity", "identifier": "bodyMass", "access": "readWrite", "label": "Body Mass", "blurb": "Weight from InBody scans", "category": "bodycomp" },
+		{ "tsKey": "bodyFatPercentage", "kind": "quantity", "identifier": "bodyFatPercentage", "access": "readWrite", "label": "Body Fat %", "blurb": "Body composition from InBody", "category": "bodycomp" },
+		{ "tsKey": "leanBodyMass", "kind": "quantity", "identifier": "leanBodyMass", "access": "readWrite", "label": "Lean Mass", "blurb": "Lean mass from InBody", "category": "bodycomp" },
+		{ "tsKey": "bodyMassIndex", "kind": "quantity", "identifier": "bodyMassIndex", "access": "readWrite", "label": "BMI", "blurb": "Body mass index", "category": "bodycomp" },
+		{ "tsKey": "waistCircumference", "kind": "quantity", "identifier": "waistCircumference", "access": "readWrite", "label": "Waist Circumference", "blurb": "Tape-measure data, complements InBody", "category": "bodycomp" },
+		{ "tsKey": "height", "kind": "quantity", "identifier": "height", "access": "readWrite", "label": "Height", "blurb": "One-time read; informs BMI math", "category": "bodycomp" },
+
+		{ "tsKey": "workout", "kind": "workout", "access": "readWrite", "label": "Workouts", "blurb": "Reads cardio, writes Rebirth strength", "category": "workouts" },
+
+		{ "tsKey": "sleepAnalysis", "kind": "category", "identifier": "sleepAnalysis", "access": "read", "label": "Sleep", "blurb": "Stages, in-bed, consistency", "category": "sleep" },
+		{ "tsKey": "mindfulSession", "kind": "category", "identifier": "mindfulSession", "access": "readWrite", "label": "Mindful Minutes", "blurb": "Meditation tracking, pairs with sleep", "category": "sleep" },
+
+		{ "tsKey": "dietaryEnergyConsumed", "kind": "quantity", "identifier": "dietaryEnergyConsumed", "access": "write", "label": "Dietary Energy", "blurb": "Logged meal calories", "category": "nutrition" },
+		{ "tsKey": "dietaryProtein", "kind": "quantity", "identifier": "dietaryProtein", "access": "write", "label": "Protein", "blurb": "Logged macro from meals", "category": "nutrition" },
+		{ "tsKey": "dietaryCarbohydrates", "kind": "quantity", "identifier": "dietaryCarbohydrates", "access": "write", "label": "Carbohydrates", "blurb": "Logged macro from meals", "category": "nutrition" },
+		{ "tsKey": "dietaryFatTotal", "kind": "quantity", "identifier": "dietaryFatTotal", "access": "write", "label": "Total Fat", "blurb": "Logged macro from meals", "category": "nutrition" },
+		{ "tsKey": "dietaryFatSaturated", "kind": "quantity", "identifier": "dietaryFatSaturated", "access": "write", "label": "Saturated Fat", "blurb": "From meal-log fat breakdown", "category": "nutrition" },
+		{ "tsKey": "dietaryFatMonounsaturated", "kind": "quantity", "identifier": "dietaryFatMonounsaturated", "access": "write", "label": "Monounsaturated Fat", "blurb": "From meal-log fat breakdown", "category": "nutrition" },
+		{ "tsKey": "dietaryFatPolyunsaturated", "kind": "quantity", "identifier": "dietaryFatPolyunsaturated", "access": "write", "label": "Polyunsaturated Fat", "blurb": "From meal-log fat breakdown", "category": "nutrition" },
+		{ "tsKey": "dietaryFiber", "kind": "quantity", "identifier": "dietaryFiber", "access": "write", "label": "Fiber", "blurb": "From meal log", "category": "nutrition" },
+		{ "tsKey": "dietarySugar", "kind": "quantity", "identifier": "dietarySugar", "access": "write", "label": "Sugar", "blurb": "From meal log", "category": "nutrition" },
+		{ "tsKey": "dietarySodium", "kind": "quantity", "identifier": "dietarySodium", "access": "write", "label": "Sodium", "blurb": "Water retention signal for HRT", "category": "nutrition" },
+		{ "tsKey": "dietaryCaffeine", "kind": "quantity", "identifier": "dietaryCaffeine", "access": "write", "label": "Caffeine", "blurb": "Sleep-quality input", "category": "nutrition" },
+		{ "tsKey": "dietaryCholesterol", "kind": "quantity", "identifier": "dietaryCholesterol", "access": "write", "label": "Cholesterol", "blurb": "Lab-context complement", "category": "nutrition" },
+		{ "tsKey": "dietaryWater", "kind": "quantity", "identifier": "dietaryWater", "access": "write", "label": "Water", "blurb": "Hydration tracking", "category": "nutrition" },
+
+		{ "tsKey": "medicationDoseEvent", "kind": "medicationDoseEvent", "access": "read", "label": "Medications", "blurb": "iOS Health Medications dose events (HRT verification). Per-object auth — uses HKHealthStore.requestPerObjectReadAuthorization, NOT the standard request set.", "category": "medications", "iosMin": "26.0", "featureFlag": "rebirth.medications.enabled" }
+	]
+}

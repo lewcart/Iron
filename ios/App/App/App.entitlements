@@ -4,6 +4,15 @@
 <dict>
 	<key>com.apple.developer.healthkit</key>
 	<true/>
+	<!--
+	  com.apple.developer.healthkit.access controls extended scopes (clinical
+	  records, medications). The empty array below is the prime suspect for the
+	  iOS 26.3.1 launch crash that was observed when HKMedicationDoseEvent was
+	  first wired up. Before flipping the rebirth.medications.enabled UserDefaults
+	  flag on a real device, capture the crash log first and confirm whether this
+	  array needs <string>health-medications</string> (or similar) added. Apple
+	  reference: https://developer.apple.com/documentation/bundleresources/entitlements/com_apple_developer_healthkit_access
+	-->
 	<key>com.apple.developer.healthkit.access</key>
 	<array/>
 	<key>com.apple.security.application-groups</key>

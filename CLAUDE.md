@@ -1,8 +1,29 @@
 # Rebirth — agent guide
 
-This is a single-user (Lewis only) Next.js App Router PWA with a Drizzle +
+This is a single-user (Lou only) Next.js App Router PWA with a Drizzle +
 Postgres backend, Dexie + sync-engine local-first layer, and an MCP server
 that exposes the same surface to AI agents.
+
+## Ship policy: direct-to-main, no PRs
+
+**This project ships straight to `main`. Do not create PRs.** Lou is the only
+user and will not review them — branches with open PRs accumulate and work gets
+lost. This overrides the default `/ship` skill behavior.
+
+When Lou says "ship" / "deploy" / "send it" / "push it":
+1. If currently on a feature branch, merge it into `main` locally first
+   (`git checkout main && git merge --no-ff <branch>`), then delete the branch
+   (local + remote). If on `main` already, skip this.
+2. Run the project's existing ship steps (tests, version bump, CHANGELOG, commit).
+3. `git push origin main` — done. No `gh pr create`.
+4. If the `/ship` skill tries to open a PR, stop and push to main directly.
+
+Exception: if Lou explicitly says "open a PR" or "make a PR for this", do that
+instead — but the default is direct-to-main.
+
+When you find a feature branch sitting around with unmerged commits, surface it
+to Lou ("branch X has N unmerged commits — merge to main or drop?") rather than
+leaving it.
 
 ## Nutrition workflow (for MCP agents)
 
@@ -64,6 +85,31 @@ Set quality:
 - **`effective_set_count`** (Phase 3) is the RIR-weighted variant on every `get_sets_per_muscle` row and `get_weekly_summary.by_muscle` row: RIR 0–3 counts 1.0, RIR 4 counts 0.5, RIR 5+ counts 0.0, RIR NULL counts 1.0 (charitable default until corpus exists). Until RIR is logged on most sets, `effective_set_count ≈ set_count`. The /feed Muscles This Week tile flags a muscle with a "JUNK" badge when `effective / set_count < 0.6` AND `set_count > 0` — meaning most logged sets were too far from failure to drive hypertrophy.
 
 `coverage` flag on `get_sets_per_muscle` rows: `'none'` means no exercise in the catalog tags this muscle (yet — the audit pass will populate). Until then those muscles can't accumulate sets. UI collapses them into a footer.
+
+## HealthKit type catalog (for any code touching the iOS HealthKit plugin)
+
+The HealthKit request set lives in **`src/lib/healthkit-types.json`** as the single
+source of truth. Two artifacts derive from it:
+
+- **`ios/App/App/HealthKitTypes.swift`** — generated. Don't hand-edit. Run
+  `npm run gen:healthkit` after changing the JSON.
+- **`src/lib/healthkit-catalog.ts`** — imports the JSON directly to populate the
+  permissions sheet UI (`HealthKitPermissionsSheet.tsx`).
+
+Drift between Swift and TS is structurally impossible: `npm run test` includes
+`src/lib/healthkit-drift.test.ts` which fails CI if the committed Swift file is
+out of date with the JSON. `npm run cap:sync` and `npm run ios:device` both run
+`gen:healthkit` automatically.
+
+To add a new HealthKit type Rebirth requests: edit the JSON entry array, run
+`npm run gen:healthkit`, commit both files, push. iOS will surface a new toggle
+on the next `requestPermissions()` call.
+
+The medications entry (`medicationDoseEvent`, iOS 26+) is gated by both an
+`@available(iOS 26.0, *)` Swift check AND the `rebirth.medications.enabled`
+UserDefaults flag (default OFF). Flipping the flag on requires a real-device
+crash log to confirm the iOS 26 launch crash is resolved first. Use
+`HealthKit.setMedicationsEnabled({enabled: true})` from the JS bridge.
 
 ## Projection workflow (for MCP agents)
 

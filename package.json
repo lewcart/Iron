@@ -10,7 +10,8 @@
     "dev": "next dev",
     "build": "next build",
     "build:cap": "mv src/app/api src/_api_tmp && CAPACITOR_BUILD=1 next build; mv src/_api_tmp src/app/api",
-    "cap:sync": "npx cap sync ios && node scripts/cap-post-sync.mjs",
+    "cap:sync": "npx cap sync ios && node scripts/cap-post-sync.mjs && npm run gen:healthkit",
+    "gen:healthkit": "node scripts/gen-healthkit-types.mjs",
     "start": "next start",
     "lint": "next lint",
     "db:migrate": "tsx src/db/migrate.ts",
@@ -24,7 +25,7 @@
     "cli:build": "tsc src/cli.ts --outDir dist --module nodenext --moduleResolution nodenext --target es2022 --esModuleInterop --skipLibCheck",
     "cli": "tsx src/cli.ts",
     "test": "vitest run",
-    "ios:device": "bash scripts/ios-device-build.sh"
+    "ios:device": "npm run gen:healthkit && bash scripts/ios-device-build.sh"
   },
   "dependencies": {
     "@capacitor/app": "^8.1.0",
