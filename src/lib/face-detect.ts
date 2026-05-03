@@ -2,14 +2,21 @@
 //
 // Returns a CSS object-position y% (0-100) that anchors the detected face at
 // the canonical comparison y (~25% from the top). NULL = couldn't detect a
-// face (unsupported browser, back-pose photo, etc.) — caller should leave
-// crop_offset_y null and let the renderer fall back to 50 (center).
+// face (e.g. back-pose photo, all detection paths failed) — caller should
+// leave crop_offset_y null and let the renderer fall back to 50 (center).
 //
-// Uses window.FaceDetector (Shape Detection API) where available — that's
-// Chromium-based browsers behind a flag in some channels, on by default in
-// others. On Safari (incl. iOS via Capacitor) the API doesn't exist yet, so
-// this returns null and manual drag-to-nudge is the only path. We never
-// download an ML model; cost stays $0.
+// Two-tier strategy:
+//   1. window.FaceDetector (Shape Detection API) — Chromium-on-Android only,
+//      native, ~zero overhead. Tried first.
+//   2. @tensorflow-models/face-detection with MediaPipe full-range model —
+//      lazy-loaded via dynamic import, runs on iOS Safari (incl. Capacitor),
+//      web Safari, and any browser without the Shape Detection API. Bundle:
+//      ~630KB JS + 250KB model on first call, cached forever.
+//
+// The "full" MediaPipe model variant is specifically designed for full-body
+// shots where faces are small in frame (down to ~5% of width) — exactly the
+// progress-photo case. The "short" / BlazeFace variant only handles
+// selfie-distance faces and would miss most progress shots.
 //
 // Convention: the "anchor y" is where the face center should sit in the
 // rendered comparison frame. With anchor=25%, faces all land at ~1/4 from
@@ -25,11 +32,58 @@ interface FaceDetectorCtor {
   new (): { detect(image: ImageBitmapSource): Promise<DetectedFace[]> };
 }
 
+// TFJS detector + import are cached at module scope so the lazy import + model
+// load only happens once per session.
+type TfjsDetector = {
+  estimateFaces(input: ImageBitmap): Promise<Array<{ box: { yMin: number; height: number } }>>;
+};
+let tfjsDetectorPromise: Promise<TfjsDetector | null> | null = null;
+
+async function loadTfjsDetector(): Promise<TfjsDetector | null> {
+  if (tfjsDetectorPromise) return tfjsDetectorPromise;
+  tfjsDetectorPromise = (async () => {
+    try {
+      // Dynamic imports keep TFJS out of the main bundle. The first user-
+      // initiated upload pays the load cost; the browser caches the chunks.
+      const [faceDetection] = await Promise.all([
+        import('@tensorflow-models/face-detection'),
+        import('@tensorflow/tfjs-core'),
+        import('@tensorflow/tfjs-converter'),
+        import('@tensorflow/tfjs-backend-webgl'),
+      ]);
+      const detector = await faceDetection.createDetector(
+        faceDetection.SupportedModels.MediaPipeFaceDetector,
+        {
+          runtime: 'tfjs',
+          // 'full' is the long-range model — handles small faces in full-body
+          // shots. 'short' is BlazeFace-equivalent and would miss most.
+          modelType: 'full',
+        },
+      );
+      return detector as unknown as TfjsDetector;
+    } catch (err) {
+      // Don't cache the rejection so a transient failure can be retried on
+      // a later upload; reset the promise.
+      tfjsDetectorPromise = null;
+      console.warn('[face-detect] tfjs detector load failed:', err);
+      return null;
+    }
+  })();
+  return tfjsDetectorPromise;
+}
+
 /** Best-effort face detection. Returns CSS object-position y% (0-100), or null
- *  when no face is detected or the browser doesn't ship FaceDetector. */
+ *  when no face is detected by any path. */
 export async function tryDetectFaceY(blob: Blob): Promise<number | null> {
-  // Feature-detect at runtime — typed loosely so we never fail compilation
-  // on browsers that don't ship the API.
+  // Path 1: native FaceDetector (fast, free).
+  const native = await tryNativeFaceDetector(blob);
+  if (native !== null) return native;
+
+  // Path 2: TFJS + MediaPipe long-range. Loaded on demand.
+  return tryTfjsFaceDetector(blob);
+}
+
+async function tryNativeFaceDetector(blob: Blob): Promise<number | null> {
   const Ctor =
     typeof window !== 'undefined'
       ? ((window as unknown as { FaceDetector?: FaceDetectorCtor }).FaceDetector ?? null)
@@ -42,31 +96,49 @@ export async function tryDetectFaceY(blob: Blob): Promise<number | null> {
     const detector = new Ctor();
     const faces = await detector.detect(bitmap);
     if (!faces || faces.length === 0) return null;
-
-    // Pick the largest face (most likely the subject).
     const face = faces.reduce((a, b) =>
       a.boundingBox.height > b.boundingBox.height ? a : b,
     );
-
-    // Face center as a fraction of image height.
     const faceCenterY = face.boundingBox.y + face.boundingBox.height / 2;
-    const facePct = (faceCenterY / bitmap.height) * 100;
-
-    // We want the face to land at ANCHOR_Y_PCT in the rendered frame.
-    // CSS object-position y% controls which part of the source image is
-    // visible at the top of the frame (when the source is taller than the
-    // frame). Solving: rendered_face_y_pct = facePct + (50 - obj_pos_y%) * k
-    // where k depends on aspect ratios. For a near-1:1 frame and portrait
-    // source we approximate: object-position y% ≈ facePct - ANCHOR_Y_PCT + 50
-    // (simple offset that reads well in practice — exact formula varies with
-    // aspect ratio, manual nudge is the safety net.)
-    const objectPositionY = clamp(facePct - ANCHOR_Y_PCT + 50, 0, 100);
-    return Math.round(objectPositionY * 10) / 10; // 1 decimal
+    return faceCenterToObjectPositionY(faceCenterY, bitmap.height);
   } catch {
     return null;
   } finally {
     bitmap?.close?.();
   }
+}
+
+async function tryTfjsFaceDetector(blob: Blob): Promise<number | null> {
+  if (typeof window === 'undefined') return null;
+  const detector = await loadTfjsDetector();
+  if (!detector) return null;
+
+  let bitmap: ImageBitmap | null = null;
+  try {
+    bitmap = await createImageBitmap(blob);
+    const faces = await detector.estimateFaces(bitmap);
+    if (!faces || faces.length === 0) return null;
+    const face = faces.reduce((a, b) => (a.box.height > b.box.height ? a : b));
+    const faceCenterY = face.box.yMin + face.box.height / 2;
+    return faceCenterToObjectPositionY(faceCenterY, bitmap.height);
+  } catch (err) {
+    console.warn('[face-detect] tfjs estimateFaces failed:', err);
+    return null;
+  } finally {
+    bitmap?.close?.();
+  }
+}
+
+/** Convert a detected face center (in image pixels) to a CSS object-position
+ *  y% that puts that face at ANCHOR_Y_PCT in the rendered frame.
+ *
+ *  For a near-1:1 frame and portrait source we approximate:
+ *    object-position y% ≈ facePct - ANCHOR_Y_PCT + 50
+ *  Exact formula varies with aspect ratio; manual nudge is the safety net. */
+function faceCenterToObjectPositionY(faceCenterY: number, imageHeight: number): number {
+  const facePct = (faceCenterY / imageHeight) * 100;
+  const objectPositionY = clamp(facePct - ANCHOR_Y_PCT + 50, 0, 100);
+  return Math.round(objectPositionY * 10) / 10;
 }
 
 function clamp(n: number, lo: number, hi: number): number {
