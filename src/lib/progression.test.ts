@@ -172,6 +172,41 @@ describe('recommendForExercise — window-aware path', () => {
     expect(r?.intensity).toBe('medium');
   });
 
+  it('boundary policy — 8 reps counts as in window for goal=build (lower edge)', () => {
+    // Regression: hitting the displayed floor of Build (8–12) used to register
+    // as "below goal" because windowForReps(8) returns 'power'. The fix uses
+    // the goal's own min/max bounds for in-window membership, so 8 reps with
+    // goal=build is in-window, not back-off.
+    const sets = [
+      set({ repetitions: 8, rir: 2 }),
+      set({ repetitions: 8, rir: 2 }),
+      set({ repetitions: 8, rir: 2 }),
+    ];
+    const r = recommendForExercise(sets, 'reps', 'build');
+    expect(r?.kind).toBe('more-reps');
+  });
+
+  it('boundary policy — 8 reps in goal=build with RIR 0–1 holds (not back-off)', () => {
+    const sets = [
+      set({ repetitions: 8, rir: 0 }),
+      set({ repetitions: 8, rir: 1 }),
+      set({ repetitions: 8, rir: 1 }),
+    ];
+    const r = recommendForExercise(sets, 'reps', 'build');
+    expect(r?.kind).toBe('hold');
+  });
+
+  it('boundary policy — 7 reps for goal=build is below goal (back-off)', () => {
+    // Sanity check the symmetric case: one rep below the goal floor still
+    // triggers back-off. Confirms we didn't shift the back-off threshold.
+    const sets = [
+      set({ repetitions: 7, rir: 0 }),
+      set({ repetitions: 7, rir: 0 }),
+    ];
+    const r = recommendForExercise(sets, 'reps', 'build');
+    expect(r?.kind).toBe('back-off');
+  });
+
   it('null RIR treated as 2 (charitable default)', () => {
     const sets = [set({ repetitions: 10, rir: null }), set({ repetitions: 10, rir: null })];
     expect(recommendForExercise(sets, 'reps', 'build')?.kind).toBe('more-reps');

@@ -8,11 +8,16 @@
 // Two paths:
 //
 // 1. Window-aware (preferred — when goal_window is provided):
-//    - majority of sets in a window BELOW the goal → back off
-//    - majority spilled TWO+ windows up OR avg RIR ≥ 4 → go heavier (high ↑↑)
-//    - majority spilled ONE window up → go heavier (medium ↑)
-//    - majority in goal window with avg RIR ≥ 2 → more reps
-//    - majority in goal window with RIR 0–1 → hold
+//    - majority of sets with reps < goal.min → back off
+//    - majority spilled TWO+ windows above goal.max OR avg RIR ≥ 4 → go heavier (high ↑↑)
+//    - majority spilled ONE window above goal.max → go heavier (medium ↑)
+//    - majority with goal.min ≤ reps ≤ goal.max and avg RIR ≥ 2 → more reps
+//    - majority with goal.min ≤ reps ≤ goal.max and RIR 0–1 → hold
+//
+//    In-window membership uses the goal's own min/max — NOT windowForReps —
+//    so that hitting the goal floor (e.g., 8 reps for Build 8–12) registers
+//    as in-window, not "below". windowForReps is only used to count how many
+//    windows a set escaped past goal.max.
 //
 // 2. Legacy (fallback when goal_window is null — uses set-level min/max):
 //    - majority of sets below min_target_reps → back off
@@ -27,7 +32,12 @@
 // effective_set_count weighting).
 
 import type { LocalWorkoutSet } from '@/db/local';
-import { REP_WINDOW_ORDER, windowForReps, type RepWindow } from './rep-windows';
+import {
+  REP_WINDOW_ORDER,
+  windowBounds,
+  windowForReps,
+  type RepWindow,
+} from './rep-windows';
 
 export type RecommendationKind =
   | 'go-heavier'
@@ -83,10 +93,15 @@ export function recommendForExercise(
     return null;
   }
 
-  // Window-aware path: classify each set by which window its reps land in,
-  // then compare to the goal window. Diff > 0 = spilled up; diff < 0 = below.
+  // Window-aware path: in-window membership uses the goal's own min/max so
+  // hitting the goal floor counts as in-window (the boundary policy in
+  // windowForReps is built for "should I escalate?" decisions at the upper
+  // edge, which can misclassify a set that nails the lower edge of the goal).
+  // For sets that exceed goal.max, windowForReps is used to count how many
+  // windows the set escaped past the goal.
   if (goalWindow) {
     const goalIdx = REP_WINDOW_ORDER.indexOf(goalWindow);
+    const { min: goalMin, max: goalMax } = windowBounds(goalWindow);
     // _inWindow is computed for symmetry/future use but isn't read by any
     // recommendation branch below — the in-window case falls through to the
     // RIR-based "more reps" / "hold" decision. Underscore prefix per the
@@ -94,13 +109,24 @@ export function recommendForExercise(
     let _inWindow = 0, upOne = 0, upTwoPlus = 0, belowGoal = 0;
 
     for (const s of working) {
-      const setWin = windowForReps(s.repetitions ?? 0);
+      const reps = s.repetitions ?? 0;
+      if (reps < goalMin) {
+        belowGoal++;
+        continue;
+      }
+      if (reps <= goalMax) {
+        _inWindow++;
+        continue;
+      }
+      const setWin = windowForReps(reps);
       if (!setWin) { belowGoal++; continue; }
       const diff = REP_WINDOW_ORDER.indexOf(setWin) - goalIdx;
-      if (diff === 0) _inWindow++;
-      else if (diff === 1) upOne++;
+      if (diff === 1) upOne++;
       else if (diff >= 2) upTwoPlus++;
-      else belowGoal++;
+      // diff === 0: only reachable when goal=endurance (top window) and
+      // reps > goalMax — there's no higher window to escalate to, so we
+      // count it as in-window (matches the prior code path's behavior).
+      else _inWindow++;
     }
 
     const total = working.length;
