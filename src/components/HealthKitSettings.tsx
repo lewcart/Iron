@@ -12,6 +12,25 @@ import {
 } from '@/features/health/healthSync';
 import { apiBase } from '@/lib/api/client';
 import { HealthKitPermissionsSheet } from '@/components/HealthKitPermissionsSheet';
+import { HK_RAW_ENTRIES } from '@/lib/healthkit-catalog';
+
+// Derived from the catalog so this summary cannot drift from the actual request set.
+// Buckets reads/writes by category so the line stays stable as types are added.
+const HK_SUMMARY = (() => {
+	const bucket = (pred: (t: { access: string }) => boolean) => {
+		const cats = new Set<string>();
+		for (const t of HK_RAW_ENTRIES) if (pred(t)) cats.add(t.category);
+		return [...cats].map((c) => ({
+			activity: 'activity', clinical: 'vitals', bodycomp: 'body comp',
+			workouts: 'workouts', sleep: 'sleep', nutrition: 'nutrition',
+			medications: 'medications',
+		}[c] ?? c)).join(', ');
+	};
+	return {
+		reads: bucket((t) => t.access === 'read' || t.access === 'readWrite'),
+		writes: bucket((t) => t.access === 'write' || t.access === 'readWrite'),
+	};
+})();
 
 // Coarse status — iOS hides per-type read auth, so pretending we know more
 // than "unavailable | not-connected | connected | error" is false precision.
@@ -282,15 +301,15 @@ export function HealthKitSettings() {
         )}
       </div>
 
-      {/* Reads / writes summary */}
+      {/* Reads / writes summary — derived from the catalog so it can't drift. */}
       <div className="px-1 mt-2 space-y-1">
         <p className="text-xs text-muted-foreground">
           <span className="font-medium text-foreground">Reads:</span>{' '}
-          workouts, steps, active/basal energy, heart rate, HRV, resting HR, VO2 max, sleep, exercise minutes.
+          {HK_SUMMARY.reads}.
         </p>
         <p className="text-xs text-muted-foreground">
           <span className="font-medium text-foreground">Writes:</span>{' '}
-          your Rebirth workouts, meals (energy, protein, carbs, fat, water), and body composition from InBody scans.
+          {HK_SUMMARY.writes}.
         </p>
       </div>
 

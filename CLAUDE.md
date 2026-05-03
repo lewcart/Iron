@@ -86,6 +86,31 @@ Set quality:
 
 `coverage` flag on `get_sets_per_muscle` rows: `'none'` means no exercise in the catalog tags this muscle (yet — the audit pass will populate). Until then those muscles can't accumulate sets. UI collapses them into a footer.
 
+## HealthKit type catalog (for any code touching the iOS HealthKit plugin)
+
+The HealthKit request set lives in **`src/lib/healthkit-types.json`** as the single
+source of truth. Two artifacts derive from it:
+
+- **`ios/App/App/HealthKitTypes.swift`** — generated. Don't hand-edit. Run
+  `npm run gen:healthkit` after changing the JSON.
+- **`src/lib/healthkit-catalog.ts`** — imports the JSON directly to populate the
+  permissions sheet UI (`HealthKitPermissionsSheet.tsx`).
+
+Drift between Swift and TS is structurally impossible: `npm run test` includes
+`src/lib/healthkit-drift.test.ts` which fails CI if the committed Swift file is
+out of date with the JSON. `npm run cap:sync` and `npm run ios:device` both run
+`gen:healthkit` automatically.
+
+To add a new HealthKit type Rebirth requests: edit the JSON entry array, run
+`npm run gen:healthkit`, commit both files, push. iOS will surface a new toggle
+on the next `requestPermissions()` call.
+
+The medications entry (`medicationDoseEvent`, iOS 26+) is gated by both an
+`@available(iOS 26.0, *)` Swift check AND the `rebirth.medications.enabled`
+UserDefaults flag (default OFF). Flipping the flag on requires a real-device
+crash log to confirm the iOS 26 launch crash is resolved first. Use
+`HealthKit.setMedicationsEnabled({enabled: true})` from the JS bridge.
+
 ## Projection workflow (for MCP agents)
 
 A "projection" is an AI-generated image of Lou (made outside this app, e.g. ChatGPT / Midjourney) showing an aspirational future-self physique. Lou uploads them here so the photos-compare viewer can line them up against real progress photos at the same pose. Schema mirrors `progress_photos` with optional `source_progress_photo_uuid` (link to source) and `target_horizon` (label).

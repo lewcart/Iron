@@ -82,7 +82,10 @@ xcrun devicectl device install app --device "$DEVICE_ID" "$APP_PATH" 2>&1 \
 
 sleep 1
 echo "▸ launch…"
-xcrun devicectl device process launch --device "$DEVICE_ID" app.rebirth 2>&1 \
+# --terminate-existing forces a fresh launch even if a previous run left the
+# app in a stuck/crashed state. Without it, devicectl returns FBSOpenApplication
+# error 1 ("failed to launch") whenever the OS is still holding a stale instance.
+xcrun devicectl device process launch --device "$DEVICE_ID" --terminate-existing app.rebirth 2>&1 \
   | grep -vE "Failed to load provisioning paramter list|may support a reduced" \
   | grep -E "Launched|error|Error" | head -2
 

@@ -11,6 +11,9 @@ public class HealthKitPlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "isAvailable", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "requestPermissions", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "checkPermissionStatus", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "getRequestStatus", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "setMedicationsEnabled", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "requestMedicationsAuthorization", returnType: CAPPluginReturnPromise),
         // Legacy reads (kept for backwards compat with existing TS callers)
         CAPPluginMethod(name: "getSteps", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "getActiveCalories", returnType: CAPPluginReturnPromise),
@@ -45,7 +48,7 @@ public class HealthKitPlugin: CAPPlugin, CAPBridgedPlugin {
             return
         }
 
-        let (readTypes, writeTypes) = Self.allRequestedTypes()
+        let (readTypes, writeTypes) = HealthKitTypes.allRequestedTypes()
 
         healthStore.requestAuthorization(toShare: writeTypes, read: readTypes) { success, error in
             if let error = error {
@@ -56,32 +59,109 @@ public class HealthKitPlugin: CAPPlugin, CAPBridgedPlugin {
         }
     }
 
+    /// Returns whether iOS thinks there's anything left to ask the user about.
+    /// .shouldRequest → call requestPermissions, the system sheet WILL appear (at minimum
+    ///                  for newly-added types). Use this to decide when to show the
+    ///                  "Request Authorization" button vs. routing the user to Settings.
+    /// .unnecessary   → user has already answered for every type in the current request set.
+    ///                  iOS will NOT show the sheet again. Show "Manage in Health app" instead.
+    /// .unknown       → iOS couldn't determine status (rare, treat like .shouldRequest).
+    @objc public func getRequestStatus(_ call: CAPPluginCall) {
+        guard HKHealthStore.isHealthDataAvailable() else {
+            call.resolve(["status": "unknown", "shouldRequest": false])
+            return
+        }
+        let (readTypes, writeTypes) = HealthKitTypes.allRequestedTypes()
+        healthStore.getRequestStatusForAuthorization(toShare: writeTypes, read: readTypes) { status, error in
+            if let error = error {
+                call.reject(error.localizedDescription)
+                return
+            }
+            let str: String
+            switch status {
+            case .shouldRequest: str = "shouldRequest"
+            case .unnecessary: str = "unnecessary"
+            case .unknown: str = "unknown"
+            @unknown default: str = "unknown"
+            }
+            call.resolve([
+                "status": str,
+                "shouldRequest": status != .unnecessary
+            ])
+        }
+    }
+
     /// Returns sharing auth status per tracked type. iOS hides READ status for privacy;
     /// read types always return 'notDetermined'. Write types reflect real status.
     @objc public func checkPermissionStatus(_ call: CAPPluginCall) {
         var statuses: [String: String] = [:]
-        // Read-only types from HK always report notDetermined — document that via return value.
-        for key in ["stepCount", "activeEnergyBurned", "basalEnergyBurned",
-                    "heartRate", "heartRateVariabilitySDNN", "restingHeartRate",
-                    "vo2Max", "appleExerciseTime", "sleepAnalysis",
-                    "distanceWalkingRunning"] {
-            statuses[key] = "notDetermined"
-        }
-        // Write types we can read authoritatively.
-        statuses["workout"] = Self.authStatusString(healthStore.authorizationStatus(for: HKObjectType.workoutType()))
-        if let t = HKQuantityType.quantityType(forIdentifier: .bodyMass) {
-            statuses["bodyMass"] = Self.authStatusString(healthStore.authorizationStatus(for: t))
-        }
-        if let t = HKQuantityType.quantityType(forIdentifier: .bodyFatPercentage) {
-            statuses["bodyFatPercentage"] = Self.authStatusString(healthStore.authorizationStatus(for: t))
-        }
-        if let t = HKQuantityType.quantityType(forIdentifier: .leanBodyMass) {
-            statuses["leanBodyMass"] = Self.authStatusString(healthStore.authorizationStatus(for: t))
-        }
-        if let t = HKQuantityType.quantityType(forIdentifier: .dietaryEnergyConsumed) {
-            statuses["dietaryEnergyConsumed"] = Self.authStatusString(healthStore.authorizationStatus(for: t))
+        for key in HealthKitTypes.allTsKeys {
+            if HealthKitTypes.writeTsKeys.contains(key), let t = HealthKitTypes.objectType(forTsKey: key) {
+                statuses[key] = Self.authStatusString(healthStore.authorizationStatus(for: t))
+            } else {
+                // Read-only or unavailable on this iOS version — iOS hides read auth status by design.
+                statuses[key] = "notDetermined"
+            }
         }
         call.resolve(["statuses": statuses])
+    }
+
+    /// Sets the runtime feature flag that gates iOS 26 Medications reads, and
+    /// (when enabling) automatically triggers the per-object authorization sheet
+    /// so the user can pick which medications Rebirth can read. One-call UX.
+    @objc public func setMedicationsEnabled(_ call: CAPPluginCall) {
+        let enabled = call.getBool("enabled") ?? false
+        UserDefaults.standard.set(enabled, forKey: "rebirth.medications.enabled")
+
+        guard enabled else {
+            call.resolve(["enabled": false, "authorized": false])
+            return
+        }
+        guard #available(iOS 26.0, *) else {
+            call.resolve(["enabled": true, "authorized": false, "reason": "ios_too_old"])
+            return
+        }
+        let medType = HKObjectType.userAnnotatedMedicationType()
+        healthStore.requestPerObjectReadAuthorization(for: medType, predicate: nil) { success, error in
+            if let error = error {
+                call.reject(error.localizedDescription)
+                return
+            }
+            call.resolve(["enabled": true, "authorized": success])
+        }
+    }
+
+    /// Requests per-object read authorization for iOS 26 Medications.
+    ///
+    /// Medications use a DIFFERENT authorization model than the rest of HealthKit. Putting
+    /// HKUserAnnotatedMedicationType (or HKMedicationDoseEventType) into the standard
+    /// requestAuthorization(toShare:read:) call throws NSException
+    /// "AuthorizationDisallowedForSharing" and aborts the process. Apple is explicit about
+    /// this in the requestPerObjectReadAuthorization docs.
+    ///
+    /// The right path: HKHealthStore.requestPerObjectReadAuthorization(for:predicate:)
+    /// shows a per-medication chooser sheet. The user picks which meds the app can read.
+    /// Subsequent fetchMedicationRecords queries return only the chosen meds' dose events.
+    ///
+    /// Call from JS once setMedicationsEnabled(true) has been set, e.g. via a "connect
+    /// medications" button in the permissions sheet.
+    @objc public func requestMedicationsAuthorization(_ call: CAPPluginCall) {
+        guard HKHealthStore.isHealthDataAvailable() else {
+            call.resolve(["granted": false, "reason": "not_available"])
+            return
+        }
+        guard #available(iOS 26.0, *) else {
+            call.resolve(["granted": false, "reason": "ios_too_old"])
+            return
+        }
+        let medType = HKObjectType.userAnnotatedMedicationType()
+        healthStore.requestPerObjectReadAuthorization(for: medType, predicate: nil) { success, error in
+            if let error = error {
+                call.reject(error.localizedDescription)
+                return
+            }
+            call.resolve(["granted": success])
+        }
     }
 
     // MARK: - Legacy reads (backwards-compat with pre-expansion TS bridge)
@@ -353,26 +433,26 @@ public class HealthKitPlugin: CAPPlugin, CAPBridgedPlugin {
 
     // MARK: - New: fetchMedicationRecords (iOS 26+ Medications feature)
     //
-    // Currently a no-op while we debug an iOS 26 launch crash that surfaced
-    // when this method actually queried HKUserAnnotatedMedicationQuery /
-    // HKMedicationDoseEvent. Server side (DB schema, sync route, MCP tools)
-    // stays wired so flipping this on later is a Swift-only change.
+    // Gated by:
+    //   1. iOS 26+ (HKMedicationDoseEvent symbol availability — older OS no-ops)
+    //   2. UserDefaults flag "rebirth.medications.enabled" (default false until
+    //      Lou verifies the iOS 26 launch crash is fixed on a real device)
     //
-    // To re-enable: remove the guard below. Real implementation kept inline
-    // for reference.
+    // To enable on device: HealthKit.setMedicationsEnabled({enabled: true}) from
+    // the JS bridge, then relaunch. The flag is read at requestAuthorization time
+    // so the iOS sheet will then surface a Medications toggle on next prompt.
     @objc public func fetchMedicationRecords(_ call: CAPPluginCall) {
-        // Always return empty until the launch-crash root cause is found.
-        call.resolve(["medications": [], "deleted": [], "nextAnchor": ""])
-        return
-
-        // Unreachable below — kept intentionally for fast re-enable.
-        // swiftlint:disable:next unreachable_code
         guard HKHealthStore.isHealthDataAvailable() else {
             call.resolve(["medications": [], "deleted": [], "nextAnchor": ""])
             return
         }
 
         guard #available(iOS 26.0, *) else {
+            call.resolve(["medications": [], "deleted": [], "nextAnchor": ""])
+            return
+        }
+
+        guard UserDefaults.standard.bool(forKey: "rebirth.medications.enabled") else {
             call.resolve(["medications": [], "deleted": [], "nextAnchor": ""])
             return
         }
@@ -722,7 +802,7 @@ public class HealthKitPlugin: CAPPlugin, CAPBridgedPlugin {
 
         // We have to query each relevant type and delete matching objects — HK
         // doesn't offer a type-agnostic deletion API.
-        let typesToSearch: [HKSampleType] = Self.allWritableTypesForDelete()
+        let typesToSearch: [HKSampleType] = HealthKitTypes.allWritableTypesForDelete()
         let group = DispatchGroup()
         var deletedCount = 0
         var failed: [String] = []
@@ -951,55 +1031,10 @@ public class HealthKitPlugin: CAPPlugin, CAPBridgedPlugin {
 
     // MARK: - Permission type sets
 
-    /// All read + write types we request from HealthKit, bundled for requestAuthorization.
-    private static func allRequestedTypes() -> (read: Set<HKObjectType>, write: Set<HKSampleType>) {
-        var read: Set<HKObjectType> = []
-        var write: Set<HKSampleType> = []
-
-        // Reads
-        for id in [HKQuantityTypeIdentifier.stepCount, .activeEnergyBurned, .basalEnergyBurned,
-                   .heartRate, .heartRateVariabilitySDNN, .restingHeartRate,
-                   .vo2Max, .appleExerciseTime] {
-            if let t = HKQuantityType.quantityType(forIdentifier: id) {
-                read.insert(t)
-            }
-        }
-        if let t = HKCategoryType.categoryType(forIdentifier: .sleepAnalysis) {
-            read.insert(t)
-        }
-        // Medications (iOS 26+) — DISABLED while debugging launch crash.
-        // Re-enable by un-commenting alongside fetchMedicationRecords.
-        // if #available(iOS 26.0, *) {
-        //     read.insert(HKObjectType.medicationDoseEventType())
-        // }
-        read.insert(HKObjectType.workoutType())
-
-        // Writes
-        write.insert(HKObjectType.workoutType())
-        for id in [HKQuantityTypeIdentifier.activeEnergyBurned, .bodyMass, .bodyFatPercentage, .leanBodyMass,
-                   .dietaryEnergyConsumed, .dietaryProtein, .dietaryCarbohydrates, .dietaryFatTotal,
-                   .dietaryWater] {
-            if let t = HKQuantityType.quantityType(forIdentifier: id) {
-                write.insert(t)
-            }
-        }
-
-        return (read, write)
-    }
-
-    /// Writable types we may need to search for deletion. (Our own writeback samples.)
-    private static func allWritableTypesForDelete() -> [HKSampleType] {
-        var types: [HKSampleType] = []
-        types.append(HKObjectType.workoutType())
-        for id in [HKQuantityTypeIdentifier.bodyMass, .bodyFatPercentage, .leanBodyMass,
-                   .dietaryEnergyConsumed, .dietaryProtein, .dietaryCarbohydrates, .dietaryFatTotal,
-                   .dietaryWater, .activeEnergyBurned] {
-            if let t = HKQuantityType.quantityType(forIdentifier: id) {
-                types.append(t)
-            }
-        }
-        return types
-    }
+    // The request set + per-key resolution lives in HealthKitTypes, generated
+    // from src/lib/healthkit-types.json by scripts/gen-healthkit-types.mjs.
+    // The CI drift test (src/lib/healthkit-drift.test.ts) verifies the generated
+    // file is up to date on every push to main.
 
     private static func authStatusString(_ status: HKAuthorizationStatus) -> String {
         switch status {
