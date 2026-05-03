@@ -147,14 +147,20 @@ function OneRMHero({
 
 /** Time-mode counterpart to OneRMHero. Headline number is the longest hold,
  *  date is when it was set. Total time across all sessions appears as a
- *  secondary inline stat — useful as a "tonnage" analogue for time-mode. */
+ *  secondary inline stat — useful as a "tonnage" analogue for time-mode.
+ *  When the longest hold was loaded with weight (e.g. weighted plank, dip,
+ *  farmer carry), surface it inline so the hero captures both dimensions. */
 function LongestHoldHero({
   longestSeconds,
   longestDate,
+  longestWeight,
+  weightLabel,
   totalSeconds,
 }: {
   longestSeconds: number | null;
   longestDate: string;
+  longestWeight: number | null;
+  weightLabel: string;
   totalSeconds: number;
 }) {
   return (
@@ -165,6 +171,11 @@ function LongestHoldHero({
           <span className="text-3xl font-bold text-foreground">
             {longestSeconds != null ? formatDuration(longestSeconds) : '—'}
           </span>
+          {longestWeight != null && longestWeight > 0 && (
+            <span className="text-sm text-muted-foreground">
+              @ {longestWeight} {weightLabel}
+            </span>
+          )}
         </div>
         <p className="text-xs text-muted-foreground mt-1">
           Longest Hold · {longestDate}
@@ -512,7 +523,11 @@ export default function ExerciseDetail({
             : '—'
         }
         caption={
-          timePRs?.longestHold ? formatDate(timePRs.longestHold.date) : 'No data yet'
+          timePRs?.longestHold
+            ? (timePRs.longestHold.weight != null && timePRs.longestHold.weight > 0
+                ? `@ ${Math.round(toDisplay(timePRs.longestHold.weight) * 10) / 10} ${label} · ${formatDate(timePRs.longestHold.date)}`
+                : formatDate(timePRs.longestHold.date))
+            : 'No data yet'
         }
       />
     ) : (
@@ -549,6 +564,19 @@ export default function ExerciseDetail({
   const volumeData = progressData?.volumeTrend.map(v => ({
     date: formatDate(v.date),
     totalVolume: Math.round(toDisplay(v.totalVolume)),
+  })) ?? [];
+
+  // Time-mode chart series: longest-hold (seconds) per session, with the
+  // PR session highlighted on the matching workout_uuid. Sorted ascending
+  // by date in getExerciseTimePRsLocal already.
+  const timePrWorkoutUuid = timePRs?.longestHold?.workout_uuid;
+  const timeChartData = timePRs?.progress.map(p => ({
+    date: formatDate(p.date),
+    rawDate: p.date,
+    workoutUuid: p.workoutUuid,
+    longestHold: p.longestHold,
+    totalSeconds: p.totalSeconds,
+    isPR: timePrWorkoutUuid != null && p.workoutUuid === timePrWorkoutUuid,
   })) ?? [];
 
   const tooltipStyle = {
@@ -628,6 +656,12 @@ export default function ExerciseDetail({
                       ? formatDate(timePRs.longestHold.date)
                       : 'No data'
                   }
+                  longestWeight={
+                    timePRs?.longestHold?.weight != null
+                      ? Math.round(toDisplay(timePRs.longestHold.weight) * 10) / 10
+                      : null
+                  }
+                  weightLabel={label}
                   totalSeconds={timePRs?.totalSeconds ?? 0}
                 />
               )
@@ -755,6 +789,78 @@ export default function ExerciseDetail({
               </div>
             )}
 
+            {isTimeMode && timeChartData.length > 0 && (
+              <div>
+                <div className="flex items-center justify-between mb-2 px-1">
+                  <p className="text-xs font-semibold text-primary uppercase tracking-wide">Hold Progress</p>
+                  <div className="flex gap-1">
+                    {RANGES.map(r => (
+                      <button
+                        key={r.value}
+                        onClick={() => setRange(r.value)}
+                        className={`px-2 py-0.5 rounded-full text-[11px] font-semibold transition-colors ${
+                          range === r.value
+                            ? 'bg-primary text-primary-foreground'
+                            : 'text-muted-foreground hover:text-foreground'
+                        }`}
+                      >
+                        {r.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div className="bg-card border border-border rounded-xl p-3">
+                  <ResponsiveContainer width="100%" height={200}>
+                    <LineChart data={timeChartData} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke={chartTheme.grid} />
+                      <XAxis dataKey="date" stroke={chartTheme.axis} fontSize={11} tick={{ fill: chartTheme.axis }} />
+                      <YAxis
+                        stroke={chartTheme.axis}
+                        fontSize={11}
+                        tick={{ fill: chartTheme.axis }}
+                        unit="s"
+                      />
+                      <Tooltip
+                        {...tooltipStyle}
+                        formatter={((v: unknown) => [
+                          typeof v === 'number' ? formatDuration(v) : String(v),
+                          'Longest Hold',
+                        ]) as never}
+                      />
+                      <Line
+                        type="monotone"
+                        dataKey="longestHold"
+                        name="Longest Hold"
+                        stroke={chartTheme.line1RM}
+                        strokeWidth={2}
+                        dot={(props: { cx?: number; cy?: number; payload?: { isPR?: boolean } }) => {
+                          const { cx, cy, payload } = props;
+                          if (!payload?.isPR || cx == null || cy == null) return <g key={`dot-${cx}`} />;
+                          return (
+                            <g key={`pr-dot-${cx}`}>
+                              <circle cx={cx} cy={cy} r={6} fill={chartTheme.pr} stroke={chartTheme.tooltipBg} strokeWidth={2} />
+                              <text x={cx} y={cy - 10} textAnchor="middle" fontSize={9} fill={chartTheme.pr} fontWeight="bold">PR</text>
+                            </g>
+                          );
+                        }}
+                        activeDot={{ r: 4 }}
+                      />
+                    </LineChart>
+                  </ResponsiveContainer>
+                  <div className="flex gap-4 mt-2 justify-center">
+                    <div className="flex items-center gap-1.5">
+                      <div className="w-4 h-0.5 rounded" style={{ background: chartTheme.line1RM }} />
+                      <span className="text-[10px] text-muted-foreground">Longest Hold</span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <div className="w-2.5 h-2.5 rounded-full" style={{ background: chartTheme.pr }} />
+                      <span className="text-[10px] text-muted-foreground">PR</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {!isTimeMode && volumeData.length > 0 && (
               <div>
                 <p className="text-xs font-semibold text-primary uppercase tracking-wide mb-2 px-1">Volume Trend</p>
@@ -787,7 +893,13 @@ export default function ExerciseDetail({
                         )}
                       </div>
                       {s.sets.map((set, i) => {
-                        const isTime = set.duration_seconds != null;
+                        // Per migration 022, exercise.tracking_mode is the
+                        // source of truth — historical sets are reinterpreted
+                        // under the current mode. A time-mode exercise with
+                        // an old reps-only set reads `repetitions` as the
+                        // held duration (Lou's pre-feature workaround).
+                        const isTime = isTimeMode || set.duration_seconds != null;
+                        const effectiveSeconds = set.duration_seconds ?? set.repetitions ?? null;
                         return (
                           <div
                             key={set.uuid}
@@ -795,9 +907,16 @@ export default function ExerciseDetail({
                           >
                             <span className="text-[10px] text-muted-foreground w-5 text-center flex-shrink-0">{i + 1}</span>
                             {isTime ? (
-                              <span className="text-xs text-foreground flex-1">
-                                {set.duration_seconds}s
-                              </span>
+                              <>
+                                <span className="text-xs text-foreground flex-1">
+                                  {set.weight != null && set.weight > 0 ? toDisplay(set.weight) : '—'}
+                                  <span className="text-muted-foreground ml-0.5">{label}</span>
+                                </span>
+                                <span className="text-xs text-muted-foreground">×</span>
+                                <span className="text-xs text-foreground flex-1">
+                                  {effectiveSeconds != null ? `${effectiveSeconds}s` : '—'}
+                                </span>
+                              </>
                             ) : (
                               <>
                                 <span className="text-xs text-foreground flex-1">

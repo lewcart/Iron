@@ -758,6 +758,10 @@ export async function getExerciseSessionHistoryLocal(
 export interface ExerciseTimePRsLocal {
   longestHold: {
     duration_seconds: number;
+    /** Loaded weight while held, in kg. NULL when the set was logged
+     *  bodyweight-only. Surfaced on the hero so weighted holds (loaded
+     *  planks, dips, farmer carries) don't lose their weight dimension. */
+    weight: number | null;
     date: string;
     workout_uuid: string;
   } | null;
@@ -769,6 +773,9 @@ export interface ExerciseTimePRsLocal {
     workoutUuid: string;
     longestHold: number;
     totalSeconds: number;
+    /** Heaviest weight loaded on any held set in this session, in kg. NULL
+     *  if no set carried a weight. */
+    maxWeight: number | null;
   }>;
 }
 
@@ -787,10 +794,18 @@ export async function getExerciseTimePRsLocal(
   if (allWes.length === 0) return empty;
 
   const weUuids = allWes.map(we => we.uuid);
+  // Per migration 022, flipping tracking_mode reinterprets historical sets.
+  // For a time-mode exercise that previously had reps-mode sets logged,
+  // duration_seconds is NULL but `repetitions` was Lou's manual workaround
+  // (entering seconds in the reps field). Treat those reps as the held
+  // duration so the PB + chart survive a mode flip.
   const allSets = await db.workout_sets
     .where('workout_exercise_uuid')
     .anyOf(weUuids)
-    .filter(s => s.is_completed && !s._deleted && s.duration_seconds != null && s.duration_seconds > 0)
+    .filter(s => s.is_completed && !s._deleted && (
+      (s.duration_seconds != null && s.duration_seconds > 0)
+      || (s.duration_seconds == null && (s.repetitions ?? 0) > 0)
+    ))
     .toArray();
   if (allSets.length === 0) return empty;
 
@@ -801,6 +816,7 @@ export async function getExerciseTimePRsLocal(
 
   type AnnotatedTimeSet = {
     duration_seconds: number;
+    weight: number | null;
     workout_uuid: string;
     date: string;
   };
@@ -811,8 +827,10 @@ export async function getExerciseTimePRsLocal(
     const wo = workoutByUuid.get(woUuid);
     if (!wo || wo._deleted) continue;
     if (sinceMs != null && new Date(wo.start_time).getTime() < sinceMs) continue;
+    const effectiveDuration = s.duration_seconds ?? s.repetitions ?? 0;
     annotated.push({
-      duration_seconds: s.duration_seconds!,
+      duration_seconds: effectiveDuration,
+      weight: s.weight ?? null,
       workout_uuid: wo.uuid,
       date: wo.start_time,
     });
@@ -829,11 +847,16 @@ export async function getExerciseTimePRsLocal(
     .map(sets => {
       const longest = sets.reduce((m, s) => Math.max(m, s.duration_seconds), 0);
       const total = sets.reduce((sum, s) => sum + s.duration_seconds, 0);
+      const maxWeight = sets.reduce<number | null>((m, s) => {
+        if (s.weight == null) return m;
+        return m == null || s.weight > m ? s.weight : m;
+      }, null);
       return {
         date: sets[0].date,
         workoutUuid: sets[0].workout_uuid,
         longestHold: longest,
         totalSeconds: total,
+        maxWeight,
       };
     })
     .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
@@ -853,6 +876,7 @@ export async function getExerciseTimePRsLocal(
   return {
     longestHold: longest ? {
       duration_seconds: longest.duration_seconds,
+      weight: longest.weight,
       date: longest.date,
       workout_uuid: longest.workout_uuid,
     } : null,
