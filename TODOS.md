@@ -36,18 +36,25 @@ Until then, the entire app is light-mode-only by design (just not by
 deliberate decision). Defer the toggle wiring rather than blocking the
 Week page on it.
 
-## Week page follow-ups (deferred from 2026-05-03 /autoplan, post-rebrief)
+## Week page v1.2 follow-ups (deferred from 2026-05-03 v1.1 ship)
 
-Plan: `~/.gstack/projects/lewcart-Iron/feat-week-page-plan-20260503-125153.md`
-Test plan: `~/.gstack/projects/lewcart-Iron/lewis-week-page-test-plan-20260503-125153.md`
+Plan: `~/.gstack/projects/lewcart-Iron/feat-week-v1.1-plan-20260503-160000.md`
 
-V1.1 follow-ups (after Week page V1 ships):
-- [ ] **Catalog audit: hip abduction exercise.** No exact match in `src/db/exercises.json` today (only `Cable Hip Adduction` — opposite muscle). Add a hip-abduction exercise + tag it so the e1RM trend row for hip abductors has a target. ~15 min.
-- [ ] **Per-muscle landmark personalization UI.** V1 uses RP-2025 defaults from `src/lib/training/volume-landmarks.ts`. After Lou has 2-3 mesocycles of data, add a UI to override per-muscle MEV/MAV/MRV based on personal recovery curves.
-- [ ] **Anchor-lift configurability UI.** V1 uses seed config in `src/lib/training/anchor-lifts.ts`. UI lets Lou pick a different anchor lift per priority muscle (e.g., switch glute anchor from Hip Thrust to RDL during a hinge mesocycle).
-- [ ] **Mesocycle / deload state machine.** Combine HRV trend + RIR drift + e1RM stagnation into a "you're at MRV, deload next week" surface.
-- [ ] **Cardio compliance tile.** Plan dose says 240 min/week cardio floor; add a small ring once we're sure we have reliable cardio session tagging.
-- [ ] **Photo cadence prompt.** Monthly footer prompt: "front-pose photo due in 6 days" — tied to projection comparison workflow. Surface on Week page footer, not as an inbox.
+V1.1 (v0.8.0) shipped: Decision-engine prescription card, cardio compliance tile (split-by-intensity), data-sufficiency badges, photo cadence footer, hip-abduction catalog audit, `get_health_cardio_week` MCP tool. Previous v1.1 follow-ups from v0.7.6 either shipped, were reframed at the autoplan gate, or moved to v1.2 (see below).
+
+V1.2 follow-ups (gated on data accumulation OR schema additions):
+
+- [ ] **Per-muscle landmark personalization UI.** Deferred at /autoplan gate — both reviewers + Lou agreed 2 weeks of data wasn't enough to override RP-2025 defaults. Wait for the data-sufficiency badges to mature (≥8 weeks per muscle), then add a `/strategy` editor section for per-muscle MEV/MAV-min/MAV-max overrides on top of RP defaults. Schema: `body_plan.programming_dose.landmark_overrides: Record<MuscleSlug, Partial<Pick<VolumeLandmark, 'mev'|'mavMin'|'mavMax'>>>` (additive JSONB). Resolver: wrap `landmarkFor(slug)` in `resolveLandmark(slug, plan)` overlaying user values on RP-2025 defaults. New MCP tool `update_vision_landmarks(overrides)`.
+- [ ] **Anchor-lift configurability UI.** Same deferral reason — defer until Lou hits a real mismatch. Then add a `/strategy` editor section: per-priority-muscle dropdown of top-5 most-logged exercises tagged with that muscle (last 12 weeks) + "use auto-resolved" option. Schema: `body_plan.programming_dose.anchor_lift_overrides: Record<MuscleSlug, string>` (exercise UUID). Resolver: extend `resolveAnchorLift()` with optional `plan` arg. New MCP tool `set_anchor_lift_override(muscle, exercise_uuid?)`.
+- [ ] **HR-zone cardio classification.** Dropped from v1.1 at eng review — `healthkit_workouts.avg_heart_rate` is workout-average only and systematically misclassifies HIIT (warmup + intervals + cooldown average into zone-2 territory). Add per-second HR samples to `healthkit_workouts` (or a sibling `healthkit_workout_samples` table), then enable HR-zone classification as the primary path with activity-type fallback. Until then, classification is activity-type-only and labeled internally as "estimated cardio categories."
+- [ ] **HRT trough-day chip on the prescription card.** Dropped from v1.1 at eng review — `hrt_timeline_periods` schema lacks `drug` (or `route`) + `cycle_days` columns, so injection-cycle inference isn't shippable without hardcoding Lou's regimen (brittle). Add migration: `ALTER TABLE hrt_timeline_periods ADD COLUMN route TEXT, ADD COLUMN dose_interval_days INTEGER`. Then derive `day_of_cycle` from latest dose timestamp + interval, and the engine adds a `[trough day]` reason chip on REDUCE recommendations landing on the second half of the injection cycle.
+- [ ] **Mesocycle / deload state machine.** v1.1 surfaces the deload signal inside the prescription card as a one-shot recommendation. Full state machine (auto-scheduled deload weeks, regularized mesocycle accounting) waits until Lou trusts the v1.1 prescription signal in practice.
+- [ ] **Per-muscle 8-week effective-set history.** v1.1's data-sufficiency badge + prescription engine confidence gate use a conservative approximation (overall `rirByWeek.length` capped at 8) for ALL priority muscles. Replace with a true per-muscle scan in `week-facts.ts` so a muscle that's been trained 6 weeks reads as 6, not as 8 just because Lou trained anything that week.
+- [ ] **Per-muscle RIR drift in week-facts.** v1.1 passes `rir_drift: null` for all priority muscles to the prescription engine — engine treats null as 0. Compute median RIR per priority muscle for the last 7 days vs the 7 days before; surface drift to the engine. Without this, the per-muscle REDUCE recommendation never fires from RIR signals (only from zone='risk').
+- [ ] **Per-muscle anchor-lift slope.** v1.1 passes `anchor_slope: null` and `anchor_lift_name: null`. Wire from the existing `anchor-lift-trend.ts` per-muscle output so the engine can fire `e1rm_stagnant` reason chips and the in-zone+slope-up PUSH variant.
+- [ ] **Frequency-picker UI for MRV.** v1 already stores MRV as `mrvAt(freq)` exactly so a picker can be added without schema change. Surface a frequency picker on the Strategy page so Lou can shift MRV columns when the training frequency changes mid-mesocycle.
+- [ ] **`projection_photos` in local-first sync.** v1.1's photo cadence footer ships the secondary "Compare projection" affordance dark because `projection_photos` isn't in `SYNCED_TABLES` yet. Add it, then enable the conditional Compare link in `PhotoCadenceFooter`.
+- [ ] **Cardio MCP tool: `start_date`/`end_date` parameter validation.** The HTTP route validates window-size; the MCP tool should mirror those checks once Lou actually exercises non-default windows from MCP.
 
 ## Old Today + Inbox follow-ups (superseded by Week page rebrief 2026-05-03)
 

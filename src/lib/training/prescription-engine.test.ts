@@ -13,7 +13,7 @@ const NO_HRT: HrtContext = {
   current_period_started_at: null,
 };
 
-function muscle(overrides: Partial<PrescriptionMuscleFact>): PrescriptionMuscleFact {
+function muscle(overrides: Partial<PrescriptionMuscleFact> = {}): PrescriptionMuscleFact {
   return {
     muscle: 'glutes',
     effective_sets: 12,

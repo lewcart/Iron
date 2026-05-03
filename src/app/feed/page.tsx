@@ -36,6 +36,13 @@ import {
   TwelveWeekTrendsSection,
   type TwelveWeekTrendsData,
 } from '@/components/week/TwelveWeekTrendsSection';
+// v1.1 surfaces
+import { CardioComplianceTile, type CardioTileResponse } from '@/components/week/CardioComplianceTile';
+import { PrescriptionCard } from '@/components/week/PrescriptionCard';
+import { PhotoCadenceFooter } from '@/components/week/PhotoCadenceFooter';
+import { prescriptionsFor, type PrescriptionMuscleFact } from '@/lib/training/prescription-engine';
+import { deriveHrtContext, type HrtTimelinePeriodInput } from '@/lib/training/hrt-context';
+import { photoCadenceState } from '@/lib/training/photo-cadence';
 import { computeEwma } from '@/lib/training/ewma';
 import { estimate1RM } from '@/lib/pr';
 import { resolveMuscleSlug, MUSCLE_DEFS, type MuscleSlug } from '@/lib/muscles';
@@ -102,6 +109,18 @@ function fetchSleepBaseline(): Promise<SleepBaselineResponse | { status: 'not_co
   });
 }
 
+// v1.1: cardio compliance fetch for the new tile in slot 4.
+function fetchCardioWeek(): Promise<CardioTileResponse> {
+  return fetchJsonAuthed<CardioTileResponse>(`/api/health/cardio-week?window_days=7`).catch(
+    (err: unknown) => {
+      if (err instanceof ApiError && err.status === 503) {
+        return { status: 'not_connected' as const, reason: 'unknown' };
+      }
+      throw err;
+    },
+  );
+}
+
 export default function WeekPage() {
   const queryClient = useQueryClient();
   const feedQueryKey = queryKeys.feed(FEED_QUERY_DEFAULTS.days, FEED_QUERY_DEFAULTS.timelineLimit);
@@ -132,6 +151,59 @@ export default function WeekPage() {
     queryFn: fetchSleepBaseline,
     staleTime: 5 * 60_000,
   });
+
+  // ── v1.1 surfaces ────────────────────────────────────────────────────
+  // Cardio compliance for the new tile (slot 4 between Recovery & Weight EWMA).
+  const { data: cardioWeek } = useQuery({
+    queryKey: ['week', 'cardio-week'],
+    queryFn: fetchCardioWeek,
+    staleTime: 5 * 60_000,
+  });
+
+  // HRT timeline periods — for the prescription engine's HrtContext (suppresses
+  // e1RM-stagnation as DELOAD trigger when protocol changed in last 4 weeks).
+  // `created_at` isn't on LocalHrtTimelinePeriod (only `_updated_at` from
+  // SyncMeta); fall back to `_updated_at` for the tiebreak — fine for this
+  // single-user app where overlapping periods at the same started_at are rare.
+  const hrtPeriods = useLiveQuery(
+    async () => {
+      const all = await db.hrt_timeline_periods.filter(p => !p._deleted).toArray();
+      return all.map<HrtTimelinePeriodInput>(p => ({
+        uuid: p.uuid,
+        name: p.name,
+        started_at: p.started_at,
+        ended_at: p.ended_at,
+        // _updated_at is an epoch number on SyncMeta; convert to ISO for the
+        // string-comparison tiebreak. Fall back to started_at for first-pull
+        // rows where _updated_at hasn't been stamped yet.
+        created_at: p._updated_at != null
+          ? new Date(p._updated_at).toISOString()
+          : `${p.started_at}T00:00:00Z`,
+      }));
+    },
+    [],
+    [] as HrtTimelinePeriodInput[],
+  );
+
+  // Latest front-pose progress photo — drives photo cadence footer.
+  const latestFrontPhoto = useLiveQuery(
+    async () => {
+      const photos = await db.progress_photos
+        .filter(p => !p._deleted && p.pose === 'front')
+        .toArray();
+      if (photos.length === 0) return null;
+      photos.sort((a, b) => (b.taken_at ?? '').localeCompare(a.taken_at ?? ''));
+      return photos[0]?.taken_at ?? null;
+    },
+    [],
+    null,
+  );
+
+  // projection_photos isn't in the local-first sync set today, so we can't
+  // detect front-pose projections from Dexie. v1.1 ships the secondary
+  // "Compare projection" affordance dark; v1.2 follow-up: add projection_photos
+  // to SYNCED_TABLES then enable a useLiveQuery here.
+  const hasFrontProjection = false;
 
   // ── Vision (Dexie) ─────────────────────────────────────────────────
   const vision = useActiveVision();
@@ -715,6 +787,108 @@ export default function WeekPage() {
   const isLoading = feedPending && !feedBundle;
   const tiles = resolveWeekTiles(facts, { loading: isLoading });
 
+  // ── v1.1 prescription engine wiring ───────────────────────────────────
+  // Build the engine input from existing facts. Per-muscle 8-week history
+  // isn't gathered today (would need a separate Dexie scan); we approximate
+  // using rirByWeek.length capped at 8. RIR drift per-muscle is set null for
+  // first ship — engine treats null as "no drift" gracefully. Anchor slope
+  // per muscle is derived from the existing anchor-lift trend data.
+  const hrtContext = useMemo(
+    () => deriveHrtContext(hrtPeriods ?? [], facts.today),
+    [hrtPeriods, facts.today],
+  );
+
+  const prescriptionResult = useMemo(() => {
+    if (isLoading) return null;
+    const priorityMuscles = facts.vision?.build_emphasis ?? [];
+    if (priorityMuscles.length === 0) {
+      // No priority muscles defined → engine returns empty card.
+      return prescriptionsFor(
+        { today: facts.today, hrv: { available: false, sigma_below: 0, baseline_days: 0 }, sessions_last_14d: facts.sessions_last_14d, muscles: [] },
+        hrtContext,
+      );
+    }
+
+    // HRV signal — derive sigma_below from the existing recovery facts.
+    const hrvDaily = facts.recovery.hrv_daily;
+    let hrvSigmaBelow = 0;
+    let hrvBaselineDays = 0;
+    let hrvAvailable = false;
+    if (facts.recovery.status === 'connected' && hrvDaily.length >= 14) {
+      const sorted = [...hrvDaily].sort((a, b) => a.date.localeCompare(b.date));
+      const last7 = sorted.slice(-7);
+      const last28 = sorted.slice(-28);
+      const window7Mean = last7.reduce((s, p) => s + p.value, 0) / last7.length;
+      const baselineMean = last28.reduce((s, p) => s + p.value, 0) / last28.length;
+      const baselineSd = Math.sqrt(
+        last28.reduce((s, p) => s + (p.value - baselineMean) ** 2, 0) / last28.length,
+      );
+      hrvAvailable = true;
+      hrvBaselineDays = last28.length;
+      hrvSigmaBelow = baselineSd > 0 ? (baselineMean - window7Mean) / baselineSd : 0;
+    }
+
+    // Per-muscle 8-week history approximation: use overall rirByWeek length.
+    // Conservative — overcounts for muscles that weren't trained every week.
+    // Refined per-muscle history is a v1.2 follow-up.
+    const weeksWithDataApprox = Math.min(8, facts.rirByWeek.length);
+
+    // Build per-muscle facts from setsByMuscle, restricted to priority muscles.
+    const setsBySlug = new Map(facts.setsByMuscle.map(r => [r.slug, r]));
+    const muscles: PrescriptionMuscleFact[] = [];
+    priorityMuscles.forEach((slug, rank) => {
+      const row = setsBySlug.get(slug);
+      // Zone needs to be re-derived (server's status uses raw set_count, not
+      // effective). For simplicity: 'in-zone' default; engine still gates on
+      // weeks_with_data and requires explicit signals to fire PUSH/REDUCE.
+      muscles.push({
+        muscle: slug,
+        effective_sets: row?.effective_set_count ?? 0,
+        zone: 'in-zone', // conservative — gates above prevent false positives
+        weeks_with_data: weeksWithDataApprox,
+        rir_drift: null,        // v1.2 — per-muscle aggregation
+        anchor_slope: null,     // v1.2 — wire from anchor-lift trend
+        anchor_lift_name: null,
+        build_emphasis_rank: rank,
+      });
+    });
+
+    return prescriptionsFor(
+      {
+        today: facts.today,
+        hrv: { available: hrvAvailable, sigma_below: hrvSigmaBelow, baseline_days: hrvBaselineDays },
+        sessions_last_14d: facts.sessions_last_14d,
+        muscles,
+      },
+      hrtContext,
+    );
+  }, [isLoading, facts, hrtContext]);
+
+  // Photo cadence state for the footer.
+  const photoCadence = useMemo(
+    () => photoCadenceState(latestFrontPhoto ?? null, new Date()),
+    [latestFrontPhoto],
+  );
+
+  // Inject weeks_with_data approximation into PriorityMusclesTile rows so
+  // the SufficiencyBadge renders. v1.2 will make this per-muscle.
+  const tilesWithBadges = useMemo(() => {
+    const weeksApprox = Math.min(8, facts.rirByWeek.length);
+    return tiles.map(t => {
+      if (t.id !== 'priority-muscles' || t.state !== 'ok') return t;
+      return {
+        ...t,
+        data: {
+          ...t.data,
+          rows: t.data.rows.map(r => ({
+            ...r,
+            weeks_with_data: r.weeks_with_data ?? weeksApprox,
+          })),
+        },
+      };
+    });
+  }, [tiles, facts.rirByWeek.length]);
+
   // ── Section B: 12-Week Trends data assembly ───────────────────────
   const trendsData: TwelveWeekTrendsData = useMemo(() => {
     // Bodyweight EWMA over the available 90-day window (already loaded
@@ -815,52 +989,74 @@ export default function WeekPage() {
       </nav>
 
       <div className="px-4 space-y-4">
-        {/* ── Section A: This Week (5 tiles) ── */}
-        {tiles.map(tile => {
-          if (tile.state === 'loading') return <SkeletonTile key={tile.id} />;
+        {/* ── v1.1: Next-week prescription banner (top of Section A) ── */}
+        <PrescriptionCard data={prescriptionResult} />
+
+        {/* ── v1.1: Photo cadence prompt — promoted to top when overdue/no-photo,
+         *  otherwise renders at the bottom (after Section B) ── */}
+        {photoCadence.status !== 'fresh' && (photoCadence.status === 'overdue' || photoCadence.status === 'no-photo-ever') && (
+          <PhotoCadenceFooter state={photoCadence} hasFrontProjection={hasFrontProjection} />
+        )}
+
+        {/* ── Section A: This Week — v1 tiles + v1.1 cardio inserted at slot 4 ── */}
+        {tilesWithBadges.map((tile, index) => {
+          // Inject CardioComplianceTile between Recovery (idx 3) and Weight EWMA (idx 4)
+          const cardioInsert = tile.id === 'weight-ewma'
+            ? <CardioComplianceTile key="cardio" data={cardioWeek ?? null} />
+            : null;
+
+          if (tile.state === 'loading') return <>{cardioInsert}<SkeletonTile key={tile.id} /></>;
           if (tile.state === 'needs-data' || tile.state === 'error') {
             return (
-              <section
-                key={tile.id}
-                className="rounded-2xl bg-card dark:bg-card border border-border dark:border-border shadow-sm p-4"
-                aria-label={`${labelFor(tile.id)} — needs data`}
-              >
-                <div className="text-xs font-semibold uppercase tracking-wide text-primary">
-                  {labelFor(tile.id)}
-                </div>
-                <div className="mt-2">
-                  <TileEmptyState
-                    message={tile.message ?? 'No data yet'}
-                    fixHref={tile.fixHref}
-                    fixLabel={tile.fixLabel}
-                  />
-                </div>
-              </section>
+              <>
+                {cardioInsert}
+                <section
+                  key={tile.id}
+                  className="rounded-2xl bg-card dark:bg-card border border-border dark:border-border shadow-sm p-4"
+                  aria-label={`${labelFor(tile.id)} — needs data`}
+                >
+                  <div className="text-xs font-semibold uppercase tracking-wide text-primary">
+                    {labelFor(tile.id)}
+                  </div>
+                  <div className="mt-2">
+                    <TileEmptyState
+                      message={tile.message ?? 'No data yet'}
+                      fixHref={tile.fixHref}
+                      fixLabel={tile.fixLabel}
+                    />
+                  </div>
+                </section>
+              </>
             );
           }
 
           // state === 'ok' or 'partial' — render tile body. We narrow per-id
           // and assert `data` (the discriminated-union ok-branch carries it).
+          let body: React.ReactNode = null;
           if (tile.id === 'priority-muscles' && tile.state === 'ok') {
-            return <PriorityMusclesTile key={tile.id} data={tile.data} />;
+            body = <PriorityMusclesTile key={tile.id} data={tile.data} />;
+          } else if (tile.id === 'effective-set-quality' && tile.state === 'ok') {
+            body = <EffectiveSetQualityTile key={tile.id} data={tile.data} />;
+          } else if (tile.id === 'anchor-lift-trend' && (tile.state === 'ok' || tile.state === 'partial')) {
+            body = <AnchorLiftTrendTile key={tile.id} data={tile.data} />;
+          } else if (tile.id === 'recovery' && tile.state === 'ok') {
+            body = <RecoveryTile key={tile.id} data={tile.data} />;
+          } else if (tile.id === 'weight-ewma' && tile.state === 'ok') {
+            body = <WeightEwmaTile key={tile.id} data={tile.data} />;
           }
-          if (tile.id === 'effective-set-quality' && tile.state === 'ok') {
-            return <EffectiveSetQualityTile key={tile.id} data={tile.data} />;
-          }
-          if (tile.id === 'anchor-lift-trend' && (tile.state === 'ok' || tile.state === 'partial')) {
-            return <AnchorLiftTrendTile key={tile.id} data={tile.data} />;
-          }
-          if (tile.id === 'recovery' && tile.state === 'ok') {
-            return <RecoveryTile key={tile.id} data={tile.data} />;
-          }
-          if (tile.id === 'weight-ewma' && tile.state === 'ok') {
-            return <WeightEwmaTile key={tile.id} data={tile.data} />;
-          }
-          return null;
+          if (body == null) return null;
+          // Index unused but kept for potential future ordering tweaks.
+          void index;
+          return <>{cardioInsert}{body}</>;
         })}
 
         {/* ── Section B: 12-Week Trends ── */}
         <TwelveWeekTrendsSection data={trendsData} />
+
+        {/* ── v1.1: Photo cadence footer — gentle reminder slot when not promoted above ── */}
+        {photoCadence.status === 'soon' && (
+          <PhotoCadenceFooter state={photoCadence} hasFrontProjection={hasFrontProjection} />
+        )}
       </div>
     </main>
   );

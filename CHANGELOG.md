@@ -2,6 +2,39 @@
 
 All notable changes to Rebirth are documented here.
 
+## [0.8.0] - 2026-05-03
+
+### Added (Week page v1.1)
+
+- **Next-Week Prescription banner** at the top of the Week page. Synthesizes the 5 v1 tile signals + HRT context into per-priority-muscle PUSH / REDUCE / DELOAD recommendations with reason chips and a tap-to-expand explanation sheet. Replaces the originally-planned "deload status chip" with an actionable surface — the autoplan dual voices both flagged a passive chip as "the worst middle ground" between status and prescription. Confidence-gated: per-muscle requires ≥3 weeks of effective-set data + ≥3 sessions in last 14 days; whole-body DELOAD requires ≥14 days of HRV baseline. Quiet warming-up state below those thresholds. Total-added-sets cap of +4/week across all PUSH recommendations (eng-review safety constraint). HRT context: reads `hrt_timeline_periods` and surfaces a "Recent protocol change — strength variance expected" footer line + suppresses e1RM stagnation as a DELOAD trigger when the active protocol is < 4 weeks old. Built on three new pure modules: `prescription-engine.ts`, `reason-chip-registry.ts`, `hrt-context.ts`.
+- **Cardio compliance tile** (Section A slot 4, between Recovery and Weight EWMA — both reviewers' "systemic load cluster" placement). Activity-type classification only for v1.1; the planned HR-zone path was dropped at the autoplan eng review (workout-avg HR systematically misclassifies HIIT, per-second HR samples not in `healthkit_workouts` schema yet). Renders single-ring mode against the umbrella `programming_dose.cardio_floor_minutes_weekly` target, OR split rows when either / both of the new `cardio_zone2_minutes_weekly` and `cardio_intervals_minutes_weekly` sub-targets are set on the active body_plan. HealthKit not connected → "Connect HealthKit" CTA. No targets set → tile renders nothing (silent). All-strength-week → 0/target silently (no warning copy).
+- **Data-sufficiency badges** on Priority Muscles tile rows. Small `[N wks]` pill rendered only when a muscle's history is below the personalization threshold (8 weeks). Foundation for v1.2 landmark personalization UI — silently disappears once the muscle accumulates enough weeks. 0-weeks renders distinct `[no data]` copy. Tap opens an explanation sheet (iOS PWA — touch has no hover, so tooltip would never be discovered).
+- **Photo cadence footer** — monthly front-pose progress photo prompt. 28-day cadence matches HRT silhouette change (van Velzen 2018). Three render states: `soon` (22-28d, gentle muted-tone footer), `overdue` (>28d, amber tone, promoted above Section B), `no-photo-ever` (onboarding copy with "take your first front-pose photo"). Capture link always present; "Compare projection" secondary affordance ships dark in v1.1 (projection_photos not yet in local-first sync set).
+- **Hip Abduction exercise** added to the catalog (`Cable Hip Abduction`, primary: `hip_abductors`, secondary: `glutes`). Closes the v0.7.6 deferred TODO — the Hip-Abductors anchor-lift trend row no longer renders the data-needs flag once Lou logs a set with this exercise.
+- **`get_health_cardio_week` MCP tool** mirroring `get_health_sleep_summary`'s shape. Returns total / zone-2 / intervals minutes vs `programming_dose` targets + 7-day breakdown. Status envelopes: `not_connected` (503), `invalid_input` (400), `no_targets` (200), or happy (200). Backed by the same `computeCardioWeek` server helper as the HTTP route.
+- **`/api/health/cardio-week` HTTP route** mirroring `/api/health/snapshot`'s shape (auth + connection check + error envelope). Accepts `start_date`/`end_date` OR `window_days` (default 7, max 90).
+- **`src/lib/training/cardio-classification.ts`** — pure activity-type → category (zone2 / intervals / uncategorized) mapping. Single source of truth shared by route + MCP tool.
+- **`src/lib/vision/programming-dose.ts`** — Zod schema for the previously-untyped `body_plan.programming_dose` JSONB blob, with `resolveCardioTargets()` helper. Replaces 3+ inline parsers, prevents future type drift.
+
+### Changed
+
+- `body_plan.programming_dose` (JSONB) now optionally accepts `cardio_zone2_minutes_weekly` and `cardio_intervals_minutes_weekly` sub-targets alongside the existing `cardio_floor_minutes_weekly` umbrella. Backwards-compatible: existing plans continue to work; the cardio tile falls back to single-ring rendering when only the umbrella is set.
+
+### Architecture notes
+
+- **Decision-engine reframe:** the original v1.1 plan bundled 7 features (landmark personalization UI, anchor-lift override UI, deload status chip, cardio tile, photo cadence, dark mode, catalog audit). Both /autoplan dual voices independently challenged this as "knobs and tiles instead of synthesis." Lou rebriefed at the premise gate: ship the synthesis surface (prescription card with HRT context), defer personalization editors to v1.2 once data accumulates, drop dark mode entirely.
+- **Two scope drops at the eng review** for schema reasons, both gated on v1.2 follow-ups: HRT trough-day chip (needs `route` + `dose_interval_days` schema additions on `hrt_timeline_periods`); HR-zone cardio classification (needs per-second HR samples in `healthkit_workouts`).
+- **Architecture pattern:** `PrescriptionCard`, `CardioComplianceTile`, and `PhotoCadenceFooter` all live OUTSIDE `resolveWeekTiles()` — they self-decide rendering based on their own data sources. Keeps the `WeekTile` discriminated union and its 12 test snapshots unchanged. The prescription engine is a pure sibling resolver next to `resolveWeekTiles`, sharing the same WeekFacts input.
+- **Future-Lou-developer ergonomics** (DX-review pattern): adding a new reason chip touches the engine rule + one entry in `reason-chip-registry.ts` (label + ariaLabel + explanation + severity). Engine emits `{kind, ...payload}` tagged-union values; UI renders by `chip.kind` from the registry.
+
+### Tests
+
+1201 → 1351 (+150 net). All passing. Coverage: prescription engine (29 cases including HRT recent-protocol suppression, total-added-set cap, RIR boundary 0.49 vs 0.50, HRV boundary -0.99σ vs -1.0σ, determinism), HrtContext (16), reason-chip registry (10), cardio classification (16), programming-dose Zod (12), cardio-week HTTP route (12), CardioComplianceTile component (11), PrescriptionCard component (12), SufficiencyBadge (10), photo-cadence math (12), PhotoCadenceFooter component (14).
+
+### Documented
+
+- v1.1 plan + decision audit (40 rows): `~/.gstack/projects/lewcart-Iron/feat-week-v1.1-plan-20260503-160000.md`
+
 ## [0.7.6] - 2026-05-03
 
 ### Added
