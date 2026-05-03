@@ -336,6 +336,100 @@ describe('set_nutrition_targets', () => {
   });
 });
 
+// ── add_week_meal ─────────────────────────────────────────────────────────────
+
+describe('add_week_meal', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('appends a meal with sort_order defaulted to current day count', async () => {
+    const db = await import('@/db/db');
+    // First queryOne is the COUNT(*); second is the INSERT RETURNING.
+    vi.mocked(db.queryOne)
+      .mockResolvedValueOnce({ c: 3 })
+      .mockResolvedValueOnce({
+        uuid: 'new-uuid', day_of_week: 5, meal_slot: 'snack',
+        meal_name: 'Chobani High Protein Yoghurt', calories: 130,
+        protein_g: 19, carbs_g: 8, fat_g: 3, quality_rating: null, sort_order: 3,
+      });
+
+    const { POST } = await import('./route');
+    const res = await POST(toolCall('add_week_meal', {
+      day: 'Sat',
+      meal_slot: 'snack',
+      meal_name: 'Chobani High Protein Yoghurt',
+      calories: 130,
+      protein_g: 19,
+      carbs_g: 8,
+      fat_g: 3,
+    }));
+
+    const body = await res.json();
+    expect(body.result.isError).toBeFalsy();
+    const parsed = JSON.parse(body.result.content[0].text);
+    expect(parsed.meal_name).toBe('Chobani High Protein Yoghurt');
+    expect(parsed.day_of_week).toBe(5);
+    expect(parsed.sort_order).toBe(3);
+
+    const countCall = vi.mocked(db.queryOne).mock.calls[0];
+    expect(countCall[0]).toMatch(/COUNT\(\*\).*nutrition_week_meals.*day_of_week = \$1/s);
+    expect(countCall[1]).toEqual([5]);
+
+    const insertCall = vi.mocked(db.queryOne).mock.calls[1];
+    expect(insertCall[0]).toMatch(/INSERT INTO nutrition_week_meals/);
+    // [uuid, day_of_week, slot, name, protein, carbs, fat, calories, quality, sort_order]
+    expect(insertCall[1]?.slice(1)).toEqual([5, 'snack', 'Chobani High Protein Yoghurt', 19, 8, 3, 130, null, 3]);
+  });
+
+  it('honors caller-supplied sort_order without consulting COUNT', async () => {
+    const db = await import('@/db/db');
+    vi.mocked(db.queryOne).mockResolvedValueOnce({
+      uuid: 'u1', day_of_week: 6, meal_slot: 'snack', meal_name: 'X', sort_order: 0,
+    });
+
+    const { POST } = await import('./route');
+    await POST(toolCall('add_week_meal', {
+      day: 7, meal_slot: 'snack', meal_name: 'X', sort_order: 0,
+    }));
+
+    expect(vi.mocked(db.queryOne).mock.calls.length).toBe(1);
+    expect(vi.mocked(db.queryOne).mock.calls[0][0]).toMatch(/INSERT INTO nutrition_week_meals/);
+  });
+
+  it('errors when day is missing', async () => {
+    const { POST } = await import('./route');
+    const res = await POST(toolCall('add_week_meal', { meal_slot: 'snack', meal_name: 'X' }));
+    const body = await res.json();
+    expect(body.result.isError).toBe(true);
+    expect(body.result.content[0].text).toMatch(/day is required/);
+  });
+
+  it('errors when meal_slot is invalid', async () => {
+    const { POST } = await import('./route');
+    const res = await POST(toolCall('add_week_meal', { day: 'Sat', meal_slot: 'brunch', meal_name: 'X' }));
+    const body = await res.json();
+    expect(body.result.isError).toBe(true);
+    expect(body.result.content[0].text).toMatch(/meal_slot must be one of/);
+  });
+
+  it('errors when meal_name is missing', async () => {
+    const { POST } = await import('./route');
+    const res = await POST(toolCall('add_week_meal', { day: 'Sat', meal_slot: 'snack' }));
+    const body = await res.json();
+    expect(body.result.isError).toBe(true);
+    expect(body.result.content[0].text).toMatch(/meal_name is required/);
+  });
+
+  it('errors when quality_rating is out of range', async () => {
+    const { POST } = await import('./route');
+    const res = await POST(toolCall('add_week_meal', {
+      day: 'Sat', meal_slot: 'snack', meal_name: 'X', quality_rating: 9,
+    }));
+    const body = await res.json();
+    expect(body.result.isError).toBe(true);
+    expect(body.result.content[0].text).toMatch(/quality_rating must be 1.5/);
+  });
+});
+
 // ── update_week_meal ──────────────────────────────────────────────────────────
 
 describe('update_week_meal', () => {

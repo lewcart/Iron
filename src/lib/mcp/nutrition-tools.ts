@@ -646,6 +646,68 @@ async function loadNutritionPlan(args: Record<string, unknown>) {
   });
 }
 
+// add_week_meal — append a single meal to the standard-week template without
+// touching anything else. Companion to load_nutrition_plan (full wipe-replace)
+// and update_week_meal (partial edit by uuid).
+async function addWeekMeal(args: Record<string, unknown>) {
+  const ALLOWED_SLOTS = ['breakfast', 'lunch', 'dinner', 'snack'] as const;
+
+  if (args.day == null || (typeof args.day !== 'string' && typeof args.day !== 'number')) {
+    return toolError('INVALID_INPUT', 'day is required (Mon/Tue/.../Sun or 1–7)');
+  }
+  if (typeof args.meal_slot !== 'string') {
+    return toolError('INVALID_INPUT', 'meal_slot is required (breakfast | lunch | dinner | snack)');
+  }
+  const slot = args.meal_slot.toLowerCase().trim();
+  if (!ALLOWED_SLOTS.includes(slot as typeof ALLOWED_SLOTS[number])) {
+    return toolError('INVALID_INPUT', `meal_slot must be one of ${ALLOWED_SLOTS.join(' | ')}`);
+  }
+  if (typeof args.meal_name !== 'string' || args.meal_name.trim() === '') {
+    return toolError('INVALID_INPUT', 'meal_name is required');
+  }
+  if (
+    args.quality_rating != null &&
+    (typeof args.quality_rating !== 'number' || args.quality_rating < 1 || args.quality_rating > 5)
+  ) {
+    return toolError('INVALID_INPUT', 'quality_rating must be 1–5');
+  }
+
+  const dow = parseDayOfWeek(args.day as string | number);
+
+  let sortOrder: number;
+  if (typeof args.sort_order === 'number') {
+    sortOrder = args.sort_order;
+  } else {
+    const countRow = await queryOne<{ c: string | number }>(
+      `SELECT COUNT(*)::int AS c FROM nutrition_week_meals WHERE day_of_week = $1`,
+      [dow],
+    );
+    sortOrder = Number(countRow?.c ?? 0);
+  }
+
+  const row = await queryOne(
+    `INSERT INTO nutrition_week_meals
+       (uuid, day_of_week, meal_slot, meal_name,
+        protein_g, carbs_g, fat_g, calories, quality_rating, sort_order)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+     RETURNING *`,
+    [
+      crypto.randomUUID(),
+      dow,
+      slot,
+      args.meal_name.trim(),
+      args.protein_g ?? null,
+      args.carbs_g ?? null,
+      args.fat_g ?? null,
+      args.calories ?? null,
+      args.quality_rating ?? null,
+      sortOrder,
+    ],
+  );
+
+  return toolResult(row);
+}
+
 const LOG_MEAL_TYPES = ['breakfast', 'lunch', 'dinner', 'snack', 'other'] as const;
 const LOG_MEAL_STATUSES = ['planned', 'deviation', 'added'] as const;
 
@@ -984,6 +1046,27 @@ export const nutritionTools: MCPTool[] = [
       required: ['days'],
     },
     execute: loadNutritionPlan,
+  },
+  {
+    name: 'add_week_meal',
+    description:
+      'Appends a single meal to the standard-week template without touching anything else. Use this when adding one meal — load_nutrition_plan wipes the whole template, update_week_meal only edits existing rows. day accepts Mon/Tue/.../Sun or 1–7. sort_order defaults to the next slot at the end of that day.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        day: { type: ['string', 'number'], description: 'Day name (Mon/Tue/Wed/Thu/Fri/Sat/Sun) or number (1=Mon … 7=Sun)' },
+        meal_slot: { type: 'string', description: 'breakfast | lunch | dinner | snack' },
+        meal_name: { type: 'string', description: 'Meal name/description' },
+        calories: { type: 'number' },
+        protein_g: { type: 'number' },
+        carbs_g: { type: 'number' },
+        fat_g: { type: 'number' },
+        quality_rating: { type: 'number', description: '1–5 quality rating' },
+        sort_order: { type: 'number', description: 'Optional; defaults to end of day' },
+      },
+      required: ['day', 'meal_slot', 'meal_name'],
+    },
+    execute: addWeekMeal,
   },
   {
     name: 'update_week_meal',
