@@ -80,6 +80,10 @@ export interface SleepNight {
 
 export interface MedicationRecord {
   hk_uuid: string;
+  /** Always "Unknown medication" on iOS 26.3.1 — Apple's API doesn't expose a
+   *  link from a dose event back to its parent medication. See
+   *  docs/healthkit-medications-name-linkage.md. The medication names live in
+   *  `annotatedMedications` on the fetch response instead. */
   medication_name: string;
   dose_string?: string;
   taken_at: number;          // epoch ms
@@ -87,6 +91,18 @@ export interface MedicationRecord {
   source_name?: string;
   source_bundle_id?: string;
   metadata_json?: string;
+}
+
+/** A user-tracked medication (HKUserAnnotatedMedication). Returned alongside
+ *  dose events. Use to render the medication list / aggregate dose counts. */
+export interface AnnotatedMedication {
+  name: string;
+  is_archived: boolean;
+  has_schedule: boolean;
+  /** Apple's display text for the underlying medication concept (e.g. the
+   *  pharmaceutical name). Often the same as `name`; differs when the user
+   *  set a nickname. */
+  concept_display_text: string;
 }
 
 export interface FullHKWorkout {
@@ -161,7 +177,16 @@ interface HealthKitPlugin {
     startTime: number;
     endTime: number;
     anchor?: string;
-  }): Promise<{ medications: MedicationRecord[]; deleted: string[]; nextAnchor: string }>;
+  }): Promise<{
+    medications: MedicationRecord[];
+    deleted: string[];
+    nextAnchor: string;
+    /** All HKUserAnnotatedMedications the user has authorized Rebirth to read.
+     *  This is how we surface medication NAMES on iOS 26.3.1 — see
+     *  docs/healthkit-medications-name-linkage.md for why it's separate from
+     *  the dose-event stream. */
+    annotatedMedications: AnnotatedMedication[];
+  }>;
 
   // Writes
   saveNutrition(options: {
