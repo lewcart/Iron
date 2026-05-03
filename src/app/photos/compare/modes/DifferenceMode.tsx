@@ -14,8 +14,10 @@ const CAVEAT_DISMISSED_KEY = 'photos-compare-difference-caveat-dismissed';
 export function DifferenceMode({
   beforeUrl,
   afterUrl,
-  beforeOffset,
-  afterOffset,
+  beforeOffsetX,
+  beforeOffsetY,
+  afterOffsetX,
+  afterOffsetY,
   beforeLabel,
   afterLabel,
   accent,
@@ -61,7 +63,7 @@ export function DifferenceMode({
           className="absolute inset-0 w-full h-full"
           style={{
             objectFit: 'cover',
-            transform: offsetTransform(afterOffset),
+            transform: offsetTransform(afterOffsetX, afterOffsetY),
             transformOrigin: 'center',
           }}
           draggable={false}
@@ -73,7 +75,7 @@ export function DifferenceMode({
           className="absolute inset-0 w-full h-full"
           style={{
             objectFit: 'cover',
-            transform: offsetTransform(beforeOffset),
+            transform: offsetTransform(beforeOffsetX, beforeOffsetY),
             transformOrigin: 'center',
             mixBlendMode: 'difference',
           }}

@@ -29,7 +29,7 @@ export async function PATCH(
     return NextResponse.json({ error: 'JSON body required' }, { status: 400 });
   }
 
-  const updates: { pose?: InspoPhotoPose | null; notes?: string | null; crop_offset_y?: number | null } = {};
+  const updates: { pose?: InspoPhotoPose | null; notes?: string | null; crop_offset_y?: number | null; crop_offset_x?: number | null } = {};
   if ('pose' in body) {
     if (body.pose === null) {
       updates.pose = null;
@@ -45,16 +45,19 @@ export async function PATCH(
   if ('notes' in body) {
     updates.notes = body.notes == null ? null : String(body.notes);
   }
-  if ('crop_offset_y' in body) {
-    if (body.crop_offset_y === null) {
-      updates.crop_offset_y = null;
-    } else if (typeof body.crop_offset_y === 'number' && body.crop_offset_y >= 0 && body.crop_offset_y <= 100) {
-      updates.crop_offset_y = body.crop_offset_y;
-    } else {
-      return NextResponse.json(
-        { error: 'crop_offset_y must be a number 0-100 or null' },
-        { status: 400 },
-      );
+  for (const axis of ['crop_offset_y', 'crop_offset_x'] as const) {
+    if (axis in body) {
+      const v = body[axis];
+      if (v === null) {
+        updates[axis] = null;
+      } else if (typeof v === 'number' && v >= 0 && v <= 100) {
+        updates[axis] = v;
+      } else {
+        return NextResponse.json(
+          { error: `${axis} must be a number 0-100 or null` },
+          { status: 400 },
+        );
+      }
     }
   }
 

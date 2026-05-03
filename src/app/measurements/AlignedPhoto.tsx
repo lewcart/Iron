@@ -11,6 +11,8 @@ interface AlignedPhotoProps {
   blob?: Blob | null;
   /** CSS object-position y%, 0-100. NULL renders centered (50%). */
   cropOffsetY: number | null;
+  /** CSS object-position x%, 0-100. NULL renders centered (50%). */
+  cropOffsetX?: number | null;
   /** Aspect ratio for the cropped frame. Default 3/4 (portrait). */
   aspectRatio?: string;
   alt: string;
@@ -21,13 +23,14 @@ interface AlignedPhotoProps {
   sizes?: string;
 }
 
-/** Renders a photo at a fixed aspect ratio with the persisted crop_offset_y
- *  applied via CSS object-position. Handles `local:*` stubs by sourcing the
- *  JPEG from the Blob and revoking the object URL on unmount. */
+/** Renders a photo at a fixed aspect ratio with the persisted crop offsets
+ *  applied via CSS transform. Handles `local:*` stubs by sourcing the JPEG
+ *  from the Blob and revoking the object URL on unmount. */
 export function AlignedPhoto({
   blobUrl,
   blob,
   cropOffsetY,
+  cropOffsetX,
   aspectRatio = '3 / 4',
   alt,
   className = '',
@@ -64,7 +67,7 @@ export function AlignedPhoto({
         className="absolute inset-0 w-full h-full select-none"
         style={{
           objectFit,
-          transform: offsetTransform(cropOffsetY),
+          transform: offsetTransform(cropOffsetX, cropOffsetY),
           transformOrigin: 'center',
         }}
         draggable={false}

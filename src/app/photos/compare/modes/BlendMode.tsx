@@ -10,8 +10,10 @@ import type { BaseCompareProps } from './types';
 export function BlendMode({
   beforeUrl,
   afterUrl,
-  beforeOffset,
-  afterOffset,
+  beforeOffsetX,
+  beforeOffsetY,
+  afterOffsetX,
+  afterOffsetY,
   beforeLabel,
   afterLabel,
   accent,
@@ -29,7 +31,7 @@ export function BlendMode({
           className="absolute inset-0 w-full h-full"
           style={{
             objectFit: 'cover',
-            transform: offsetTransform(afterOffset),
+            transform: offsetTransform(afterOffsetX, afterOffsetY),
             transformOrigin: 'center',
           }}
           draggable={false}
@@ -41,7 +43,7 @@ export function BlendMode({
           className="absolute inset-0 w-full h-full"
           style={{
             objectFit: 'cover',
-            transform: offsetTransform(beforeOffset),
+            transform: offsetTransform(beforeOffsetX, beforeOffsetY),
             transformOrigin: 'center',
             opacity: opacity / 100,
           }}

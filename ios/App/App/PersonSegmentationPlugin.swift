@@ -98,10 +98,19 @@ public class PersonSegmentationPlugin: CAPPlugin, CAPBridgedPlugin {
         }
     }
 
-    /// Convert a single-channel CVPixelBuffer mask to a grayscale PNG, scaled
-    /// to `targetSize`. The web layer renders the mask with the same CSS
-    /// transform (offsetTransform + object-fit: cover) as the source image,
-    /// so dimensions must match exactly for the silhouette to align.
+    /// Convert a single-channel CVPixelBuffer mask to an RGBA PNG (white
+    /// where person, transparent where background), scaled to `targetSize`.
+    ///
+    /// Why RGBA + alpha instead of grayscale: CSS `mask-image` defaults to
+    /// `mask-mode: alpha` for raster sources. Grayscale PNGs come out alpha
+    /// =255 across the whole frame, so the colored layer paints everywhere
+    /// (not just the silhouette). Baking the segmentation value INTO the
+    /// alpha channel lets the default mask-mode work correctly without
+    /// per-property luminance-mode workarounds that vary across browsers.
+    ///
+    /// The web layer renders the mask with the same CSS transform
+    /// (offsetTransform + object-fit: cover) as the source image, so
+    /// dimensions must match exactly for the silhouette to align.
     private func maskToPng(mask: CVPixelBuffer, targetSize: CGSize) -> Data? {
         let ciImage = CIImage(cvPixelBuffer: mask)
         let context = CIContext(options: nil)
@@ -110,9 +119,20 @@ public class PersonSegmentationPlugin: CAPPlugin, CAPBridgedPlugin {
         let maskHeight = CVPixelBufferGetHeight(mask)
         let scaleX = targetSize.width / CGFloat(maskWidth)
         let scaleY = targetSize.height / CGFloat(maskHeight)
-        let scaled = ciImage.transformed(by: CGAffineTransform(scaleX: scaleX, y: scaleY))
+        let scaledMask = ciImage.transformed(by: CGAffineTransform(scaleX: scaleX, y: scaleY))
 
-        guard let cgScaled = context.createCGImage(scaled, from: CGRect(origin: .zero, size: targetSize)) else {
+        // Use the grayscale mask as the alpha channel of an RGBA image:
+        // foreground = solid white, background = fully transparent, mask
+        // controls the per-pixel alpha. CIBlendWithMask is exactly this.
+        let extent = CGRect(origin: .zero, size: targetSize)
+        let whiteFg = CIImage(color: CIColor.white).cropped(to: extent)
+        let clearBg = CIImage(color: CIColor.clear).cropped(to: extent)
+        let composed = whiteFg.applyingFilter("CIBlendWithMask", parameters: [
+            "inputBackgroundImage": clearBg,
+            "inputMaskImage": scaledMask,
+        ])
+
+        guard let cgScaled = context.createCGImage(composed, from: extent) else {
             return nil
         }
 

@@ -32,8 +32,10 @@ export function SilhouetteMode({
   // beforePhoto / afterPhoto.blob_url when needed.
   beforeUrl: _beforeUrl,
   afterUrl,
-  beforeOffset,
-  afterOffset,
+  beforeOffsetX,
+  beforeOffsetY,
+  afterOffsetX,
+  afterOffsetY,
   beforeLabel,
   afterLabel,
   accent,
@@ -62,6 +64,15 @@ export function SilhouetteMode({
     const controller = new AbortController();
     abortRef.current = controller;
 
+    // Cache hit fast path — skip the async pipeline entirely (no
+    // ensureMask round-trip, no "Tracing outlines…" flash, no extra
+    // render). When both masks are already on the photo rows we render
+    // them directly. Async path only runs on cache miss.
+    const { beforePhoto: bp0, afterPhoto: ap0 } = propsRef.current;
+    if (bp0.mask_url && ap0.mask_url) {
+      setState({ phase: 'ready', beforeMask: bp0.mask_url, afterMask: ap0.mask_url });
+      return;
+    }
     setState({ phase: 'loading' });
 
     (async () => {
@@ -119,7 +130,7 @@ export function SilhouetteMode({
             className="absolute inset-0 w-full h-full opacity-30"
             style={{
               objectFit: 'cover',
-              transform: offsetTransform(afterOffset),
+              transform: offsetTransform(afterOffsetX, afterOffsetY),
               transformOrigin: 'center',
             }}
             draggable={false}
@@ -159,8 +170,7 @@ export function SilhouetteMode({
               maskSize: 'cover',
               maskRepeat: 'no-repeat',
               maskPosition: 'center',
-              maskMode: 'luminance',
-              transform: offsetTransform(afterOffset),
+              transform: offsetTransform(afterOffsetX, afterOffsetY),
               transformOrigin: 'center',
             }}
           />
@@ -176,8 +186,7 @@ export function SilhouetteMode({
               maskSize: 'cover',
               maskRepeat: 'no-repeat',
               maskPosition: 'center',
-              maskMode: 'luminance',
-              transform: offsetTransform(beforeOffset),
+              transform: offsetTransform(beforeOffsetX, beforeOffsetY),
               transformOrigin: 'center',
               mixBlendMode: 'plus-lighter',
             }}
