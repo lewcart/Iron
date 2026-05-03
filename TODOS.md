@@ -1,3 +1,24 @@
+## Plan-progress: extend source-mapping for circ + InBody fields
+
+Surfaced 2026-05-03 during Androgod(ess) plan north_star rebuild. `get_plan_progress`
+auto-populates `current_value` for some metric keys but returns `null` for most:
+
+- ✅ Mapped: `weight_kg` (reads from body_comp).
+- ❌ Unmapped: `circ_hip_cm`, `circ_abdomen_cm`, `circ_right_arm_cm`, `circ_right_thigh_cm`,
+  `shoulders_cm`, `shoulder_width_cm`, `whr`, `smm_kg`, `body_fat_mass_kg`,
+  `seg_lean_right_arm_kg`, `seg_lean_right_leg_kg`.
+
+Today's workaround: monthly sweep playbook reads `get_body_comp` + `list_inbody_scans`
+directly and computes progress in-flight. Works but means `get_plan_progress.current_value`
+is mostly null, so the on-track boolean is null too. Backlog item:
+
+- [ ] Extend the source-mapping inside `get_plan_progress` (likely in
+  `src/app/api/mcp/plan-progress/...` or wherever the metric→source resolver lives) to
+  cover circ_*, shoulders_cm, shoulder_width_cm, whr (computed from waist÷hip),
+  and the latest InBody fields (smm_kg, body_fat_mass_kg, seg_lean_*).
+- [ ] Once mapped, remove the sweep-time direct reads from the `/androgodess` skill
+  playbook.
+
 ## Dark mode (app-wide)
 
 Surfaced during 2026-05-03 Week page /qa verify pass. **Pre-existing — not a
