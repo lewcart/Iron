@@ -38,8 +38,7 @@ import { isComparablePose, POSE_LABELS } from '@/lib/poses';
 import { offsetTransform } from '@/lib/photo-offset';
 import { apiBase, fetchJsonAuthed } from '@/lib/api/client';
 import { isLocalStub } from '@/lib/photo-upload-queue';
-import { CompareDialog, type CompareTarget } from '@/app/measurements/CompareDialog';
-import { AdjustOffsetDialog, type AdjustablePhotoKind } from '@/app/measurements/AdjustOffsetDialog';
+import { useRouter } from 'next/navigation';
 import {
   EditVisionButton,
   EditPlanButton,
@@ -57,26 +56,13 @@ export default function StrategyPage() {
   const projections = useProjectionsFeed(4);
   const progressPhotos = useProgressPhotos(50);
 
-  // Compare state — opens when Lou taps a Projection or Inspiration thumb.
-  // Source = latest matching-pose progress photo. defaultTargetUuid pre-
-  // selects the specific thumb in the carousel so the dialog shows what
-  // Lou tapped, not just "newest at this pose".
-  const [compareSource, setCompareSource] = useState<{
-    uuid: string;
-    blob_url: string;
-    pose: ProgressPhotoPose;
-    taken_at: string;
-    crop_offset_y: number | null;
-  } | null>(null);
-  const [compareTarget, setCompareTarget] = useState<CompareTarget>('projection');
-  const [compareTargetUuid, setCompareTargetUuid] = useState<string | null>(null);
+  const router = useRouter();
 
-  // Adjust offset dialog (so the in-dialog "Adjust source/target" buttons work).
-  const [adjustState, setAdjustState] = useState<{
-    photo: { uuid: string; blob_url: string; crop_offset_y: number | null };
-    kind: AdjustablePhotoKind;
-  } | null>(null);
-
+  // Compare nav — taps on a Projection / Inspiration thumb push to the
+  // /photos/compare page with the source progress photo + the tapped target
+  // pre-selected. Source = latest progress photo at matching pose, with
+  // fall-through to whichever pose has one if Lou hasn't shot the matching
+  // pose yet.
   const latestProgressByPose = useMemo(() => {
     const byPose: Partial<Record<ProgressPhotoPose, ProgressPhotoLike>> = {};
     for (const p of progressPhotos ?? []) {
@@ -97,26 +83,18 @@ export default function StrategyPage() {
   }, [progressPhotos]);
 
   const openCompare = useCallback(
-    (target: CompareTarget, pose: ProgressPhotoPose | null, targetUuid: string) => {
+    (kind: 'projection' | 'inspo', pose: ProgressPhotoPose | null, targetUuid: string) => {
       const matchingPose: ProgressPhotoPose = isComparablePose(pose) ? pose : 'front';
-      const src = latestProgressByPose[matchingPose];
-      if (!src) {
-        // No progress photo at this pose. Fall through to whichever pose has one.
-        const fallback =
-          latestProgressByPose.front ??
-          latestProgressByPose.side ??
-          latestProgressByPose.back ??
-          latestProgressByPose.face_front ??
-          latestProgressByPose.face_side;
-        if (!fallback) return; // no progress photos at all — nothing to compare
-        setCompareSource(fallback);
-      } else {
-        setCompareSource(src);
-      }
-      setCompareTarget(target);
-      setCompareTargetUuid(targetUuid);
+      const src = latestProgressByPose[matchingPose]
+        ?? latestProgressByPose.front
+        ?? latestProgressByPose.side
+        ?? latestProgressByPose.back
+        ?? latestProgressByPose.face_front
+        ?? latestProgressByPose.face_side;
+      if (!src) return; // no progress photos at all — nothing to compare
+      router.push(`/photos/compare?source=${src.uuid}&kind=${kind}&target=${targetUuid}&mode=side`);
     },
-    [latestProgressByPose],
+    [latestProgressByPose, router],
   );
 
   // useLiveQuery returns undefined while loading, null/[] when nothing matches.
@@ -160,21 +138,6 @@ export default function StrategyPage() {
         }
       />
 
-      <CompareDialog
-        open={compareSource !== null}
-        onClose={() => { setCompareSource(null); setCompareTargetUuid(null); }}
-        source={compareSource}
-        defaultTarget={compareTarget}
-        defaultTargetUuid={compareTargetUuid}
-        onAdjust={(photo, kind) => setAdjustState({ photo, kind })}
-      />
-      <AdjustOffsetDialog
-        open={adjustState !== null}
-        onClose={() => setAdjustState(null)}
-        photo={adjustState?.photo ?? null}
-        kind={adjustState?.kind ?? 'progress'}
-        onSaved={() => { /* no-op; Dexie sync engine carries through */ }}
-      />
     </main>
   );
 }

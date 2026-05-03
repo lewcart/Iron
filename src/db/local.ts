@@ -448,6 +448,9 @@ export interface LocalInspoPhoto extends Partial<SyncMeta> {
   pose: 'front' | 'side' | 'back' | 'face_front' | 'face_side' | 'other' | null;
   /** CSS object-position y%, 0-100. NULL = renderer defaults to 50 (center). */
   crop_offset_y?: number | null;
+  /** Server-cached person-segmentation mask URL (Vercel Blob). NULL = not yet
+   *  computed. See migration 038. Read-only client-side; server-owned cache. */
+  mask_url?: string | null;
 }
 
 /** Progress photo metadata — JPEG fetched lazily from blob_url.
@@ -475,6 +478,9 @@ export interface LocalProgressPhoto extends SyncMeta {
    *  Auto-filled on capture via best-effort face detection where supported;
    *  manual drag-to-nudge in adjust mode also writes here. */
   crop_offset_y: number | null;
+  /** Server-cached person-segmentation mask URL (Vercel Blob). NULL = not yet
+   *  computed. See migration 038. Read-only client-side; server-owned cache. */
+  mask_url?: string | null;
 }
 
 // ─── Exercise image candidates (read-only, server-owned) ────────────────────
@@ -781,6 +787,18 @@ export class IronDB extends Dexie {
       });
       await tx.table('nutrition_day_notes').toCollection().modify(row => {
         if (row.template_applied_at === undefined) row.template_applied_at = null;
+      });
+    });
+    // v18: photo segmentation masks for /photos/compare silhouette mode.
+    // Server-cached mask URL (Vercel Blob) on progress + inspo photos. Stores
+    // shape unchanged (mask_url is not indexed). Backfill mask_url=null on
+    // existing rows so reads after upgrade get a defined value, not undefined.
+    this.version(18).stores(v16Stores).upgrade(async tx => {
+      await tx.table('progress_photos').toCollection().modify(row => {
+        if (row.mask_url === undefined) row.mask_url = null;
+      });
+      await tx.table('inspo_photos').toCollection().modify(row => {
+        if (row.mask_url === undefined) row.mask_url = null;
       });
     });
   }

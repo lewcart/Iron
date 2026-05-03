@@ -3,7 +3,7 @@
 import { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import { ChevronLeft, Trash2, ImageIcon, Activity, Target, Plus, GitCompare, Move, Tag } from 'lucide-react';
 import Link from 'next/link';
-import { useSearchParams } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { useUnit } from '@/context/UnitContext';
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
@@ -21,7 +21,6 @@ import { Sheet } from '@/components/ui/sheet';
 import { isLocalStub } from '@/lib/photo-upload-queue';
 import { PhotoSheet } from './PhotoSheet';
 import { InbodyScanSheet } from './InbodyScanSheet';
-import { CompareDialog, type CompareTarget } from './CompareDialog';
 import { AdjustOffsetDialog, type AdjustablePhotoKind } from './AdjustOffsetDialog';
 import { AlignedPhoto } from './AlignedPhoto';
 import { apiBase, fetchJsonAuthed } from '@/lib/api/client';
@@ -105,6 +104,7 @@ function toDateInputValue(d = new Date()) {
 
 function MeasurementsInner() {
   const { fromInput, toDisplay, label } = useUnit();
+  const router = useRouter();
   const searchParams = useSearchParams();
   const initialTab = (searchParams?.get('tab') as TabKey | null) ?? 'measurements';
   const [activeTab, setActiveTab] = useState<TabKey>(initialTab);
@@ -132,12 +132,14 @@ function MeasurementsInner() {
   const [photoSheetOpen, setPhotoSheetOpen] = useState(false);
   const [inbodySheetOpen, setInbodySheetOpen] = useState(false);
 
-  // Compare flow: lightweight existence checks for both target types, plus
-  // dialog state. The dialog itself loads the full lists when it opens.
+  // Compare flow: lightweight existence checks so the "Compare with…" CTAs
+  // only render when there's something to compare against. The compare page
+  // itself loads the full lists.
   const [projectionCount, setProjectionCount] = useState<number | null>(null);
   const [inspoCount, setInspoCount] = useState<number | null>(null);
-  const [compareSource, setCompareSource] = useState<LocalProgressPhoto | null>(null);
-  const [compareTarget, setCompareTarget] = useState<CompareTarget>('projection');
+  const openCompare = useCallback((sourceUuid: string, kind: 'projection' | 'inspo') => {
+    router.push(`/photos/compare?source=${sourceUuid}&kind=${kind}&mode=side`);
+  }, [router]);
   useEffect(() => {
     fetchJsonAuthed<ProjectionPhoto[]>(`${apiBase()}/api/projection-photos?limit=1`)
       .then((rows) => setProjectionCount(rows.length))
@@ -151,11 +153,14 @@ function MeasurementsInner() {
   }, []);
 
   // Adjust mode (manual head-y nudge). Holds the photo + its kind so the
-  // dialog knows which API route to PATCH on save.
+  // dialog knows which API route to PATCH on save. `onSaved` (when set by
+  // the caller) lets the originating view refresh its own state — e.g. the
+  // CompareDialog needs to update the displayed offset without reopening.
   const [adjustState, setAdjustState] = useState<{
     photo: { uuid: string; blob_url: string; crop_offset_y: number | null };
     kind: AdjustablePhotoKind;
     blob?: Blob | null;
+    onSaved?: (newOffset: number | null) => void;
   } | null>(null);
 
   const handleAdjustSaved = useCallback(async (newOffset: number | null) => {
@@ -172,6 +177,7 @@ function MeasurementsInner() {
         syncEngine.schedulePush();
       } catch { /* non-fatal */ }
     }
+    adjustState.onSaved?.(newOffset);
   }, [adjustState]);
 
   // Retag a progress photo's pose. Optimistic Dexie update so the gallery
@@ -709,10 +715,7 @@ function MeasurementsInner() {
                       key={photo.uuid}
                       photo={photo}
                       onDelete={handleDeletePhoto}
-                      onCompare={(target) => {
-                        setCompareTarget(target);
-                        setCompareSource(photo);
-                      }}
+                      onCompare={(kind) => openCompare(photo.uuid, kind)}
                       onAdjust={() =>
                         setAdjustState({
                           photo: {
@@ -774,8 +777,7 @@ function MeasurementsInner() {
                 .sort((a, b) => b.taken_at.localeCompare(a.taken_at));
               const src = usable[0];
               if (!src) return;
-              setCompareTarget((projectionCount ?? 0) > 0 ? 'projection' : 'inspo');
-              setCompareSource(src);
+              openCompare(src.uuid, (projectionCount ?? 0) > 0 ? 'projection' : 'inspo');
             }}
             className="flex items-center gap-2 px-3 py-2 border border-trans-blue/30 text-trans-blue text-sm font-medium rounded-lg"
           >
@@ -1036,15 +1038,6 @@ function MeasurementsInner() {
 
       <PhotoSheet open={photoSheetOpen} onClose={() => setPhotoSheetOpen(false)} />
       <InbodyScanSheet open={inbodySheetOpen} onClose={() => setInbodySheetOpen(false)} />
-      <CompareDialog
-        open={compareSource !== null}
-        onClose={() => setCompareSource(null)}
-        source={compareSource}
-        defaultTarget={compareTarget}
-        onAdjust={(photo, kind) =>
-          setAdjustState({ photo, kind })
-        }
-      />
       <AdjustOffsetDialog
         open={adjustState !== null}
         onClose={() => setAdjustState(null)}
@@ -1070,7 +1063,7 @@ function PhotoTile({
 }: {
   photo: LocalProgressPhoto;
   onDelete: (uuid: string) => void;
-  onCompare: (target: CompareTarget) => void;
+  onCompare: (kind: 'projection' | 'inspo') => void;
   onAdjust: () => void;
   onRetagPose: (pose: ProgressPhotoPose) => void;
   hasProjection: boolean;
