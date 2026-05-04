@@ -23,6 +23,8 @@ import {
   isGeofenceAvailable,
   simulateWalkOutbound,
   simulateWalkInbound,
+  requestHKWriteAuth,
+  deleteRecentSimulatedWalks,
   type WalkSnapshot,
   type WalkPhase,
   type DepartWindows,
@@ -135,6 +137,12 @@ export function MorningWalkSettings() {
     saveAutoWalkEnabledToLS(next);
     try {
       await setAutoWalkEnabled(next);
+      // First-time enable: trigger the iOS HealthKit permission sheet now
+      // (one well-timed prompt) so the dev simulate path + real morning save
+      // both work without per-tap reprompts.
+      if (next) {
+        await requestHKWriteAuth();
+      }
     } catch (err) {
       console.warn('[MorningWalk] setAutoWalkEnabled failed', err);
     }
@@ -244,6 +252,20 @@ export function MorningWalkSettings() {
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       setSimResult(`Walk-2 sim failed: ${msg}`);
+    } finally {
+      setSimRunning(false);
+    }
+  };
+
+  const handleDeleteSimWalks = async () => {
+    setSimRunning(true);
+    setSimResult(null);
+    try {
+      const r = await deleteRecentSimulatedWalks();
+      setSimResult(`Deleted ${r.deleted} Rebirth walk${r.deleted === 1 ? '' : 's'} from the last hour.`);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setSimResult(`Delete failed: ${msg}`);
     } finally {
       setSimRunning(false);
     }
@@ -474,6 +496,13 @@ export function MorningWalkSettings() {
                     className="px-3 py-2 rounded-md bg-secondary text-sm font-medium min-h-[44px] disabled:opacity-50"
                   >
                     Simulate walk-2 (gym → home, 16 min)
+                  </button>
+                  <button
+                    onClick={handleDeleteSimWalks}
+                    disabled={simRunning}
+                    className="px-3 py-2 rounded-md text-sm font-medium min-h-[44px] text-red-600 border border-red-600/40 disabled:opacity-50 mt-1"
+                  >
+                    Delete Rebirth walks from last hour
                   </button>
                   {simResult && (
                     <p className="text-xs text-foreground mt-1">{simResult}</p>

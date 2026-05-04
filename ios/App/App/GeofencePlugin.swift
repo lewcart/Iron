@@ -42,6 +42,8 @@ public class GeofencePlugin: CAPPlugin, CAPBridgedPlugin {
         // Dev / test simulation methods (gated by JS-side dev-mode toggle):
         CAPPluginMethod(name: "simulateWalkOutbound", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "simulateWalkInbound",  returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "requestHKWriteAuth",   returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "deleteRecentSimulatedWalks", returnType: CAPPluginReturnPromise),
     ]
 
     // ── Region identifiers ───────────────────────────────────────────────────
@@ -204,6 +206,60 @@ public class GeofencePlugin: CAPPlugin, CAPBridgedPlugin {
         call.resolve(["enabled": enabled])
     }
 
+    /// Explicitly request HealthKit write permission. Called once when the
+    /// user enables auto-walk so the iOS sheet appears at a sensible moment
+    /// (not mid-simulate). Subsequent calls are no-ops if iOS remembers the
+    /// answer; idempotent.
+    @objc func requestHKWriteAuth(_ call: CAPPluginCall) {
+        walkTracker.requestHKWriteAuthorization { _, err in
+            if let err = err {
+                call.reject(err.localizedDescription)
+            } else {
+                call.resolve(["requested": true])
+            }
+        }
+    }
+
+    /// DEV: delete Rebirth-branded HKWorkouts saved in the last hour. Used
+    /// to clean up after `Simulate walk-1` / `Simulate walk-2` taps without
+    /// having to manually find each workout in the Health app.
+    @objc func deleteRecentSimulatedWalks(_ call: CAPPluginCall) {
+        guard let store = walkTracker.exposedHealthStore else {
+            call.reject("HealthKit not available")
+            return
+        }
+        let workoutType = HKObjectType.workoutType()
+        let oneHourAgo = Date().addingTimeInterval(-3600)
+        let datePredicate = HKQuery.predicateForSamples(withStart: oneHourAgo, end: Date(), options: [])
+        let brandPredicate = HKQuery.predicateForObjects(withMetadataKey: HKMetadataKeyWorkoutBrandName, allowedValues: ["Rebirth"])
+        let predicate = NSCompoundPredicate(andPredicateWithSubpredicates: [datePredicate, brandPredicate])
+        let query = HKSampleQuery(
+            sampleType: workoutType,
+            predicate: predicate,
+            limit: 50,
+            sortDescriptors: nil
+        ) { _, samples, error in
+            if let error = error {
+                DispatchQueue.main.async { call.reject(error.localizedDescription) }
+                return
+            }
+            guard let workouts = samples, !workouts.isEmpty else {
+                DispatchQueue.main.async { call.resolve(["deleted": 0]) }
+                return
+            }
+            store.delete(workouts) { success, err in
+                DispatchQueue.main.async {
+                    if success {
+                        call.resolve(["deleted": workouts.count])
+                    } else {
+                        call.reject(err?.localizedDescription ?? "Delete failed")
+                    }
+                }
+            }
+        }
+        store.execute(query)
+    }
+
     // MARK: - Public JS methods — walk control
 
     /// Starts walk-2 immediately. Called from JS finish-workout hook.
@@ -261,10 +317,9 @@ public class GeofencePlugin: CAPPlugin, CAPBridgedPlugin {
     }
 
     /// DEV: simulate the outbound walk (depart-home → gym arrival → save).
-    /// Requests HealthKit write permission first if needed, then bypasses the
-    /// time-window gate and saves a real HKWorkout with an 18-min synthetic
-    /// route. Works with home set; gym is optional (route lives ~700m north
-    /// of home if no gym configured).
+    /// Bypasses the time-window gate. HK write auth must already have been
+    /// requested via setAutoWalkEnabled. If the user denied, the save fails
+    /// and a "Could not save walk" notification fires.
     @objc func simulateWalkOutbound(_ call: CAPPluginCall) {
         guard let centre = simulationCenter() else {
             call.reject("Set Home before simulating")
@@ -272,35 +327,26 @@ public class GeofencePlugin: CAPPlugin, CAPBridgedPlugin {
         }
         let durationMin = call.getInt("durationMinutes") ?? 18
         let durationSec = TimeInterval(durationMin * 60)
-        walkTracker.requestHKWriteAuthorization { [weak self] granted, _ in
-            guard let self else { return }
-            if !granted {
-                call.reject("HealthKit write permission denied. Open iOS Settings → Health → Rebirth and turn on Workouts + Workout Routes.")
-                return
-            }
-            let now = Date()
-            let _ = self.walkTracker.start(reason: .departHome, at: now.addingTimeInterval(-durationSec))
-            self.walkTracker.injectSyntheticRoute(
-                centerLat: centre.lat,
-                centerLon: centre.lon,
-                sampleCount: 20,
-                durationSeconds: durationSec,
-                endsAt: now
-            )
-            self.notifyWalkStateChanged()
-            // Force the gym-entry path even if no real gym geofence exists —
-            // this is the dev shortcut to finalise the walk.
-            self.walkTracker.transition(to: .atGymWalkSaved)
-            self.walkTracker.finish(at: now) { [weak self] result in
-                self?.handleWalkFinishResult(result, leg: .outbound, partial: false)
-            }
-            call.resolve(["simulated": true, "durationMinutes": durationMin])
+        let now = Date()
+        let _ = walkTracker.start(reason: .departHome, at: now.addingTimeInterval(-durationSec))
+        walkTracker.injectSyntheticRoute(
+            centerLat: centre.lat,
+            centerLon: centre.lon,
+            sampleCount: 20,
+            durationSeconds: durationSec,
+            endsAt: now
+        )
+        notifyWalkStateChanged()
+        // Force the gym-entry path even if no real gym geofence exists —
+        // dev shortcut to finalise the walk.
+        walkTracker.transition(to: .atGymWalkSaved)
+        walkTracker.finish(at: now) { [weak self] result in
+            self?.handleWalkFinishResult(result, leg: .outbound, partial: false)
         }
+        call.resolve(["simulated": true, "durationMinutes": durationMin])
     }
 
     /// DEV: simulate the inbound walk (start walk-2 → home arrival → save).
-    /// Same auth + home-only fallback rules as outbound. Bypasses the
-    /// startWalkNow phase gate.
     @objc func simulateWalkInbound(_ call: CAPPluginCall) {
         guard let centre = simulationCenter() else {
             call.reject("Set Home before simulating")
@@ -308,28 +354,21 @@ public class GeofencePlugin: CAPPlugin, CAPBridgedPlugin {
         }
         let durationMin = call.getInt("durationMinutes") ?? 16
         let durationSec = TimeInterval(durationMin * 60)
-        walkTracker.requestHKWriteAuthorization { [weak self] granted, _ in
-            guard let self else { return }
-            if !granted {
-                call.reject("HealthKit write permission denied. Open iOS Settings → Health → Rebirth and turn on Workouts + Workout Routes.")
-                return
-            }
-            let now = Date()
-            let _ = self.walkTracker.start(reason: .postWorkout, at: now.addingTimeInterval(-durationSec))
-            self.walkTracker.injectSyntheticRoute(
-                centerLat: centre.lat,
-                centerLon: centre.lon,
-                sampleCount: 20,
-                durationSeconds: durationSec,
-                endsAt: now
-            )
-            self.notifyWalkStateChanged()
-            self.walkTracker.transition(to: .completed)
-            self.walkTracker.finish(at: now) { [weak self] result in
-                self?.handleWalkFinishResult(result, leg: .inbound, partial: false)
-            }
-            call.resolve(["simulated": true, "durationMinutes": durationMin])
+        let now = Date()
+        let _ = walkTracker.start(reason: .postWorkout, at: now.addingTimeInterval(-durationSec))
+        walkTracker.injectSyntheticRoute(
+            centerLat: centre.lat,
+            centerLon: centre.lon,
+            sampleCount: 20,
+            durationSeconds: durationSec,
+            endsAt: now
+        )
+        notifyWalkStateChanged()
+        walkTracker.transition(to: .completed)
+        walkTracker.finish(at: now) { [weak self] result in
+            self?.handleWalkFinishResult(result, leg: .inbound, partial: false)
         }
+        call.resolve(["simulated": true, "durationMinutes": durationMin])
     }
 
     @objc func cancelActiveWalk(_ call: CAPPluginCall) {

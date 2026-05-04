@@ -175,6 +175,11 @@ final class WalkTracker {
     private let storage = WalkTrackerStorage()
     private let healthStore: HKHealthStore?
 
+    /// Read-only access to the underlying HKHealthStore for queries that
+    /// don't fit in the WalkTracker's normal lifecycle (e.g., dev-mode
+    /// deletion of recent sim walks).
+    var exposedHealthStore: HKHealthStore? { healthStore }
+
     /// In-memory accumulators. Reset on start/cancel/finish. All access goes
     /// through `serialQueue` to keep mutations safe across the CLLocation delegate,
     /// JS bridge, and HealthKit completion callbacks.
