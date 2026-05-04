@@ -192,6 +192,8 @@ private struct HeroTarget: View {
     let onTapWeight: () -> Void
     let onTapReps: () -> Void
 
+    @Environment(\.isLuminanceReduced) private var isAOD: Bool
+
     private var displayWeight: Double? { editedWeight ?? set.targetWeight }
     private var displayReps: Int? { editedReps ?? set.targetReps }
 
@@ -205,6 +207,7 @@ private struct HeroTarget: View {
                         .minimumScaleFactor(0.6)
                         .lineLimit(1)
                         .foregroundStyle(editedWeight != nil ? .green : .primary)
+                        .opacity(isAOD ? 0.3 : 1)
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("Target weight \(formatWeight(displayWeight)) kilograms — tap to adjust")

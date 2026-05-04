@@ -37,6 +37,7 @@
 		BCDB60B1669B43B1F7D02C66 /* InspoBurstPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EC6C38970F00C7EEB816A32 /* InspoBurstPlugin.swift */; };
 		C399A66DF6D58A717E02ECAC /* RebirthModels in Frameworks */ = {isa = PBXBuildFile; productRef = 167B3C8338D8D7232CD433A8 /* RebirthModels */; };
 		C3A959FD13211607714A1599 /* RestTimerLiveActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = B72C4CFA9F269091844B4FFE /* RestTimerLiveActivity.swift */; };
+		C3BC5EDC7FE866C9A74D6C25 /* CountdownRing.swift in Sources */ = {isa = PBXBuildFile; fileRef = B26E20E85A8E8608BDB08D0B /* CountdownRing.swift */; };
 		C79BFF79A46570A814F39165 /* RebirthAppGroup in Frameworks */ = {isa = PBXBuildFile; productRef = CBFCC65D6373CEB9843140F1 /* RebirthAppGroup */; };
 		CFE1352CAFFB12EDFC9337E5 /* MockSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = B3BDB8B5588979A91F96AC46 /* MockSnapshot.swift */; };
 		D45824666E1EDEB9361C5592 /* RebirthModels in Frameworks */ = {isa = PBXBuildFile; productRef = A68EF85EEC9AFFF977144D00 /* RebirthModels */; };
@@ -132,6 +133,7 @@
 		958DCC722DB07C7200EA8C5F /* debug.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; name = debug.xcconfig; path = ../debug.xcconfig; sourceTree = SOURCE_ROOT; };
 		95B0D3245656B25E47BA3FE9 /* Foundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Foundation.framework; path = Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS18.0.sdk/System/Library/Frameworks/Foundation.framework; sourceTree = DEVELOPER_DIR; };
 		984637B68F4B9C52AE4CA5BB /* RepsDial.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = RepsDial.swift; path = RepsDial.swift; sourceTree = "<group>"; };
+		B26E20E85A8E8608BDB08D0B /* CountdownRing.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = CountdownRing.swift; path = CountdownRing.swift; sourceTree = "<group>"; };
 		B308E163AD1E376CB098944C /* RebirthWatchApp.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = RebirthWatchApp.swift; path = RebirthWatchApp.swift; sourceTree = "<group>"; };
 		B3BDB8B5588979A91F96AC46 /* MockSnapshot.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = MockSnapshot.swift; path = MockSnapshot.swift; sourceTree = "<group>"; };
 		B70ECA36E07E47254F7A8C94 /* RestTimerLiveActivity.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = RestTimerLiveActivity.appex; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -309,6 +311,7 @@
 				66DA4F51204F40D8A7AA3617 /* SetCompletionCoordinator.swift */,
 				5CDD02C5F83D8B1EA88EC391 /* WeightDial.swift */,
 				984637B68F4B9C52AE4CA5BB /* RepsDial.swift */,
+				B26E20E85A8E8608BDB08D0B /* CountdownRing.swift */,
 			);
 			name = RebirthWatch;
 			path = ../RebirthWatch;
@@ -586,6 +589,7 @@
 				F7B73EF14DEAE92C49C8B8C1 /* SetCompletionCoordinator.swift in Sources */,
 				2B45C91C5E68670CD444FF3D /* WeightDial.swift in Sources */,
 				38FC3ABC8FE5B5D3C25327A9 /* RepsDial.swift in Sources */,
+				C3BC5EDC7FE866C9A74D6C25 /* CountdownRing.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

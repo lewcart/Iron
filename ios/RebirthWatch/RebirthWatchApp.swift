@@ -28,6 +28,8 @@ struct RootView: View {
     @EnvironmentObject var completion: SetCompletionCoordinator
 
     @State private var pickerContext: PickerContext?
+    @State private var restCountdown: Int?    // total seconds for an active rest timer
+    @State private var timeModeContext: TimeModeContext?
 
     var body: some View {
         Group {
@@ -35,7 +37,11 @@ struct RootView: View {
                 ActiveWorkoutGlance(
                     snapshot: snapshot,
                     onRequestComplete: { exercise, set in
-                        pickerContext = PickerContext(exercise: exercise, workoutSet: set)
+                        if exercise.trackingMode == .time {
+                            timeModeContext = TimeModeContext(exercise: exercise, workoutSet: set)
+                        } else {
+                            pickerContext = PickerContext(exercise: exercise, workoutSet: set)
+                        }
                     },
                     onEditWeight: { set, weight in
                         completion.setEditWeight(setUUID: set.uuid, weight: weight)
@@ -67,15 +73,49 @@ struct RootView: View {
                 set: ctx.workoutSet,
                 onConfirm: { rir in
                     Task { await completion.completeSet(in: ctx.exercise, set: ctx.workoutSet, rir: rir) }
-                    session.loadFromAppGroup()        // pull optimistic update
+                    session.loadFromAppGroup()
                     pickerContext = nil
+                    // Auto-start rest timer (Tier 2 feature). Use snapshot default;
+                    // skip on time-mode (already had its own countdown).
+                    if ctx.exercise.trackingMode == .reps,
+                       let s = session.snapshot {
+                        restCountdown = s.restTimerDefaultSeconds
+                    }
                 },
                 onCancel: {
-                    // Dismissed without RIR — log set complete with rir=nil
                     Task { await completion.completeSet(in: ctx.exercise, set: ctx.workoutSet, rir: nil) }
                     session.loadFromAppGroup()
                     pickerContext = nil
+                    if ctx.exercise.trackingMode == .reps,
+                       let s = session.snapshot {
+                        restCountdown = s.restTimerDefaultSeconds
+                    }
                 }
+            )
+        }
+        .sheet(isPresented: Binding(
+            get: { restCountdown != nil },
+            set: { if !$0 { restCountdown = nil } })
+        ) {
+            if let total = restCountdown {
+                CountdownRing(
+                    totalSeconds: total,
+                    onFinish: { restCountdown = nil },
+                    onCancel: { restCountdown = nil }
+                )
+            }
+        }
+        .sheet(item: $timeModeContext) { ctx in
+            CountdownRing(
+                totalSeconds: ctx.workoutSet.targetDurationSeconds ?? 60,
+                onFinish: {
+                    // Hold complete → open RIR picker so the user can rate it.
+                    let exercise = ctx.exercise
+                    let set = ctx.workoutSet
+                    timeModeContext = nil
+                    pickerContext = PickerContext(exercise: exercise, workoutSet: set)
+                },
+                onCancel: { timeModeContext = nil }
             )
         }
     }
@@ -87,6 +127,12 @@ struct PickerContext: Identifiable {
     let exercise: ActiveExercise
     let workoutSet: WorkoutSet
     var id: String { workoutSet.uuid }
+}
+
+struct TimeModeContext: Identifiable {
+    let exercise: ActiveExercise
+    let workoutSet: WorkoutSet
+    var id: String { "tm-\(workoutSet.uuid)" }
 }
 
 // MARK: - Empty + sync states

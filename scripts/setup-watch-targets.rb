@@ -24,6 +24,7 @@ WATCH_SOURCES = [
   'ios/RebirthWatch/RIRPicker.swift',
   'ios/RebirthWatch/WeightDial.swift',
   'ios/RebirthWatch/RepsDial.swift',
+  'ios/RebirthWatch/CountdownRing.swift',
   'ios/RebirthWatch/SetCompletionCoordinator.swift',
   'ios/RebirthWatch/MockSnapshot.swift',
 ]
