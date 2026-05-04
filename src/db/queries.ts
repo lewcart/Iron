@@ -1339,17 +1339,29 @@ export async function getWeekMuscleFrequency(tz: string = APP_TZ): Promise<{ pri
  * Per-muscle weekly working-set counts against canonical taxonomy.
  *
  * Returns ALL canonical muscles (LEFT JOIN against `muscles`), so muscles
- * with zero sets in the week appear with set_count=0. Each working set
- * counts toward every muscle in the exercise's primary AND secondary arrays
- * (full credit, no fractional weighting).
+ * with zero sets in the week appear with set_count=0.
  *
- * Phase 3 also returns `effective_set_count` — RIR-weighted hypertrophy
- * volume:
- *   RIR 0–3 → weight 1.0 (close to failure, full hypertrophy stimulus)
- *   RIR 4   → weight 0.5 (sub-stimulus; partial credit)
- *   RIR 5+  → weight 0.0 (junk set; no hypertrophy contribution)
- *   RIR NULL → weight 1.0 (not recorded; charitable default until corpus
- *              of real data exists)
+ * `set_count` is the raw hit count: every set credits 1 to every muscle
+ * in either the primary OR secondary array (counting a muscle once per set,
+ * even if it appears in both). This preserves "did this muscle get worked
+ * at all this week?" semantics.
+ *
+ * `effective_set_count` is the stimulus-weighted variant. Two factors stack:
+ *
+ *   1. Primary/secondary credit (RP / Helms convention):
+ *      - muscle in primary_muscles → 1.0
+ *      - muscle in secondary_muscles only → 0.5
+ *      - muscle in both → 1.0 (primary wins; not double-counted)
+ *
+ *   2. RIR (Reps in Reserve) credit:
+ *      - RIR 0–3 → 1.0  (close to failure; full hypertrophy stimulus)
+ *      - RIR 4   → 0.5  (sub-stimulus; partial credit)
+ *      - RIR 5+  → 0.0  (junk set; no hypertrophy contribution)
+ *      - RIR NULL → 1.0 (charitable default until RIR is logged broadly)
+ *
+ * Effective contribution per (set, muscle) = primary_secondary_credit ×
+ * rir_credit. Example: an RDL set @ RIR 4 contributes 0.5 to glutes if
+ * glutes is secondary (0.5 × 0.5), 0.5 to hamstrings if primary (1.0 × 0.5).
  *
  *   coverage='none' → no exercise in the catalog tags this muscle at all.
  *                     Useful for collapsing always-zero buckets in UI.
@@ -1400,27 +1412,46 @@ export async function getWeekSetsPerMuscle(weekOffset: number = 0, tz: string = 
         AND ws.is_completed = true
         AND (ws.repetitions >= 1 OR ws.duration_seconds > 0)
     ),
-    muscle_hits AS (
-      -- Explode each set into one row per muscle hit (primary AND secondary).
-      -- DISTINCT-by-(set_uuid, muscle_slug) so a set hitting a muscle via
-      -- both primary AND secondary doesn't double-count.
-      SELECT DISTINCT ws.set_uuid, v.muscle_slug, ws.weight, ws.repetitions, ws.rir
+    muscle_hits_raw AS (
+      -- Explode each set into one row per (set, muscle, credit) — primary
+      -- contributes credit=1.0, secondary contributes credit=0.5. A muscle
+      -- appearing in both arrays produces two rows here; we collapse them in
+      -- muscle_hits below by taking MAX(credit) so primary wins.
+      SELECT ws.set_uuid, v.muscle_slug, 1.0::numeric AS credit,
+             ws.weight, ws.repetitions, ws.rir
       FROM week_sets ws,
            LATERAL (
-             SELECT jsonb_array_elements_text(
-               COALESCE(ws.primary_muscles, '[]'::jsonb)
-               || COALESCE(ws.secondary_muscles, '[]'::jsonb)
-             ) AS muscle_slug
+             SELECT jsonb_array_elements_text(COALESCE(ws.primary_muscles, '[]'::jsonb)) AS muscle_slug
            ) v
+      UNION ALL
+      SELECT ws.set_uuid, v.muscle_slug, 0.5::numeric AS credit,
+             ws.weight, ws.repetitions, ws.rir
+      FROM week_sets ws,
+           LATERAL (
+             SELECT jsonb_array_elements_text(COALESCE(ws.secondary_muscles, '[]'::jsonb)) AS muscle_slug
+           ) v
+    ),
+    muscle_hits AS (
+      -- One row per (set, muscle). credit = 1.0 if primary (or both), else 0.5.
+      -- weight/repetitions/rir are per-set so MAX/MIN/ANY pick the same value.
+      SELECT
+        set_uuid,
+        muscle_slug,
+        MAX(credit)        AS credit,
+        MAX(weight)        AS weight,
+        MAX(repetitions)   AS repetitions,
+        MAX(rir)           AS rir
+      FROM muscle_hits_raw
+      GROUP BY set_uuid, muscle_slug
     ),
     muscle_aggregate AS (
       SELECT
         muscle_slug,
         COUNT(DISTINCT set_uuid) AS set_count,
-        -- Effective sets — RIR-weighted hypertrophy volume.
-        --   RIR 0–3 = 1.0, RIR 4 = 0.5, RIR 5+ = 0.0, NULL = 1.0
+        -- Effective sets — primary/secondary credit × RIR credit.
+        --   primary=1.0, secondary=0.5; RIR 0–3=1.0, RIR 4=0.5, RIR 5+=0.0, NULL=1.0
         COALESCE(SUM(
-          CASE
+          credit * CASE
             WHEN rir IS NULL THEN 1.0
             WHEN rir <= 3    THEN 1.0
             WHEN rir = 4     THEN 0.5

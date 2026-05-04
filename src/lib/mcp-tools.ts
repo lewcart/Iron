@@ -539,9 +539,10 @@ async function getWeeklySummary(args: Record<string, unknown> = {}) {
       GROUP BY w.uuid, w.title, w.start_time
       ORDER BY w.start_time
     `, [weekBoundsRow!.start_at, weekBoundsRow!.end_at]),
-    // Per-muscle aggregate using canonical taxonomy. Counts sets toward both
-    // primary AND secondary muscles. Returns every canonical muscle (zero-set
-    // ones too) for stable shape.
+    // Per-muscle aggregate using canonical taxonomy. set_count is raw (every
+    // set credits 1 to every muscle in primary OR secondary). effective_set_count
+    // weights primary=1.0 / secondary-only=0.5 and stacks RIR credit on top.
+    // Returns every canonical muscle (zero-set ones too) for stable shape.
     getWeekSetsPerMuscle(weekOffset, tz),
     queryOne<{ routine_count: string }>(`
       SELECT COUNT(wr.uuid) AS routine_count
@@ -2910,15 +2911,18 @@ export const tools: MCPTool[] = [
     name: 'get_sets_per_muscle',
     description:
       'Working sets per canonical muscle for a given week, with optimal range and status. ' +
-      'Sets count toward both primary AND secondary muscles of each exercise (full credit, no fractional weighting). ' +
-      'Working set = is_completed=true AND (reps>=1 OR duration>0); warm-ups and uncompleted sets excluded. ' +
-      'Drop sets count as 1 each. ' +
+      'set_count is a raw hit count: every set credits 1 to every muscle in the exercise\'s primary OR secondary array (counted once per set). ' +
+      'effective_set_count is the stimulus-weighted variant. Two factors stack: ' +
+      '(1) primary/secondary credit — primary=1.0, secondary-only=0.5, in-both=1.0 (RP/Helms convention); ' +
+      '(2) RIR credit — RIR 0–3 counts 1.0, RIR 4 counts 0.5, RIR 5+ counts 0.0, RIR=NULL gets the charitable default of 1.0. ' +
+      'Example: an RDL set @ RIR 4 contributes 0.25 effective sets to glutes (secondary 0.5 × RIR 0.5), and 0.5 effective sets to hamstrings (primary 1.0 × RIR 0.5). ' +
+      'Working set = is_completed=true AND (reps>=1 OR duration>0); warm-ups and uncompleted sets excluded. Drop sets count as 1 each. ' +
       'Optimal range defaults to 10-20 sets/muscle/week (Schoenfeld 2021), tunable per-muscle in the muscles table — rotator_cuff and forearms ship with tighter bands. ' +
       'Returns all canonical muscles in display order; pass include_zero=false to drop muscles with zero sets. ' +
       'Each row carries a coverage flag (none|tagged) — none means no exercise in the catalog tags this muscle yet (e.g. rhomboids until the audit pass tags them). ' +
       'Week boundaries (Monday start, local TZ) match get_weekly_summary. ' +
       'kg_volume is preserved on each row as a legacy metric — prefer set_count for hypertrophy questions. ' +
-      'effective_set_count is the RIR-weighted variant (Phase 3): RIR 0–3 counts 1.0, RIR 4 counts 0.5, RIR 5+ counts 0.0. RIR=NULL gets the charitable default of 1.0, so until RIR is collected on most sets the value will equal set_count. When effective < set_count by a meaningful margin, the user is leaving stimulus on the table (junk sets too far from failure). ' +
+      'When effective < set_count by a meaningful margin, the user is either training too far from failure OR doing a lot of secondary-only work for that muscle. ' +
       'Pairs with list_muscles (taxonomy + optimal ranges) and get_weekly_summary (total volume + compliance). ' +
       'Use week_offset=0 for current week, -1 for last week.',
     inputSchema: {

@@ -555,14 +555,24 @@ export default function WeekPage() {
       ]);
       if (workouts.length === 0) return [];
 
-      const exerciseMuscles = new Map<string, MuscleSlug[]>();
+      // Per-exercise muscle list with primary=1.0 / secondary-only=0.5 credit.
+      // Mirrors getWeekSetsPerMuscle's RP/Helms convention. A muscle in BOTH
+      // arrays gets primary's 1.0.
+      const exerciseMuscles = new Map<string, { slug: MuscleSlug; credit: number }[]>();
       for (const ex of exercises) {
-        const out = new Set<MuscleSlug>();
-        for (const v of [...(ex.primary_muscles ?? []), ...(ex.secondary_muscles ?? [])]) {
+        const creditBySlug = new Map<MuscleSlug, number>();
+        for (const v of ex.primary_muscles ?? []) {
           const slug = typeof v === 'string' ? resolveMuscleSlug(v) : null;
-          if (slug) out.add(slug);
+          if (slug) creditBySlug.set(slug, 1.0);
         }
-        exerciseMuscles.set(ex.uuid, [...out]);
+        for (const v of ex.secondary_muscles ?? []) {
+          const slug = typeof v === 'string' ? resolveMuscleSlug(v) : null;
+          if (slug && !creditBySlug.has(slug)) creditBySlug.set(slug, 0.5);
+        }
+        exerciseMuscles.set(
+          ex.uuid,
+          [...creditBySlug.entries()].map(([slug, credit]) => ({ slug, credit })),
+        );
       }
       const weByUuid = new Map(allWE.map(we => [we.uuid, we]));
       const wUuidByWE = new Map(allWE.map(we => [we.uuid, we.workout_uuid]));
@@ -600,20 +610,19 @@ export default function WeekPage() {
         if (idx == null) continue;
 
         const muscles = exerciseMuscles.get(we.exercise_uuid) ?? [];
-        // Credit both primary and secondary muscles fully (mirrors
-        // get_sets_per_muscle behavior). RIR weighting:
-        //   RIR 0–3 = 1.0, RIR 4 = 0.5, RIR 5+ = 0.0, NULL = 1.0.
-        let credit = 1.0;
+        // Stimulus credit = primary/secondary credit × RIR credit.
+        //   primary=1.0, secondary-only=0.5; RIR 0–3=1.0, RIR 4=0.5, RIR 5+=0.0, NULL=1.0.
+        let rirCredit = 1.0;
         if (s.rir != null) {
-          if (s.rir <= 3) credit = 1.0;
-          else if (s.rir === 4) credit = 0.5;
-          else credit = 0.0;
+          if (s.rir <= 3) rirCredit = 1.0;
+          else if (s.rir === 4) rirCredit = 0.5;
+          else rirCredit = 0.0;
         }
-        if (credit <= 0) continue;
+        if (rirCredit <= 0) continue;
 
         for (const m of muscles) {
-          const arr = perMuscle.get(m);
-          if (arr) arr[idx] += credit;
+          const arr = perMuscle.get(m.slug);
+          if (arr) arr[idx] += m.credit * rirCredit;
         }
       }
 
