@@ -317,45 +317,28 @@ public class GeofencePlugin: CAPPlugin, CAPBridgedPlugin {
     }
 
     /// DEV: simulate the outbound walk (depart-home → gym arrival → save).
-    /// Bypasses the time-window gate. HK write auth must already have been
-    /// requested via setAutoWalkEnabled. If the user denied, the save fails
-    /// and a "Could not save walk" notification fires.
+    /// Awaits the actual save and surfaces the specific failure reason to JS.
     @objc func simulateWalkOutbound(_ call: CAPPluginCall) {
-        guard let centre = simulationCenter() else {
-            call.reject("Set Home before simulating")
-            return
-        }
-        let durationMin = call.getInt("durationMinutes") ?? 18
-        let durationSec = TimeInterval(durationMin * 60)
-        let now = Date()
-        let _ = walkTracker.start(reason: .departHome, at: now.addingTimeInterval(-durationSec))
-        walkTracker.injectSyntheticRoute(
-            centerLat: centre.lat,
-            centerLon: centre.lon,
-            sampleCount: 20,
-            durationSeconds: durationSec,
-            endsAt: now
-        )
-        notifyWalkStateChanged()
-        // Force the gym-entry path even if no real gym geofence exists —
-        // dev shortcut to finalise the walk.
-        walkTracker.transition(to: .atGymWalkSaved)
-        walkTracker.finish(at: now) { [weak self] result in
-            self?.handleWalkFinishResult(result, leg: .outbound, partial: false)
-        }
-        call.resolve(["simulated": true, "durationMinutes": durationMin])
+        runSimulation(reason: .departHome, leg: .outbound, durationMinutesDefault: 18, call: call)
     }
 
     /// DEV: simulate the inbound walk (start walk-2 → home arrival → save).
     @objc func simulateWalkInbound(_ call: CAPPluginCall) {
+        runSimulation(reason: .postWorkout, leg: .inbound, durationMinutesDefault: 16, call: call)
+    }
+
+    /// Shared simulation orchestration that awaits the HK save and reports
+    /// the specific WalkSaveError back to JS so the caller can show actionable
+    /// error messages in the UI.
+    private func runSimulation(reason: WalkTracker.WalkReason, leg: WalkLeg, durationMinutesDefault: Int, call: CAPPluginCall) {
         guard let centre = simulationCenter() else {
             call.reject("Set Home before simulating")
             return
         }
-        let durationMin = call.getInt("durationMinutes") ?? 16
+        let durationMin = call.getInt("durationMinutes") ?? durationMinutesDefault
         let durationSec = TimeInterval(durationMin * 60)
         let now = Date()
-        let _ = walkTracker.start(reason: .postWorkout, at: now.addingTimeInterval(-durationSec))
+        let _ = walkTracker.start(reason: reason, at: now.addingTimeInterval(-durationSec))
         walkTracker.injectSyntheticRoute(
             centerLat: centre.lat,
             centerLon: centre.lon,
@@ -364,11 +347,55 @@ public class GeofencePlugin: CAPPlugin, CAPBridgedPlugin {
             endsAt: now
         )
         notifyWalkStateChanged()
-        walkTracker.transition(to: .completed)
+        walkTracker.transition(to: leg == .outbound ? .atGymWalkSaved : .completed)
         walkTracker.finish(at: now) { [weak self] result in
-            self?.handleWalkFinishResult(result, leg: .inbound, partial: false)
+            self?.handleWalkFinishResult(result, leg: leg, partial: false)
+            DispatchQueue.main.async {
+                switch result {
+                case .success:
+                    call.resolve(["simulated": true, "saved": true, "durationMinutes": durationMin])
+                case .failure(let err):
+                    call.reject(self?.describeWalkSaveError(err) ?? "save failed")
+                }
+            }
         }
-        call.resolve(["simulated": true, "durationMinutes": durationMin])
+    }
+
+    private func describeWalkSaveError(_ err: WalkSaveError) -> String {
+        switch err {
+        case .notActive:
+            return "Walk wasn't active — sim state corrupt. Toggle Auto-log walks off + on."
+        case .healthKitUnavailable:
+            return "HealthKit isn't available on this device."
+        case .noSamples:
+            return "No GPS samples were captured — route file empty. Likely a storage write failure."
+        case .beginCollectionFailed(let inner):
+            return "HKWorkoutBuilder.beginCollection failed: \(inner?.localizedDescription ?? "no detail")"
+        case .finishWorkoutFailed(let inner):
+            let msg = inner.map { describeHKError($0 as NSError) } ?? "no detail"
+            return "Workout save failed: \(msg)"
+        case .routeInsertFailed(let inner, _):
+            let msg = describeHKError(inner as NSError)
+            return "Workout saved but route insert failed: \(msg). In iOS Settings → Health → Data Access & Devices → Rebirth, make sure 'Workout Routes' is ON."
+        }
+    }
+
+    private func describeHKError(_ err: NSError) -> String {
+        if err.domain == HKError.errorDomain {
+            switch err.code {
+            case HKError.errorAuthorizationDenied.rawValue:
+                return "permission denied — toggle Workouts + Workout Routes ON in iOS Settings → Health → Data Access & Devices → Rebirth"
+            case HKError.errorAuthorizationNotDetermined.rawValue:
+                return "permission not yet asked"
+            case HKError.errorHealthDataUnavailable.rawValue:
+                return "HealthKit unavailable"
+            case HKError.errorDatabaseInaccessible.rawValue:
+                return "Health database locked (phone still locked?)"
+            default:
+                return "HKError \(err.code): \(err.localizedDescription)"
+            }
+        }
+        return err.localizedDescription
     }
 
     @objc func cancelActiveWalk(_ call: CAPPluginCall) {
