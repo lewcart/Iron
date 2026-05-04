@@ -111,6 +111,10 @@ Canonical muscle taxonomy: 18 slugs. Always use canonical slugs (`chest`, `lats`
 - **"Did I hit my volume targets this week?"** → `get_sets_per_muscle({ week_offset: 0 })` returns per-muscle set counts vs Schoenfeld 10–20 range. `summary.optimal_count`/`under_count`/`over_count` is the headline; `muscles[]` is the detail.
 - **"Total volume this week + per-muscle breakdown"** → `get_weekly_summary({ week_offset: 0 })` returns `total_volume`, `by_muscle[]` (canonical slugs + set_count + kg_volume), and `compliance_pct` vs active plan.
 - **"Find a glute exercise"** → `find_exercises({ query: 'romanian deadlift', muscle_group: 'glutes' })` — `muscle_group` accepts canonical slugs OR legacy synonyms.
+- **"That set was bad form, exclude it from PB"** → `get_exercise_history(...)` returns `set_uuid` per set → `exclude_set_from_pb({ set_uuid, excluded: true })`. Set stays in workout history / volume / set counts; just stops anchoring PRs. Restore with `excluded: false`.
+- **"I was doing this exercise wrong before [date]"** → `exclude_exercise_pb_history_through({ exercise_name | exercise_id, through_date: 'YYYY-MM-DD' })`. Inclusive cutoff (sets ON or BEFORE that date are excluded). Pass `dry_run: true` to preview the count first. Returns before/after e1RM PB so you can confirm the change to Lou. Restore the same date range with `excluded: false`.
+
+PB philosophy: only **e1RM** (Epley) is surfaced as a PB. Heaviest-weight and most-reps-in-a-set were dropped (gameable derivatives, not honest progress signals). Don't independently surface "heaviest weight" or "most reps" framings as PRs — `get_exercise_history` returns `estimated_1rm` per session for reps-mode and `longest_hold_seconds` per session for time-mode. Excluded sets respect this: they're returned in `sets[]` with `excluded_from_pb: true` so you can show full history if asked, but are skipped when the per-session e1RM / longest-hold is computed.
 
 Set quality:
 - A working set = `is_completed=true AND (reps>=1 OR duration_seconds>0)`. Drop sets count as 1 each. Each set credits BOTH primary AND secondary muscles (full credit, not fractional).

@@ -16,7 +16,7 @@ import {
   type SleepSummaryArgs,
 } from '@/lib/health-sleep-summary';
 import { computeCardioWeek } from '@/lib/server/health-data';
-import { getWeekSetsPerMuscle } from '@/db/queries';
+import { getWeekSetsPerMuscle, getExercisePRs, recomputePRFlagsForExercise } from '@/db/queries';
 import { resolveMuscleSlug } from '@/lib/muscles';
 
 // ── Result helpers ────────────────────────────────────────────────────────────
@@ -201,11 +201,18 @@ async function getExerciseHistory(args: Record<string, unknown>) {
   const weUuids = sessions.map(s => s.we_uuid);
   const sets = await query<{
     workout_exercise_uuid: string;
+    set_uuid: string;
     weight: number | null;
     repetitions: number | null;
     duration_seconds: number | null;
+    is_pr: boolean;
+    excluded_from_pb: boolean;
   }>(`
-    SELECT workout_exercise_uuid, weight, repetitions, duration_seconds
+    SELECT
+      workout_exercise_uuid,
+      uuid AS set_uuid,
+      weight, repetitions, duration_seconds,
+      is_pr, excluded_from_pb
     FROM workout_sets
     WHERE workout_exercise_uuid = ANY($1)
       AND is_completed = true
@@ -228,15 +235,22 @@ async function getExerciseHistory(args: Record<string, unknown>) {
 
   return toolResult(sessions.map(s => {
     const sessionSets = (setsByWe[s.we_uuid] ?? []).map(row => ({
+      set_uuid: row.set_uuid,
       weight: row.weight,
       reps: row.repetitions,
       duration_seconds: row.duration_seconds,
+      is_pr: Boolean(row.is_pr) && !row.excluded_from_pb,
+      excluded_from_pb: Boolean(row.excluded_from_pb),
     }));
     if (trackingMode === 'time') {
       // Time-mode: 1RM is meaningless. Surface longest single hold + total
       // seconds across the session instead, so the agent gets a comparable
-      // PR-style metric for time-tracked exercises.
+      // PR-style metric for time-tracked exercises. Excluded sets are
+      // skipped from the longest_hold calculation but still appear in the
+      // sets[] array (with excluded_from_pb=true) so the agent can see
+      // the full history if asked.
       const longestHold = sessionSets.reduce((max, row) => {
+        if (row.excluded_from_pb) return max;
         const d = row.duration_seconds;
         return d != null && d > max ? d : max;
       }, 0);
@@ -254,6 +268,7 @@ async function getExerciseHistory(args: Record<string, unknown>) {
       };
     }
     const best1rm = sessionSets.reduce((max, row) => {
+      if (row.excluded_from_pb) return max;
       if (row.weight == null || row.reps == null || row.reps === 0) return max;
       // 1 decimal place rounding preserves the historic MCP output format.
       const rm = Math.round(estimate1RM(row.weight, row.reps) * 10) / 10;
@@ -267,6 +282,296 @@ async function getExerciseHistory(args: Record<string, unknown>) {
       estimated_1rm: best1rm > 0 ? best1rm : null,
     };
   }));
+}
+
+// ── PB exclusion (per-set + per-exercise bulk) ─────────────────────────────
+//
+// Two tools, both write through to the same recomputePRFlagsForExercise so
+// the canonical-group is_pr flags stay correct after the change. Both
+// return the post-recompute e1RM PR so the agent can write a useful
+// confirming sentence to Lou ("Your bench e1RM PB went from X → Y").
+
+async function resolveExerciseFromArgs(args: {
+  exercise_name?: string;
+  exercise_id?: string;
+}): Promise<
+  | { ok: true; uuid: string; title: string }
+  | { ok: false; envelope: ReturnType<typeof toolErrorEnvelope> }
+> {
+  const { exercise_name, exercise_id } = args;
+  if (exercise_id) {
+    const row = await queryOne<{ uuid: string; title: string }>(
+      `SELECT uuid, title FROM exercises WHERE uuid = $1 AND is_hidden = false`,
+      [exercise_id],
+    );
+    if (!row) {
+      return {
+        ok: false,
+        envelope: toolErrorEnvelope(
+          'NOT_FOUND',
+          `No exercise with id ${exercise_id}.`,
+          'find_exercises',
+        ),
+      };
+    }
+    return { ok: true, uuid: row.uuid, title: row.title };
+  }
+  if (exercise_name) {
+    const matches = await query<{ uuid: string; title: string; is_custom: boolean }>(
+      `SELECT uuid, title, is_custom FROM exercises
+       WHERE title ILIKE $1 AND is_hidden = false
+       ORDER BY is_custom ASC, title ASC
+       LIMIT 5`,
+      [`%${exercise_name}%`],
+    );
+    if (matches.length === 0) {
+      return {
+        ok: false,
+        envelope: toolErrorEnvelope(
+          'NOT_FOUND',
+          `No exercise found matching "${exercise_name}".`,
+          'find_exercises',
+        ),
+      };
+    }
+    if (matches.length > 1 && matches[0].title.toLowerCase() !== exercise_name.toLowerCase()) {
+      // Ambiguous — surface the candidates so the agent can pick by id.
+      return {
+        ok: false,
+        envelope: toolErrorEnvelope(
+          'MULTIPLE_MATCHES',
+          `"${exercise_name}" matched ${matches.length} exercises: ${matches.map(m => m.title).join(', ')}.`,
+          'pass exercise_id from candidates',
+        ),
+      };
+    }
+    return { ok: true, uuid: matches[0].uuid, title: matches[0].title };
+  }
+  return {
+    ok: false,
+    envelope: toolErrorEnvelope(
+      'INVALID_INPUT',
+      'Provide exercise_id or exercise_name.',
+      'find_exercises',
+    ),
+  };
+}
+
+async function excludeSetFromPbTool(args: Record<string, unknown>) {
+  const { set_uuid, excluded } = args as { set_uuid?: string; excluded?: boolean };
+  if (!set_uuid) return toolErrorEnvelope('INVALID_INPUT', 'set_uuid is required.');
+  if (typeof excluded !== 'boolean') {
+    return toolErrorEnvelope('INVALID_INPUT', 'excluded must be true or false.');
+  }
+
+  const row = await queryOne<{
+    set_uuid: string;
+    exercise_uuid: string;
+    exercise_title: string;
+    excluded_from_pb: boolean;
+  }>(
+    `SELECT ws.uuid AS set_uuid, e.uuid AS exercise_uuid, e.title AS exercise_title, ws.excluded_from_pb
+     FROM workout_sets ws
+     JOIN workout_exercises we ON ws.workout_exercise_uuid = we.uuid
+     JOIN exercises e ON we.exercise_uuid = e.uuid
+     WHERE ws.uuid = $1`,
+    [set_uuid],
+  );
+  if (!row) return toolErrorEnvelope('NOT_FOUND', `No set with uuid ${set_uuid}.`);
+
+  const alreadyInState = Boolean(row.excluded_from_pb) === excluded;
+  const beforePb = await getExercisePRs(row.exercise_uuid);
+
+  if (!alreadyInState) {
+    await query(
+      `UPDATE workout_sets SET excluded_from_pb = $1, updated_at = NOW() WHERE uuid = $2`,
+      [excluded, set_uuid],
+    );
+    await recomputePRFlagsForExercise(row.exercise_uuid);
+  }
+
+  const afterPb = await getExercisePRs(row.exercise_uuid);
+
+  return toolResult({
+    set_uuid,
+    exercise: { id: row.exercise_uuid, name: row.exercise_title },
+    excluded,
+    already_in_target_state: alreadyInState,
+    pbs: { before: beforePb, after: afterPb },
+    pb_changed: !pbsEqual(beforePb, afterPb),
+    agent_summary_hint: alreadyInState
+      ? `That set was already ${excluded ? 'excluded' : 'counting'} for PB — nothing changed.`
+      : excluded
+        ? buildExcludedSummary(row.exercise_title, beforePb, afterPb)
+        : `Restored that set as a PB candidate for ${row.exercise_title}.`,
+  });
+}
+
+async function excludeExercisePbHistoryThroughTool(args: Record<string, unknown>) {
+  const {
+    exercise_name,
+    exercise_id,
+    through_date,
+    excluded = true,
+    dry_run = false,
+  } = args as {
+    exercise_name?: string;
+    exercise_id?: string;
+    through_date?: string;
+    excluded?: boolean;
+    dry_run?: boolean;
+  };
+
+  if (typeof through_date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(through_date)) {
+    return toolErrorEnvelope(
+      'INVALID_INPUT',
+      'through_date must be YYYY-MM-DD (inclusive cutoff in user local timezone).',
+    );
+  }
+  if (typeof excluded !== 'boolean') {
+    return toolErrorEnvelope('INVALID_INPUT', 'excluded must be true or false.');
+  }
+
+  const resolved = await resolveExerciseFromArgs({ exercise_name, exercise_id });
+  if (!resolved.ok) return resolved.envelope;
+
+  const beforePb = await getExercisePRs(resolved.uuid);
+
+  // Inclusive end-of-day cutoff in user local timezone (Europe/London for
+  // this single-user app). Compare against w.start_time which is timestamptz.
+  const cutoffEndOfDay = `${through_date}T23:59:59.999Z`;
+
+  // Find candidate set_uuids that would change state. Used for the count
+  // and (in dry_run) the preview return.
+  const candidates = await query<{ set_uuid: string; workout_uuid: string }>(
+    `SELECT ws.uuid AS set_uuid, w.uuid AS workout_uuid
+     FROM workout_sets ws
+     JOIN workout_exercises we ON ws.workout_exercise_uuid = we.uuid
+     JOIN workouts w ON we.workout_uuid = w.uuid
+     WHERE we.exercise_uuid IN (
+       SELECT e2.uuid FROM exercises e1
+       JOIN exercises e2 ON
+         (e2.everkinetic_id = e1.everkinetic_id AND e1.everkinetic_id > 0)
+         OR (e1.everkinetic_id = 0 AND e2.title = e1.title)
+       WHERE e1.uuid = $1
+     )
+       AND ws.is_completed = true
+       AND ws.excluded_from_pb = $2
+       AND w.start_time <= $3`,
+    [resolved.uuid, !excluded, cutoffEndOfDay],
+  );
+
+  const newlyChangedCount = candidates.length;
+  const workoutsAffected = new Set(candidates.map(c => c.workout_uuid)).size;
+
+  // Count rows already in target state for an idempotency signal.
+  const alreadyRow = await queryOne<{ count: string }>(
+    `SELECT COUNT(*)::text AS count
+     FROM workout_sets ws
+     JOIN workout_exercises we ON ws.workout_exercise_uuid = we.uuid
+     JOIN workouts w ON we.workout_uuid = w.uuid
+     WHERE we.exercise_uuid IN (
+       SELECT e2.uuid FROM exercises e1
+       JOIN exercises e2 ON
+         (e2.everkinetic_id = e1.everkinetic_id AND e1.everkinetic_id > 0)
+         OR (e1.everkinetic_id = 0 AND e2.title = e1.title)
+       WHERE e1.uuid = $1
+     )
+       AND ws.is_completed = true
+       AND ws.excluded_from_pb = $2
+       AND w.start_time <= $3`,
+    [resolved.uuid, excluded, cutoffEndOfDay],
+  );
+  const alreadyCount = Number(alreadyRow?.count ?? 0);
+
+  if (dry_run) {
+    return toolResult({
+      dry_run: true,
+      exercise: { id: resolved.uuid, name: resolved.title },
+      through_date,
+      excluded,
+      newly_changed_count: newlyChangedCount,
+      already_in_target_state_count: alreadyCount,
+      workouts_affected_count: workoutsAffected,
+      pbs: { before: beforePb, after: beforePb },
+      pb_changed: false,
+      agent_summary_hint: `Preview only — would ${excluded ? 'exclude' : 'restore'} ${newlyChangedCount} ${pluralizeMcp('set', newlyChangedCount)} on or before ${through_date}.`,
+    });
+  }
+
+  if (newlyChangedCount > 0) {
+    const setUuids = candidates.map(c => c.set_uuid);
+    await query(
+      `UPDATE workout_sets SET excluded_from_pb = $1, updated_at = NOW() WHERE uuid = ANY($2::uuid[])`,
+      [excluded, setUuids],
+    );
+    await recomputePRFlagsForExercise(resolved.uuid);
+  }
+
+  const afterPb = await getExercisePRs(resolved.uuid);
+
+  return toolResult({
+    exercise: { id: resolved.uuid, name: resolved.title },
+    through_date,
+    excluded,
+    newly_changed_count: newlyChangedCount,
+    already_in_target_state_count: alreadyCount,
+    workouts_affected_count: workoutsAffected,
+    pbs: { before: beforePb, after: afterPb },
+    pb_changed: !pbsEqual(beforePb, afterPb),
+    agent_summary_hint: newlyChangedCount === 0
+      ? `Nothing to ${excluded ? 'exclude' : 'restore'} — already in that state for sets on or before ${through_date}.`
+      : excluded
+        ? `${pluralizeMcp(`Excluded ${newlyChangedCount} set`, newlyChangedCount)} from PB on ${resolved.title} across ${workoutsAffected} ${pluralizeMcp('workout', workoutsAffected)}. Workout history is unchanged. ${formatPbDiff(beforePb, afterPb)}`
+        : `Restored ${newlyChangedCount} ${pluralizeMcp('set', newlyChangedCount)} as PB candidates on ${resolved.title}. ${formatPbDiff(beforePb, afterPb)}`,
+  });
+}
+
+function pbsEqual(
+  a: { estimated1RM: { weight: number; repetitions: number } | null },
+  b: { estimated1RM: { weight: number; repetitions: number } | null },
+): boolean {
+  if (a.estimated1RM === null && b.estimated1RM === null) return true;
+  if (a.estimated1RM === null || b.estimated1RM === null) return false;
+  return a.estimated1RM.weight === b.estimated1RM.weight
+    && a.estimated1RM.repetitions === b.estimated1RM.repetitions;
+}
+
+function buildExcludedSummary(
+  exerciseTitle: string,
+  before: { estimated1RM: { estimated_1rm: number } | null },
+  after: { estimated1RM: { estimated_1rm: number } | null },
+): string {
+  if (!before.estimated1RM || !after.estimated1RM) {
+    return `Excluded that set from PB on ${exerciseTitle}. Workout history is unchanged.`;
+  }
+  const beforeKg = Math.round(before.estimated1RM.estimated_1rm);
+  const afterKg = Math.round(after.estimated1RM.estimated_1rm);
+  if (beforeKg === afterKg) {
+    return `Excluded that set from PB on ${exerciseTitle}. Top e1RM PB unchanged at ${afterKg}kg.`;
+  }
+  return `Excluded that set from PB on ${exerciseTitle}. Your top e1RM PB went ${beforeKg}kg → ${afterKg}kg.`;
+}
+
+function formatPbDiff(
+  before: { estimated1RM: { estimated_1rm: number } | null },
+  after: { estimated1RM: { estimated_1rm: number } | null },
+): string {
+  if (!before.estimated1RM && !after.estimated1RM) return 'No PB recorded yet.';
+  if (!before.estimated1RM && after.estimated1RM) {
+    return `New top e1RM PB: ${Math.round(after.estimated1RM.estimated_1rm)}kg.`;
+  }
+  if (before.estimated1RM && !after.estimated1RM) {
+    return `Top e1RM PB cleared (was ${Math.round(before.estimated1RM.estimated_1rm)}kg).`;
+  }
+  const beforeKg = Math.round(before.estimated1RM!.estimated_1rm);
+  const afterKg = Math.round(after.estimated1RM!.estimated_1rm);
+  if (beforeKg === afterKg) return `Top e1RM PB unchanged at ${afterKg}kg.`;
+  return `Top e1RM PB went ${beforeKg}kg → ${afterKg}kg.`;
+}
+
+function pluralizeMcp(word: string, n: number): string {
+  return n === 1 ? word : `${word}s`;
 }
 
 async function getActiveRoutine() {
@@ -3255,6 +3560,35 @@ export const tools: MCPTool[] = [
       required: ['routine_id'],
     },
     execute: removeExercise,
+  },
+  {
+    name: 'exclude_set_from_pb',
+    description: 'Toggle whether a single completed set counts toward PB / e1RM calculations. Set stays in workout history (still counts toward volume + set counts) but stops anchoring PRs. Use when Lou says "that one set was bad form, exclude it". Get set_uuid from get_exercise_history (each set in the response now has a set_uuid). Returns before/after e1RM PR + agent_summary_hint for confirming back to Lou.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        set_uuid: { type: 'string', description: 'UUID of the workout_set to toggle.' },
+        excluded: { type: 'boolean', description: 'true = exclude from PB; false = restore as a PB candidate.' },
+      },
+      required: ['set_uuid', 'excluded'],
+    },
+    execute: excludeSetFromPbTool,
+  },
+  {
+    name: 'exclude_exercise_pb_history_through',
+    description: 'Bulk-exclude every completed set in an exercise on or before a cutoff date (the form-fix moment). Use when Lou says "I was doing leg press wrong for the last 3 weeks". Resolves the canonical exercise group (catalog duplicates merge by everkinetic_id), flips excluded_from_pb=true (or false to restore) for sets whose workout date is on or before through_date (inclusive, user local timezone). Workout history / volume / set counts are unchanged. Pass dry_run: true to preview the count without writing. Returns before/after e1RM PB + counts + agent_summary_hint.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        exercise_id: { type: 'string', description: 'UUID of the exercise (use instead of exercise_name).' },
+        exercise_name: { type: 'string', description: 'Name fragment, fuzzy-matched. Returns MULTIPLE_MATCHES error if ambiguous — agent should pick by id from candidates.' },
+        through_date: { type: 'string', description: 'YYYY-MM-DD in user local timezone. Inclusive: sets ON or BEFORE this date are affected.' },
+        excluded: { type: 'boolean', description: 'true = exclude (default); false = restore.' },
+        dry_run: { type: 'boolean', description: 'If true, preview the count without writing. Returns the same shape as a real call but with pbs.before === pbs.after.' },
+      },
+      required: ['through_date'],
+    },
+    execute: excludeExercisePbHistoryThroughTool,
   },
   {
     name: 'update_sets',
