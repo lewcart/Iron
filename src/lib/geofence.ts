@@ -97,11 +97,7 @@ interface GeofencePluginInterface {
   cancelActiveWalk(): Promise<{ cancelled: true }>;
   getActiveWalkState(): Promise<WalkSnapshot>;
   getStatus(): Promise<GeofenceStatus>;
-  simulateWalkOutbound(options?: { durationMinutes?: number }): Promise<{ simulated: true; durationMinutes: number }>;
-  simulateWalkInbound(options?: { durationMinutes?: number }): Promise<{ simulated: true; durationMinutes: number }>;
   requestHKWriteAuth(): Promise<{ requested: true }>;
-  deleteRecentSimulatedWalks(): Promise<{ deleted: number }>;
-  openIOSSettings(): Promise<{ opened: boolean }>;
   addListener(
     event: 'homeArrival',
     handler: (data: HomeArrivalEvent) => void
@@ -139,11 +135,7 @@ const GeofencePluginNative = registerPlugin<GeofencePluginInterface>('Geofence',
       lastSampleAt: null,
     }),
     getStatus: async (): Promise<GeofenceStatus> => ({ monitoring: false }),
-    simulateWalkOutbound: async () => ({ simulated: true as const, durationMinutes: 0 }),
-    simulateWalkInbound: async () => ({ simulated: true as const, durationMinutes: 0 }),
     requestHKWriteAuth: async () => ({ requested: true as const }),
-    deleteRecentSimulatedWalks: async () => ({ deleted: 0 }),
-    openIOSSettings: async () => ({ opened: false }),
     addListener: async (): Promise<PluginListenerHandle> => ({ remove: async () => {} }),
   },
 });
@@ -201,26 +193,8 @@ export async function getActiveWalkState(): Promise<WalkSnapshot> {
   return GeofencePluginNative.getActiveWalkState();
 }
 
-// ── DEV: simulation methods (used by the dev panel in MorningWalkSettings) ──
-
-export async function simulateWalkOutbound(durationMinutes = 18): Promise<{ simulated: true; durationMinutes: number }> {
-  return GeofencePluginNative.simulateWalkOutbound({ durationMinutes });
-}
-
-export async function simulateWalkInbound(durationMinutes = 16): Promise<{ simulated: true; durationMinutes: number }> {
-  return GeofencePluginNative.simulateWalkInbound({ durationMinutes });
-}
-
 export async function requestHKWriteAuth(): Promise<{ requested: true }> {
   return GeofencePluginNative.requestHKWriteAuth();
-}
-
-export async function deleteRecentSimulatedWalks(): Promise<{ deleted: number }> {
-  return GeofencePluginNative.deleteRecentSimulatedWalks();
-}
-
-export async function openIOSSettings(): Promise<{ opened: boolean }> {
-  return GeofencePluginNative.openIOSSettings();
 }
 
 // ── Public API — status ──────────────────────────────────────────────────────
