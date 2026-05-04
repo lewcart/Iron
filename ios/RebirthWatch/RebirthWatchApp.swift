@@ -36,21 +36,6 @@ struct RootView: View {
     }
 }
 
-struct ActiveWorkoutGlance: View {
-    let snapshot: ActiveWorkoutSnapshot
-
-    var body: some View {
-        VStack(spacing: 4) {
-            Text("Day 1 skeleton")
-                .font(.caption)
-            Text(snapshot.exercises.first?.name ?? "no exercises yet")
-                .font(.headline)
-                .multilineTextAlignment(.center)
-        }
-        .padding()
-    }
-}
-
 struct SyncingFromPhoneView: View {
     var body: some View {
         VStack(spacing: 8) {

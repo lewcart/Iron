@@ -31,6 +31,7 @@ import { formatTime, calcCompletedSets, calcTotalVolume } from './workout-utils'
 import { uuid as genUUID } from '@/lib/uuid';
 import { useUnit } from '@/context/UnitContext';
 import { useCurrentWorkoutFull, useExercises, getAutoFillValues, getAllTimeBest1RM, getLastSessionSetsForExercise, getGoalWindowForWorkoutExercise } from '@/lib/useLocalDB';
+import { buildWatchSnapshot, pushSnapshotToWatch } from '@/lib/watch';
 import { recommendForExercise, type ExerciseRecommendation } from '@/lib/progression';
 import { REP_WINDOWS, type RepWindow } from '@/lib/rep-windows';
 import { usePlansFull } from '@/lib/useLocalDB-plans';
@@ -1714,6 +1715,35 @@ export default function WorkoutPage() {
       return next;
     });
   }, []);
+
+  // ─── Watch snapshot push ───────────────────────────────────────────────
+  // Cache goal_window per exercise (mirrors WorkoutFinishModal:418).
+  const [pageGoalWindowByExercise, setPageGoalWindowByExercise] = useState<Map<string, RepWindow | null>>(new Map());
+  useEffect(() => {
+    if (!workout) return;
+    let cancelled = false;
+    Promise.all(
+      workout.exercises.map(we =>
+        getGoalWindowForWorkoutExercise(we.workout_uuid, we.exercise_uuid).then(w => [we.exercise_uuid, w] as const),
+      ),
+    ).then(pairs => {
+      if (!cancelled) setPageGoalWindowByExercise(new Map(pairs));
+    });
+    return () => { cancelled = true; };
+  }, [workout?.uuid, workout?.exercises.length]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Push snapshot whenever the live workout changes (any set update, exercise
+  // add/remove, completion). useCurrentWorkoutFull is the Dexie live query, so
+  // this effect re-fires the moment a mutation lands. Best-effort — failures
+  // log to console and don't surface in the UI.
+  useEffect(() => {
+    if (!workout) return;
+    const snapshot = buildWatchSnapshot({
+      workout,
+      goalWindowByExercise: pageGoalWindowByExercise,
+    });
+    void pushSnapshotToWatch(snapshot);
+  }, [workout, pageGoalWindowByExercise]);
 
   // Collapse all plans except the first one once the local data has loaded.
   // useLiveQuery returns synchronously after first render, so this effect

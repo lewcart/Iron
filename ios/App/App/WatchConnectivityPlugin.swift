@@ -1,6 +1,9 @@
 import Foundation
 import Capacitor
 import WatchConnectivity
+import RebirthAppGroup
+import RebirthModels
+import RebirthWatchLog
 
 /// Capacitor plugin that bridges JS → WatchConnectivity. Phone-side mirror of
 /// the watch app. Two write modes:
@@ -40,7 +43,18 @@ public class WatchConnectivityPlugin: CAPPlugin, CAPBridgedPlugin {
             call.reject("missing snapshot")
             return
         }
-        coordinator.pushApplicationContext(snapshot) { result in
+
+        // Wrap as { schema_version, body } so the watch's RebirthAppGroup
+        // .readSnapshot() can decode the same envelope. The watch writes this
+        // to ITS App Group container on receipt — App Groups are per-device,
+        // not shared phone↔watch, so iPhone-side persistence here would not
+        // reach the watch.
+        let envelope: [String: Any] = [
+            "schema_version": SchemaVersion.current,
+            "body": snapshot,
+        ]
+
+        coordinator.pushApplicationContext(envelope) { result in
             switch result {
             case .success:
                 call.resolve(["delivered": true])

@@ -5,18 +5,30 @@ import RebirthModels
 import RebirthWatchLog
 
 /// Watch-side WCSessionDelegate. Reads the latest snapshot from App Group
-/// UserDefaults on launch, and updates state when the phone pushes a new one.
+/// UserDefaults on launch (the previous-session cache), and overwrites it
+/// when the phone pushes a new one via `updateApplicationContext`.
 @MainActor
 final class WatchSessionStore: NSObject, ObservableObject, WCSessionDelegate {
     @Published var snapshot: ActiveWorkoutSnapshot?
     @Published var isActivating: Bool = true
+    @Published var lastReceivedAt: Date?
 
     private let appGroup = RebirthAppGroup()
     private let log = RebirthWatchLog.shared
 
     func activate() {
-        // Try to read existing snapshot eagerly so cold-start UI is instant.
+        // Cold-start: read previous snapshot eagerly so UI is instant.
         loadFromAppGroup()
+
+        #if WATCH_MOCK_SNAPSHOT
+        if snapshot == nil {
+            snapshot = MockSnapshot.midStrengthSession
+            log.info("Loaded mock snapshot (WATCH_MOCK_SNAPSHOT)")
+            isActivating = false
+            return
+        }
+        #endif
+
         guard WCSession.isSupported() else {
             isActivating = false
             return
@@ -36,6 +48,18 @@ final class WatchSessionStore: NSObject, ObservableObject, WCSessionDelegate {
         }
     }
 
+    /// Write the inbound envelope to App Group UserDefaults so cold-launches
+    /// after a session have something to render. Mirrors the encoding the
+    /// iOS plugin produces: `{ schema_version, body: <ActiveWorkoutSnapshot> }`.
+    private func persistEnvelope(_ envelope: [String: Any]) {
+        do {
+            let data = try JSONSerialization.data(withJSONObject: envelope, options: [])
+            appGroup.defaults?.set(data, forKey: RebirthAppGroup.snapshotKey)
+        } catch {
+            log.error("Failed to persist inbound envelope: \(error)")
+        }
+    }
+
     nonisolated func session(_ session: WCSession, activationDidCompleteWith activationState: WCSessionActivationState, error: Error?) {
         Task { @MainActor in
             isActivating = false
@@ -49,9 +73,10 @@ final class WatchSessionStore: NSObject, ObservableObject, WCSessionDelegate {
 
     nonisolated func session(_ session: WCSession, didReceiveApplicationContext applicationContext: [String: Any]) {
         Task { @MainActor in
-            // Phone pushes the snapshot encoded inside this dict; we wrote it
-            // to the App Group on the iOS side, so just re-read from disk.
+            log.info("WC inbound applicationContext keys=\(applicationContext.keys.sorted())")
+            persistEnvelope(applicationContext)
             loadFromAppGroup()
+            lastReceivedAt = Date()
         }
     }
 }

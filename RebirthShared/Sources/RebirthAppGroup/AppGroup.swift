@@ -7,7 +7,7 @@ import RebirthModels
 public struct RebirthAppGroup: Sendable {
     public static let identifier = "group.app.rebirth"
 
-    private static let snapshotKey = "rebirth.activeWorkoutSnapshot.v1"
+    public static let snapshotKey = "rebirth.activeWorkoutSnapshot.v1"
 
     public init() {}
 

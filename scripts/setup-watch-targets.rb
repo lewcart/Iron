@@ -20,6 +20,8 @@ SHARED_PACKAGE_PATH = '../../RebirthShared'    # relative to ios/App/
 WATCH_SOURCES = [
   'ios/RebirthWatch/RebirthWatchApp.swift',
   'ios/RebirthWatch/WatchSessionStore.swift',
+  'ios/RebirthWatch/ActiveWorkoutGlance.swift',
+  'ios/RebirthWatch/MockSnapshot.swift',
 ]
 WATCH_INFO_PLIST = 'ios/RebirthWatch/Info.plist'
 WATCH_ENTITLEMENTS = 'ios/RebirthWatch/RebirthWatch.entitlements'

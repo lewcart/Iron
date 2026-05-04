@@ -4,9 +4,9 @@ import PackageDescription
 let package = Package(
     name: "RebirthShared",
     platforms: [
-        .iOS(.v17),
+        .iOS(.v15),    // matches the App target's IPHONEOS_DEPLOYMENT_TARGET
         .watchOS(.v10),
-        .macOS(.v13),  // for `swift build` on dev machine; production targets are iOS + watchOS
+        .macOS(.v13),  // for `swift build` on dev machine
     ],
     products: [
         .library(name: "RebirthModels", targets: ["RebirthModels"]),
