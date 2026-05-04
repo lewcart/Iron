@@ -428,9 +428,6 @@ final class WalkTracker {
                 completion(.failure(.beginCollectionFailed(err)))
                 return
             }
-            // We deliberately don't add distance/energy samples — see
-            // requestHKWriteAuthorization for the rationale. The route's GPS
-            // polyline is the source of truth for distance.
             let metadata: [String: Any] = [
                 HKMetadataKeyWorkoutBrandName: "Rebirth",
                 "RebirthFlowId": s.flowId,
@@ -443,52 +440,44 @@ final class WalkTracker {
                     completion(.failure(.finishWorkoutFailed(metaErr)))
                     return
                 }
-                builder.endCollection(withEnd: at) { endSuccess, endErr in
-                    if !endSuccess {
-                        self.markHKWriteLikelyDenied(if: endErr)
-                        self.clearFinishInFlight()
-                        completion(.failure(.finishWorkoutFailed(endErr)))
-                        return
-                    }
-                    builder.finishWorkout { workout, finErr in
-                        guard let workout = workout, finErr == nil else {
-                            self.markHKWriteLikelyDenied(if: finErr)
+                // Add distance + energy samples one at a time so a missing
+                // write perm on one type doesn't block the other or the workout
+                // itself. Each call logs failure and continues.
+                self.addOptionalSamples(builder: builder, distance: s.distance, energy: s.energy, start: s.startedAt, end: at) {
+                    builder.endCollection(withEnd: at) { endSuccess, endErr in
+                        if !endSuccess {
+                            self.markHKWriteLikelyDenied(if: endErr)
                             self.clearFinishInFlight()
-                            completion(.failure(.finishWorkoutFailed(finErr)))
+                            completion(.failure(.finishWorkoutFailed(endErr)))
                             return
                         }
-                        // Workout finalized. Now associate the route.
-                        let routeBuilder = HKWorkoutRouteBuilder(healthStore: s.store, device: .local())
-                        routeBuilder.insertRouteData(s.samples) { insertSuccess, routeErr in
-                            if !insertSuccess {
-                                self.markHKWriteLikelyDenied(if: routeErr)
+                        builder.finishWorkout { workout, finErr in
+                            guard let workout = workout, finErr == nil else {
+                                self.markHKWriteLikelyDenied(if: finErr)
                                 self.clearFinishInFlight()
-                                completion(.failure(.routeInsertFailed(routeErr ?? GenericRouteError(), workout: workout)))
+                                completion(.failure(.finishWorkoutFailed(finErr)))
                                 return
                             }
-                            routeBuilder.finishRoute(with: workout, metadata: nil) { route, finishErr in
-                                if route == nil || finishErr != nil {
-                                    self.markHKWriteLikelyDenied(if: finishErr)
+                            // Workout finalized. Now associate the route.
+                            let routeBuilder = HKWorkoutRouteBuilder(healthStore: s.store, device: .local())
+                            routeBuilder.insertRouteData(s.samples) { insertSuccess, routeErr in
+                                if !insertSuccess {
+                                    self.markHKWriteLikelyDenied(if: routeErr)
                                     self.clearFinishInFlight()
-                                    completion(.failure(.routeInsertFailed(finishErr ?? GenericRouteError(), workout: workout)))
+                                    completion(.failure(.routeInsertFailed(routeErr ?? GenericRouteError(), workout: workout)))
                                     return
                                 }
-                                UserDefaults.standard.removeObject(forKey: WalkTracker.hkWriteLikelyDeniedKey)
-                                self.cleanupAfterSave(flowId: s.flowId)
-                                // Workout + route saved. Now attempt to attach
-                                // distance + energy samples as a best-effort
-                                // (non-fatal) write. If the user hasn't granted
-                                // those write perms, the calls fail silently
-                                // and the workout still appears in Apple Health
-                                // with just the route map.
-                                self.saveOptionalQuantitySamples(
-                                    store: s.store,
-                                    distance: s.distance,
-                                    energy: s.energy,
-                                    start: s.startedAt,
-                                    end: at
-                                )
-                                completion(.success(workout))
+                                routeBuilder.finishRoute(with: workout, metadata: nil) { route, finishErr in
+                                    if route == nil || finishErr != nil {
+                                        self.markHKWriteLikelyDenied(if: finishErr)
+                                        self.clearFinishInFlight()
+                                        completion(.failure(.routeInsertFailed(finishErr ?? GenericRouteError(), workout: workout)))
+                                        return
+                                    }
+                                    UserDefaults.standard.removeObject(forKey: WalkTracker.hkWriteLikelyDeniedKey)
+                                    self.cleanupAfterSave(flowId: s.flowId)
+                                    completion(.success(workout))
+                                }
                             }
                         }
                     }
@@ -501,34 +490,45 @@ final class WalkTracker {
         serialQueue.sync { finishInFlight = false }
     }
 
-    /// Save distance + active-energy samples to HK separately (not via the
-    /// builder), so that a failure of one (or both) doesn't take down the
-    /// workout save. HK auto-associates samples that overlap the workout's
-    /// time range when Apple Health computes the workout's totals.
-    private func saveOptionalQuantitySamples(
-        store: HKHealthStore,
+    /// Add distance + active-energy samples to the workout builder, one type
+    /// at a time so a missing write perm on one doesn't take down the other.
+    /// All failures are logged but never block the workflow — the completion
+    /// always fires when both attempts have settled.
+    private func addOptionalSamples(
+        builder: HKWorkoutBuilder,
         distance: Double,
         energy: Double,
         start: Date,
-        end: Date
+        end: Date,
+        completion: @escaping () -> Void
     ) {
-        if let distanceType = HKQuantityType.quantityType(forIdentifier: .distanceWalkingRunning), distance > 0 {
+        let distanceSample: HKQuantitySample? = {
+            guard distance > 0,
+                  let type = HKQuantityType.quantityType(forIdentifier: .distanceWalkingRunning) else { return nil }
             let q = HKQuantity(unit: .meter(), doubleValue: distance)
-            let sample = HKQuantitySample(type: distanceType, quantity: q, start: start, end: end)
-            store.save(sample) { _, err in
-                if let err = err {
-                    print("[WalkTracker] distance sample save failed (non-fatal): \(err)")
-                }
+            return HKQuantitySample(type: type, quantity: q, start: start, end: end)
+        }()
+        let energySample: HKQuantitySample? = {
+            guard energy > 0,
+                  let type = HKQuantityType.quantityType(forIdentifier: .activeEnergyBurned) else { return nil }
+            let q = HKQuantity(unit: .kilocalorie(), doubleValue: energy)
+            return HKQuantitySample(type: type, quantity: q, start: start, end: end)
+        }()
+
+        func tryAddEnergy() {
+            guard let s = energySample else { completion(); return }
+            builder.add([s]) { ok, err in
+                if !ok { print("[WalkTracker] energy sample add failed (non-fatal): \(err?.localizedDescription ?? "no detail")") }
+                completion()
             }
         }
-        if let energyType = HKQuantityType.quantityType(forIdentifier: .activeEnergyBurned), energy > 0 {
-            let q = HKQuantity(unit: .kilocalorie(), doubleValue: energy)
-            let sample = HKQuantitySample(type: energyType, quantity: q, start: start, end: end)
-            store.save(sample) { _, err in
-                if let err = err {
-                    print("[WalkTracker] energy sample save failed (non-fatal): \(err)")
-                }
+        if let d = distanceSample {
+            builder.add([d]) { ok, err in
+                if !ok { print("[WalkTracker] distance sample add failed (non-fatal): \(err?.localizedDescription ?? "no detail")") }
+                tryAddEnergy()
             }
+        } else {
+            tryAddEnergy()
         }
     }
 
