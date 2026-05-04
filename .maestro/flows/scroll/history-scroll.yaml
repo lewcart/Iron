@@ -8,7 +8,6 @@ tags:
 - tapOn: "History"
 - assertVisible:
     text: "History"
-    timeout: 4000
 - swipe:
     direction: UP
     duration: 800

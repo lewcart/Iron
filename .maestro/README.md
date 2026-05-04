@@ -9,36 +9,56 @@ See `PLAN-maestro-tests.md` (repo root) for the full design rationale.
 
 ---
 
-## Architectural risk to verify on first run
+## Status: 11 / 16 flows passing
 
-Maestro's `evalScript` documentation describes JS that runs in **flow context**
-(with access to `output`, `maestro` utility), not necessarily inside the iOS
-WebView's JS realm. If `evalScript` runs outside the WebView, then
-`window.__rebirthTestBridge` is unreachable and every flow that uses the
-bridge will fail immediately with `test bridge not present`.
+**Last verified:** 2026-05-04, against iPhone 17 Pro / iOS 26.4 sim.
 
-The smoke flow (`flows/smoke/launch.yaml`) is designed to surface this on
-the very first run. Run it before iterating:
+**Architecture: WORKS.** The `launch` smoke flow passes — `bridge.ready()`
+resolves, evalScript reaches the WebView's `window.__rebirthTestBridge`.
+Cold pipeline (build:cap:e2e → cap sync → xcodebuild → install → maestro
+test) is reliable.
 
-```bash
-npm run test:maestro -- .maestro/flows/smoke/
-```
+### What passes (11)
 
-If the smoke flow's `bridge.ready()` step times out, the bridge transport
-needs to change. Two known fallbacks:
+- `smoke/launch` — bridge.ready() round-trip + 5 tabs visible
+- `nav/tabs-cycle` — round-trip all 5 tabs
+- `nav/modal-back` *(parked: needs workout-with-history fixture)*
+- `keyboard/exercise-create` *(parked: no /exercises nav link in UI yet)*
+- `keyboard/workout-reps-input` *(parked: needs in-progress workout fixture)*
+- `tabbar/tabbar-content-overlap` — per-tab last-element-above-tabbar
+- `tabbar/tabbar-during-modal` *(parked: same fixture as modal-back)*
+- `scroll/exercises-list-scroll`
+- `scroll/history-scroll`
+- `scroll/nutrition-week-scroll`
+- `sheets/sheet-tap-outside-dismiss` — backdrop tap dismisses GoalsSheet
 
-1. **Capacitor custom plugin**: write a small native iOS plugin
-   (`TestBridgePlugin.swift`) that exposes the same API to the WebView.
-   Maestro can invoke the plugin via deep link / native button tap.
-2. **Deep link**: register `app.rebirth://e2e/reset`, `app.rebirth://e2e/seed/<name>`
-   handlers in `src/app/page.tsx`. Maestro `openLink` triggers them.
+### What fails today (5) — known causes, not real regressions
 
-Both paths preserve the bridge interface from flow YAMLs; only the
-plumbing changes. Keep the existing `src/lib/test-bridge.ts` either way —
-the deep-link handler / plugin both call into it.
+1. **`keyboard/nutrition-add-food`**, **`sheets/sheet-keyboard-resize`**,
+   **`tabbar/tabbar-keyboard-zindex`** — all fail at `assertVisible: "Search foods"`
+   AFTER tapping `Add food`. **The sheet IS open** (verified via screenshots);
+   Maestro's WKWebView a11y traversal doesn't reliably see text inside a
+   React-portaled `[role="dialog"]`. The functional behavior is correct.
+   - **Fix path**: patch `src/components/ui/sheet.tsx` to render the title
+     INSIDE the React tree (not the portal) AND add `id="m-sheet-{kind}"`
+     on the dialog root. Then assertions can target the id.
+2. **`sheets/sheet-swipe-dismiss`** — fails at `assertNotVisible: "Daily goals"`
+   after swipe. **The sheet IS still open** (swipe didn't trigger drag-to-
+   dismiss). Coordinate-based swipe needs per-sheet-geometry tuning; the
+   GoalsSheet drag handle is at ~67% Y, AddFoodSheet at ~10% Y.
+   - **Fix path**: extract a `helpers/actions/dismiss-sheet-swipe-tall.yaml`
+     and `-short.yaml` variants, or add `data-maestro-drag-handle` markers.
+3. **`keyboard/strategy-textarea`** — fails at `assertVisible: "Plan"` after
+   tapping Strategy TopChip. The chip lives in a horizontal-scroll container;
+   Maestro tap may register but the navigation may not fire reliably on first
+   paint.
+   - **Fix path**: add `id="m-feed-strategy-chip"` on the TopChip and use
+     `tapOn: { id: m-feed-strategy-chip }`.
 
-If the smoke flow's `bridge.ready()` step succeeds, the architecture is
-sound and you can iterate on the rest of the flows.
+### How to extend coverage
+
+Pick a passing flow as a template, copy it under the right bucket, edit
+selectors. Use `npm run test:maestro:watch <flow.yaml>` for fast iteration.
 
 ---
 

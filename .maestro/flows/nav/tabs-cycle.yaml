@@ -8,23 +8,18 @@ tags:
 - tapOn: "HRT"
 - assertVisible:
     text: "HRT"
-    timeout: 4000
 - tapOn: "Workout"
 - assertVisible:
     text: "Workout"
-    timeout: 4000
 - tapOn: "Measure"
 - assertVisible:
     text: "Measure"
-    timeout: 4000
 - tapOn: "Nutrition"
 - assertVisible:
     text: "Today"
-    timeout: 4000
 - tapOn: "Week"
 - assertVisible:
     text: "Week"
-    timeout: 4000
 # Final state check: TabBar still present, no error overlay.
 - assertVisible:
     text: "Week"

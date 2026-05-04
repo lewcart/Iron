@@ -16,12 +16,24 @@
 import { db } from '@/db/local';
 import * as nowProvider from '@/lib/now-provider';
 
+interface RouterLike {
+  push: (path: string) => void;
+  replace: (path: string) => void;
+}
+
+interface MountOptions {
+  router: RouterLike;
+}
+
 export interface RebirthTestBridge {
   ready: () => Promise<void>;
   reset: () => Promise<void>;
   seed: (name: string) => Promise<void>;
   setClock: (iso: string | null) => void;
   getTree: () => unknown;
+  // Navigate via full reload. Cheaper than chasing nav links through the
+  // UI for flows that just need to be on a specific page.
+  navigate: (path: string) => void;
 }
 
 declare global {
@@ -30,7 +42,7 @@ declare global {
   }
 }
 
-export function mountTestBridge(): void {
+export function mountTestBridge(opts: MountOptions): void {
   // Dead-code-eliminate the entire body in non-E2E builds. SWC inlines
   // `process.env.NEXT_PUBLIC_E2E` to its build-time value, so when the
   // flag is unset this becomes `'undefined' !== '1'` → unconditional early
@@ -44,7 +56,13 @@ export function mountTestBridge(): void {
   if (process.env.NEXT_PUBLIC_E2E !== '1') return;
 
   if (typeof window === 'undefined') return;
-  if (window.__rebirthTestBridge) return;
+  if (window.__rebirthTestBridge) {
+    // Re-mount with the latest router (it changes when the React tree
+    // re-renders e.g. after navigation). Update the navigate fn in place.
+    window.__rebirthTestBridge.navigate = (path: string) =>
+      opts.router.push(path);
+    return;
+  }
 
   window.__rebirthTestBridge = {
     ready: async () => {
@@ -103,6 +121,20 @@ export function mountTestBridge(): void {
     },
 
     getTree: () => walkAccessibilityTree(document.body),
+
+    navigate: (path: string) => {
+      // Try Next router first (clean SPA navigation, no reload). If the
+      // pathname doesn't change within a tick, fall back to a hard
+      // location.assign — Capacitor's static export sometimes ignores
+      // router.push for routes outside the current segment tree.
+      const before = window.location.pathname;
+      opts.router.push(path);
+      setTimeout(() => {
+        if (window.location.pathname === before && before !== path) {
+          window.location.assign(path);
+        }
+      }, 200);
+    },
   };
 }
 

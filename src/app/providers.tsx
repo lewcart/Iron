@@ -145,9 +145,10 @@ function AppBootstrap() {
 // are all eliminated as one unit by webpack DCE. scripts/check-no-test-bridge.sh
 // belt-and-braces greps the static export for `__rebirthTestBridge`.
 function TestBridgeMount() {
+  const router = useRouter();
   useEffect(() => {
     import('@/lib/test-bridge')
-      .then(m => m.mountTestBridge())
+      .then(m => m.mountTestBridge({ router }))
       .catch(err => {
         // Surface mount failures loudly. Without this, a transient HMR /
         // module-load error in dev leaves the bridge un-mounted and the
@@ -155,7 +156,7 @@ function TestBridgeMount() {
         // no clue why.
         console.error('[test-bridge] mount failed', err);
       });
-  }, []);
+  }, [router]);
   return null;
 }
 

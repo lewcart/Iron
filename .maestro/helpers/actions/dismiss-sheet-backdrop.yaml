@@ -9,4 +9,3 @@ appId: app.rebirth
     point: 50%, 8%
 - assertNotVisible:
     text: ${SHEET_TITLE}
-    timeout: 2000

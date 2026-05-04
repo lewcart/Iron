@@ -1,0 +1,34 @@
+appId: app.rebirth
+---
+# Navigate the app to a route via bridge.navigate (window.location.href).
+# Bypasses the UI nav path entirely — flows that need to "be on /strategy"
+# can call this instead of clicking through tabs and TopChips.
+#
+# After navigation, the bridge re-mounts (location.href triggers full reload).
+# We wait for it to come back up before yielding.
+#
+# env:
+#   ROUTE — the route path (e.g. "/strategy", "/nutrition/today")
+#
+# NOTE: Don't name this env var PATH — that collides with the system PATH
+# variable, which Maestro substitutes before the runFlow env injection,
+# producing an invalid JS string and a confusing "Missing close quote"
+# SyntaxError.
+- evalScript: |
+    (() => {
+      if (!window.__rebirthTestBridge) {
+        throw new Error("navigate: bridge not present");
+      }
+      window.__rebirthTestBridge.navigate(ROUTE);
+    })()
+- evalScript: |
+    (async () => {
+      const start = Date.now();
+      while (!window.__rebirthTestBridge && Date.now() - start < 10000) {
+        await new Promise(r => setTimeout(r, 100));
+      }
+      if (!window.__rebirthTestBridge) {
+        throw new Error("navigate: bridge did not remount after navigation");
+      }
+      await window.__rebirthTestBridge.ready();
+    })()

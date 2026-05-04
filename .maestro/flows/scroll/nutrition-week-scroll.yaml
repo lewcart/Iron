@@ -10,7 +10,6 @@ tags:
     text: "Week"
 - assertVisible:
     text: "Week"
-    timeout: 4000
 # Horizontal swipe — should change days, not jiggle vertically.
 - swipe:
     direction: LEFT

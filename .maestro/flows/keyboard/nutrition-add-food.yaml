@@ -5,26 +5,18 @@ tags:
 # Regression test for capacitor.config.ts:23-32 (Keyboard.resize=body).
 # When the keyboard appears in the AddFoodSheet, the search input must
 # stay visible above the keyboard top — not slide off behind it.
-#
-# Bug history: Lou hit this on-device pre-fix; the WKWebView slid up as
-# a whole, pushing the sheet's search input above the visible viewport.
 - runFlow: ../../helpers/launch.yaml
-- runFlow: ../../helpers/reset-data.yaml
-- runFlow: ../../helpers/launch.yaml
-- tapOn:
-    text: "Nutrition"
-- assertVisible:
-    text: "Today"
-# AddFoodSheet trigger is an icon-only button with aria-label="Add food"
-# (see src/app/nutrition/today/EntryDock.tsx).
+- tapOn: "Nutrition"
+- assertVisible: "Goals"
 - tapOn: "Add food"
-- assertVisible:
-    text: "Add to"           # title is "Add to Breakfast/Lunch/…"
-    timeout: 4000
+# Sheet title "Add to {slot}" is rendered through a React portal; Maestro's
+# WKWebView a11y traversal sometimes misses portaled headings. Use the
+# search input placeholder as the sheet-open sentinel instead — it's an
+# <input> with stable accessible name.
+- assertVisible: "Search foods"
 - tapOn:
-    text: "Search foods"     # placeholder is "Search foods…"
+    text: "Search foods"
 - inputText: "chicken"
-# Cross-check: the search input bottom edge must be above the keyboard top.
 - runFlow:
     file: ../../helpers/actions/assert-above-keyboard.yaml
     env:

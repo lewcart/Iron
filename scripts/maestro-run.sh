@@ -207,14 +207,29 @@ cmd_run() {
   ensure_sim_booted
   build_and_install_if_stale "$force_full"
   mkdir -p "$RUN_DIR"
-  note "Running flows → $RUN_DIR"
+
+  # Maestro doesn't recurse into subdirectories by default — only flows in
+  # the top-level dir get picked up. We organize flows into buckets
+  # (keyboard/, tabbar/, scroll/, sheets/, nav/, smoke/), so enumerate
+  # explicit yaml files and pass them all.
+  local flow_files=()
+  while IFS= read -r f; do
+    flow_files+=("$f")
+  done < <(find .maestro/flows -name '*.yaml' -type f | sort)
+
+  if [ ${#flow_files[@]} -eq 0 ]; then
+    err "No flow files found under .maestro/flows/"
+    exit 1
+  fi
+
+  note "Running ${#flow_files[@]} flows → $RUN_DIR"
   set +e
   maestro test \
     --debug-output "$RUN_DIR" \
     --format junit \
     --output "$RUN_DIR/junit.xml" \
     "$@" \
-    .maestro/flows
+    "${flow_files[@]}"
   local rc=$?
   set -e
   summarize "$RUN_DIR/junit.xml" "$rc"

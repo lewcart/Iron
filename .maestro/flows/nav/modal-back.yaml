@@ -2,38 +2,19 @@ appId: app.rebirth
 tags:
   - nav
 ---
-# Open a modal, dismiss via back / close, return to underlying screen
-# with scroll position preserved.
+# Open ExerciseDetailModal, dismiss via Close button (aria-label="Close"
+# on src/components/ExerciseDetailModal.tsx:59), return to underlying
+# screen with scroll position preserved.
+#
+# Same fixture dependency as tabbar-during-modal — needs a workout-with-history
+# fixture before this can run. Skipped until the seed lands.
 - runFlow: ../../helpers/launch.yaml
-- tapOn: "History"
-- assertVisible:
-    text: "History"
-    timeout: 4000
+- runFlow:
+    file: ../../helpers/actions/navigate.yaml
+    env:
+      ROUTE: /history
+- assertVisible: "History"
 - evalScript: |
     (() => {
-      const items = document.querySelectorAll('[role="button"], button, a');
-      if (items.length < 2) {
-        throw new Error("modal-back: history is empty. Seed first.");
-      }
-      // Capture scroll position before drilling in.
-      window.__rebirthScrollBefore = window.scrollY;
-    })()
-- tapOn:
-    point: 50%, 35%
-- assertVisible:
-    text: "Notes"            # ExerciseDetailModal sentinel — TODO confirm
-    timeout: 3000
-# Dismiss. Most modals expose a Close button with aria-label="Close".
-- tapOn: "Close"             # AMBIGUOUS — TODO id="m-modal-close"
-- assertNotVisible:
-    text: "Notes"
-- evalScript: |
-    (() => {
-      const after = window.scrollY;
-      const before = window.__rebirthScrollBefore || 0;
-      if (Math.abs(after - before) > 50) {
-        throw new Error(
-          "modal-back: scroll position not preserved. before=" + before + " after=" + after
-        );
-      }
+      throw new Error("modal-back: ExerciseDetailModal navigation requires a workout-with-history fixture. Implement test-fixtures.ts seed first.");
     })()

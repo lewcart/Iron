@@ -17,14 +17,12 @@ appId: app.rebirth
     })()
 - evalScript: |
     (() => {
+      const tabName = TAB;
       const tabBar = document.querySelector('nav.fixed.bottom-0');
       if (!tabBar) {
         throw new Error("tabbar-content-overlap: TabBar not found in DOM");
       }
       const tabTop = tabBar.getBoundingClientRect().top;
-
-      // Find the lowest interactive element ABOVE the tab bar that's also
-      // ABOVE the viewport bottom. Anything below tabTop is occluded.
       const interactiveSelectors = 'button, a, input, textarea, [role="button"], [role="link"]';
       const candidates = Array.from(document.querySelectorAll(interactiveSelectors))
         .filter(el => {
@@ -32,16 +30,13 @@ appId: app.rebirth
           return r.height > 0 && r.bottom <= window.innerHeight;
         })
         .sort((a, b) => b.getBoundingClientRect().bottom - a.getBoundingClientRect().bottom);
-
       const last = candidates[0];
-      if (!last) {
-        // No interactive element on this page — that's fine, just skip.
-        return;
-      }
+      if (!last) return;
       const lastBottom = last.getBoundingClientRect().bottom;
       if (lastBottom > tabTop + 1) {
         throw new Error(
-          "tabbar-content-overlap: tab=${TAB} last interactive element at y=" + lastBottom +
+          "tabbar-content-overlap: tab=" + tabName +
+          " last interactive element at y=" + lastBottom +
           " is below TabBar top y=" + tabTop +
           " — page is missing safe-area bottom padding"
         );

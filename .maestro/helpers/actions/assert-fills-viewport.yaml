@@ -1,0 +1,33 @@
+appId: app.rebirth
+---
+# Visual layout assertion: an element must occupy a meaningful fraction
+# of the viewport height. Catches sheets that render collapsed (height
+# near 0) or modals that don't actually cover the screen.
+#
+# env:
+#   SELECTOR_QUERY — CSS selector for the element under test
+#   MIN_FRACTION   — minimum height as fraction of viewport (e.g. "0.3" for 30%)
+#   LABEL          — human-readable name for the error message
+- evalScript: |
+    (() => {
+      const sel = SELECTOR_QUERY;
+      const minFrac = Number(MIN_FRACTION);
+      const label = LABEL;
+      const el = document.querySelector(sel);
+      if (!el) {
+        throw new Error(
+          "assert-fills-viewport: " + label + " not found (selector: " + sel + ")"
+        );
+      }
+      const h = el.getBoundingClientRect().height;
+      const vh = window.innerHeight;
+      const ratio = h / vh;
+      if (ratio < minFrac) {
+        throw new Error(
+          "assert-fills-viewport: " + label + " height=" + Math.round(h) +
+          "px (" + Math.round(ratio * 100) + "% of " + vh +
+          "px viewport) — expected ≥" + Math.round(minFrac * 100) + "%. " +
+          "Likely the element rendered collapsed or got clipped."
+        );
+      }
+    })()

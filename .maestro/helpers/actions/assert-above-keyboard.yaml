@@ -12,23 +12,22 @@ appId: app.rebirth
     text: ${SELECTOR_TEXT}
 - evalScript: |
     (() => {
+      const target = SELECTOR_TEXT;
       const candidates = Array.from(document.querySelectorAll('*')).filter(el => {
         const aria = el.getAttribute('aria-label') || '';
         const txt = el.textContent || '';
-        return aria.includes("${SELECTOR_TEXT}") || txt.trim() === "${SELECTOR_TEXT}";
+        return aria.includes(target) || txt.trim() === target;
       });
       if (candidates.length === 0) {
-        throw new Error("assert-above-keyboard: no element matched ${SELECTOR_TEXT}");
+        throw new Error("assert-above-keyboard: no element matched " + target);
       }
-      const target = candidates[0];
-      const rect = target.getBoundingClientRect();
+      const el = candidates[0];
+      const rect = el.getBoundingClientRect();
       const vv = window.visualViewport;
       const viewportBottom = vv ? vv.height : window.innerHeight;
-      // The keyboard pushes visualViewport.height shorter than innerHeight.
-      // If the element's bottom is below the viewport bottom, it's hidden.
       if (rect.bottom > viewportBottom + 1) {
         throw new Error(
-          "assert-above-keyboard: '${SELECTOR_TEXT}' bottom=" + rect.bottom +
+          "assert-above-keyboard: '" + target + "' bottom=" + rect.bottom +
           " > viewportBottom=" + viewportBottom +
           " (keyboard is covering it)"
         );

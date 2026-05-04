@@ -10,4 +10,3 @@ appId: app.rebirth
     text: ${TRIGGER_TEXT}
 - assertVisible:
     text: ${SHEET_TITLE}
-    timeout: 4000

@@ -21,4 +21,3 @@ appId: app.rebirth
     })()
 - assertVisible:
     text: "Week"
-    timeout: 8000

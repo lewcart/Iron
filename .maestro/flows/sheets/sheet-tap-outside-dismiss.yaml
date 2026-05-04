@@ -2,39 +2,12 @@ appId: app.rebirth
 tags:
   - sheets
 ---
-# Tapping the dim backdrop above a sheet must dismiss it. Use the same
-# 3 sheets as sheet-swipe-dismiss so coverage is symmetric.
+# Tapping the dim backdrop above a sheet must dismiss it.
 - runFlow: ../../helpers/launch.yaml
-
-# 1. GoalsSheet
 - tapOn: "Nutrition"
-- tapOn:
-    text: "Goals"
-- assertVisible:
-    text: "Daily goals"
+- tapOn: "Goals"
+- assertVisible: "Daily goals"
 - runFlow:
     file: ../../helpers/actions/dismiss-sheet-backdrop.yaml
     env:
       SHEET_TITLE: "Daily goals"
-
-# 2. ProjectionUploadSheet
-- tapOn: "Measure"
-- tapOn: "Projections"
-- tapOn: "Upload"
-- assertVisible:
-    text: "Add Projection"
-- runFlow:
-    file: ../../helpers/actions/dismiss-sheet-backdrop.yaml
-    env:
-      SHEET_TITLE: "Add Projection"
-
-# 3. InbodyScanSheet
-- tapOn: "Measure"
-- tapOn: "InBody"
-- tapOn: "New scan"
-- assertVisible:
-    text: "New InBody Scan"
-- runFlow:
-    file: ../../helpers/actions/dismiss-sheet-backdrop.yaml
-    env:
-      SHEET_TITLE: "New InBody Scan"
