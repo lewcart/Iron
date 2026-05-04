@@ -839,6 +839,8 @@ export async function getExerciseSessionHistoryPaged(
       duration_seconds: number | null;
       rpe: number | null;
       tag: string | null;
+      is_pr: boolean;
+      excluded_from_pb: boolean;
       order_index: number;
     }>;
   }>;
@@ -899,6 +901,8 @@ export async function getExerciseSessionHistoryPaged(
     duration_seconds: number | null;
     rpe: string | null;
     tag: string | null;
+    is_pr: boolean;
+    excluded_from_pb: boolean;
     order_index: number;
   }>(`
     SELECT
@@ -909,6 +913,8 @@ export async function getExerciseSessionHistoryPaged(
       ws.duration_seconds,
       ws.rpe,
       ws.tag,
+      ws.is_pr,
+      ws.excluded_from_pb,
       ws.order_index
     FROM workout_sets ws
     JOIN workout_exercises we ON ws.workout_exercise_uuid = we.uuid
@@ -926,6 +932,8 @@ export async function getExerciseSessionHistoryPaged(
     duration_seconds: number | null;
     rpe: number | null;
     tag: string | null;
+    is_pr: boolean;
+    excluded_from_pb: boolean;
     order_index: number;
   };
   const setsByWorkout = new Map<string, SessionSet[]>();
@@ -938,6 +946,8 @@ export async function getExerciseSessionHistoryPaged(
       duration_seconds: s.duration_seconds,
       rpe: s.rpe ? parseFloat(s.rpe) : null,
       tag: s.tag,
+      is_pr: Boolean(s.is_pr),
+      excluded_from_pb: Boolean(s.excluded_from_pb),
       order_index: s.order_index,
     });
   }

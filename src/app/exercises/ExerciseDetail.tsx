@@ -9,6 +9,7 @@ import type { ContentKind } from '@/lib/exercise-content-prompt';
 import { ExerciseDemoStrip } from '@/components/ExerciseDemoStrip';
 import { ExerciseImageManager } from '@/components/ExerciseImageManager';
 import { EditableTextSection } from '@/components/EditableTextSection';
+import { SetActionSheet, type SetActionSheetTarget } from '@/components/SetActionSheet';
 import { MuscleMap } from '@/components/MuscleMap';
 import { MUSCLE_DEFS, normalizeMuscleTags } from '@/lib/muscles';
 import { updateExercise } from '@/lib/mutations-exercises';
@@ -390,6 +391,7 @@ export default function ExerciseDetail({
   const [sessionsServerCursor, setSessionsServerCursor] = useState<string | null>(null);
   const [sessionsServerDone, setSessionsServerDone] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
+  const [setActionTarget, setSetActionTarget] = useState<SetActionSheetTarget | null>(null);
 
   // Time-mode PR — only populated for time-mode exercises. Drives the
   // LongestHoldHero block in place of OneRMHero.
@@ -875,37 +877,64 @@ export default function ExerciseDetail({
                         // held duration (Lou's pre-feature workaround).
                         const isTime = isTimeMode || set.duration_seconds != null;
                         const effectiveSeconds = set.duration_seconds ?? set.repetitions ?? null;
+                        const excluded = set.excluded_from_pb;
+                        const isPr = set.is_pr && !excluded;
                         return (
-                          <div
+                          <button
+                            type="button"
                             key={set.uuid}
-                            className={`flex items-baseline gap-3 px-3 py-1.5 ${i % 2 === 0 ? 'bg-card' : 'bg-muted/30'}`}
+                            onClick={() => setSetActionTarget({
+                              set_uuid: set.uuid,
+                              is_excluded: excluded,
+                              weight: set.weight,
+                              repetitions: set.repetitions,
+                              duration_seconds: set.duration_seconds,
+                              label: `Set ${i + 1} · ${formatDate(s.date)}`,
+                            })}
+                            className={`w-full flex items-baseline gap-3 px-3 py-1.5 text-left active:bg-card/70 ${
+                              excluded
+                                ? 'border-l-2 border-l-slate-500/60 bg-card/40'
+                                : isPr
+                                ? 'bg-amber-500/10'
+                                : i % 2 === 0 ? 'bg-card' : 'bg-muted/30'
+                            }`}
                           >
-                            <span className="text-[10px] text-muted-foreground w-5 text-center flex-shrink-0">{i + 1}</span>
+                            <span className={`text-[10px] w-5 text-center flex-shrink-0 ${
+                              excluded ? 'text-muted-foreground/60' : 'text-muted-foreground'
+                            }`}>{i + 1}</span>
                             {isTime ? (
                               <>
-                                <span className="text-xs text-foreground flex-1">
+                                <span className={`text-xs flex-1 ${excluded ? 'text-muted-foreground/60 line-through' : 'text-foreground'}`}>
                                   {set.weight != null && set.weight > 0 ? toDisplay(set.weight) : '—'}
                                   <span className="text-muted-foreground ml-0.5">{label}</span>
                                 </span>
                                 <span className="text-xs text-muted-foreground">×</span>
-                                <span className="text-xs text-foreground flex-1">
+                                <span className={`text-xs flex-1 ${excluded ? 'text-muted-foreground/60 line-through' : 'text-foreground'}`}>
                                   {effectiveSeconds != null ? `${effectiveSeconds}s` : '—'}
                                 </span>
                               </>
                             ) : (
                               <>
-                                <span className="text-xs text-foreground flex-1">
+                                <span className={`text-xs flex-1 ${excluded ? 'text-muted-foreground/60 line-through' : 'text-foreground'}`}>
                                   {set.weight != null ? toDisplay(set.weight) : '—'}
                                   <span className="text-muted-foreground ml-0.5">{label}</span>
                                 </span>
                                 <span className="text-xs text-muted-foreground">×</span>
-                                <span className="text-xs text-foreground flex-1">{set.repetitions ?? '—'} reps</span>
+                                <span className={`text-xs flex-1 ${excluded ? 'text-muted-foreground/60 line-through' : 'text-foreground'}`}>{set.repetitions ?? '—'} reps</span>
                               </>
                             )}
-                            <span className="text-[11px] text-muted-foreground w-10 text-right flex-shrink-0">
-                              {set.rpe != null ? `RPE ${set.rpe}` : ''}
-                            </span>
-                          </div>
+                            {excluded ? (
+                              <span className="text-[10px] font-bold text-slate-300 bg-slate-500/20 border border-slate-500/30 px-1.5 py-0 rounded-full">
+                                EX
+                              </span>
+                            ) : isPr ? (
+                              <span className="text-[10px] font-bold text-amber-400">PR</span>
+                            ) : (
+                              <span className="text-[11px] text-muted-foreground w-10 text-right flex-shrink-0">
+                                {set.rpe != null ? `RPE ${set.rpe}` : ''}
+                              </span>
+                            )}
+                          </button>
                         );
                       })}
                     </div>
@@ -1057,6 +1086,11 @@ export default function ExerciseDetail({
           </div>
         )}
       </div>
+      <SetActionSheet
+        target={setActionTarget}
+        onClose={() => setSetActionTarget(null)}
+        unitLabel={label}
+      />
     </main>
   );
 }

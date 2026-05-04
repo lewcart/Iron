@@ -163,6 +163,26 @@ export async function deleteSet(uuid: string): Promise<void> {
   syncEngine.schedulePush();
 }
 
+/**
+ * Toggle the `excluded_from_pb` flag on a set. Used by the per-set action
+ * sheet ("Doesn't count (form)") and the per-exercise bulk reset path.
+ *
+ * The set stays in workout history and continues to count toward volume /
+ * set-counts; it just becomes invisible to PR / PB calculations. Server
+ * recomputes is_pr flags on the next sync push (slice 7 wires that in).
+ */
+export async function excludeSetFromPb(uuid: string, excluded: boolean): Promise<void> {
+  await db.workout_sets.update(uuid, {
+    excluded_from_pb: excluded,
+    // Optimistic: clear the local is_pr badge immediately so the UI doesn't
+    // flicker between "PR" and "EX" while the server-side recompute lands.
+    // The server's next pull will overwrite is_pr with the recomputed truth.
+    ...(excluded ? { is_pr: false } : {}),
+    ...syncMeta(),
+  });
+  syncEngine.schedulePush();
+}
+
 // ─── Bodyweight logs ───────────────────────────────────────────────────────────
 
 export async function logBodyweight(weight_kg: number, note?: string): Promise<string> {

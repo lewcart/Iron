@@ -475,6 +475,8 @@ export interface ExerciseSessionGroup {
     duration_seconds: number | null;
     rpe: number | null;
     tag: string | null;
+    is_pr: boolean;
+    excluded_from_pb: boolean;
     order_index: number;
   }>;
 }
@@ -715,6 +717,8 @@ export async function getExerciseSessionHistoryLocal(
           duration_seconds: s.duration_seconds ?? null,
           rpe: s.rpe,
           tag: s.tag,
+          is_pr: s.is_pr,
+          excluded_from_pb: s.excluded_from_pb,
           order_index: s.order_index,
         })),
       };
