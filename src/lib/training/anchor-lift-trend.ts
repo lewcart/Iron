@@ -12,9 +12,12 @@ import { estimate1RM } from '../pr';
 
 export interface AnchorLiftSetInput {
   /** Working-set criteria from plan: is_completed=true AND repetitions>=1
-   *  AND weight>0. Caller is responsible for filtering — we do it again
-   *  defensively. */
+   *  AND weight>0 AND NOT excluded_from_pb. Caller is responsible for
+   *  filtering — we do it again defensively. */
   is_completed: boolean;
+  /** True if Lou flagged this set as bad-form / partial. Excluded sets are
+   *  skipped for trend points the same way pre-completed sets are skipped. */
+  excluded_from_pb: boolean;
   repetitions: number | null;
   weight: number | null;
   /** workout_exercise_uuid — resolved to a date via the workouts map. */
@@ -68,6 +71,7 @@ export function buildAnchorLiftTrend(
 
   for (const s of sets) {
     if (!s.is_completed) continue;
+    if (s.excluded_from_pb) continue;
     const reps = s.repetitions ?? 0;
     const weight = s.weight ?? 0;
     if (reps < 1 || weight <= 0) continue;

@@ -468,6 +468,7 @@ function resolveAnchorLiftTrend(facts: WeekFacts): WeekTile {
     const trend = buildAnchorLiftTrend(
       exerciseSets.map(s => ({
         is_completed: s.is_completed,
+        excluded_from_pb: s.excluded_from_pb,
         repetitions: s.repetitions,
         weight: s.weight,
         workout_exercise_uuid: s.workout_exercise_uuid,

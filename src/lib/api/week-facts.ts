@@ -34,6 +34,9 @@ export interface WeekFactsAnchorSetInput {
   exercise_uuid: string;
   workout_exercise_uuid: string;
   is_completed: boolean;
+  /** True if Lou flagged this set as bad-form / partial. Excluded sets stay
+   *  in workout history but never anchor a PB or e1RM trend point. */
+  excluded_from_pb: boolean;
   weight: number | null;
   repetitions: number | null;
   rir: number | null;

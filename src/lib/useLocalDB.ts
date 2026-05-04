@@ -563,7 +563,8 @@ export async function getExerciseProgressLocal(
     ? await db.workout_sets
         .where('workout_exercise_uuid')
         .anyOf(weUuids)
-        .filter(s => s.is_completed && !s._deleted && s.weight != null && s.repetitions != null)
+        .filter(s => s.is_completed && !s._deleted && !s.excluded_from_pb
+          && s.weight != null && s.repetitions != null)
         .toArray()
     : [];
 
@@ -795,7 +796,7 @@ export async function getExerciseTimePRsLocal(
   const allSets = await db.workout_sets
     .where('workout_exercise_uuid')
     .anyOf(weUuids)
-    .filter(s => s.is_completed && !s._deleted && (
+    .filter(s => s.is_completed && !s._deleted && !s.excluded_from_pb && (
       (s.duration_seconds != null && s.duration_seconds > 0)
       || (s.duration_seconds == null && (s.repetitions ?? 0) > 0)
     ))

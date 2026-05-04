@@ -338,6 +338,7 @@ export default function WeekPage() {
           exercise_uuid: we?.exercise_uuid ?? '',
           workout_exercise_uuid: s.workout_exercise_uuid,
           is_completed: s.is_completed,
+          excluded_from_pb: s.excluded_from_pb,
           weight: s.weight,
           repetitions: s.repetitions,
           rir: s.rir,

@@ -437,6 +437,13 @@ export async function getHistoricalBestsForExercise(
   exerciseUuid: string,
   excludeWorkoutUuid: string,
 ): Promise<{ best1RM: number }> {
+  // Two changes from the original query:
+  //   1. Use exerciseGroupMatch so historical bests merge across catalog
+  //      duplicates (same everkinetic_id) — matches getExercisePRs and the
+  //      PB cards on ExerciseDetail. Without this, live PR detection saw a
+  //      different history than the PB cards rendered.
+  //   2. Filter excluded_from_pb. Sets Lou has flagged as bad-form / partial
+  //      stay in workout history but never count toward PR detection.
   const rows = await query<{
     weight: string;
     repetitions: number;
@@ -445,9 +452,10 @@ export async function getHistoricalBestsForExercise(
     FROM workout_sets ws
     JOIN workout_exercises we ON ws.workout_exercise_uuid = we.uuid
     JOIN workouts w ON we.workout_uuid = w.uuid
-    WHERE we.exercise_uuid = $1
+    WHERE we.exercise_uuid IN (${exerciseGroupMatch(1)})
       AND w.uuid != $2
       AND ws.is_completed = true
+      AND ws.excluded_from_pb = false
       AND ws.weight IS NOT NULL
       AND ws.repetitions IS NOT NULL
   `, [exerciseUuid, excludeWorkoutUuid]);
@@ -524,6 +532,7 @@ export async function getExerciseProgress(exerciseUuid: string, since?: Date): P
       JOIN workouts w ON we.workout_uuid = w.uuid
       WHERE we.exercise_uuid IN (${exerciseGroupMatch(1)})
         AND ws.is_completed = true
+        AND ws.excluded_from_pb = false
         AND ws.weight IS NOT NULL
         AND ws.repetitions IS NOT NULL
         ${sinceClause}
@@ -573,6 +582,7 @@ export async function getExercisePRs(exerciseUuid: string): Promise<{
     JOIN workouts w ON we.workout_uuid = w.uuid
     WHERE we.exercise_uuid IN (${exerciseGroupMatch(1)})
       AND ws.is_completed = true
+      AND ws.excluded_from_pb = false
       AND ws.weight IS NOT NULL
       AND ws.repetitions IS NOT NULL
     ORDER BY w.start_time ASC
@@ -684,6 +694,7 @@ export async function getExercisePBPerSet(
     JOIN workout_exercises we ON ws.workout_exercise_uuid = we.uuid
     WHERE we.exercise_uuid IN (${exerciseGroupMatch(1)})
       AND ws.is_completed = true
+      AND ws.excluded_from_pb = false
       AND ws.weight IS NOT NULL
       AND ws.repetitions IS NOT NULL
     ORDER BY ws.order_index, ws.weight DESC, ws.repetitions DESC
