@@ -205,21 +205,18 @@ final class WalkTracker {
         self.healthStore = healthStore
     }
 
-    /// Request HealthKit write permissions for workout + route + the sample
-    /// types we attach to the workout. Idempotent; iOS only prompts once and
-    /// remembers the answer per type.
+    /// Request HealthKit write permissions for workout + route only. We
+    /// deliberately do NOT request distance / energy: the route's GPS polyline
+    /// covers distance (Apple Health renders it as a map), and energy is a
+    /// secondary signal we can live without. Keeping the request set narrow
+    /// reduces friction (fewer toggles for the user to flip) and avoids
+    /// failures if those sub-permissions are off.
     func requestHKWriteAuthorization(completion: @escaping (Bool, Error?) -> Void) {
         guard let store = healthStore else {
             completion(false, nil)
             return
         }
-        var write: Set<HKSampleType> = [HKObjectType.workoutType(), HKSeriesType.workoutRoute()]
-        if let d = HKQuantityType.quantityType(forIdentifier: .distanceWalkingRunning) {
-            write.insert(d)
-        }
-        if let e = HKQuantityType.quantityType(forIdentifier: .activeEnergyBurned) {
-            write.insert(e)
-        }
+        let write: Set<HKSampleType> = [HKObjectType.workoutType(), HKSeriesType.workoutRoute()]
         store.requestAuthorization(toShare: write, read: []) { success, err in
             DispatchQueue.main.async { completion(success, err) }
         }
@@ -426,15 +423,9 @@ final class WalkTracker {
                 completion(.failure(.beginCollectionFailed(err)))
                 return
             }
-            var hkSamples: [HKSample] = []
-            if let distanceType = HKQuantityType.quantityType(forIdentifier: .distanceWalkingRunning) {
-                let distQty = HKQuantity(unit: .meter(), doubleValue: s.distance)
-                hkSamples.append(HKQuantitySample(type: distanceType, quantity: distQty, start: s.startedAt, end: at))
-            }
-            if let energyType = HKQuantityType.quantityType(forIdentifier: .activeEnergyBurned), s.energy > 0 {
-                let kcal = HKQuantity(unit: .kilocalorie(), doubleValue: s.energy)
-                hkSamples.append(HKQuantitySample(type: energyType, quantity: kcal, start: s.startedAt, end: at))
-            }
+            // We deliberately don't add distance/energy samples — see
+            // requestHKWriteAuthorization for the rationale. The route's GPS
+            // polyline is the source of truth for distance.
             let metadata: [String: Any] = [
                 HKMetadataKeyWorkoutBrandName: "Rebirth",
                 "RebirthFlowId": s.flowId,
@@ -447,47 +438,39 @@ final class WalkTracker {
                     completion(.failure(.finishWorkoutFailed(metaErr)))
                     return
                 }
-                builder.add(hkSamples) { addSuccess, addErr in
-                    if !addSuccess {
-                        self.markHKWriteLikelyDenied(if: addErr)
+                builder.endCollection(withEnd: at) { endSuccess, endErr in
+                    if !endSuccess {
+                        self.markHKWriteLikelyDenied(if: endErr)
                         self.clearFinishInFlight()
-                        completion(.failure(.finishWorkoutFailed(addErr)))
+                        completion(.failure(.finishWorkoutFailed(endErr)))
                         return
                     }
-                    builder.endCollection(withEnd: at) { endSuccess, endErr in
-                        if !endSuccess {
-                            self.markHKWriteLikelyDenied(if: endErr)
+                    builder.finishWorkout { workout, finErr in
+                        guard let workout = workout, finErr == nil else {
+                            self.markHKWriteLikelyDenied(if: finErr)
                             self.clearFinishInFlight()
-                            completion(.failure(.finishWorkoutFailed(endErr)))
+                            completion(.failure(.finishWorkoutFailed(finErr)))
                             return
                         }
-                        builder.finishWorkout { workout, finErr in
-                            guard let workout = workout, finErr == nil else {
-                                self.markHKWriteLikelyDenied(if: finErr)
+                        // Workout finalized. Now associate the route.
+                        let routeBuilder = HKWorkoutRouteBuilder(healthStore: s.store, device: .local())
+                        routeBuilder.insertRouteData(s.samples) { insertSuccess, routeErr in
+                            if !insertSuccess {
+                                self.markHKWriteLikelyDenied(if: routeErr)
                                 self.clearFinishInFlight()
-                                completion(.failure(.finishWorkoutFailed(finErr)))
+                                completion(.failure(.routeInsertFailed(routeErr ?? GenericRouteError(), workout: workout)))
                                 return
                             }
-                            // Workout finalized. Now associate the route.
-                            let routeBuilder = HKWorkoutRouteBuilder(healthStore: s.store, device: .local())
-                            routeBuilder.insertRouteData(s.samples) { insertSuccess, routeErr in
-                                if !insertSuccess {
-                                    self.markHKWriteLikelyDenied(if: routeErr)
+                            routeBuilder.finishRoute(with: workout, metadata: nil) { route, finishErr in
+                                if route == nil || finishErr != nil {
+                                    self.markHKWriteLikelyDenied(if: finishErr)
                                     self.clearFinishInFlight()
-                                    completion(.failure(.routeInsertFailed(routeErr ?? GenericRouteError(), workout: workout)))
+                                    completion(.failure(.routeInsertFailed(finishErr ?? GenericRouteError(), workout: workout)))
                                     return
                                 }
-                                routeBuilder.finishRoute(with: workout, metadata: nil) { route, finishErr in
-                                    if route == nil || finishErr != nil {
-                                        self.markHKWriteLikelyDenied(if: finishErr)
-                                        self.clearFinishInFlight()
-                                        completion(.failure(.routeInsertFailed(finishErr ?? GenericRouteError(), workout: workout)))
-                                        return
-                                    }
-                                    UserDefaults.standard.removeObject(forKey: WalkTracker.hkWriteLikelyDeniedKey)
-                                    self.cleanupAfterSave(flowId: s.flowId)
-                                    completion(.success(workout))
-                                }
+                                UserDefaults.standard.removeObject(forKey: WalkTracker.hkWriteLikelyDeniedKey)
+                                self.cleanupAfterSave(flowId: s.flowId)
+                                completion(.success(workout))
                             }
                         }
                     }
