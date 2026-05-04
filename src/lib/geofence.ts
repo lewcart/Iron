@@ -97,6 +97,8 @@ interface GeofencePluginInterface {
   cancelActiveWalk(): Promise<{ cancelled: true }>;
   getActiveWalkState(): Promise<WalkSnapshot>;
   getStatus(): Promise<GeofenceStatus>;
+  simulateWalkOutbound(options?: { durationMinutes?: number }): Promise<{ simulated: true; durationMinutes: number }>;
+  simulateWalkInbound(options?: { durationMinutes?: number }): Promise<{ simulated: true; durationMinutes: number }>;
   addListener(
     event: 'homeArrival',
     handler: (data: HomeArrivalEvent) => void
@@ -134,6 +136,8 @@ const GeofencePluginNative = registerPlugin<GeofencePluginInterface>('Geofence',
       lastSampleAt: null,
     }),
     getStatus: async (): Promise<GeofenceStatus> => ({ monitoring: false }),
+    simulateWalkOutbound: async () => ({ simulated: true as const, durationMinutes: 0 }),
+    simulateWalkInbound: async () => ({ simulated: true as const, durationMinutes: 0 }),
     addListener: async (): Promise<PluginListenerHandle> => ({ remove: async () => {} }),
   },
 });
@@ -189,6 +193,16 @@ export async function cancelActiveWalk(): Promise<{ cancelled: true }> {
 /** Pull the current walk snapshot. Use on app foreground/resume to reconcile. */
 export async function getActiveWalkState(): Promise<WalkSnapshot> {
   return GeofencePluginNative.getActiveWalkState();
+}
+
+// ── DEV: simulation methods (used by the dev panel in MorningWalkSettings) ──
+
+export async function simulateWalkOutbound(durationMinutes = 18): Promise<{ simulated: true; durationMinutes: number }> {
+  return GeofencePluginNative.simulateWalkOutbound({ durationMinutes });
+}
+
+export async function simulateWalkInbound(durationMinutes = 16): Promise<{ simulated: true; durationMinutes: number }> {
+  return GeofencePluginNative.simulateWalkInbound({ durationMinutes });
 }
 
 // ── Public API — status ──────────────────────────────────────────────────────

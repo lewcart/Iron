@@ -19,6 +19,8 @@ import {
   isAutoWalkEnabledFromLS,
   saveAutoWalkEnabledToLS,
   isGeofenceAvailable,
+  simulateWalkOutbound,
+  simulateWalkInbound,
   type WalkSnapshot,
   type WalkPhase,
   type DepartWindows,
@@ -73,6 +75,9 @@ export function MorningWalkSettings() {
   const [windows, setWindows] = useState<DepartWindows>(DEFAULT_DEPART_WINDOWS);
   const [snap, setSnap] = useState<WalkSnapshot | null>(null);
   const [permRevoked, setPermRevoked] = useState(false);
+  const [devOpen, setDevOpen] = useState(false);
+  const [simRunning, setSimRunning] = useState(false);
+  const [simResult, setSimResult] = useState<string | null>(null);
 
   // Initial sync
   useEffect(() => {
@@ -189,6 +194,34 @@ export function MorningWalkSettings() {
       await cancelActiveWalk();
     } catch (err) {
       console.warn('[MorningWalk] cancelActiveWalk failed', err);
+    }
+  };
+
+  const handleSimulateOutbound = async () => {
+    setSimRunning(true);
+    setSimResult(null);
+    try {
+      const r = await simulateWalkOutbound();
+      setSimResult(`Walk-1 simulated (${r.durationMinutes} min). Check Apple Health.`);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setSimResult(`Walk-1 sim failed: ${msg}`);
+    } finally {
+      setSimRunning(false);
+    }
+  };
+
+  const handleSimulateInbound = async () => {
+    setSimRunning(true);
+    setSimResult(null);
+    try {
+      const r = await simulateWalkInbound();
+      setSimResult(`Walk-2 simulated (${r.durationMinutes} min). Check Apple Health.`);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setSimResult(`Walk-2 sim failed: ${msg}`);
+    } finally {
+      setSimRunning(false);
     }
   };
 
@@ -355,6 +388,50 @@ export function MorningWalkSettings() {
         <p className="text-xs text-muted-foreground px-1 mt-1">
           Set your gym location while standing inside the gym for best accuracy.
         </p>
+      )}
+
+      {enabled && gymSet && (
+        <div className="mt-3">
+          <button
+            onClick={() => setDevOpen(!devOpen)}
+            className="text-xs text-muted-foreground px-1"
+          >
+            {devOpen ? '▼' : '▶'} Dev tools
+          </button>
+          {devOpen && (
+            <div className="ios-section mt-1">
+              <div className="ios-row flex-col items-stretch gap-2 py-3">
+                <p className="text-xs text-muted-foreground">
+                  Run a fake morning flow without leaving the house. Each button saves a
+                  real Apple Health workout with a synthetic GPS route around the
+                  midpoint between your home and gym.
+                </p>
+                <div className="flex flex-col gap-2 mt-1">
+                  <button
+                    onClick={handleSimulateOutbound}
+                    disabled={simRunning}
+                    className="px-3 py-2 rounded-md bg-secondary text-sm font-medium min-h-[44px] disabled:opacity-50"
+                  >
+                    Simulate walk-1 (depart → gym, 18 min)
+                  </button>
+                  <p className="text-xs text-muted-foreground">
+                    Then tap Start workout in Rebirth, log a set, tap Finish to wire walk-2.
+                  </p>
+                  <button
+                    onClick={handleSimulateInbound}
+                    disabled={simRunning}
+                    className="px-3 py-2 rounded-md bg-secondary text-sm font-medium min-h-[44px] disabled:opacity-50"
+                  >
+                    Simulate walk-2 (gym → home, 16 min)
+                  </button>
+                  {simResult && (
+                    <p className="text-xs text-foreground mt-1">{simResult}</p>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
       )}
     </div>
   );

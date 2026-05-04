@@ -501,6 +501,67 @@ final class WalkTracker {
         }
     }
 
+    /// Inject a synthetic route (back-dated samples around the user's current
+    /// position) and persist them as if they came from CLLocationManager.
+    /// Used by the dev "Simulate walk" buttons to exercise the full save path
+    /// without leaving the house.
+    ///
+    /// `centerLat`/`centerLon` is where the synthetic route lives in space.
+    /// Samples are placed in a small ~200m loop around that point, with
+    /// timestamps spread evenly across `durationSeconds`, ending at `endsAt`.
+    func injectSyntheticRoute(
+        centerLat: Double,
+        centerLon: Double,
+        sampleCount: Int = 20,
+        durationSeconds: TimeInterval,
+        endsAt: Date = Date()
+    ) {
+        serialQueue.sync {
+            guard activeFlowId != nil else { return }
+            let startTime = endsAt.addingTimeInterval(-durationSeconds)
+            // Simple circular route: place samples on a circle of ~80m radius
+            // around the centre point. Earth radius ~6371000m; 80m → ~0.00072°.
+            let radiusDeg = 0.00072
+            var synthetic: [CLLocation] = []
+            for i in 0..<sampleCount {
+                let progress = Double(i) / Double(sampleCount - 1)
+                let angle = progress * 2 * .pi
+                let dLat = radiusDeg * cos(angle)
+                let dLon = radiusDeg * sin(angle)
+                let ts = startTime.addingTimeInterval(durationSeconds * progress)
+                let loc = CLLocation(
+                    coordinate: CLLocationCoordinate2D(latitude: centerLat + dLat, longitude: centerLon + dLon),
+                    altitude: 10,
+                    horizontalAccuracy: 5,
+                    verticalAccuracy: 5,
+                    course: 0,
+                    speed: 1.4,
+                    timestamp: ts
+                )
+                synthetic.append(loc)
+            }
+            // Append to disk in one shot.
+            do {
+                if let flowId = activeFlowId {
+                    try storage.append(samples: synthetic, to: flowId)
+                    totalSamplesCount += synthetic.count
+                    lastSampleAt = synthetic.last?.timestamp
+                }
+            } catch {
+                print("[WalkTracker] injectSyntheticRoute append failed: \(error)")
+            }
+            // Backdate startedAt so HKWorkoutBuilder accepts the duration. Only
+            // backdate if we're currently set to a more recent time than the
+            // synthetic route's beginning.
+            if let started = activeStartedAt, started > startTime {
+                activeStartedAt = startTime
+                var s = loadState()
+                s.startedAt = startTime
+                saveState(s)
+            }
+        }
+    }
+
     /// Cancel using only persisted state. Used by the notification action
     /// handler which may run before the JS bridge is alive (cold launch via
     /// notification action).

@@ -39,6 +39,9 @@ public class GeofencePlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "cancelActiveWalk",    returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "getActiveWalkState",  returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "getStatus",           returnType: CAPPluginReturnPromise),
+        // Dev / test simulation methods (gated by JS-side dev-mode toggle):
+        CAPPluginMethod(name: "simulateWalkOutbound", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "simulateWalkInbound",  returnType: CAPPluginReturnPromise),
     ]
 
     // ── Region identifiers ───────────────────────────────────────────────────
@@ -239,6 +242,68 @@ public class GeofencePlugin: CAPPlugin, CAPBridgedPlugin {
         postWalkStartedNotification(leg: "Post-workout walk started")
         notifyWalkStateChanged()
         call.resolve(["started": true])
+    }
+
+    /// DEV: simulate the outbound walk (depart-home → gym arrival → save).
+    /// Bypasses the time-window gate. Uses the configured home + gym coords as
+    /// the route's spatial centre. Saves a real HKWorkout with a synthetic
+    /// 18-min, 1.2km route.
+    @objc func simulateWalkOutbound(_ call: CAPPluginCall) {
+        guard
+            let home = loadPersisted(StoredRegion.self, key: GeofencePlugin.prefsHomeKey),
+            let gym = loadPersisted(StoredRegion.self, key: GeofencePlugin.prefsGymKey)
+        else {
+            call.reject("Set home and gym before simulating")
+            return
+        }
+        let durationMin = call.getInt("durationMinutes") ?? 18
+        let durationSec = TimeInterval(durationMin * 60)
+        let now = Date()
+        let _ = walkTracker.start(reason: .departHome, at: now.addingTimeInterval(-durationSec))
+        // Centre route between home and gym for a plausible-looking line.
+        let midLat = (home.lat + gym.lat) / 2
+        let midLon = (home.lon + gym.lon) / 2
+        walkTracker.injectSyntheticRoute(
+            centerLat: midLat,
+            centerLon: midLon,
+            sampleCount: 20,
+            durationSeconds: durationSec,
+            endsAt: now
+        )
+        notifyWalkStateChanged()
+        // Trigger gym entry which finalises the walk.
+        handleGymEntry(at: now)
+        call.resolve(["simulated": true, "durationMinutes": durationMin])
+    }
+
+    /// DEV: simulate the inbound walk (start walk-2 → home arrival → save).
+    /// Uses gym + home coords. Useful when the user has just tapped Finish on
+    /// a strength workout in the simulator and wants to verify walk-2 saves.
+    @objc func simulateWalkInbound(_ call: CAPPluginCall) {
+        guard
+            let home = loadPersisted(StoredRegion.self, key: GeofencePlugin.prefsHomeKey),
+            let gym = loadPersisted(StoredRegion.self, key: GeofencePlugin.prefsGymKey)
+        else {
+            call.reject("Set home and gym before simulating")
+            return
+        }
+        let durationMin = call.getInt("durationMinutes") ?? 16
+        let durationSec = TimeInterval(durationMin * 60)
+        let now = Date()
+        // Bypass startWalkNow's phase gate by calling the tracker directly.
+        let _ = walkTracker.start(reason: .postWorkout, at: now.addingTimeInterval(-durationSec))
+        let midLat = (home.lat + gym.lat) / 2
+        let midLon = (home.lon + gym.lon) / 2
+        walkTracker.injectSyntheticRoute(
+            centerLat: midLat,
+            centerLon: midLon,
+            sampleCount: 20,
+            durationSeconds: durationSec,
+            endsAt: now
+        )
+        notifyWalkStateChanged()
+        handleHomeEntry(at: now)
+        call.resolve(["simulated": true, "durationMinutes": durationMin])
     }
 
     @objc func cancelActiveWalk(_ call: CAPPluginCall) {
