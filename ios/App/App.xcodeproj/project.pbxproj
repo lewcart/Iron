@@ -29,6 +29,8 @@
 		HK0000000000000000000001 /* HealthKitPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = HK0000000000000000000002 /* HealthKitPlugin.swift */; };
 		HK0000000000000000000003 /* HealthKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = HK0000000000000000000004 /* HealthKit.framework */; settings = {ATTRIBUTES = (Required, ); }; };
 		HK0000000000000000000007 /* HealthKitTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = HK0000000000000000000008 /* HealthKitTypes.swift */; };
+		GP0000000000000000000100 /* GeofencePlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = GP0000000000000000000200 /* GeofencePlugin.swift */; };
+		WT0000000000000000000100 /* WalkTracker.swift in Sources */ = {isa = PBXBuildFile; fileRef = WT0000000000000000000200 /* WalkTracker.swift */; };
 		PS0000000000000000000001 /* PersonSegmentationPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = PS0000000000000000000002 /* PersonSegmentationPlugin.swift */; };
 /* End PBXBuildFile section */
 
@@ -92,6 +94,8 @@
 		HK0000000000000000000004 /* HealthKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = HealthKit.framework; path = System/Library/Frameworks/HealthKit.framework; sourceTree = SDKROOT; };
 		HK0000000000000000000005 /* App.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = App.entitlements; sourceTree = "<group>"; };
 		HK0000000000000000000008 /* HealthKitTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthKitTypes.swift; sourceTree = "<group>"; };
+		GP0000000000000000000200 /* GeofencePlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeofencePlugin.swift; sourceTree = "<group>"; };
+		WT0000000000000000000200 /* WalkTracker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WalkTracker.swift; sourceTree = "<group>"; };
 		PS0000000000000000000002 /* PersonSegmentationPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersonSegmentationPlugin.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -162,6 +166,8 @@
 				50B271D01FEDC1A000F3C39B /* public */,
 				5EC6C38970F00C7EEB816A32 /* InspoBurstPlugin.swift */,
 				FD5E740390A75C0F2061E3BF /* RestTimerPlugin.swift */,
+				GP0000000000000000000200 /* GeofencePlugin.swift */,
+				WT0000000000000000000200 /* WalkTracker.swift */,
 			);
 			path = App;
 			sourceTree = "<group>";
@@ -360,6 +366,8 @@
 				504EC3081FED79650016851F /* AppDelegate.swift in Sources */,
 				HK0000000000000000000001 /* HealthKitPlugin.swift in Sources */,
 				HK0000000000000000000007 /* HealthKitTypes.swift in Sources */,
+				GP0000000000000000000100 /* GeofencePlugin.swift in Sources */,
+				WT0000000000000000000100 /* WalkTracker.swift in Sources */,
 				PS0000000000000000000001 /* PersonSegmentationPlugin.swift in Sources */,
 				BCDB60B1669B43B1F7D02C66 /* InspoBurstPlugin.swift in Sources */,
 				35976665B93CB7279F053E62 /* RestTimerPlugin.swift in Sources */,
