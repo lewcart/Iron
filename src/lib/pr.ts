@@ -19,8 +19,6 @@ export interface PRSet {
 
 export interface PRResult {
   estimated1RM: PersonalRecord | null;
-  heaviestWeight: PersonalRecord | null;
-  mostReps: PersonalRecord | null;
 }
 
 /**
@@ -37,60 +35,43 @@ export function isNewEstimated1RM(
 }
 
 /**
- * Calculate personal records from an array of completed sets.
- * Returns the best set for each of three categories:
- *   - estimated1RM: highest Epley 1RM estimate
- *   - heaviestWeight: highest weight lifted
- *   - mostReps: most repetitions in a single set
+ * Calculate the personal record from an array of completed sets.
+ * Returns the set with the highest Epley 1RM estimate.
+ *
+ * Heaviest-weight and most-reps were previously surfaced as separate PBs
+ * but were dropped: heaviest-weight without rep context is gameable, and
+ * most-reps-in-a-set is an endurance derivative, not a strength PB. e1RM
+ * is the only honest progress signal in a 1-rep-max-extrapolation framing.
  */
 export function calculatePRs(
   sets: PRSet[],
 ): PRResult {
   if (sets.length === 0) {
-    return { estimated1RM: null, heaviestWeight: null, mostReps: null };
+    return { estimated1RM: null };
   }
 
   let best1RMSet: PRSet | null = null;
   let best1RMValue = -Infinity;
 
-  let heaviestSet: PRSet | null = null;
-  let heaviestValue = -Infinity;
-
-  let mostRepsSet: PRSet | null = null;
-  let mostRepsValue = -Infinity;
-
   for (const set of sets) {
     const orm = estimate1RM(set.weight, set.repetitions);
-
     if (orm > best1RMValue) {
       best1RMValue = orm;
       best1RMSet = set;
     }
-
-    if (set.weight > heaviestValue) {
-      heaviestValue = set.weight;
-      heaviestSet = set;
-    }
-
-    if (set.repetitions > mostRepsValue) {
-      mostRepsValue = set.repetitions;
-      mostRepsSet = set;
-    }
   }
 
-  const toPersonalRecord = (set: PRSet): PersonalRecord => ({
-    exercise_uuid: set.exercise_uuid ?? '',
-    weight: set.weight,
-    repetitions: set.repetitions,
-    estimated_1rm: estimate1RM(set.weight, set.repetitions),
-    date: set.date,
-    workout_uuid: set.workout_uuid ?? '',
-  });
+  if (!best1RMSet) return { estimated1RM: null };
 
   return {
-    estimated1RM: best1RMSet ? toPersonalRecord(best1RMSet) : null,
-    heaviestWeight: heaviestSet ? toPersonalRecord(heaviestSet) : null,
-    mostReps: mostRepsSet ? toPersonalRecord(mostRepsSet) : null,
+    estimated1RM: {
+      exercise_uuid: best1RMSet.exercise_uuid ?? '',
+      weight: best1RMSet.weight,
+      repetitions: best1RMSet.repetitions,
+      estimated_1rm: estimate1RM(best1RMSet.weight, best1RMSet.repetitions),
+      date: best1RMSet.date,
+      workout_uuid: best1RMSet.workout_uuid ?? '',
+    },
   };
 }
 

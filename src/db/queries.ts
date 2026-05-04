@@ -556,8 +556,6 @@ export async function getExerciseProgress(exerciseUuid: string, since?: Date): P
 
 export async function getExercisePRs(exerciseUuid: string): Promise<{
   estimated1RM: PersonalRecord | null;
-  heaviestWeight: PersonalRecord | null;
-  mostReps: PersonalRecord | null;
 }> {
   const rows = await query<{
     date: string;

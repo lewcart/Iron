@@ -4,6 +4,9 @@
  * Because vitest is configured with environment: 'node' (no jsdom),
  * these tests focus on the data transformation and helper logic used
  * by the ExerciseDetail progress section rather than DOM rendering.
+ *
+ * Heaviest-weight and most-reps PB badges were removed; only the e1RM
+ * hero remains. The fixtures + assertions below reflect that.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -47,8 +50,6 @@ interface ProgressData {
   progress: ProgressPoint[];
   prs: {
     estimated1RM: PRRecord | null;
-    heaviestWeight: PRRecord | null;
-    mostReps: PRRecord | null;
   };
   volumeTrend: VolumeTrendPoint[];
   recentSets: RecentSet[];
@@ -69,27 +70,14 @@ function buildVolumeData(volumeTrend: VolumeTrendPoint[]) {
   }));
 }
 
-function formatPRValue(pr: PRRecord | null, type: 'estimated1RM' | 'heaviestWeight' | 'mostReps'): string {
+function formatHeroValue(pr: PRRecord | null): string {
   if (!pr) return '—';
-  switch (type) {
-    case 'estimated1RM':
-      return `${Math.round(pr.estimated1RM)} kg`;
-    case 'heaviestWeight':
-      return `${pr.weight} kg`;
-    case 'mostReps':
-      return `${pr.repetitions}`;
-  }
+  return `${Math.round(pr.estimated1RM)} kg`;
 }
 
-function formatPRSub(pr: PRRecord | null, type: 'estimated1RM' | 'heaviestWeight' | 'mostReps'): string {
+function formatHeroSub(pr: PRRecord | null): string {
   if (!pr) return 'No data';
-  switch (type) {
-    case 'estimated1RM':
-    case 'heaviestWeight':
-      return formatDate(pr.date);
-    case 'mostReps':
-      return `@ ${pr.weight} kg`;
-  }
+  return formatDate(pr.date);
 }
 
 function hasProgressData(data: ProgressData | null): boolean {
@@ -128,23 +116,19 @@ const sampleRecentSet: RecentSet = {
 
 const fullProgressData: ProgressData = {
   progress: [sampleProgressPoint],
-  prs: {
-    estimated1RM: samplePR,
-    heaviestWeight: { ...samplePR, weight: 120, repetitions: 1 },
-    mostReps: { ...samplePR, weight: 60, repetitions: 20 },
-  },
+  prs: { estimated1RM: samplePR },
   volumeTrend: [sampleVolumePoint],
   recentSets: [sampleRecentSet],
 };
 
 const emptyProgressData: ProgressData = {
   progress: [],
-  prs: { estimated1RM: null, heaviestWeight: null, mostReps: null },
+  prs: { estimated1RM: null },
   volumeTrend: [],
   recentSets: [],
 };
 
-// ── Tests: hasProgressData ─────────────────────────────────────────────────
+// ── Tests ─────────────────────────────────────────────────────────────────
 
 describe('hasProgressData', () => {
   it('returns false when data is null (loading state)', () => {
@@ -160,72 +144,32 @@ describe('hasProgressData', () => {
   });
 });
 
-// ── Tests: PR badge value formatting ──────────────────────────────────────
-
-describe('formatPRValue - estimated1RM', () => {
+describe('formatHeroValue (e1RM hero)', () => {
   it('returns em-dash when PR is null', () => {
-    expect(formatPRValue(null, 'estimated1RM')).toBe('—');
+    expect(formatHeroValue(null)).toBe('—');
   });
 
   it('returns rounded kg value when PR exists', () => {
-    expect(formatPRValue(samplePR, 'estimated1RM')).toBe('127 kg');
+    expect(formatHeroValue(samplePR)).toBe('127 kg');
   });
 
   it('rounds correctly for decimal estimated 1RM', () => {
     const pr: PRRecord = { ...samplePR, estimated1RM: 126.4 };
-    expect(formatPRValue(pr, 'estimated1RM')).toBe('126 kg');
+    expect(formatHeroValue(pr)).toBe('126 kg');
   });
 });
 
-describe('formatPRValue - heaviestWeight', () => {
-  it('returns em-dash when PR is null', () => {
-    expect(formatPRValue(null, 'heaviestWeight')).toBe('—');
+describe('formatHeroSub (e1RM hero)', () => {
+  it('returns "No data" when PR is null', () => {
+    expect(formatHeroSub(null)).toBe('No data');
   });
 
-  it('returns exact weight in kg when PR exists', () => {
-    const pr: PRRecord = { ...samplePR, weight: 120 };
-    expect(formatPRValue(pr, 'heaviestWeight')).toBe('120 kg');
-  });
-});
-
-describe('formatPRValue - mostReps', () => {
-  it('returns em-dash when PR is null', () => {
-    expect(formatPRValue(null, 'mostReps')).toBe('—');
-  });
-
-  it('returns repetitions count as string when PR exists', () => {
-    const pr: PRRecord = { ...samplePR, repetitions: 20 };
-    expect(formatPRValue(pr, 'mostReps')).toBe('20');
-  });
-});
-
-// ── Tests: PR badge sub-text ──────────────────────────────────────────────
-
-describe('formatPRSub', () => {
-  it('returns "No data" when PR is null for any type', () => {
-    expect(formatPRSub(null, 'estimated1RM')).toBe('No data');
-    expect(formatPRSub(null, 'heaviestWeight')).toBe('No data');
-    expect(formatPRSub(null, 'mostReps')).toBe('No data');
-  });
-
-  it('returns formatted date for estimated1RM', () => {
-    const sub = formatPRSub(samplePR, 'estimated1RM');
+  it('returns formatted date when PR exists', () => {
+    const sub = formatHeroSub(samplePR);
     expect(sub).toMatch(/Jan/);
     expect(sub).toMatch(/15/);
   });
-
-  it('returns formatted date for heaviestWeight', () => {
-    const sub = formatPRSub(samplePR, 'heaviestWeight');
-    expect(sub).toMatch(/Jan/);
-  });
-
-  it('returns weight context for mostReps', () => {
-    const pr: PRRecord = { ...samplePR, weight: 60, repetitions: 20 };
-    expect(formatPRSub(pr, 'mostReps')).toBe('@ 60 kg');
-  });
 });
-
-// ── Tests: chart data transformation ──────────────────────────────────────
 
 describe('buildChartData', () => {
   it('returns empty array for empty progress', () => {
@@ -268,8 +212,6 @@ describe('buildChartData', () => {
   });
 });
 
-// ── Tests: volume trend transformation ────────────────────────────────────
-
 describe('buildVolumeData', () => {
   it('returns empty array for empty volume trend', () => {
     expect(buildVolumeData([])).toEqual([]);
@@ -294,8 +236,6 @@ describe('buildVolumeData', () => {
   });
 });
 
-// ── Tests: formatDate helper ──────────────────────────────────────────────
-
 describe('formatDate', () => {
   it('formats an ISO date string to DD Mon format', () => {
     const result = formatDate('2026-01-15T10:00:00.000Z');
@@ -311,44 +251,5 @@ describe('formatDate', () => {
   it('pads single-digit days with zero', () => {
     const result = formatDate('2026-01-05T10:00:00.000Z');
     expect(result).toMatch(/05/);
-  });
-});
-
-// ── Tests: full progress data with all PRs ─────────────────────────────────
-
-describe('PR badge rendering logic with full data', () => {
-  it('estimated1RM badge shows correct value and date', () => {
-    const { estimated1RM } = fullProgressData.prs;
-    expect(formatPRValue(estimated1RM, 'estimated1RM')).toBe('127 kg');
-    expect(formatPRSub(estimated1RM, 'estimated1RM')).toMatch(/Jan/);
-  });
-
-  it('heaviestWeight badge shows correct value', () => {
-    const { heaviestWeight } = fullProgressData.prs;
-    expect(formatPRValue(heaviestWeight, 'heaviestWeight')).toBe('120 kg');
-  });
-
-  it('mostReps badge shows correct reps and weight context', () => {
-    const { mostReps } = fullProgressData.prs;
-    expect(formatPRValue(mostReps, 'mostReps')).toBe('20');
-    expect(formatPRSub(mostReps, 'mostReps')).toBe('@ 60 kg');
-  });
-});
-
-// ── Tests: null PR scenarios (no workout history) ─────────────────────────
-
-describe('PR badge rendering logic with no data', () => {
-  it('all PR badges show em-dash when PRs are null', () => {
-    const { prs } = emptyProgressData;
-    expect(formatPRValue(prs.estimated1RM, 'estimated1RM')).toBe('—');
-    expect(formatPRValue(prs.heaviestWeight, 'heaviestWeight')).toBe('—');
-    expect(formatPRValue(prs.mostReps, 'mostReps')).toBe('—');
-  });
-
-  it('all PR badges show "No data" sub-text when PRs are null', () => {
-    const { prs } = emptyProgressData;
-    expect(formatPRSub(prs.estimated1RM, 'estimated1RM')).toBe('No data');
-    expect(formatPRSub(prs.heaviestWeight, 'heaviestWeight')).toBe('No data');
-    expect(formatPRSub(prs.mostReps, 'mostReps')).toBe('No data');
   });
 });

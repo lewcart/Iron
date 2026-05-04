@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ChevronLeft, Trophy, Medal, Award, Timer } from 'lucide-react';
+import { ChevronLeft, Trophy, Timer } from 'lucide-react';
 import type { Exercise } from '@/types';
 import { useUnit } from '@/context/UnitContext';
 import { apiBase, fetchJsonAuthed } from '@/lib/api/client';
@@ -70,8 +70,6 @@ interface ProgressData {
   progress: ProgressPoint[];
   prs: {
     estimated1RM: PRRecord | null;
-    heaviestWeight: PRRecord | null;
-    mostReps: PRRecord | null;
   };
   volumeTrend: VolumeTrendPoint[];
   recentSets: RecentSet[];
@@ -97,27 +95,6 @@ function readCssVarColor(varName: string, fallback: string): string {
 }
 
 // ── Sub-components ─────────────────────────────────────────────────────────
-
-function PRBadge({
-  icon,
-  label,
-  value,
-  sub,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  value: string;
-  sub: string;
-}) {
-  return (
-    <div className="flex-1 flex flex-col items-center gap-1 bg-card border border-border rounded-xl p-3 min-w-0">
-      <div className="text-muted-foreground">{icon}</div>
-      <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide text-center">{label}</p>
-      <p className="text-base font-bold text-foreground text-center leading-tight">{value}</p>
-      <p className="text-[10px] text-muted-foreground text-center">{sub}</p>
-    </div>
-  );
-}
 
 /** Headline 1RM block — promoted from the 3-up secondary row in the
  *  previous layout. Shows the naked Epley estimate (no confidence band — see
@@ -452,8 +429,6 @@ export default function ExerciseDetail({
           progress: local.progress,
           prs: {
             estimated1RM: local.prs.estimated1RM ? { ...local.prs.estimated1RM, exercise_uuid: exercise.uuid } : null,
-            heaviestWeight: local.prs.heaviestWeight ? { ...local.prs.heaviestWeight, exercise_uuid: exercise.uuid } : null,
-            mostReps: local.prs.mostReps ? { ...local.prs.mostReps, exercise_uuid: exercise.uuid } : null,
           },
           volumeTrend: local.volumeTrend,
           recentSets: [],
@@ -461,7 +436,7 @@ export default function ExerciseDetail({
           // Time-mode: empty rep-shaped fields. The hero + chart branches
           // off `isTimeMode` so this empty payload never gets rendered.
           progress: [],
-          prs: { estimated1RM: null, heaviestWeight: null, mostReps: null },
+          prs: { estimated1RM: null },
           volumeTrend: [],
           recentSets: [],
         };
@@ -712,36 +687,6 @@ export default function ExerciseDetail({
               />
             )}
 
-            <div className="flex gap-2">
-              <PRBadge
-                icon={<Medal className="h-4 w-4" />}
-                label="Heaviest"
-                value={
-                  progressData != null && progressData.prs.heaviestWeight
-                    ? `${toDisplay(progressData.prs.heaviestWeight.weight)} ${label}`
-                    : '—'
-                }
-                sub={
-                  progressData != null && progressData.prs.heaviestWeight
-                    ? formatDate(progressData.prs.heaviestWeight.date)
-                    : 'No data'
-                }
-              />
-              <PRBadge
-                icon={<Award className="h-4 w-4" />}
-                label="Most Reps"
-                value={
-                  progressData != null && progressData.prs.mostReps
-                    ? `${progressData.prs.mostReps.repetitions}`
-                    : '—'
-                }
-                sub={
-                  progressData != null && progressData.prs.mostReps
-                    ? `@ ${toDisplay(progressData.prs.mostReps.weight)} ${label}`
-                    : 'No data'
-                }
-              />
-            </div>
             </>)}
 
             {!isTimeMode && chartData.length > 0 && (

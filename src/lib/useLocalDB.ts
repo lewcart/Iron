@@ -489,8 +489,6 @@ export interface ExerciseProgressLocal {
   }>;
   prs: {
     estimated1RM: { weight: number; repetitions: number; estimated_1rm: number; date: string; workout_uuid: string } | null;
-    heaviestWeight: { weight: number; repetitions: number; estimated_1rm: number; date: string; workout_uuid: string } | null;
-    mostReps: { weight: number; repetitions: number; estimated_1rm: number; date: string; workout_uuid: string } | null;
   };
   volumeTrend: Array<{ date: string; totalVolume: number }>;
 }
@@ -543,7 +541,7 @@ export async function getExerciseProgressLocal(
   if (groupUuids.size === 0) {
     return {
       progress: [],
-      prs: { estimated1RM: null, heaviestWeight: null, mostReps: null },
+      prs: { estimated1RM: null },
       volumeTrend: [],
     };
   }
@@ -555,7 +553,7 @@ export async function getExerciseProgressLocal(
   if (allWes.length === 0) {
     return {
       progress: [],
-      prs: { estimated1RM: null, heaviestWeight: null, mostReps: null },
+      prs: { estimated1RM: null },
       volumeTrend: [],
     };
   }
@@ -625,15 +623,12 @@ export async function getExerciseProgressLocal(
     })
     .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
 
-  // PRs across all annotated sets.
+  // PR across all annotated sets — only e1RM. Heaviest-weight and
+  // most-reps were dropped (gameable; not honest progress signals).
   let best1rm: AnnotatedSet | null = null; let best1rmVal = -Infinity;
-  let heaviest: AnnotatedSet | null = null; let heaviestVal = -Infinity;
-  let mostReps: AnnotatedSet | null = null; let mostRepsVal = -Infinity;
   for (const s of annotated) {
     const orm = estimate1RM(s.weight, s.repetitions);
     if (orm > best1rmVal) { best1rmVal = orm; best1rm = s; }
-    if (s.weight > heaviestVal) { heaviestVal = s.weight; heaviest = s; }
-    if (s.repetitions > mostRepsVal) { mostRepsVal = s.repetitions; mostReps = s; }
   }
   const toRecord = (s: AnnotatedSet | null) => s ? {
     weight: s.weight,
@@ -649,8 +644,6 @@ export async function getExerciseProgressLocal(
     progress,
     prs: {
       estimated1RM: toRecord(best1rm),
-      heaviestWeight: toRecord(heaviest),
-      mostReps: toRecord(mostReps),
     },
     volumeTrend,
   };
