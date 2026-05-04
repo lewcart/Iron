@@ -2,6 +2,7 @@ import Foundation
 import Capacitor
 import CoreLocation
 import HealthKit
+import UIKit
 import UserNotifications
 
 // MARK: - GeofencePlugin
@@ -44,6 +45,7 @@ public class GeofencePlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "simulateWalkInbound",  returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "requestHKWriteAuth",   returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "deleteRecentSimulatedWalks", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "openIOSSettings",      returnType: CAPPluginReturnPromise),
     ]
 
     // ── Region identifiers ───────────────────────────────────────────────────
@@ -216,6 +218,21 @@ public class GeofencePlugin: CAPPlugin, CAPBridgedPlugin {
                 call.reject(err.localizedDescription)
             } else {
                 call.resolve(["requested": true])
+            }
+        }
+    }
+
+    /// Deep-link to iOS Settings → Rebirth so the user can hit "Health Access"
+    /// and toggle the missing permission types. We can't deep-link further
+    /// (Apple doesn't expose a public URL for the per-app Health Access subscreen).
+    @objc func openIOSSettings(_ call: CAPPluginCall) {
+        DispatchQueue.main.async {
+            if let url = URL(string: UIApplication.openSettingsURLString) {
+                UIApplication.shared.open(url) { ok in
+                    call.resolve(["opened": ok])
+                }
+            } else {
+                call.reject("Could not build settings URL")
             }
         }
     }

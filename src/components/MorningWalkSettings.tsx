@@ -25,6 +25,7 @@ import {
   simulateWalkInbound,
   requestHKWriteAuth,
   deleteRecentSimulatedWalks,
+  openIOSSettings,
   type WalkSnapshot,
   type WalkPhase,
   type DepartWindows,
@@ -504,6 +505,16 @@ export function MorningWalkSettings() {
                   >
                     Delete Rebirth walks from last hour
                   </button>
+                  <button
+                    onClick={() => openIOSSettings()}
+                    className="px-3 py-2 rounded-md text-sm font-medium min-h-[44px] bg-secondary mt-1"
+                  >
+                    Open iOS Settings → Rebirth
+                  </button>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    From there, tap <b>Health Access</b> and toggle ON: Workouts, Workout Routes,
+                    Distance Walking + Running, and Active Energy.
+                  </p>
                   {simResult && (
                     <p className="text-xs text-foreground mt-1">{simResult}</p>
                   )}
