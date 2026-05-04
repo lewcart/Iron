@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { MapPin, Clock } from 'lucide-react';
 import {
+  setHomeLocation,
   setGymLocation,
   removeGymLocation,
   setDepartWindows,
@@ -11,6 +12,7 @@ import {
   getActiveWalkState,
   getGeofenceStatus,
   onWalkStateChanged,
+  saveHomeLocationToLS,
   saveGymLocationToLS,
   loadGymLocationFromLS,
   clearGymLocationFromLS,
@@ -70,6 +72,7 @@ function isActivePhase(phase: WalkPhase): boolean {
 export function MorningWalkSettings() {
   const available = isGeofenceAvailable();
   const [enabled, setEnabled] = useState(false);
+  const [homeSet, setHomeSet] = useState(false);
   const [gymSet, setGymSet] = useState(false);
   const [gymRadius, setGymRadius] = useState(100);
   const [windows, setWindows] = useState<DepartWindows>(DEFAULT_DEPART_WINDOWS);
@@ -90,6 +93,7 @@ export function MorningWalkSettings() {
       setGymRadius(gym.radius ?? 100);
     }
     getGeofenceStatus().then((s) => {
+      setHomeSet(Boolean(s.homeMonitored));
       setGymSet(Boolean(s.gymMonitored));
       if (s.gymRadius) setGymRadius(s.gymRadius);
     });
@@ -134,6 +138,26 @@ export function MorningWalkSettings() {
     } catch (err) {
       console.warn('[MorningWalk] setAutoWalkEnabled failed', err);
     }
+  };
+
+  const handleSetHome = async () => {
+    if (!navigator.geolocation) return;
+    navigator.geolocation.getCurrentPosition(
+      async (pos) => {
+        const { latitude: lat, longitude: lon } = pos.coords;
+        try {
+          const status = await setHomeLocation({ lat, lon, radius: 175 });
+          if (status.monitoring) {
+            saveHomeLocationToLS(lat, lon, 175);
+            setHomeSet(true);
+          }
+        } catch (err) {
+          console.error('[MorningWalk] setHomeLocation failed', err);
+        }
+      },
+      (err) => console.error('[MorningWalk] getCurrentPosition (home) failed', err),
+      { enableHighAccuracy: true, timeout: 10000 }
+    );
   };
 
   const handleSetGym = async () => {
@@ -286,9 +310,34 @@ export function MorningWalkSettings() {
           <Toggle on={enabled} onToggle={handleMasterToggle} />
         </div>
 
-        {/* Gym setup */}
+        {/* Home + gym setup */}
         {enabled && (
           <>
+            {/* Home location — shared with the existing Auto-end at Home geofence */}
+            <div className="ios-row justify-between">
+              <div className="flex items-center gap-3 min-w-0">
+                <IconBadge bg="bg-pink-600">
+                  <MapPin className="w-4 h-4 text-white" />
+                </IconBadge>
+                <div>
+                  <span className="text-sm font-medium">Home location</span>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    {homeSet
+                      ? 'Set — shared with Auto-end at Home'
+                      : 'Not set — leaving home triggers walk-1'}
+                  </p>
+                </div>
+              </div>
+              {!homeSet && (
+                <button
+                  onClick={handleSetHome}
+                  className="px-3 py-2 text-sm bg-secondary rounded-md min-h-[44px]"
+                >
+                  Set
+                </button>
+              )}
+            </div>
+
             <div className="ios-row justify-between">
               <div className="flex items-center gap-3 min-w-0">
                 <IconBadge bg="bg-blue-600">
@@ -384,9 +433,11 @@ export function MorningWalkSettings() {
           </>
         )}
       </div>
-      {enabled && !gymSet && (
+      {enabled && (!homeSet || !gymSet) && (
         <p className="text-xs text-muted-foreground px-1 mt-1">
-          Set your gym location while standing inside the gym for best accuracy.
+          {!homeSet
+            ? 'Set Home while standing at home for best accuracy.'
+            : 'Set Gym while standing inside the gym for best accuracy.'}
         </p>
       )}
 
