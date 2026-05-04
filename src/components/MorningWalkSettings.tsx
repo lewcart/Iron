@@ -258,6 +258,20 @@ export function MorningWalkSettings() {
     }
   };
 
+  const handleRequestHKAuth = async () => {
+    setSimRunning(true);
+    setSimResult(null);
+    try {
+      await requestHKWriteAuth();
+      setSimResult('HK auth requested. If a new prompt appeared, toggle Distance Walking + Running and Active Energy ON, then tap Allow.');
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setSimResult(`HK auth failed: ${msg}`);
+    } finally {
+      setSimRunning(false);
+    }
+  };
+
   const handleDeleteSimWalks = async () => {
     setSimRunning(true);
     setSimResult(null);
@@ -497,6 +511,13 @@ export function MorningWalkSettings() {
                     className="px-3 py-2 rounded-md bg-secondary text-sm font-medium min-h-[44px] disabled:opacity-50"
                   >
                     Simulate walk-2 (gym → home, 16 min)
+                  </button>
+                  <button
+                    onClick={handleRequestHKAuth}
+                    disabled={simRunning}
+                    className="px-3 py-2 rounded-md text-sm font-medium min-h-[44px] bg-secondary disabled:opacity-50 mt-1"
+                  >
+                    Re-request HealthKit permissions
                   </button>
                   <button
                     onClick={handleDeleteSimWalks}

@@ -205,18 +205,23 @@ final class WalkTracker {
         self.healthStore = healthStore
     }
 
-    /// Request HealthKit write permissions for workout + route only. We
-    /// deliberately do NOT request distance / energy: the route's GPS polyline
-    /// covers distance (Apple Health renders it as a map), and energy is a
-    /// secondary signal we can live without. Keeping the request set narrow
-    /// reduces friction (fewer toggles for the user to flip) and avoids
-    /// failures if those sub-permissions are off.
+    /// Request HealthKit write permissions for workout + route + distance + energy.
+    /// Workout + route are required for the save to succeed at all. Distance +
+    /// energy are nice-to-have: their sample additions are wrapped in a
+    /// non-fatal try inside `finish`, so if iOS denies them the workout still
+    /// saves with the route (just no distance/kcal in the summary).
     func requestHKWriteAuthorization(completion: @escaping (Bool, Error?) -> Void) {
         guard let store = healthStore else {
             completion(false, nil)
             return
         }
-        let write: Set<HKSampleType> = [HKObjectType.workoutType(), HKSeriesType.workoutRoute()]
+        var write: Set<HKSampleType> = [HKObjectType.workoutType(), HKSeriesType.workoutRoute()]
+        if let d = HKQuantityType.quantityType(forIdentifier: .distanceWalkingRunning) {
+            write.insert(d)
+        }
+        if let e = HKQuantityType.quantityType(forIdentifier: .activeEnergyBurned) {
+            write.insert(e)
+        }
         store.requestAuthorization(toShare: write, read: []) { success, err in
             DispatchQueue.main.async { completion(success, err) }
         }
@@ -470,6 +475,19 @@ final class WalkTracker {
                                 }
                                 UserDefaults.standard.removeObject(forKey: WalkTracker.hkWriteLikelyDeniedKey)
                                 self.cleanupAfterSave(flowId: s.flowId)
+                                // Workout + route saved. Now attempt to attach
+                                // distance + energy samples as a best-effort
+                                // (non-fatal) write. If the user hasn't granted
+                                // those write perms, the calls fail silently
+                                // and the workout still appears in Apple Health
+                                // with just the route map.
+                                self.saveOptionalQuantitySamples(
+                                    store: s.store,
+                                    distance: s.distance,
+                                    energy: s.energy,
+                                    start: s.startedAt,
+                                    end: at
+                                )
                                 completion(.success(workout))
                             }
                         }
@@ -481,6 +499,37 @@ final class WalkTracker {
 
     private func clearFinishInFlight() {
         serialQueue.sync { finishInFlight = false }
+    }
+
+    /// Save distance + active-energy samples to HK separately (not via the
+    /// builder), so that a failure of one (or both) doesn't take down the
+    /// workout save. HK auto-associates samples that overlap the workout's
+    /// time range when Apple Health computes the workout's totals.
+    private func saveOptionalQuantitySamples(
+        store: HKHealthStore,
+        distance: Double,
+        energy: Double,
+        start: Date,
+        end: Date
+    ) {
+        if let distanceType = HKQuantityType.quantityType(forIdentifier: .distanceWalkingRunning), distance > 0 {
+            let q = HKQuantity(unit: .meter(), doubleValue: distance)
+            let sample = HKQuantitySample(type: distanceType, quantity: q, start: start, end: end)
+            store.save(sample) { _, err in
+                if let err = err {
+                    print("[WalkTracker] distance sample save failed (non-fatal): \(err)")
+                }
+            }
+        }
+        if let energyType = HKQuantityType.quantityType(forIdentifier: .activeEnergyBurned), energy > 0 {
+            let q = HKQuantity(unit: .kilocalorie(), doubleValue: energy)
+            let sample = HKQuantitySample(type: energyType, quantity: q, start: start, end: end)
+            store.save(sample) { _, err in
+                if let err = err {
+                    print("[WalkTracker] energy sample save failed (non-fatal): \(err)")
+                }
+            }
+        }
     }
 
     private struct GenericRouteError: Error {
