@@ -1,0 +1,16 @@
+appId: app.rebirth
+tags:
+  - smoke
+---
+# Smallest possible end-to-end check. Proves: build installed, sim booted,
+# Dexie opens, bridge mounted, /feed paints. If this fails, every other
+# flow is moot — fix this first.
+- runFlow: ../../helpers/launch.yaml
+- assertVisible:
+    text: "HRT"
+- assertVisible:
+    text: "Workout"
+- assertVisible:
+    text: "Measure"
+- assertVisible:
+    text: "Nutrition"

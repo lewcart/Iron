@@ -1,0 +1,40 @@
+appId: app.rebirth
+tags:
+  - keyboard
+---
+# Workout reps input + RIR chip strip must remain tappable when keyboard
+# is up. RIR chip with keyboard up is the specific failure mode — the
+# RIR row is below the input row, and on iOS the keyboard occluding both
+# means a "tap RIR" inside an active set wouldn't register.
+- runFlow: ../../helpers/launch.yaml
+- tapOn:
+    text: "Workout"
+- assertVisible:
+    text: "Workout"
+    timeout: 4000
+# TODO: this flow assumes a workout is in progress with at least one set
+# row. Add a seed fixture once seed() is implemented:
+#   - runFlow:
+#       file: ../../helpers/seed.yaml
+#       env:
+#         FIXTURE: "workout-with-3-sets"
+#
+# For now, run interactively after starting a workout with 1 exercise +
+# 1 working set. Skip this flow in CI until the fixture is in place.
+- evalScript: |
+    (() => {
+      // Bail if no working set is on screen — flow is not authored to
+      // handle the empty-workout case yet.
+      const hasReps = !!document.querySelector('input[inputmode="numeric"]');
+      if (!hasReps) {
+        throw new Error("workout-reps-input: requires an in-progress workout with a numeric reps input. Seed first.");
+      }
+    })()
+- tapOn:
+    id: "m-workout-reps-1"   # TODO: add `id="m-workout-reps-{n}"` to reps inputs in workout/page.tsx
+- inputText: "10"
+- runFlow:
+    file: ../../helpers/actions/assert-above-keyboard.yaml
+    env:
+      SELECTOR_TEXT: "RIR"   # the RIR label is in the radiogroup aria-label
+- hideKeyboard

@@ -1,0 +1,26 @@
+appId: app.rebirth
+tags:
+  - scroll
+---
+# /nutrition/week has horizontal day swipes. A vertical scroll on the
+# page itself shouldn't hijack the horizontal pager, and vice versa.
+- runFlow: ../../helpers/launch.yaml
+- tapOn: "Nutrition"
+- tapOn:
+    text: "Week"
+- assertVisible:
+    text: "Week"
+    timeout: 4000
+# Horizontal swipe — should change days, not jiggle vertically.
+- swipe:
+    direction: LEFT
+    duration: 400
+- swipe:
+    direction: LEFT
+    duration: 400
+# Then a vertical swipe — should scroll the page, not affect day selection.
+- swipe:
+    direction: UP
+    duration: 600
+- assertVisible:
+    text: "Week"             # heading still on screen (or whatever pinned label)

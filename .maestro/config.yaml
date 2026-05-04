@@ -1,0 +1,10 @@
+# Maestro shared config. Loaded automatically when running flows from
+# this directory. Per-flow frontmatter can override.
+appId: app.rebirth
+
+# Output goes here unless --debug-output overrides. scripts/maestro-run.sh
+# always passes a timestamped subdir.
+output: .maestro-out
+
+# Default per-flow timeout. Tabbar/keyboard flows can override to 90s.
+flowTimeout: 60000

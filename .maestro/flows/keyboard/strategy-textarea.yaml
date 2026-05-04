@@ -1,0 +1,24 @@
+appId: app.rebirth
+tags:
+  - keyboard
+---
+# /strategy page Vision textarea: typing a paragraph shouldn't push the
+# Save button off-screen below the keyboard.
+- runFlow: ../../helpers/launch.yaml
+- tapOn:
+    text: "Strategy"
+- assertVisible:
+    text: "Vision"
+    timeout: 4000
+- tapOn:
+    text: "Edit"             # AMBIGUOUS — TODO add id="m-vision-edit"
+- assertVisible:
+    text: "Vision"
+- tapOn:
+    text: "Markdown body"    # placeholder substring (full: "# Heading\n\nMarkdown body…")
+- inputText: "First line.\nSecond line.\nThird line."
+- runFlow:
+    file: ../../helpers/actions/assert-above-keyboard.yaml
+    env:
+      SELECTOR_TEXT: "Save"
+- hideKeyboard

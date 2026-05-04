@@ -1,0 +1,49 @@
+appId: app.rebirth
+---
+# Tap a tab, scroll to bottom, assert the lowest interactive element is
+# above the TabBar top edge. Reused by tabbar-content-overlap for each
+# of the 5 main tabs.
+#
+# env:
+#   TAB — visible text of the tab to test (Week|HRT|Workout|Measure|Nutrition)
+- tapOn:
+    text: ${TAB}
+- evalScript: |
+    (() => {
+      // Pick the page's main scroll container. Capacitor uses body-scroll
+      // by default; the TabBar is fixed bottom-0 with safe-area padding.
+      // Scroll the document to maximum.
+      window.scrollTo(0, document.body.scrollHeight);
+    })()
+- evalScript: |
+    (() => {
+      const tabBar = document.querySelector('nav.fixed.bottom-0');
+      if (!tabBar) {
+        throw new Error("tabbar-content-overlap: TabBar not found in DOM");
+      }
+      const tabTop = tabBar.getBoundingClientRect().top;
+
+      // Find the lowest interactive element ABOVE the tab bar that's also
+      // ABOVE the viewport bottom. Anything below tabTop is occluded.
+      const interactiveSelectors = 'button, a, input, textarea, [role="button"], [role="link"]';
+      const candidates = Array.from(document.querySelectorAll(interactiveSelectors))
+        .filter(el => {
+          const r = el.getBoundingClientRect();
+          return r.height > 0 && r.bottom <= window.innerHeight;
+        })
+        .sort((a, b) => b.getBoundingClientRect().bottom - a.getBoundingClientRect().bottom);
+
+      const last = candidates[0];
+      if (!last) {
+        // No interactive element on this page — that's fine, just skip.
+        return;
+      }
+      const lastBottom = last.getBoundingClientRect().bottom;
+      if (lastBottom > tabTop + 1) {
+        throw new Error(
+          "tabbar-content-overlap: tab=${TAB} last interactive element at y=" + lastBottom +
+          " is below TabBar top y=" + tabTop +
+          " — page is missing safe-area bottom padding"
+        );
+      }
+    })()

@@ -1,0 +1,48 @@
+appId: app.rebirth
+tags:
+  - tabbar
+---
+# When ExerciseDetailModal (or any z-60 modal) is open, the TabBar
+# (z-50) must be covered by the modal scrim — never visible above it.
+- runFlow: ../../helpers/launch.yaml
+- tapOn:
+    text: "History"
+- assertVisible:
+    text: "History"
+    timeout: 4000
+# Tap into the most recent workout. TODO: history page interaction varies
+# with state; this assumes at least one logged workout. Skip in CI until
+# fixture exists.
+- evalScript: |
+    (() => {
+      const items = document.querySelectorAll('[role="button"], button, a');
+      if (items.length < 2) {
+        throw new Error("tabbar-during-modal: history page has no workouts to drill into. Seed first.");
+      }
+    })()
+- tapOn:
+    point: 50%, 35%           # tap a row roughly in upper-mid of the list
+- assertVisible:
+    text: "Notes"             # ExerciseDetailModal commonly shows a "Notes" field — TODO confirm in tree dump
+    timeout: 3000
+- evalScript: |
+    (() => {
+      // [role="dialog"] also matches Sheet (src/components/ui/sheet.tsx:81),
+      // so we explicitly target the modal by aria-label suffix " details"
+      // (set by ExerciseDetailModal at src/components/ExerciseDetailModal.tsx:52).
+      // If multiple dialogs are open, this picks the first matching one and
+      // ignores Sheets — exactly the disambiguation we want.
+      const modal = Array.from(document.querySelectorAll('[role="dialog"]'))
+        .find(d => /\sdetails$/.test(d.getAttribute('aria-label') || ''));
+      const tabBar = document.querySelector('nav.fixed.bottom-0');
+      if (!modal) throw new Error("tabbar-during-modal: no exercise detail modal [role=dialog][aria-label*=' details'] found");
+      if (!tabBar) return; // hidden — fine
+      const tabZ = parseInt(getComputedStyle(tabBar).zIndex, 10) || 0;
+      const modalZ = parseInt(getComputedStyle(modal).zIndex, 10) || 0;
+      if (tabZ >= modalZ) {
+        throw new Error(
+          "tabbar-during-modal: TabBar z=" + tabZ + " >= modal z=" + modalZ +
+          " — TabBar will float above modal"
+        );
+      }
+    })()

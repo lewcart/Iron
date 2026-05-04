@@ -1,0 +1,40 @@
+appId: app.rebirth
+tags:
+  - tabbar
+---
+# When the keyboard is up, the TabBar must NOT float visibly between the
+# keyboard and the page content. Either it stays below the keyboard, or
+# it's hidden / inset-bottom-pushed off screen.
+#
+# This is distinct from the Keyboard.resize=body regression in
+# nutrition-add-food (that one tests the input position, not the TabBar
+# z-index/position behavior).
+- runFlow: ../../helpers/launch.yaml
+- tapOn:
+    text: "Nutrition"
+- assertVisible: "Today"
+- tapOn: "Add food"
+- assertVisible:
+    text: "Add to"
+- tapOn:
+    text: "Search foods"
+- inputText: "x"
+# Now the keyboard is up. Check TabBar position.
+- evalScript: |
+    (() => {
+      const tabBar = document.querySelector('nav.fixed.bottom-0');
+      if (!tabBar) return; // sheet may have hidden it via z-index — fine.
+      const r = tabBar.getBoundingClientRect();
+      const vv = window.visualViewport;
+      const visibleBottom = vv ? vv.height : window.innerHeight;
+      // Acceptable: TabBar is at or below the visible viewport bottom
+      // (keyboard pushes the visualViewport shorter, body resizes around it,
+      // TabBar's bottom-0 should stick to the new bottom OR be hidden).
+      if (r.top < visibleBottom - 10 && r.bottom > visibleBottom + 1) {
+        throw new Error(
+          "tabbar-keyboard-zindex: TabBar floating mid-screen with keyboard up. " +
+          "tabTop=" + r.top + " visibleBottom=" + visibleBottom + " tabBottom=" + r.bottom
+        );
+      }
+    })()
+- hideKeyboard
