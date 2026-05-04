@@ -18,6 +18,10 @@ struct ActiveWorkoutGlance: View {
     /// Per-set in-progress edits — looked up so the hero shows the edited
     /// value before confirmation.
     let editsBySet: [String: SetCompletionCoordinator.SetEdits]
+    /// Live HR + elapsed time from HKLiveWorkoutBuilder. Nil HR means no
+    /// session running yet. Pill is hidden when nil.
+    let liveHeartRate: Int?
+    let elapsedSeconds: Int
 
     @State private var visibleExerciseIndex: Int = 0
     @State private var dialMode: DialMode?
@@ -47,6 +51,8 @@ struct ActiveWorkoutGlance: View {
                     exerciseIndex: visibleExerciseIndex,
                     exerciseCount: snapshot.exercises.count,
                     edits: editsBySet,
+                    liveHeartRate: liveHeartRate,
+                    elapsedSeconds: elapsedSeconds,
                     onRequestComplete: { set in onRequestComplete(exercise, set) },
                     onTapWeight: { set in
                         let prev = exercise.history?.sets.first?.actualWeight ?? exercise.history?.sets.first?.targetWeight
@@ -112,6 +118,8 @@ private struct ExerciseGlanceContent: View {
     let exerciseIndex: Int
     let exerciseCount: Int
     let edits: [String: SetCompletionCoordinator.SetEdits]
+    let liveHeartRate: Int?
+    let elapsedSeconds: Int
     let onRequestComplete: (WorkoutSet) -> Void
     let onTapWeight: (WorkoutSet) -> Void
     let onTapReps: (WorkoutSet) -> Void
@@ -125,8 +133,27 @@ private struct ExerciseGlanceContent: View {
         return (exercise.sets.firstIndex(where: { $0.uuid == set.uuid }) ?? 0) + 1
     }
 
+    private var elapsedDisplay: String {
+        let m = elapsedSeconds / 60
+        let s = elapsedSeconds % 60
+        return String(format: "%d:%02d", m, s)
+    }
+
     var body: some View {
         VStack(spacing: 8) {
+            // Live HR + elapsed pill (only when a session is running)
+            if let hr = liveHeartRate {
+                HStack(spacing: 6) {
+                    Text("♥ \(hr)")
+                        .font(.system(size: 10, weight: .semibold, design: .rounded))
+                        .foregroundStyle(.red)
+                    Text(elapsedDisplay)
+                        .font(.system(size: 10, design: .rounded))
+                        .foregroundStyle(.secondary)
+                }
+                .accessibilityLabel("Heart rate \(hr), elapsed \(elapsedDisplay)")
+            }
+
             // Header: name + set chip
             HStack(alignment: .top, spacing: 6) {
                 Text(exercise.name)

@@ -34,6 +34,7 @@
 		98EE23C6C281D82C4EB2A32D /* RebirthOutbox in Frameworks */ = {isa = PBXBuildFile; productRef = 86C0BC3FE18502D842503A21 /* RebirthOutbox */; };
 		995DECA840D4453CDDB51624 /* RestTimerAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = E821CA38A7C622120A207A08 /* RestTimerAttributes.swift */; };
 		A9401796DFFB4961E62B1B17 /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 95B0D3245656B25E47BA3FE9 /* Foundation.framework */; };
+		ACD416F980BCC7404673E381 /* WorkoutSessionManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = DB75C7B55D81A811D7F97EA7 /* WorkoutSessionManager.swift */; };
 		BCDB60B1669B43B1F7D02C66 /* InspoBurstPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EC6C38970F00C7EEB816A32 /* InspoBurstPlugin.swift */; };
 		C399A66DF6D58A717E02ECAC /* RebirthModels in Frameworks */ = {isa = PBXBuildFile; productRef = 167B3C8338D8D7232CD433A8 /* RebirthModels */; };
 		C3A959FD13211607714A1599 /* RestTimerLiveActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = B72C4CFA9F269091844B4FFE /* RestTimerLiveActivity.swift */; };
@@ -143,6 +144,7 @@
 		C9BA14D94DEDD9B952AB0B24 /* RIRPicker.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = RIRPicker.swift; path = RIRPicker.swift; sourceTree = "<group>"; };
 		D121A798D2850322D0EBD90E /* FitspoControlWidget.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = FitspoControlWidget.swift; sourceTree = "<group>"; };
 		D6ED0494C3B066937838629B /* RebirthWatch.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = RebirthWatch.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		DB75C7B55D81A811D7F97EA7 /* WorkoutSessionManager.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = WorkoutSessionManager.swift; path = WorkoutSessionManager.swift; sourceTree = "<group>"; };
 		E4BEA78AC3B864F81CF8105E /* RebirthWatchComplications.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = RebirthWatchComplications.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		E64E87D18C5A9BB8F67CCC7F /* FitspoBurstIntent.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = FitspoBurstIntent.swift; sourceTree = "<group>"; };
 		E821CA38A7C622120A207A08 /* RestTimerAttributes.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RestTimerAttributes.swift; sourceTree = "<group>"; };
@@ -312,6 +314,7 @@
 				5CDD02C5F83D8B1EA88EC391 /* WeightDial.swift */,
 				984637B68F4B9C52AE4CA5BB /* RepsDial.swift */,
 				B26E20E85A8E8608BDB08D0B /* CountdownRing.swift */,
+				DB75C7B55D81A811D7F97EA7 /* WorkoutSessionManager.swift */,
 			);
 			name = RebirthWatch;
 			path = ../RebirthWatch;
@@ -590,6 +593,7 @@
 				2B45C91C5E68670CD444FF3D /* WeightDial.swift in Sources */,
 				38FC3ABC8FE5B5D3C25327A9 /* RepsDial.swift in Sources */,
 				C3BC5EDC7FE866C9A74D6C25 /* CountdownRing.swift in Sources */,
+				ACD416F980BCC7404673E381 /* WorkoutSessionManager.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

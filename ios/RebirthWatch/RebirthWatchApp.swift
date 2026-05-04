@@ -8,12 +8,14 @@ import RebirthWatchLog
 struct RebirthWatchApp: App {
     @StateObject private var session = WatchSessionStore()
     @StateObject private var completion = SetCompletionCoordinator()
+    @StateObject private var workoutSession = WorkoutSessionManager()
 
     var body: some Scene {
         WindowGroup {
             RootView()
                 .environmentObject(session)
                 .environmentObject(completion)
+                .environmentObject(workoutSession)
                 .onAppear {
                     RebirthWatchLog.shared.info("RebirthWatch launched")
                     session.activate()
@@ -26,6 +28,7 @@ struct RebirthWatchApp: App {
 struct RootView: View {
     @EnvironmentObject var session: WatchSessionStore
     @EnvironmentObject var completion: SetCompletionCoordinator
+    @EnvironmentObject var workoutSession: WorkoutSessionManager
 
     @State private var pickerContext: PickerContext?
     @State private var restCountdown: Int?    // total seconds for an active rest timer
@@ -37,6 +40,9 @@ struct RootView: View {
                 ActiveWorkoutGlance(
                     snapshot: snapshot,
                     onRequestComplete: { exercise, set in
+                        // Auto-start an HKWorkoutSession on first set approval
+                        // of this workout. Idempotent for the same UUID.
+                        workoutSession.beginSession(rebirthWorkoutUUID: snapshot.workoutUUID)
                         if exercise.trackingMode == .time {
                             timeModeContext = TimeModeContext(exercise: exercise, workoutSet: set)
                         } else {
@@ -49,7 +55,9 @@ struct RootView: View {
                     onEditReps: { set, reps in
                         completion.setEditReps(setUUID: set.uuid, reps: reps)
                     },
-                    editsBySet: completion.edits
+                    editsBySet: completion.edits,
+                    liveHeartRate: workoutSession.currentHeartRate,
+                    elapsedSeconds: workoutSession.elapsedSeconds
                 )
                 .overlay(alignment: .top) {
                     if completion.isAuthHalted {
