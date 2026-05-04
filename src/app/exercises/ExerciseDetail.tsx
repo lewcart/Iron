@@ -1056,6 +1056,40 @@ export default function ExerciseDetail({
           />
         )}
 
+        {/* Has-sides toggle — when on, the in-workout stopwatch enters a 10s
+            switch countdown after side 1 stops, then resumes counting up
+            for side 2. Surfaces only on the page chrome (same gating as
+            tracking_mode). Wired through to exercises.has_sides via
+            updateExercise. */}
+        {chrome === 'page' && (
+          <div className="ios-section">
+            <button
+              type="button"
+              onClick={async () => {
+                await updateExercise(exercise.uuid, { has_sides: !exercise.has_sides });
+              }}
+              className="ios-row flex items-center justify-between w-full"
+              aria-pressed={exercise.has_sides}
+            >
+              <div className="flex flex-col items-start">
+                <span className="text-sm">Has sides (each leg / each arm)</span>
+                <span className="text-[11px] text-muted-foreground mt-0.5">
+                  Stopwatch adds a 10s switch between sides
+                </span>
+              </div>
+              <div className={
+                'w-11 h-6 rounded-full relative transition-colors flex-shrink-0 ' +
+                (exercise.has_sides ? 'bg-primary' : 'bg-secondary')
+              }>
+                <div className={
+                  'absolute top-0.5 w-5 h-5 rounded-full bg-white transition-transform ' +
+                  (exercise.has_sides ? 'translate-x-[22px]' : 'translate-x-0.5')
+                } />
+              </div>
+            </button>
+          </div>
+        )}
+
         {exercise.equipment.length > 0 && (
           <div>
             <p className="text-xs font-semibold text-primary uppercase tracking-wide mb-1 px-1">Equipment</p>

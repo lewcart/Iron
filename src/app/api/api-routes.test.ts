@@ -44,6 +44,10 @@ const mockExercise = {
   is_hidden: false,
   movement_pattern: null,
   tracking_mode: 'reps' as const,
+  image_count: 0,
+  youtube_url: null,
+  image_urls: null,
+  has_sides: false,
 };
 
 const mockWorkout = {

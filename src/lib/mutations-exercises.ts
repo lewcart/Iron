@@ -40,6 +40,7 @@ export async function createCustomExercise(opts: {
   tips?: string[];
   movement_pattern?: string | null;
   tracking_mode?: 'reps' | 'time';
+  has_sides?: boolean;
   youtube_url?: string | null;
 }): Promise<LocalExercise> {
   const normalized = opts.title.trim().toLowerCase();
@@ -70,6 +71,7 @@ export async function createCustomExercise(opts: {
     image_count: 0,
     youtube_url: opts.youtube_url ?? null,
     image_urls: null,
+    has_sides: opts.has_sides ?? false,
   };
   // Push needs the dirty flag. exercises rows technically don't extend
   // SyncMeta on the type but the sync engine reads _synced/_updated_at

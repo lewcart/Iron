@@ -24,6 +24,11 @@ export interface Exercise {
   youtube_url: string | null;
   /** Optional Vercel Blob URLs for AI-generated in-app demo images. */
   image_urls: string[] | null;
+  /** When true, the exercise is performed unilaterally (each leg / each
+   *  arm). The in-workout stopwatch enters a 10-second switch countdown
+   *  after the user stops the first side, then resumes counting up for
+   *  the second side. Default false. */
+  has_sides: boolean;
 }
 
 export interface Workout {

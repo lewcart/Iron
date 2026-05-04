@@ -432,6 +432,7 @@ function mapExercise(r: Record<string, unknown>) {
     image_count: typeof r.image_count === 'number' ? r.image_count : 0,
     youtube_url: (r.youtube_url as string | null) ?? null,
     image_urls: Array.isArray(r.image_urls) ? r.image_urls as string[] : null,
+    has_sides: Boolean(r.has_sides),
   };
 }
 

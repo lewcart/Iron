@@ -1489,6 +1489,7 @@ export function parseExercise(row: DbRow): Exercise {
     image_count: typeof row.image_count === 'number' ? row.image_count : 0,
     youtube_url: (row.youtube_url as string | null) ?? null,
     image_urls: Array.isArray(row.image_urls) ? row.image_urls as string[] : null,
+    has_sides: Boolean(row.has_sides),
   };
 }
 
