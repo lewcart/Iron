@@ -10,6 +10,7 @@ import { ExerciseDemoStrip } from '@/components/ExerciseDemoStrip';
 import { ExerciseImageManager } from '@/components/ExerciseImageManager';
 import { EditableTextSection } from '@/components/EditableTextSection';
 import { SetActionSheet, type SetActionSheetTarget } from '@/components/SetActionSheet';
+import { AdjustPBHistorySheet } from '@/components/AdjustPBHistorySheet';
 import { MuscleMap } from '@/components/MuscleMap';
 import { MUSCLE_DEFS, normalizeMuscleTags } from '@/lib/muscles';
 import { updateExercise } from '@/lib/mutations-exercises';
@@ -392,6 +393,7 @@ export default function ExerciseDetail({
   const [sessionsServerDone, setSessionsServerDone] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [setActionTarget, setSetActionTarget] = useState<SetActionSheetTarget | null>(null);
+  const [adjustPbOpen, setAdjustPbOpen] = useState(false);
 
   // Time-mode PR — only populated for time-mode exercises. Drives the
   // LongestHoldHero block in place of OneRMHero.
@@ -656,37 +658,55 @@ export default function ExerciseDetail({
           <>
             {isTimeMode ? (
               !stripWillUseLeadingSlot && (
-                <LongestHoldHero
-                  longestSeconds={timePRs?.longestHold?.duration_seconds ?? null}
-                  longestDate={
-                    timePRs?.longestHold
-                      ? formatDate(timePRs.longestHold.date)
-                      : 'No data'
-                  }
-                  longestWeight={
-                    timePRs?.longestHold?.weight != null
-                      ? Math.round(toDisplay(timePRs.longestHold.weight) * 10) / 10
-                      : null
-                  }
-                  weightLabel={label}
-                  totalSeconds={timePRs?.totalSeconds ?? 0}
-                />
+                <>
+                  <LongestHoldHero
+                    longestSeconds={timePRs?.longestHold?.duration_seconds ?? null}
+                    longestDate={
+                      timePRs?.longestHold
+                        ? formatDate(timePRs.longestHold.date)
+                        : 'No data'
+                    }
+                    longestWeight={
+                      timePRs?.longestHold?.weight != null
+                        ? Math.round(toDisplay(timePRs.longestHold.weight) * 10) / 10
+                        : null
+                    }
+                    weightLabel={label}
+                    totalSeconds={timePRs?.totalSeconds ?? 0}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setAdjustPbOpen(true)}
+                    className="self-start text-[11px] font-semibold text-muted-foreground hover:text-foreground active:text-foreground -mt-1 px-1"
+                  >
+                    Set after a form fix? Adjust PB history…
+                  </button>
+                </>
               )
             ) : (<>
             {!stripWillUseLeadingSlot && (
-              <OneRMHero
-                value={
-                  progressData != null && progressData.prs.estimated1RM
-                    ? `${Math.round(toDisplay(progressData.prs.estimated1RM.estimated_1rm))}`
-                    : '—'
-                }
-                unit={label}
-                date={
-                  progressData != null && progressData.prs.estimated1RM
-                    ? formatDate(progressData.prs.estimated1RM.date)
-                    : 'No data'
-                }
-              />
+              <>
+                <OneRMHero
+                  value={
+                    progressData != null && progressData.prs.estimated1RM
+                      ? `${Math.round(toDisplay(progressData.prs.estimated1RM.estimated_1rm))}`
+                      : '—'
+                  }
+                  unit={label}
+                  date={
+                    progressData != null && progressData.prs.estimated1RM
+                      ? formatDate(progressData.prs.estimated1RM.date)
+                      : 'No data'
+                  }
+                />
+                <button
+                  type="button"
+                  onClick={() => setAdjustPbOpen(true)}
+                  className="self-start text-[11px] font-semibold text-muted-foreground hover:text-foreground active:text-foreground -mt-1 px-1"
+                >
+                  Set after a form fix? Adjust PB history…
+                </button>
+              </>
             )}
 
             </>)}
@@ -1090,6 +1110,12 @@ export default function ExerciseDetail({
         target={setActionTarget}
         onClose={() => setSetActionTarget(null)}
         unitLabel={label}
+      />
+      <AdjustPBHistorySheet
+        exerciseUuid={exercise.uuid}
+        exerciseTitle={exercise.title}
+        open={adjustPbOpen}
+        onClose={() => setAdjustPbOpen(false)}
       />
     </main>
   );

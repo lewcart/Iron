@@ -506,7 +506,7 @@ export interface ExerciseProgressLocal {
  *    - 'any': used by session-history reads, where time-mode exercises need
  *      to merge their own duplicates (e.g. two "Plank" rows from catalog +
  *      custom both contribute their hold history). */
-async function resolveCanonicalExerciseUuids(
+export async function resolveCanonicalExerciseUuids(
   exerciseUuid: string,
   modeFilter: 'reps' | 'any' = 'reps',
 ): Promise<Set<string>> {
