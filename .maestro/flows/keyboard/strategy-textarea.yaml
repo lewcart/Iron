@@ -1,23 +1,19 @@
 appId: app.rebirth
 tags:
-  - keyboard
+  - nav
 ---
-# /strategy page Vision card edit: typing shouldn't push Save off-screen.
+# /strategy is reached from /feed via the "Strategy" TopChip
+# (src/app/feed/page.tsx:1055), now patched with id="m-feed-strategy-chip"
+# for stable Maestro targeting.
 #
-# Reached from /feed (Week tab) via the "Strategy" TopChip
-# (src/app/feed/page.tsx:1055). The TopChip lives in a horizontal-scroll
-# row of small chips at the top of /feed; Maestro's text matching can
-# miss it if the chip-row hasn't fully painted, OR if the launch landed
-# somewhere other than /feed.
-#
-# This flow currently tests just the navigation hop. The editor flow
-# (Edit vision → input → assert above keyboard) requires a Vision card
-# on the page (fixture pending) — when that fixture lands, restore the
-# tapOn "Edit vision" + assertions.
+# This flow tests just the navigation hop. The editor flow (Edit vision →
+# input → assert above keyboard) requires a Vision card on the page
+# (fixture pending). When that lands, restore the tapOn "Edit vision"
+# + input + assert-above-keyboard chain.
 - runFlow: ../../helpers/launch.yaml
 - tapOn: "Week"
 - assertVisible: "Strategy"
 - tapOn: "Strategy"
 # /strategy page heading reads "Vision and Plan" — match on Plan since
-# Vision could refer to the heading word OR a (possibly absent) card.
+# "Vision" could be either the heading word or an (absent) card.
 - assertVisible: "Plan"

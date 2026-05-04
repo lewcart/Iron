@@ -2,16 +2,18 @@ appId: app.rebirth
 ---
 # Swipe the sheet down to dismiss. Sheet must already be open.
 #
-# Maestro's `direction: DOWN` swipe starts at screen center, but our Sheet's
-# drag-to-dismiss handler only fires on a swipe that starts at the drag
-# handle (the small bar at the top of the sheet). Use coordinate-based
-# swipe starting near the top of the sheet to get a clean dismiss.
+# The drag handle is at the top of the sheet. Sheets with `height="auto"`
+# (e.g. GoalsSheet) start around 65-70% of viewport Y. Sheets with
+# `height="90vh"` start around 5-10% Y. We swipe from a Y range covering
+# both: starting at 75% (which is below the handle on auto sheets, and
+# inside the body of tall sheets — close to a real drag) and ending near
+# the bottom.
 #
 # env:
-#   SHEET_TITLE — aria-label of the sheet (asserted gone after swipe)
+#   SHEET_TITLE — aria-label substring asserted gone after swipe
 - swipe:
-    start: 50%, 35%
-    end: 50%, 95%
-    duration: 600
+    start: 50%, 75%
+    end: 50%, 98%
+    duration: 700
 - assertNotVisible:
     text: ${SHEET_TITLE}

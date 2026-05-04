@@ -8,7 +8,7 @@ tags:
 - runFlow: ../../helpers/launch.yaml
 - tapOn: "Nutrition"
 - tapOn: "Add food"
-- assertVisible: "Search foods"   # see nutrition-add-food.yaml note re: portal a11y
+# Skip portaled-sheet visibility check — see nutrition-add-food.yaml note.
 - tapOn:
     text: "Search foods"
 - inputText: "x"

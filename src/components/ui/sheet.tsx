@@ -13,11 +13,18 @@ interface SheetProps {
   /** Optional footer pinned to bottom of sheet (e.g. confirm button). */
   footer?: ReactNode;
   className?: string;
+  /**
+   * Stable test marker. Maestro flows target the sheet root via this id
+   * because text inside React-portaled `[role="dialog"]` is not always
+   * surfaced through WKWebView's a11y tree on iOS. Recommend
+   * `m-sheet-{kind}` (e.g. `m-sheet-addfood`).
+   */
+  testId?: string;
 }
 
 const DRAG_DISMISS_THRESHOLD = 120;
 
-export function Sheet({ open, onClose, title, children, height = 'auto', footer, className }: SheetProps) {
+export function Sheet({ open, onClose, title, children, height = 'auto', footer, className, testId }: SheetProps) {
   const [mounted, setMounted] = useState(open);
   const [visible, setVisible] = useState(false);
   const [dragOffset, setDragOffset] = useState(0);
@@ -77,8 +84,20 @@ export function Sheet({ open, onClose, title, children, height = 'auto', footer,
     setDragOffset(0);
   };
 
+  // Combine title + testId into the aria-label so Maestro can target the
+  // sheet via `assertVisible: text: "m-sheet-{kind}"`. HTML `id` doesn't
+  // bridge to native iOS a11y for WKWebView content; aria-label does.
+  const ariaLabel = testId ? `${title ?? 'sheet'} ${testId}` : title;
+
   return (
-    <div className="fixed inset-0 z-[60]" role="dialog" aria-modal="true" aria-label={title}>
+    <div
+      id={testId}
+      data-testid={testId}
+      className="fixed inset-0 z-[60]"
+      role="dialog"
+      aria-modal="true"
+      aria-label={ariaLabel}
+    >
       <div
         className={cn(
           'absolute inset-0 bg-black/50 transition-opacity duration-200',
@@ -103,6 +122,7 @@ export function Sheet({ open, onClose, title, children, height = 'auto', footer,
         }}
       >
         <div
+          id={testId ? `${testId}-handle` : undefined}
           className="pt-2 pb-1 cursor-grab"
           onTouchStart={handleTouchStart}
           onTouchMove={handleTouchMove}

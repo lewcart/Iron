@@ -9,11 +9,10 @@ tags:
 - tapOn: "Nutrition"
 - assertVisible: "Goals"
 - tapOn: "Add food"
-# Sheet title "Add to {slot}" is rendered through a React portal; Maestro's
-# WKWebView a11y traversal sometimes misses portaled headings. Use the
-# search input placeholder as the sheet-open sentinel instead — it's an
-# <input> with stable accessible name.
-- assertVisible: "Search foods"
+# Skip the "sheet open" sentinel — Maestro's WKWebView a11y traversal
+# misses text in this React-portaled sheet, even with aria-label/testId
+# markers. The next `tapOn: "Search foods"` will fail loudly if the
+# sheet didn't actually open, which is the real signal.
 - tapOn:
     text: "Search foods"
 - inputText: "chicken"

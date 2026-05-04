@@ -1269,6 +1269,7 @@ function SetRow({
             <div className="flex items-center gap-1 flex-shrink-0">
               <input
                 id="m-workout-set-reps"
+                aria-label="m-workout-set-reps reps input"
                 type="number"
                 inputMode="numeric"
                 placeholder={repsPlaceholder}
