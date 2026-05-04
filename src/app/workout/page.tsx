@@ -9,6 +9,8 @@ import {
   readPersistedTimer as _readPersistedTimer,
   computeRemaining,
 } from './rest-timer-utils';
+import { useStopwatch } from './useStopwatch';
+import { StopwatchSheet } from './StopwatchSheet';
 import {
   requestNotificationPermission,
   scheduleRestNotification,
@@ -22,7 +24,7 @@ import {
 import { consumeScheduleTap } from '@/lib/workout-schedule';
 import { HealthSection } from '@/components/HealthSection';
 import Link from 'next/link';
-import { Check, ChevronDown, ChevronRight, ChevronsUp, ChevronUp, ClipboardList, Clock, Dumbbell, Equal, GripVertical, Info, Plus, Search, X } from 'lucide-react';
+import { Check, ChevronDown, ChevronRight, ChevronsUp, ChevronUp, ClipboardList, Clock, Dumbbell, Equal, GripVertical, Info, Plus, Search, Timer, X } from 'lucide-react';
 import { ExerciseDetailModal } from '@/components/ExerciseDetailModal';
 import type { WorkoutPlan, WorkoutRoutine, WorkoutRoutineExercise, WorkoutRoutineSet, Exercise } from '@/types';
 import { formatTime, calcCompletedSets, calcTotalVolume } from './workout-utils';
@@ -968,32 +970,127 @@ function RirSlider({
   );
 }
 
+// ─── RPE chip strip (time-mode rows only) ─────────────────────────────────────
+//
+// Time-mode exercises (planks, holds, isometrics) collect RPE 1-10 as the
+// proximity-to-failure proxy — RIR doesn't translate cleanly to a hold.
+// The server bridges RPE → RIR (rir = clamp(10 - rpe, 0, 5)) on sync push
+// so the existing RIR-weighted effective_set_count math at queries.ts:1367
+// continues to credit time-mode sets. Single source of truth: client only
+// writes `rpe`; the rir column is server-derived for time-mode rows.
+//
+// Anchor copy under chips 6-10 (where RPE meaning matters for the bridge).
+// 6 easy / 7 mod / 8 hard / 9 near / 10 fail.
+
+function RpeChipStrip({
+  value,
+  legacyRirFallback,
+  onChange,
+}: {
+  value: number | null;
+  legacyRirFallback: number | null;
+  onChange: (rpe: number | null) => Promise<void>;
+}) {
+  // Display-only fallback for legacy time-mode rows that have rir but no rpe.
+  // Reverse-bridge gives Lou a starting point without writing until they
+  // actually pick a chip. Once they pick, the row commits and the legacy
+  // rir gets server-overwritten on next sync push.
+  const displayValue = value ?? (legacyRirFallback != null ? Math.max(1, Math.min(10, 10 - legacyRirFallback)) : null);
+  const isLegacy = value == null && legacyRirFallback != null;
+
+  const anchors: Record<number, string> = {
+    6: 'easy',
+    7: 'mod',
+    8: 'hard',
+    9: 'near',
+    10: 'fail',
+  };
+
+  return (
+    <div className="px-3 pt-1 pb-2 -mt-1 border-b border-border last:border-0">
+      <div className="flex items-center gap-1 justify-between" role="radiogroup" aria-label="RPE 1 to 10">
+        {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(n => {
+          const selected = displayValue === n;
+          const muted = isLegacy && selected;
+          return (
+            <button
+              key={n}
+              type="button"
+              role="radio"
+              aria-checked={selected}
+              aria-label={`RPE ${n}${anchors[n] ? ' (' + anchors[n] + ')' : ''}`}
+              onClick={() => { void onChange(n); }}
+              className={
+                'flex-1 h-7 rounded-md text-xs font-semibold tabular-nums transition-all min-w-0 ' +
+                (selected
+                  ? muted
+                    ? 'bg-primary/30 text-primary-foreground/70 ring-1 ring-primary/40'
+                    : 'bg-primary text-primary-foreground'
+                  : 'bg-secondary text-muted-foreground active:bg-secondary/70')
+              }
+            >
+              {n}
+            </button>
+          );
+        })}
+      </div>
+      <div className="flex items-center gap-1 justify-between mt-0.5 px-px">
+        {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(n => (
+          <span
+            key={n}
+            className="flex-1 text-center text-[8px] uppercase tracking-wide text-muted-foreground/60 select-none"
+          >
+            {anchors[n] ?? ''}
+          </span>
+        ))}
+      </div>
+      {isLegacy && (
+        <p className="text-[10px] text-muted-foreground/70 mt-1 text-center">
+          Legacy RIR — tap to confirm RPE
+        </p>
+      )}
+    </div>
+  );
+}
+
+// ─── SetRow ───────────────────────────────────────────────────────────────────
+
 function SetRow({
   setNumber,
   set,
   workoutExerciseUuid,
   trackingMode,
+  hasSides,
   onUpdate,
   onUpdateDuration,
   onEdit,
   onEditDuration,
   onUpdateRir,
+  onUpdateRpe,
+  onOpenStopwatch,
   onDelete,
   allTimeBest1RM,
   previousRir,
+  stopwatchRunning,
+  stopwatchElapsed,
 }: {
   setNumber: number;
   set: LocalWorkoutSet;
   workoutExerciseUuid: string;
   trackingMode: 'reps' | 'time';
+  hasSides: boolean;
   onUpdate: (weUuid: string, setUuid: string, weight: number, reps: number) => Promise<void>;
   onUpdateDuration: (weUuid: string, setUuid: string, weight: number, durationSeconds: number) => Promise<void>;
   onEdit: (weUuid: string, setUuid: string, weight: number, reps: number) => Promise<void>;
   onEditDuration: (weUuid: string, setUuid: string, weight: number, durationSeconds: number) => Promise<void>;
   onUpdateRir: (setUuid: string, rir: number | null) => Promise<void>;
+  onUpdateRpe: (setUuid: string, rpe: number | null) => Promise<void>;
+  onOpenStopwatch: (setRowKey: string, hasSides: boolean, replacingSeconds: number | null) => void;
   onDelete: (setUuid: string) => Promise<void>;
   allTimeBest1RM?: number | null;
   previousRir?: number | null;
+  stopwatchRunning?: boolean;
+  stopwatchElapsed?: number;
 }) {
   const { toDisplay, fromInput, label } = useUnit();
   const [weight, setWeight] = useState(
@@ -1031,7 +1128,11 @@ function SetRow({
     // position (or RIR_DEFAULT_FALLBACK) so a single tap captures completion +
     // a sensible RIR. The inline slider lets the user adjust without a second
     // tap-to-open step.
-    if (!wasCompleted && set.rir == null) {
+    //
+    // Time-mode SKIPS the auto-fill: RPE is not auto-defaulted to keep the
+    // server-side RIR bridge accurate (a fake RPE would silently credit
+    // hypertrophy junk-set math). User must pick a chip explicitly.
+    if (!wasCompleted && set.rir == null && trackingMode === 'reps') {
       await onUpdateRir(set.uuid, rirDefault);
     }
     setSaving(false);
@@ -1073,104 +1174,151 @@ function SetRow({
   // the right can host the RIR slider once the set is ticked. Pre-completion
   // that area is empty — the row stays uncluttered while the user is still
   // entering numbers.
+  //
+  // Time-mode adds a Timer icon button next to the duration input that opens
+  // the stopwatch sheet, and replaces the RIR slider with a full-width RPE
+  // chip strip on its own row below the inputs (10 chips don't fit beside
+  // the inputs on a 375px iPhone). When the stopwatch is running for THIS
+  // set, the duration value is replaced by a live mm:ss readout.
+  const stopwatchActive = !!stopwatchRunning;
+  const liveSeconds = stopwatchActive ? (stopwatchElapsed ?? 0) : null;
+
   const inner = (
-    <div className={`flex items-center gap-2 py-1.5 px-3 border-b border-border last:border-0 ${completed ? 'opacity-60' : ''}`}>
-      <div className="w-5 text-center text-xs font-semibold text-muted-foreground">{setNumber}</div>
+    <div className={`flex flex-col border-b border-border last:border-0 ${completed ? 'opacity-60' : ''}`}>
+      <div className="flex items-center gap-2 py-1.5 px-3">
+        <div className="w-5 text-center text-xs font-semibold text-muted-foreground">{setNumber}</div>
 
-      {trackingMode === 'time' ? (
-        <>
-          <div className="flex items-center gap-1 flex-shrink-0">
-            <input
-              type="number"
-              inputMode="decimal"
-              placeholder="—"
-              value={weight}
-              onChange={e => setWeight(e.target.value)}
-              onFocus={e => { e.target.scrollIntoView({ behavior: 'smooth', block: 'center' }); e.target.select(); }}
-              onBlur={handleTimeBlur}
-              className="w-12 text-left text-sm font-medium bg-transparent outline-none min-h-[36px]"
+        {trackingMode === 'time' ? (
+          <>
+            <div className="flex items-center gap-1 flex-shrink-0">
+              <input
+                type="number"
+                inputMode="decimal"
+                placeholder="—"
+                value={weight}
+                onChange={e => setWeight(e.target.value)}
+                onFocus={e => { e.target.scrollIntoView({ behavior: 'smooth', block: 'center' }); e.target.select(); }}
+                onBlur={handleTimeBlur}
+                className="w-12 text-left text-sm font-medium bg-transparent outline-none min-h-[36px]"
+              />
+              <span className="text-[10px] text-muted-foreground">{label}</span>
+            </div>
+
+            <span className="text-muted-foreground text-xs">×</span>
+
+            <div className="flex items-center gap-1 flex-shrink-0">
+              {stopwatchActive ? (
+                <span
+                  className="w-12 text-left text-sm font-medium tabular-nums text-primary min-h-[36px] flex items-center"
+                  aria-label="Stopwatch running"
+                >
+                  {formatTime(liveSeconds ?? 0)}
+                </span>
+              ) : (
+                <input
+                  type="number"
+                  inputMode="numeric"
+                  placeholder="60"
+                  value={duration}
+                  onChange={e => setDuration(e.target.value)}
+                  onFocus={e => { e.target.scrollIntoView({ behavior: 'smooth', block: 'center' }); e.target.select(); }}
+                  onBlur={handleTimeBlur}
+                  className="w-12 text-left text-sm font-medium bg-transparent outline-none min-h-[36px]"
+                />
+              )}
+              <span className="text-[10px] text-muted-foreground">sec</span>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => {
+                const setRowKey = `${workoutExerciseUuid}:${set.uuid}`;
+                const replacing = set.duration_seconds && set.duration_seconds > 0
+                  ? set.duration_seconds : null;
+                onOpenStopwatch(setRowKey, hasSides, replacing);
+              }}
+              className={
+                'flex-shrink-0 w-9 h-9 min-w-[44px] min-h-[44px] -mx-1 rounded-full flex items-center justify-center ' +
+                (stopwatchActive
+                  ? 'text-primary'
+                  : 'text-muted-foreground bg-zinc-800/40 ring-1 ring-zinc-700/60 active:bg-zinc-700/60')
+              }
+              aria-label={stopwatchActive ? 'Stopwatch running — tap to open' : 'Open stopwatch'}
+            >
+              <Timer className={'h-4 w-4 ' + (stopwatchActive ? 'animate-pulse motion-reduce:animate-none' : '')} />
+            </button>
+          </>
+        ) : (
+          <>
+            <div className="flex items-center gap-1 flex-shrink-0">
+              <input
+                type="number"
+                inputMode="decimal"
+                placeholder="—"
+                value={weight}
+                onChange={e => setWeight(e.target.value)}
+                onFocus={e => { e.target.scrollIntoView({ behavior: 'smooth', block: 'center' }); e.target.select(); }}
+                onBlur={handleRepsBlur}
+                className="w-12 text-left text-sm font-medium bg-transparent outline-none min-h-[36px]"
+              />
+              <span className="text-[10px] text-muted-foreground">{label}</span>
+            </div>
+
+            <span className="text-muted-foreground text-xs">×</span>
+
+            <div className="flex items-center gap-1 flex-shrink-0">
+              <input
+                type="number"
+                inputMode="numeric"
+                placeholder={repsPlaceholder}
+                value={reps}
+                onChange={e => setReps(e.target.value)}
+                onFocus={e => { e.target.scrollIntoView({ behavior: 'smooth', block: 'center' }); e.target.select(); }}
+                onBlur={handleRepsBlur}
+                className="w-12 text-left text-sm font-medium bg-transparent outline-none min-h-[36px]"
+              />
+              <span className="text-[10px] text-muted-foreground">reps</span>
+            </div>
+          </>
+        )}
+
+        <div className="flex-1 flex items-center justify-end">
+          {completed && trackingMode === 'reps' && (
+            <RirSlider
+              value={set.rir ?? null}
+              defaultValue={rirDefault}
+              onChange={(n) => onUpdateRir(set.uuid, n)}
             />
-            <span className="text-[10px] text-muted-foreground">{label}</span>
-          </div>
+          )}
+        </div>
 
-          <span className="text-muted-foreground text-xs">×</span>
+        <div className="relative flex-shrink-0">
+          <button
+            onClick={handleComplete}
+            disabled={saving}
+            className={`w-8 h-8 rounded-full flex items-center justify-center transition-colors ${
+              completed
+                ? 'bg-green-500 text-white'
+                : 'border-2 border-border text-transparent hover:border-primary'
+            }`}
+          >
+            <Check className="h-3.5 w-3.5" />
+          </button>
+          {showPD && (
+            <span className="absolute -top-1.5 -right-1.5 text-[8px] font-bold px-0.5 leading-[14px] rounded-full text-amber-400 bg-amber-400/15 border border-amber-400/30 pointer-events-none">
+              PR
+            </span>
+          )}
+        </div>
+      </div>
 
-          <div className="flex items-center gap-1 flex-shrink-0">
-            <input
-              type="number"
-              inputMode="numeric"
-              placeholder="60"
-              value={duration}
-              onChange={e => setDuration(e.target.value)}
-              onFocus={e => { e.target.scrollIntoView({ behavior: 'smooth', block: 'center' }); e.target.select(); }}
-              onBlur={handleTimeBlur}
-              className="w-12 text-left text-sm font-medium bg-transparent outline-none min-h-[36px]"
-            />
-            <span className="text-[10px] text-muted-foreground">sec</span>
-          </div>
-        </>
-      ) : (
-        <>
-          <div className="flex items-center gap-1 flex-shrink-0">
-            <input
-              type="number"
-              inputMode="decimal"
-              placeholder="—"
-              value={weight}
-              onChange={e => setWeight(e.target.value)}
-              onFocus={e => { e.target.scrollIntoView({ behavior: 'smooth', block: 'center' }); e.target.select(); }}
-              onBlur={handleRepsBlur}
-              className="w-12 text-left text-sm font-medium bg-transparent outline-none min-h-[36px]"
-            />
-            <span className="text-[10px] text-muted-foreground">{label}</span>
-          </div>
-
-          <span className="text-muted-foreground text-xs">×</span>
-
-          <div className="flex items-center gap-1 flex-shrink-0">
-            <input
-              type="number"
-              inputMode="numeric"
-              placeholder={repsPlaceholder}
-              value={reps}
-              onChange={e => setReps(e.target.value)}
-              onFocus={e => { e.target.scrollIntoView({ behavior: 'smooth', block: 'center' }); e.target.select(); }}
-              onBlur={handleRepsBlur}
-              className="w-12 text-left text-sm font-medium bg-transparent outline-none min-h-[36px]"
-            />
-            <span className="text-[10px] text-muted-foreground">reps</span>
-          </div>
-        </>
+      {completed && trackingMode === 'time' && (
+        <RpeChipStrip
+          value={set.rpe ?? null}
+          legacyRirFallback={set.rir ?? null}
+          onChange={(rpe) => onUpdateRpe(set.uuid, rpe)}
+        />
       )}
-
-      <div className="flex-1 flex items-center justify-end">
-        {completed && (
-          <RirSlider
-            value={set.rir ?? null}
-            defaultValue={rirDefault}
-            onChange={(n) => onUpdateRir(set.uuid, n)}
-          />
-        )}
-      </div>
-
-      <div className="relative flex-shrink-0">
-        <button
-          onClick={handleComplete}
-          disabled={saving}
-          className={`w-8 h-8 rounded-full flex items-center justify-center transition-colors ${
-            completed
-              ? 'bg-green-500 text-white'
-              : 'border-2 border-border text-transparent hover:border-primary'
-          }`}
-        >
-          <Check className="h-3.5 w-3.5" />
-        </button>
-        {showPD && (
-          <span className="absolute -top-1.5 -right-1.5 text-[8px] font-bold px-0.5 leading-[14px] rounded-full text-amber-400 bg-amber-400/15 border border-amber-400/30 pointer-events-none">
-            PR
-          </span>
-        )}
-      </div>
     </div>
   );
 
@@ -1206,8 +1354,12 @@ function SortableExerciseCard({
   onEditSet,
   onEditSetDuration,
   onUpdateSetRir,
+  onUpdateSetRpe,
   onDeleteSet,
   onShowInfo,
+  onOpenStopwatch,
+  stopwatchSetKey,
+  stopwatchElapsed,
 }: {
   we: LocalWorkoutExerciseEntry;
   isExpanded: boolean;
@@ -1219,8 +1371,12 @@ function SortableExerciseCard({
   onEditSet: (workoutExerciseUuid: string, setUuid: string, weight: number, reps: number) => Promise<void>;
   onEditSetDuration: (workoutExerciseUuid: string, setUuid: string, weight: number, durationSeconds: number) => Promise<void>;
   onUpdateSetRir: (setUuid: string, rir: number | null) => Promise<void>;
+  onUpdateSetRpe: (setUuid: string, rpe: number | null) => Promise<void>;
   onDeleteSet: (uuid: string) => Promise<void>;
   onShowInfo: () => void;
+  onOpenStopwatch: (setRowKey: string, hasSides: boolean, replacingSeconds: number | null) => void;
+  stopwatchSetKey: string | null;
+  stopwatchElapsed: number;
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: we.uuid });
   const style = {
@@ -1349,23 +1505,32 @@ function SortableExerciseCard({
           </div>
 
           {/* Sets */}
-          {we.sets.map((set, idx) => (
-            <SetRow
-              key={set.uuid}
-              setNumber={idx + 1}
-              set={set}
-              workoutExerciseUuid={we.uuid}
-              trackingMode={we.exercise?.tracking_mode ?? 'reps'}
-              onUpdate={onUpdateSet}
-              onUpdateDuration={onUpdateSetDuration}
-              onEdit={onEditSet}
-              onEditDuration={onEditSetDuration}
-              onUpdateRir={onUpdateSetRir}
-              onDelete={onDeleteSet}
-              allTimeBest1RM={allTimeBest1RM}
-              previousRir={previousRirs[idx] ?? null}
-            />
-          ))}
+          {we.sets.map((set, idx) => {
+            const setRowKey = `${we.uuid}:${set.uuid}`;
+            const stopwatchRunning = stopwatchSetKey === setRowKey;
+            return (
+              <SetRow
+                key={set.uuid}
+                setNumber={idx + 1}
+                set={set}
+                workoutExerciseUuid={we.uuid}
+                trackingMode={we.exercise?.tracking_mode ?? 'reps'}
+                hasSides={Boolean(we.exercise?.has_sides)}
+                onUpdate={onUpdateSet}
+                onUpdateDuration={onUpdateSetDuration}
+                onEdit={onEditSet}
+                onEditDuration={onEditSetDuration}
+                onUpdateRir={onUpdateSetRir}
+                onUpdateRpe={onUpdateSetRpe}
+                onOpenStopwatch={onOpenStopwatch}
+                onDelete={onDeleteSet}
+                allTimeBest1RM={allTimeBest1RM}
+                previousRir={previousRirs[idx] ?? null}
+                stopwatchRunning={stopwatchRunning}
+                stopwatchElapsed={stopwatchElapsed}
+              />
+            );
+          })}
 
           {/* Add set */}
           <button
@@ -1412,6 +1577,57 @@ export default function WorkoutPage() {
 
   const restTimer = useRestTimer();
   const elapsed = useElapsed(workout?.start_time ?? null);
+
+  // Stopwatch (count-up timer) for time-based exercises. State machine and
+  // persistence live in useStopwatch; the sheet renders below as a sibling
+  // of RestTimerSheet so both can coexist (separate localStorage namespaces
+  // — see stopwatch-utils.STOPWATCH_STATE_KEY vs rest-timer-utils).
+  const isSetAttached = useCallback((setRowKey: string) => {
+    if (!workout) return false;
+    const [weUuid, setUuid] = setRowKey.split(':');
+    return workout.exercises.some(we =>
+      we.uuid === weUuid && we.sets.some(s => s.uuid === setUuid && !s._deleted)
+    );
+  }, [workout]);
+  const stopwatch = useStopwatch({ isSetAttached });
+  const [stopwatchOpen, setStopwatchOpen] = useState(false);
+  const [stopwatchReplacing, setStopwatchReplacing] = useState<number | null>(null);
+
+  const handleOpenStopwatch = useCallback(
+    (setRowKey: string, hasSides: boolean, replacingSeconds: number | null) => {
+      setStopwatchReplacing(replacingSeconds);
+      stopwatch.open({ setRowKey, hasSides });
+      setStopwatchOpen(true);
+    },
+    [stopwatch],
+  );
+
+  // Re-open the sheet automatically when a stopwatch is restored on mount
+  // (e.g. after a page reload mid-workout) AND the user explicitly returns
+  // to the workout page. This is opt-in: the sticky pill in the workout
+  // header is the recommended re-entry per Phase 2 design auto-decision #6.
+  // We don't auto-open; the user taps the running indicator.
+
+  const handleStopwatchCommit = useCallback(async (durationSeconds: number) => {
+    const state = stopwatch.state;
+    if (!state) return;
+    const [weUuid, setUuid] = state.setRowKey.split(':');
+    if (!weUuid || !setUuid) return;
+    // Preserve any previously-entered weight on the set (loaded planks etc).
+    const we = workout?.exercises.find(e => e.uuid === weUuid);
+    const set = we?.sets.find(s => s.uuid === setUuid);
+    const weightKg = set?.weight ?? 0;
+    await mutUpdateSet(setUuid, {
+      weight: weightKg,
+      duration_seconds: durationSeconds,
+      is_completed: true,
+    });
+    setStopwatchOpen(false);
+    setStopwatchReplacing(null);
+  }, [stopwatch.state, workout]);
+
+  const stopwatchSetKey = stopwatch.state && (stopwatch.state.phase === 'counting' || stopwatch.state.phase === 'switching')
+    ? stopwatch.state.setRowKey : null;
 
   // Drag-to-reorder sensors
   const sensors = useSensors(
@@ -1723,6 +1939,14 @@ export default function WorkoutPage() {
     await mutUpdateSet(setUuid, { rir });
   };
 
+  // Time-mode RPE write. Client only writes `rpe` — the sync push route
+  // derives `rir = clamp(10 - rpe, 0, 5)` server-side so the existing
+  // RIR-based effective_set_count math stays consistent. See
+  // PLAN-exercise-timer.md Phase 3 auto-decision E3.
+  const updateSetRpe = async (setUuid: string, rpe: number | null) => {
+    await mutUpdateSet(setUuid, { rpe });
+  };
+
   const updateSet = async (workoutExerciseUuid: string, setUuid: string, weight: number, reps: number) => {
     await mutUpdateSet(setUuid, { weight, repetitions: reps, is_completed: true });
 
@@ -1976,8 +2200,12 @@ export default function WorkoutPage() {
                       onEditSet={editSet}
                       onEditSetDuration={editSetDuration}
                       onUpdateSetRir={updateSetRir}
+                      onUpdateSetRpe={updateSetRpe}
                       onDeleteSet={mutDeleteSet}
                       onShowInfo={() => setInfoExercise(we.exercise as unknown as Exercise)}
+                      onOpenStopwatch={handleOpenStopwatch}
+                      stopwatchSetKey={stopwatchSetKey}
+                      stopwatchElapsed={stopwatch.elapsed}
                     />
                   ))}
                 </div>
@@ -2031,6 +2259,36 @@ export default function WorkoutPage() {
           onAdjust={restTimer.adjust}
           onClose={() => setShowRestTimer(false)}
         />
+      )}
+      {stopwatchOpen && stopwatch.state && (
+        <StopwatchSheet
+          api={stopwatch}
+          onCommit={handleStopwatchCommit}
+          onClose={() => setStopwatchOpen(false)}
+          replacingSeconds={stopwatchReplacing}
+          exerciseName={(() => {
+            const [weUuid] = stopwatch.state.setRowKey.split(':');
+            return workout.exercises.find(e => e.uuid === weUuid)?.exercise?.title ?? undefined;
+          })()}
+        />
+      )}
+      {/* Sticky resume bar — when a stopwatch is running but its sheet is
+          closed, show a tappable bar so the user can re-enter without
+          digging through SetRows. Per Phase 2 design auto-decision #6. */}
+      {!stopwatchOpen && stopwatch.state && (stopwatch.state.phase === 'counting' || stopwatch.state.phase === 'switching' || stopwatch.state.phase === 'switch_expired_paused') && (
+        <button
+          onClick={() => setStopwatchOpen(true)}
+          className="fixed bottom-safe-or-4 left-1/2 -translate-x-1/2 z-40 px-4 py-2 rounded-full bg-primary text-primary-foreground text-sm font-semibold shadow-lg flex items-center gap-2"
+          aria-label="Resume stopwatch"
+        >
+          <Timer className="h-4 w-4" />
+          {stopwatch.state.hasSides ? (stopwatch.state.side === 1 ? 'First side' : 'Second side') + ' — ' : ''}
+          {stopwatch.state.phase === 'switching'
+            ? `${stopwatch.switchRemaining}s switch`
+            : stopwatch.state.phase === 'switch_expired_paused'
+              ? 'Paused'
+              : formatTime(stopwatch.elapsed)}
+        </button>
       )}
       {showFinishModal && (
         <FinishWorkoutModal

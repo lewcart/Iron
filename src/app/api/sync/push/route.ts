@@ -140,6 +140,32 @@ async function pushWorkoutSet(r: Record<string, unknown>): Promise<void> {
     await query('DELETE FROM workout_sets WHERE uuid = $1', [r.uuid]);
     return;
   }
+
+  // Server-side RPE→RIR bridge for time-mode sets. Single source of truth
+  // for the bridge formula: clients only need to send `rpe`; the server
+  // derives `rir = clamp(10 - rpe, 0, 5)` so the existing RIR-based
+  // effective_set_count weighting (queries.ts:1367-1372) keeps crediting
+  // time-mode sets without a SQL change. Client-pushed `rir` is ignored
+  // for time-mode rows. See PLAN-exercise-timer.md.
+  const trackingModeRows = await query<{ tracking_mode: 'reps' | 'time' }>(
+    `SELECT e.tracking_mode FROM exercises e
+     JOIN workout_exercises we ON we.exercise_uuid = e.uuid
+     WHERE we.uuid = $1`,
+    [r.workout_exercise_uuid],
+  );
+  const trackingMode = trackingModeRows[0]?.tracking_mode ?? 'reps';
+
+  const rpeRaw = r.rpe;
+  const rpeNum = typeof rpeRaw === 'number' ? rpeRaw : null;
+  const clientRir = typeof r.rir === 'number' ? r.rir : null;
+
+  let rirParam: number | null;
+  if (trackingMode === 'time' && rpeNum != null) {
+    rirParam = Math.max(0, Math.min(5, 10 - Math.round(rpeNum)));
+  } else {
+    rirParam = clientRir;
+  }
+
   await query(
     `INSERT INTO workout_sets (uuid, workout_exercise_uuid, weight, repetitions, min_target_reps, max_target_reps, rpe, rir, tag, comment, is_completed, is_pr, order_index, duration_seconds, updated_at)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW())
@@ -150,7 +176,7 @@ async function pushWorkoutSet(r: Record<string, unknown>): Promise<void> {
        is_completed = EXCLUDED.is_completed, is_pr = EXCLUDED.is_pr,
        order_index = EXCLUDED.order_index,
        duration_seconds = EXCLUDED.duration_seconds, updated_at = NOW()`,
-    [r.uuid, r.workout_exercise_uuid, r.weight, r.repetitions, r.min_target_reps, r.max_target_reps, r.rpe, r.rir ?? null, r.tag, r.comment, r.is_completed, r.is_pr, r.order_index, r.duration_seconds ?? null],
+    [r.uuid, r.workout_exercise_uuid, r.weight, r.repetitions, r.min_target_reps, r.max_target_reps, rpeNum, rirParam, r.tag, r.comment, r.is_completed, r.is_pr, r.order_index, r.duration_seconds ?? null],
   );
 }
 
@@ -212,8 +238,8 @@ async function pushExercise(r: Record<string, unknown>): Promise<void> {
   const imageCountParam = clientSentImageCount ? r.image_count : 0;
 
   await query(
-    `INSERT INTO exercises (uuid, everkinetic_id, title, alias, description, primary_muscles, secondary_muscles, equipment, steps, tips, is_custom, is_hidden, movement_pattern, tracking_mode, image_count, youtube_url, image_urls, updated_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, NOW())
+    `INSERT INTO exercises (uuid, everkinetic_id, title, alias, description, primary_muscles, secondary_muscles, equipment, steps, tips, is_custom, is_hidden, movement_pattern, tracking_mode, image_count, youtube_url, image_urls, has_sides, updated_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, NOW())
      ON CONFLICT (uuid) DO UPDATE SET
        title = EXCLUDED.title, alias = EXCLUDED.alias, description = EXCLUDED.description,
        primary_muscles = EXCLUDED.primary_muscles, secondary_muscles = EXCLUDED.secondary_muscles,
@@ -224,6 +250,7 @@ async function pushExercise(r: Record<string, unknown>): Promise<void> {
        image_count = ${clientSentImageCount ? 'EXCLUDED.image_count' : 'exercises.image_count'},
        youtube_url = EXCLUDED.youtube_url,
        image_urls = ${clientSentImageUrls ? 'EXCLUDED.image_urls' : 'exercises.image_urls'},
+       has_sides = EXCLUDED.has_sides,
        updated_at = NOW()`,
     [
       String(r.uuid).toLowerCase(), r.everkinetic_id, r.title,
@@ -235,6 +262,7 @@ async function pushExercise(r: Record<string, unknown>): Promise<void> {
       imageCountParam,
       ytClean,
       imageUrlsParam,
+      Boolean(r.has_sides),
     ],
   );
 }

@@ -17,6 +17,12 @@ function makeExercise(overrides: Partial<Exercise> = {}): Exercise {
     tips: [],
     is_custom: false,
     is_hidden: false,
+    movement_pattern: null,
+    tracking_mode: 'reps',
+    image_count: 0,
+    youtube_url: null,
+    image_urls: null,
+    has_sides: false,
     ...overrides,
   };
 }

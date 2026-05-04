@@ -42,6 +42,12 @@ export interface LocalExercise {
   /** Optional Vercel Blob URLs for AI-generated in-app demo images.
    *  When set, takes precedence over the bundled public/ path. */
   image_urls: string[] | null;
+  /** When true, the exercise is performed unilaterally (each leg / each
+   *  arm). The in-workout stopwatch enters a 10-second switch countdown
+   *  after the user stops the first side, then resumes counting up for
+   *  the second side. Default false; coerce undefined → false on read for
+   *  rows that arrived from a Dexie v19 store before the v20 schema bump. */
+  has_sides: boolean;
 }
 
 export interface LocalWorkout extends SyncMeta {
@@ -819,6 +825,24 @@ export class IronDB extends Dexie {
         if (row.crop_offset_x === undefined) row.crop_offset_x = null;
       });
     });
+    // v20: exercises.has_sides — unilateral flag for the in-workout
+    // stopwatch's switch-sides countdown. Mirrors Postgres migration 041.
+    // Stores shape unchanged (has_sides is not indexed). Backfill false on
+    // existing rows so reads after upgrade get a defined boolean.
+    this.version(20).stores(v16Stores).upgrade(async tx => {
+      await tx.table('exercises').toCollection().modify(row => {
+        if (row.has_sides === undefined) row.has_sides = false;
+      });
+    });
+
+    // versionchange handler — when a new SW activates and the next page
+    // load opens the DB at v21+, Dexie fires versionchange on existing
+    // open connections. Without handling, those connections deadlock the
+    // upgrade. Close + reload so the new schema actually takes effect.
+    this.on('versionchange', () => {
+      this.close();
+      if (typeof window !== 'undefined') window.location.reload();
+    });
   }
 }
 
@@ -905,6 +929,7 @@ export async function hydrateExercises(): Promise<void> {
           image_count: ex.image_count ?? 0,
           youtube_url: ex.youtube_url ?? null,
           image_urls: ex.image_urls ?? null,
+          has_sides: ex.has_sides ?? false,
         });
       }
     });
