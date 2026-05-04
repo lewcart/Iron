@@ -18,6 +18,7 @@
 
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, fireEvent, cleanup, act } from '@testing-library/react';
+import { useEffect, useState } from 'react';
 import type { Exercise } from '@/types';
 
 // Stateful mock of useExercises — a setter outside the React tree lets the
@@ -33,8 +34,8 @@ vi.mock('@/lib/useLocalDB', () => ({
   useExercises: () => {
     // Re-read on every notify by forcing a state bump. Mirrors useLiveQuery's
     // reactive contract closely enough for this test.
-    const [, force] = require('react').useState(0);
-    require('react').useEffect(() => {
+    const [, force] = useState(0);
+    useEffect(() => {
       const sub = () => force((n: number) => n + 1);
       subscribers.add(sub);
       return () => { subscribers.delete(sub); };
