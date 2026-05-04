@@ -1233,50 +1233,105 @@ export async function startWorkoutFromRoutine(routineUuid: string): Promise<Star
 }
 
 // ===== SUMMARY STATS =====
+//
+// Week-boundary policy: Postgres runs in UTC, so a naive
+// `date_trunc('week', NOW())` rolls over at 00:00 UTC — wrong for any
+// user TZ east of UTC (e.g. AEST users see "this week" still resolving
+// to last Monday for ~10h every Sun→Mon). Every query that depends on
+// "this week" / "current week" takes a `tz` param (IANA TZ name) and
+// converts NOW into local civil time before truncating:
+//   date_trunc('week', (NOW() AT TIME ZONE $tz)::timestamp)
+// `weekOffset` shifts in 7-day steps from that local-Monday boundary.
 
-export async function getWeekWorkouts(): Promise<{ uuid: string; start_time: string; end_time: string }[]> {
+import { APP_TZ } from '@/lib/app-tz';
+
+export async function getWeekWorkouts(tz: string = APP_TZ): Promise<{ uuid: string; start_time: string; end_time: string }[]> {
   const rows = await query<DbRow>(`
     SELECT uuid, start_time, end_time FROM workouts
-    WHERE start_time >= date_trunc('week', CURRENT_DATE)
+    WHERE start_time >= date_trunc('week', (NOW() AT TIME ZONE $1)::timestamp) AT TIME ZONE $1
     AND end_time IS NOT NULL
     AND is_current = false
     ORDER BY start_time DESC
-  `);
+  `, [tz]);
   return rows as { uuid: string; start_time: string; end_time: string }[];
 }
 
-export async function getWeekVolume(): Promise<number> {
+export async function getWeekVolume(tz: string = APP_TZ): Promise<number> {
   const row = await queryOne<DbRow>(`
     SELECT COALESCE(SUM(ws.weight * ws.repetitions), 0) as total_volume
     FROM workout_sets ws
     JOIN workout_exercises we ON ws.workout_exercise_uuid = we.uuid
     JOIN workouts w ON we.workout_uuid = w.uuid
-    WHERE w.start_time >= date_trunc('week', CURRENT_DATE)
+    WHERE w.start_time >= date_trunc('week', (NOW() AT TIME ZONE $1)::timestamp) AT TIME ZONE $1
     AND w.end_time IS NOT NULL AND ws.is_completed = true
-  `);
+  `, [tz]);
   return row ? Number(row.total_volume) : 0;
 }
 
-export async function getWorkoutStreak(): Promise<{ week_start: string }[]> {
+export async function getWorkoutStreak(tz: string = APP_TZ): Promise<{ week_start: string }[]> {
+  // Bucket each workout's start_time by the user's local week so streaks
+  // aren't broken when a Sun-evening UTC session spills back into the
+  // prior local week.
   const rows = await query<DbRow>(`
     WITH weekly AS (
-      SELECT DISTINCT date_trunc('week', start_time)::date as week_start
+      SELECT DISTINCT date_trunc('week', (start_time AT TIME ZONE $1))::date as week_start
       FROM workouts WHERE end_time IS NOT NULL AND is_current = false
     )
     SELECT week_start FROM weekly ORDER BY week_start DESC
-  `);
+  `, [tz]);
   return rows as { week_start: string }[];
 }
 
-export async function getWeekMuscleFrequency(): Promise<{ primary_muscles: string[] | string }[]> {
+/** Distinct strength sessions in the chosen week (offset from current
+ *  local week) — drives the frequency-bound MRV column for the priority-
+ *  muscles tile when the user picks a previous week. Returns the local
+ *  YYYY-MM-DD Monday/Sunday for labelling. */
+export async function getOffsetWeekSessions(weekOffset: number, tz: string = APP_TZ): Promise<{
+  week_start: string;
+  week_end: string;
+  session_count: number;
+}> {
+  const row = await queryOne<DbRow>(`
+    WITH week_bounds AS (
+      SELECT
+        (date_trunc('week', (NOW() AT TIME ZONE $2)::timestamp) + (INTERVAL '7 days' * $1::int)) AT TIME ZONE $2 AS start_at,
+        (date_trunc('week', (NOW() AT TIME ZONE $2)::timestamp) + (INTERVAL '7 days' * ($1::int + 1))) AT TIME ZONE $2 AS end_at,
+        (date_trunc('week', (NOW() AT TIME ZONE $2)::timestamp) + (INTERVAL '7 days' * $1::int))::date AS local_start,
+        (date_trunc('week', (NOW() AT TIME ZONE $2)::timestamp) + (INTERVAL '7 days' * ($1::int + 1)) - INTERVAL '1 day')::date AS local_end
+    )
+    SELECT
+      to_char(wb.local_start, 'YYYY-MM-DD') AS week_start,
+      to_char(wb.local_end, 'YYYY-MM-DD') AS week_end,
+      (
+        SELECT COUNT(DISTINCT w.uuid)
+        FROM workouts w
+        JOIN workout_exercises we ON we.workout_uuid = w.uuid
+        JOIN workout_sets ws ON ws.workout_exercise_uuid = we.uuid
+        WHERE w.start_time >= wb.start_at
+          AND w.start_time <  wb.end_at
+          AND w.end_time IS NOT NULL
+          AND w.is_current = false
+          AND ws.is_completed = true
+          AND (ws.repetitions >= 1 OR ws.duration_seconds > 0)
+      )::int AS session_count
+    FROM week_bounds wb
+  `, [weekOffset, tz]);
+  return {
+    week_start: String(row?.week_start ?? ''),
+    week_end: String(row?.week_end ?? ''),
+    session_count: Number(row?.session_count ?? 0),
+  };
+}
+
+export async function getWeekMuscleFrequency(tz: string = APP_TZ): Promise<{ primary_muscles: string[] | string }[]> {
   const rows = await query<DbRow>(`
     SELECT e.primary_muscles
     FROM workout_exercises we
     JOIN exercises e ON we.exercise_uuid = e.uuid
     JOIN workouts w ON we.workout_uuid = w.uuid
-    WHERE w.start_time >= date_trunc('week', CURRENT_DATE)
+    WHERE w.start_time >= date_trunc('week', (NOW() AT TIME ZONE $1)::timestamp) AT TIME ZONE $1
     AND w.end_time IS NOT NULL
-  `);
+  `, [tz]);
   return rows as { primary_muscles: string[] | string }[];
 }
 
@@ -1301,9 +1356,10 @@ export async function getWeekMuscleFrequency(): Promise<{ primary_muscles: strin
  *   coverage='tagged' → at least one exercise in the catalog tags it.
  *
  *   week_offset 0=current, -1=last week. Boundaries match getWeekVolume
- *   (Monday start, ISO week, local server TZ).
+ *   (Monday start, ISO week, **user-local** TZ — see "Week-boundary
+ *   policy" comment above on the SUMMARY STATS section).
  */
-export async function getWeekSetsPerMuscle(weekOffset: number = 0): Promise<{
+export async function getWeekSetsPerMuscle(weekOffset: number = 0, tz: string = APP_TZ): Promise<{
   slug: string;
   display_name: string;
   parent_group: string;
@@ -1315,13 +1371,14 @@ export async function getWeekSetsPerMuscle(weekOffset: number = 0): Promise<{
   kg_volume: number;
   coverage: 'none' | 'tagged';
 }[]> {
-  // Negative week_offset goes back. Postgres INTERVAL accepts negative values,
-  // and date_trunc + arithmetic gives us the Monday boundary.
+  // Boundary computed in the user's local TZ then converted back to a
+  // timestamptz so the comparison against `workouts.start_time` (UTC) is
+  // correct. Negative `weekOffset` walks back week-by-week.
   const rows = await query<DbRow>(`
     WITH week_bounds AS (
       SELECT
-        date_trunc('week', CURRENT_DATE) + (INTERVAL '7 days' * $1::int) AS week_start,
-        date_trunc('week', CURRENT_DATE) + (INTERVAL '7 days' * ($1::int + 1)) AS week_end
+        (date_trunc('week', (NOW() AT TIME ZONE $2)::timestamp) + (INTERVAL '7 days' * $1::int)) AT TIME ZONE $2 AS week_start,
+        (date_trunc('week', (NOW() AT TIME ZONE $2)::timestamp) + (INTERVAL '7 days' * ($1::int + 1))) AT TIME ZONE $2 AS week_end
     ),
     week_sets AS (
       SELECT
@@ -1404,7 +1461,7 @@ export async function getWeekSetsPerMuscle(weekOffset: number = 0): Promise<{
     LEFT JOIN muscle_aggregate ma ON ma.muscle_slug = m.slug
     LEFT JOIN muscle_coverage  mc ON mc.muscle_slug = m.slug
     ORDER BY m.display_order
-  `, [weekOffset]);
+  `, [weekOffset, tz]);
 
   return rows.map(r => ({
     slug: r.slug as string,

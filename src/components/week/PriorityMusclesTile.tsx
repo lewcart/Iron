@@ -2,14 +2,36 @@
 
 import Link from 'next/link';
 import { useState } from 'react';
-import { ChevronDown, ChevronUp, Info, Pencil } from 'lucide-react';
+import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Info, Pencil } from 'lucide-react';
 import type { PriorityMuscleRow, PriorityMusclesTileData } from '@/lib/api/resolveWeekTiles';
 import type { Zone } from '@/lib/training/volume-landmarks';
 import { SufficiencyBadge } from './SufficiencyBadge';
 
+export interface PriorityMusclesTileProps {
+  data: PriorityMusclesTileData;
+  /** 0 = this week, -1 = last, etc. Used for the picker label + chevron gating. */
+  weekOffset?: number;
+  /** Selected week's Monday (YYYY-MM-DD, user-local TZ). Optional —
+   *  hides the date label when omitted. */
+  weekStart?: string;
+  /** Selected week's Sunday (YYYY-MM-DD). */
+  weekEnd?: string;
+  /** Picker callback. Omit to hide the chevrons (e.g. tests). */
+  onChangeWeekOffset?: (next: number) => void;
+}
+
 /** Tile 1 — Priority Muscles vs MEV/MAV/MRV (the headline tile). */
-export function PriorityMusclesTile({ data }: { data: PriorityMusclesTileData }) {
+export function PriorityMusclesTile({
+  data,
+  weekOffset = 0,
+  weekStart,
+  weekEnd,
+  onChangeWeekOffset,
+}: PriorityMusclesTileProps) {
   const [expanded, setExpanded] = useState(false);
+  const showPicker = onChangeWeekOffset != null;
+  const canGoForward = weekOffset < 0;
+  const weekLabel = formatWeekLabel(weekOffset, weekStart, weekEnd);
 
   const priority = data.rows.filter(r => r.isPriority);
   const inZoneOrUnder = data.rows.filter(r => !r.isPriority && !r.isDeemphasis && (r.zone === 'in-zone' || r.zone === 'under'));
@@ -42,6 +64,34 @@ export function PriorityMusclesTile({ data }: { data: PriorityMusclesTileData })
           </Link>
         </div>
       </div>
+
+      {showPicker && (
+        <div className="mt-2 flex items-center justify-between gap-2">
+          <button
+            type="button"
+            onClick={() => onChangeWeekOffset!(weekOffset - 1)}
+            aria-label="View previous week"
+            className="inline-flex h-9 w-9 -m-1 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+          >
+            <ChevronLeft className="h-4 w-4" strokeWidth={2} />
+          </button>
+          <span
+            className="text-[11px] text-muted-foreground tabular-nums"
+            aria-live="polite"
+          >
+            {weekLabel}
+          </span>
+          <button
+            type="button"
+            onClick={() => canGoForward && onChangeWeekOffset!(weekOffset + 1)}
+            disabled={!canGoForward}
+            aria-label="View next week"
+            className="inline-flex h-9 w-9 -m-1 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+          >
+            <ChevronRight className="h-4 w-4" strokeWidth={2} />
+          </button>
+        </div>
+      )}
 
       <div className="mt-3 space-y-2">
         {priority.map(row => (
@@ -179,6 +229,24 @@ function MuscleRow({ row, priority = false }: { row: PriorityMuscleRow; priority
       </div>
     </div>
   );
+}
+
+/** Build a terse week-picker label. Prefers human strings (this/last week)
+ *  for the recent two; falls back to the ISO Mon–Sun span otherwise. */
+export function formatWeekLabel(offset: number, weekStart?: string, weekEnd?: string): string {
+  if (offset === 0) return 'this week';
+  if (offset === -1) return 'last week';
+  if (weekStart && weekEnd) return `${formatShortDate(weekStart)} – ${formatShortDate(weekEnd)}`;
+  return `${offset} wk`;
+}
+
+/** YYYY-MM-DD → "Apr 20" (no year). Pure date math — no `Date` parse to
+ *  avoid timezone shifts on the YYYY-MM-DD anchor. */
+function formatShortDate(iso: string): string {
+  const [y, m, d] = iso.split('-').map(Number);
+  if (!y || !m || !d) return iso;
+  const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  return `${monthNames[m - 1]} ${d}`;
 }
 
 function zoneTextClass(zone: Zone): string {

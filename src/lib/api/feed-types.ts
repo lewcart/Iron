@@ -46,6 +46,15 @@ export interface SummaryData {
    * tags this muscle yet — UI should collapse those into a footer.
    */
   setsByMuscle: SetsByMuscleRow[];
+  /** Selected week (Monday in user-local TZ, YYYY-MM-DD). */
+  weekStart: string;
+  /** Selected week end (Sunday inclusive, YYYY-MM-DD). */
+  weekEnd: string;
+  /** 0 = this week, -1 = last week, etc. Drives the week-picker label. */
+  weekOffset: number;
+  /** Distinct strength sessions in the selected week — used by the
+   *  PriorityMusclesTile to size the MRV-by-frequency column. */
+  weekSessions: number;
 }
 
 export interface SetsByMuscleRow {

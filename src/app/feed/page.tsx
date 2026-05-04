@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useLiveQuery } from 'dexie-react-hooks';
@@ -19,7 +19,7 @@ import {
   type WeekFacts,
   type WeekFactsAnchorSetInput,
 } from '@/lib/api/week-facts';
-import { resolveWeekTiles } from '@/lib/api/resolveWeekTiles';
+import { resolveWeekTiles, type WeekTile } from '@/lib/api/resolveWeekTiles';
 import {
   ANCHOR_LIFTS,
   resolveAnchorLift,
@@ -123,15 +123,46 @@ function fetchCardioWeek(): Promise<CardioTileResponse> {
 
 export default function WeekPage() {
   const queryClient = useQueryClient();
-  const feedQueryKey = queryKeys.feed(FEED_QUERY_DEFAULTS.days, FEED_QUERY_DEFAULTS.timelineLimit);
 
-  // ── Server bundle (summary.setsByMuscle, lastWorkouts) ─────────────
+  // Week-picker state for the priority-muscles tile. 0 = this week,
+  // -1 = last week, etc. Forward weeks are not allowed.
+  // Only the priority-muscles tile re-fetches on offset change — every
+  // other tile (RIR, anchor lifts, recovery, prescription) intentionally
+  // stays anchored to the current week, otherwise PUSH/REDUCE/DELOAD
+  // verdicts and 8-week trends would all jump too.
+  const [weekOffset, setWeekOffset] = useState(0);
+
+  const feedQueryKey = queryKeys.feed(FEED_QUERY_DEFAULTS.days, FEED_QUERY_DEFAULTS.timelineLimit, 0);
+
+  // ── Server bundle (summary.setsByMuscle, lastWorkouts) — current week ─
   const { data: feedBundle, isPending: feedPending } = useQuery({
     queryKey: feedQueryKey,
-    queryFn: () => fetchFeedBundle(FEED_QUERY_DEFAULTS.days, FEED_QUERY_DEFAULTS.timelineLimit),
+    queryFn: () => fetchFeedBundle({
+      days: FEED_QUERY_DEFAULTS.days,
+      timelineLimit: FEED_QUERY_DEFAULTS.timelineLimit,
+      weekOffset: 0,
+    }),
     staleTime: 45_000,
     placeholderData: (prev) => prev,
   });
+
+  // ── Picker-driven server bundle — only fetched when offset != 0 ──
+  const offsetFeedQueryKey = queryKeys.feed(FEED_QUERY_DEFAULTS.days, FEED_QUERY_DEFAULTS.timelineLimit, weekOffset);
+  const { data: offsetFeedBundle } = useQuery({
+    queryKey: offsetFeedQueryKey,
+    queryFn: () => fetchFeedBundle({
+      days: FEED_QUERY_DEFAULTS.days,
+      timelineLimit: FEED_QUERY_DEFAULTS.timelineLimit,
+      weekOffset,
+    }),
+    staleTime: 45_000,
+    placeholderData: (prev) => prev,
+    enabled: weekOffset !== 0,
+  });
+
+  // The summary used for the priority-muscles tile: offset bundle if a
+  // non-current week is selected, else the live `feedBundle`.
+  const priorityWeekSummary = weekOffset === 0 ? feedBundle?.summary : offsetFeedBundle?.summary;
 
   // ── Health (HRV daily + last-night sleep) ─────────────────────────
   const { data: snapshot } = useQuery({
@@ -872,22 +903,43 @@ export default function WeekPage() {
 
   // Inject weeks_with_data approximation into PriorityMusclesTile rows so
   // the SufficiencyBadge renders. v1.2 will make this per-muscle.
+  // When the user picks a non-current week, swap the priority-muscles
+  // tile's data for one resolved against the offset summary — but keep
+  // every other tile (RIR, anchor lifts, etc.) anchored to "this week".
   const tilesWithBadges = useMemo(() => {
     const weeksApprox = Math.min(8, facts.rirByWeek.length);
+
+    // Compute the offset-week priority-muscles tile when the picker is
+    // moved away from "this week". Reuses the same resolver, fed an
+    // overridden facts object (only setsByMuscle + sessions_this_week
+    // change so the bar widths and MRV column reflect the picked week).
+    let offsetPriorityTile: WeekTile | null = null;
+    if (weekOffset !== 0 && priorityWeekSummary) {
+      const offsetFacts: WeekFacts = {
+        ...facts,
+        setsByMuscle: priorityWeekSummary.setsByMuscle,
+        sessions_this_week: priorityWeekSummary.weekSessions,
+      };
+      const resolved = resolveWeekTiles(offsetFacts);
+      offsetPriorityTile = resolved.find(t => t.id === 'priority-muscles') ?? null;
+    }
+
     return tiles.map(t => {
-      if (t.id !== 'priority-muscles' || t.state !== 'ok') return t;
+      if (t.id !== 'priority-muscles') return t;
+      const source = offsetPriorityTile ?? t;
+      if (source.state !== 'ok') return source;
       return {
-        ...t,
+        ...source,
         data: {
-          ...t.data,
-          rows: t.data.rows.map(r => ({
+          ...source.data,
+          rows: source.data.rows.map(r => ({
             ...r,
             weeks_with_data: r.weeks_with_data ?? weeksApprox,
           })),
         },
       };
     });
-  }, [tiles, facts.rirByWeek.length]);
+  }, [tiles, facts, facts.rirByWeek.length, weekOffset, priorityWeekSummary]);
 
   // ── Section B: 12-Week Trends data assembly ───────────────────────
   const trendsData: TwelveWeekTrendsData = useMemo(() => {
@@ -1034,7 +1086,16 @@ export default function WeekPage() {
           // and assert `data` (the discriminated-union ok-branch carries it).
           let body: React.ReactNode = null;
           if (tile.id === 'priority-muscles' && tile.state === 'ok') {
-            body = <PriorityMusclesTile key={tile.id} data={tile.data} />;
+            body = (
+              <PriorityMusclesTile
+                key={tile.id}
+                data={tile.data}
+                weekOffset={weekOffset}
+                weekStart={priorityWeekSummary?.weekStart}
+                weekEnd={priorityWeekSummary?.weekEnd}
+                onChangeWeekOffset={setWeekOffset}
+              />
+            );
           } else if (tile.id === 'effective-set-quality' && tile.state === 'ok') {
             body = <EffectiveSetQualityTile key={tile.id} data={tile.data} />;
           } else if (tile.id === 'anchor-lift-trend' && (tile.state === 'ok' || tile.state === 'partial')) {
