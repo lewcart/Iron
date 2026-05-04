@@ -2,7 +2,6 @@ import Foundation
 import Capacitor
 import CoreLocation
 import HealthKit
-import UIKit
 import UserNotifications
 
 // MARK: - GeofencePlugin
@@ -40,12 +39,7 @@ public class GeofencePlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "cancelActiveWalk",    returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "getActiveWalkState",  returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "getStatus",           returnType: CAPPluginReturnPromise),
-        // Dev / test simulation methods (gated by JS-side dev-mode toggle):
-        CAPPluginMethod(name: "simulateWalkOutbound", returnType: CAPPluginReturnPromise),
-        CAPPluginMethod(name: "simulateWalkInbound",  returnType: CAPPluginReturnPromise),
-        CAPPluginMethod(name: "requestHKWriteAuth",   returnType: CAPPluginReturnPromise),
-        CAPPluginMethod(name: "deleteRecentSimulatedWalks", returnType: CAPPluginReturnPromise),
-        CAPPluginMethod(name: "openIOSSettings",      returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "requestHKWriteAuth",  returnType: CAPPluginReturnPromise),
     ]
 
     // ── Region identifiers ───────────────────────────────────────────────────
@@ -222,60 +216,6 @@ public class GeofencePlugin: CAPPlugin, CAPBridgedPlugin {
         }
     }
 
-    /// Deep-link to iOS Settings → Rebirth so the user can hit "Health Access"
-    /// and toggle the missing permission types. We can't deep-link further
-    /// (Apple doesn't expose a public URL for the per-app Health Access subscreen).
-    @objc func openIOSSettings(_ call: CAPPluginCall) {
-        DispatchQueue.main.async {
-            if let url = URL(string: UIApplication.openSettingsURLString) {
-                UIApplication.shared.open(url) { ok in
-                    call.resolve(["opened": ok])
-                }
-            } else {
-                call.reject("Could not build settings URL")
-            }
-        }
-    }
-
-    /// DEV: delete Rebirth-branded HKWorkouts saved in the last hour. Used
-    /// to clean up after `Simulate walk-1` / `Simulate walk-2` taps without
-    /// having to manually find each workout in the Health app.
-    @objc func deleteRecentSimulatedWalks(_ call: CAPPluginCall) {
-        guard let store = walkTracker.exposedHealthStore else {
-            call.reject("HealthKit not available")
-            return
-        }
-        let workoutType = HKObjectType.workoutType()
-        let oneHourAgo = Date().addingTimeInterval(-3600)
-        let datePredicate = HKQuery.predicateForSamples(withStart: oneHourAgo, end: Date(), options: [])
-        let brandPredicate = HKQuery.predicateForObjects(withMetadataKey: HKMetadataKeyWorkoutBrandName, allowedValues: ["Rebirth"])
-        let predicate = NSCompoundPredicate(andPredicateWithSubpredicates: [datePredicate, brandPredicate])
-        let query = HKSampleQuery(
-            sampleType: workoutType,
-            predicate: predicate,
-            limit: 50,
-            sortDescriptors: nil
-        ) { _, samples, error in
-            if let error = error {
-                DispatchQueue.main.async { call.reject(error.localizedDescription) }
-                return
-            }
-            guard let workouts = samples, !workouts.isEmpty else {
-                DispatchQueue.main.async { call.resolve(["deleted": 0]) }
-                return
-            }
-            store.delete(workouts) { success, err in
-                DispatchQueue.main.async {
-                    if success {
-                        call.resolve(["deleted": workouts.count])
-                    } else {
-                        call.reject(err?.localizedDescription ?? "Delete failed")
-                    }
-                }
-            }
-        }
-        store.execute(query)
-    }
 
     // MARK: - Public JS methods — walk control
 
@@ -316,104 +256,6 @@ public class GeofencePlugin: CAPPlugin, CAPBridgedPlugin {
         call.resolve(["started": true])
     }
 
-    /// Pick a route centre point. Prefers the midpoint between home and gym
-    /// if both are set. Falls back to home + a small northward offset when
-    /// only home is set (useful for sim before the user has been to the gym).
-    /// If home isn't set, returns nil — sim can't generate a plausible route.
-    private func simulationCenter() -> (lat: Double, lon: Double)? {
-        let home = loadPersisted(StoredRegion.self, key: GeofencePlugin.prefsHomeKey)
-        let gym = loadPersisted(StoredRegion.self, key: GeofencePlugin.prefsGymKey)
-        if let h = home, let g = gym {
-            return ((h.lat + g.lat) / 2, (h.lon + g.lon) / 2)
-        }
-        if let h = home {
-            // ~700m north of home (0.0063° lat ≈ 700m). No gym needed.
-            return (h.lat + 0.0063, h.lon)
-        }
-        return nil
-    }
-
-    /// DEV: simulate the outbound walk (depart-home → gym arrival → save).
-    /// Awaits the actual save and surfaces the specific failure reason to JS.
-    @objc func simulateWalkOutbound(_ call: CAPPluginCall) {
-        runSimulation(reason: .departHome, leg: .outbound, durationMinutesDefault: 18, call: call)
-    }
-
-    /// DEV: simulate the inbound walk (start walk-2 → home arrival → save).
-    @objc func simulateWalkInbound(_ call: CAPPluginCall) {
-        runSimulation(reason: .postWorkout, leg: .inbound, durationMinutesDefault: 16, call: call)
-    }
-
-    /// Shared simulation orchestration that awaits the HK save and reports
-    /// the specific WalkSaveError back to JS so the caller can show actionable
-    /// error messages in the UI.
-    private func runSimulation(reason: WalkTracker.WalkReason, leg: WalkLeg, durationMinutesDefault: Int, call: CAPPluginCall) {
-        guard let centre = simulationCenter() else {
-            call.reject("Set Home before simulating")
-            return
-        }
-        let durationMin = call.getInt("durationMinutes") ?? durationMinutesDefault
-        let durationSec = TimeInterval(durationMin * 60)
-        let now = Date()
-        let _ = walkTracker.start(reason: reason, at: now.addingTimeInterval(-durationSec))
-        walkTracker.injectSyntheticRoute(
-            centerLat: centre.lat,
-            centerLon: centre.lon,
-            sampleCount: 20,
-            durationSeconds: durationSec,
-            endsAt: now
-        )
-        notifyWalkStateChanged()
-        walkTracker.transition(to: leg == .outbound ? .atGymWalkSaved : .completed)
-        walkTracker.finish(at: now) { [weak self] result in
-            self?.handleWalkFinishResult(result, leg: leg, partial: false)
-            DispatchQueue.main.async {
-                switch result {
-                case .success:
-                    call.resolve(["simulated": true, "saved": true, "durationMinutes": durationMin])
-                case .failure(let err):
-                    call.reject(self?.describeWalkSaveError(err) ?? "save failed")
-                }
-            }
-        }
-    }
-
-    private func describeWalkSaveError(_ err: WalkSaveError) -> String {
-        switch err {
-        case .notActive:
-            return "Walk wasn't active — sim state corrupt. Toggle Auto-log walks off + on."
-        case .healthKitUnavailable:
-            return "HealthKit isn't available on this device."
-        case .noSamples:
-            return "No GPS samples were captured — route file empty. Likely a storage write failure."
-        case .beginCollectionFailed(let inner):
-            return "HKWorkoutBuilder.beginCollection failed: \(inner?.localizedDescription ?? "no detail")"
-        case .finishWorkoutFailed(let inner):
-            let msg = inner.map { describeHKError($0 as NSError) } ?? "no detail"
-            return "Workout save failed: \(msg)"
-        case .routeInsertFailed(let inner, _):
-            let msg = describeHKError(inner as NSError)
-            return "Workout saved but route insert failed: \(msg). In iOS Settings → Health → Data Access & Devices → Rebirth, make sure 'Workout Routes' is ON."
-        }
-    }
-
-    private func describeHKError(_ err: NSError) -> String {
-        if err.domain == HKError.errorDomain {
-            switch err.code {
-            case HKError.errorAuthorizationDenied.rawValue:
-                return "permission denied — toggle Workouts + Workout Routes ON in iOS Settings → Health → Data Access & Devices → Rebirth"
-            case HKError.errorAuthorizationNotDetermined.rawValue:
-                return "permission not yet asked"
-            case HKError.errorHealthDataUnavailable.rawValue:
-                return "HealthKit unavailable"
-            case HKError.errorDatabaseInaccessible.rawValue:
-                return "Health database locked (phone still locked?)"
-            default:
-                return "HKError \(err.code): \(err.localizedDescription)"
-            }
-        }
-        return err.localizedDescription
-    }
 
     @objc func cancelActiveWalk(_ call: CAPPluginCall) {
         endActiveWalkLocationUpdates()
