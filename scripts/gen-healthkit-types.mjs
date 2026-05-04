@@ -71,6 +71,9 @@ export function generateSwift(catalog) {
 		} else if (t.kind === 'workout') {
 			if (reads) lines.push(`${indent(depth)}read.insert(HKObjectType.workoutType())`);
 			if (writes) lines.push(`${indent(depth)}write.insert(HKObjectType.workoutType())`);
+		} else if (t.kind === 'workoutRoute') {
+			if (reads) lines.push(`${indent(depth)}read.insert(HKSeriesType.workoutRoute())`);
+			if (writes) lines.push(`${indent(depth)}write.insert(HKSeriesType.workoutRoute())`);
 		}
 		// kind === 'medicationDoseEvent' deliberately emits nothing into the standard
 		// auth set. iOS 26 medications use per-object authorization
@@ -98,6 +101,8 @@ export function generateSwift(catalog) {
 			lines.push(`        if let _t = HKCategoryType.categoryType(forIdentifier: .${t.identifier}) { types.append(_t) }`);
 		} else if (t.kind === 'workout') {
 			lines.push(`        types.append(HKObjectType.workoutType())`);
+		} else if (t.kind === 'workoutRoute') {
+			lines.push(`        types.append(HKSeriesType.workoutRoute())`);
 		}
 	}
 	lines.push('        return types');
@@ -146,6 +151,8 @@ export function generateSwift(catalog) {
 			cases.push(`${depths[depth]}return HKCategoryType.categoryType(forIdentifier: .${t.identifier})`);
 		} else if (t.kind === 'workout') {
 			cases.push(`${depths[depth]}return HKObjectType.workoutType()`);
+		} else if (t.kind === 'workoutRoute') {
+			cases.push(`${depths[depth]}return HKSeriesType.workoutRoute()`);
 		} else if (t.kind === 'medicationDoseEvent') {
 			// Per-object auth type — not exposed via the standard objectType resolver.
 			// Callers should use HKHealthStore.requestPerObjectReadAuthorization directly.

@@ -40,6 +40,7 @@ import {
 } from '@/lib/geofence';
 import { GeofenceOnboarding } from '@/components/GeofenceOnboarding';
 import { HealthKitSettings } from '@/components/HealthKitSettings';
+import { MorningWalkSettings } from '@/components/MorningWalkSettings';
 
 const REST_TIMES = [30, 60, 90, 120, 150, 180, 210, 240, 300];
 
@@ -87,8 +88,8 @@ function Toggle({ on, onToggle }: { on: boolean; onToggle: () => void }) {
       }`}
     >
       <span
-        className={`absolute top-0.5 w-6 h-6 rounded-full bg-white shadow transition-transform ${
-          on ? 'translate-x-5' : 'translate-x-0.5'
+        className={`absolute top-0.5 w-6 h-6 rounded-full bg-white shadow transition-all ${
+          on ? 'left-0.5 right-auto' : 'right-0.5 left-auto'
         }`}
       />
     </button>
@@ -681,6 +682,9 @@ export default function SettingsPage() {
             )}
           </div>
         )}
+
+        {/* ── Auto-log Morning Walks ──────────────────── */}
+        <MorningWalkSettings />
 
         {/* ── Apple Health ────────────────────────────── */}
         <HealthKitSettings />

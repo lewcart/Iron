@@ -9,7 +9,8 @@
 		"blurb": "What Rebirth uses this type for, plain English.",
 		"iosMin": "Minimum iOS major.minor (e.g. '26.0'). Generates an @available guard. Null = no guard.",
 		"featureFlag": "Optional UserDefaults bool key that gates this type at runtime. Null = always on.",
-		"category": "Bucket for the UI grouping. clinical | bodycomp | activity | workouts | sleep | nutrition | medications"
+		"category": "Bucket for the UI grouping. clinical | bodycomp | activity | workouts | sleep | nutrition | medications",
+		"_kindWorkoutRoute": "Series type HKSeriesType.workoutRoute() — paired with workout writes. Used by morning-walk-automation to attach GPS routes to outdoor walks."
 	},
 	"types": [
 		{ "tsKey": "stepCount", "kind": "quantity", "identifier": "stepCount", "access": "read", "label": "Steps", "blurb": "Daily activity totals", "category": "activity" },
@@ -42,7 +43,8 @@
 		{ "tsKey": "waistCircumference", "kind": "quantity", "identifier": "waistCircumference", "access": "readWrite", "label": "Waist Circumference", "blurb": "Tape-measure data, complements InBody", "category": "bodycomp" },
 		{ "tsKey": "height", "kind": "quantity", "identifier": "height", "access": "readWrite", "label": "Height", "blurb": "One-time read; informs BMI math", "category": "bodycomp" },
 
-		{ "tsKey": "workout", "kind": "workout", "access": "readWrite", "label": "Workouts", "blurb": "Reads cardio, writes Rebirth strength", "category": "workouts" },
+		{ "tsKey": "workout", "kind": "workout", "access": "readWrite", "label": "Workouts", "blurb": "Reads cardio, writes Rebirth strength + auto-logged morning walks", "category": "workouts" },
+		{ "tsKey": "workoutRoute", "kind": "workoutRoute", "access": "write", "label": "Workout Routes (GPS)", "blurb": "GPS routes for auto-logged morning walks", "category": "workouts" },
 
 		{ "tsKey": "sleepAnalysis", "kind": "category", "identifier": "sleepAnalysis", "access": "read", "label": "Sleep", "blurb": "Stages, in-bed, consistency", "category": "sleep" },
 		{ "tsKey": "mindfulSession", "kind": "category", "identifier": "mindfulSession", "access": "readWrite", "label": "Mindful Minutes", "blurb": "Meditation tracking, pairs with sleep", "category": "sleep" },

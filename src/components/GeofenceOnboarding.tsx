@@ -21,8 +21,11 @@ export function GeofenceOnboarding({ onConfirm, onDismiss }: Props) {
 
   if (step === 'permission') {
     return (
-      <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 backdrop-blur-sm">
-        <div className="w-full max-w-md rounded-t-2xl bg-zinc-900 p-6 pb-safe space-y-5">
+      <div className="fixed inset-0 z-[60] flex items-end justify-center bg-black/60 backdrop-blur-sm">
+        <div
+          className="w-full max-w-md rounded-t-2xl bg-zinc-900 p-6 space-y-5"
+          style={{ paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + var(--tab-bar-inner-height, 49px) + 1.5rem)' }}
+        >
           <div className="flex items-center justify-between">
             <h2 className="text-lg font-semibold text-white">Allow background location</h2>
             <button onClick={onDismiss} className="text-zinc-400 hover:text-white">
@@ -59,8 +62,11 @@ export function GeofenceOnboarding({ onConfirm, onDismiss }: Props) {
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 backdrop-blur-sm">
-      <div className="w-full max-w-md rounded-t-2xl bg-zinc-900 p-6 pb-safe space-y-6">
+    <div className="fixed inset-0 z-[60] flex items-end justify-center bg-black/60 backdrop-blur-sm">
+      <div
+        className="w-full max-w-md rounded-t-2xl bg-zinc-900 p-6 space-y-6"
+        style={{ paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + var(--tab-bar-inner-height, 49px) + 1.5rem)' }}
+      >
         <div className="flex items-center justify-between">
           <h2 className="text-lg font-semibold text-white">Auto-end at home</h2>
           <button onClick={onDismiss} className="text-zinc-400 hover:text-white">

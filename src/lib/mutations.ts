@@ -6,6 +6,7 @@ import type { LocalWorkout, LocalWorkoutExercise, LocalWorkoutSet, LocalBodyweig
 import { uuid as genUUID } from '@/lib/uuid';
 import { saveWorkoutToHealthKit } from '@/lib/healthkit';
 import { resolveCanonicalExerciseUuids } from '@/lib/useLocalDB';
+import { startWalkNow as startMorningWalkAfterFinish, isAutoWalkEnabledFromLS, isGeofenceAvailable } from '@/lib/geofence';
 
 function now() {
   return Date.now();
@@ -65,6 +66,17 @@ export async function finishWorkout(uuid: string): Promise<void> {
       endTime,
       title: workout.title,
     });
+  }
+
+  // Morning-walk automation: if auto-walk is enabled, start walk-2 immediately.
+  // The native plugin gates this internally on the master toggle and ignores
+  // the call if a walk is already active or if the home/gym pair isn't set up.
+  if (isGeofenceAvailable() && isAutoWalkEnabledFromLS()) {
+    try {
+      await startMorningWalkAfterFinish();
+    } catch (err) {
+      console.warn('[finishWorkout] startWalkNow failed', err);
+    }
   }
 }
 

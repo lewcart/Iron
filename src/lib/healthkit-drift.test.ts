@@ -39,7 +39,7 @@ describe('HealthKit type catalog drift', () => {
 	it('every entry has the required shape', () => {
 		for (const t of HK_RAW_ENTRIES) {
 			expect(t.tsKey).toMatch(/^[a-z][a-zA-Z0-9]*$/);
-			expect(['quantity', 'category', 'workout', 'medicationDoseEvent']).toContain(t.kind);
+			expect(['quantity', 'category', 'workout', 'workoutRoute', 'medicationDoseEvent']).toContain(t.kind);
 			expect(['read', 'write', 'readWrite']).toContain(t.access);
 			expect(typeof t.label).toBe('string');
 			expect(typeof t.blurb).toBe('string');

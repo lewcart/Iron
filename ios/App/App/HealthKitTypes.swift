@@ -168,6 +168,9 @@ enum HealthKitTypes {
         read.insert(HKObjectType.workoutType())
         write.insert(HKObjectType.workoutType())
 
+        // Workout Routes (GPS) (workoutRoute, write)
+        write.insert(HKSeriesType.workoutRoute())
+
         // Sleep (category, read)
         if let _t = HKCategoryType.categoryType(forIdentifier: .sleepAnalysis) {
             read.insert(_t)
@@ -268,6 +271,7 @@ enum HealthKitTypes {
         if let _t = HKQuantityType.quantityType(forIdentifier: .waistCircumference) { types.append(_t) }
         if let _t = HKQuantityType.quantityType(forIdentifier: .height) { types.append(_t) }
         types.append(HKObjectType.workoutType())
+        types.append(HKSeriesType.workoutRoute())
         if let _t = HKCategoryType.categoryType(forIdentifier: .mindfulSession) { types.append(_t) }
         if let _t = HKQuantityType.quantityType(forIdentifier: .dietaryEnergyConsumed) { types.append(_t) }
         if let _t = HKQuantityType.quantityType(forIdentifier: .dietaryProtein) { types.append(_t) }
@@ -316,6 +320,7 @@ enum HealthKitTypes {
         "waistCircumference",
         "height",
         "workout",
+        "workoutRoute",
         "sleepAnalysis",
         "mindfulSession",
         "dietaryEnergyConsumed",
@@ -349,6 +354,7 @@ enum HealthKitTypes {
         "waistCircumference",
         "height",
         "workout",
+        "workoutRoute",
         "mindfulSession",
         "dietaryEnergyConsumed",
         "dietaryProtein",
@@ -433,6 +439,8 @@ enum HealthKitTypes {
             return HKQuantityType.quantityType(forIdentifier: .height)
         case "workout":
             return HKObjectType.workoutType()
+        case "workoutRoute":
+            return HKSeriesType.workoutRoute()
         case "sleepAnalysis":
             return HKCategoryType.categoryType(forIdentifier: .sleepAnalysis)
         case "mindfulSession":
