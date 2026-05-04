@@ -8,6 +8,7 @@ import type { ProjectionPhoto, ProgressPhotoPose } from '@/types';
 import { apiBase, fetchJsonAuthed } from '@/lib/api/client';
 import { ProjectionUploadSheet } from './ProjectionUploadSheet';
 import { ALL_POSES, POSE_LABELS } from '@/lib/poses';
+import { useRefetchOnVisible } from '@/lib/useRefetchOnVisible';
 
 const POSE_FILTERS: ('all' | ProgressPhotoPose)[] = ['all', ...ALL_POSES];
 
@@ -110,12 +111,21 @@ export default function ProjectionsGalleryPage() {
   const [filter, setFilter] = useState<'all' | ProgressPhotoPose>('all');
   const [sheetOpen, setSheetOpen] = useState(false);
 
-  useEffect(() => {
-    fetchJsonAuthed<ProjectionPhoto[]>(`${apiBase()}/api/projection-photos?limit=100`)
-      .then(setPhotos)
-      .catch((e) => setError(e instanceof Error ? e.message : 'Failed to load'))
-      .finally(() => setLoading(false));
+  // Refresh-on-visible: this list isn't backed by Dexie liveQuery, so external
+  // changes (MCP uploads, other devices) wouldn't appear until reload without
+  // an explicit refetch. Foreground transitions trigger silent re-fetches —
+  // initial load still drives the skeleton.
+  const refetch = useCallback(() => {
+    return fetchJsonAuthed<ProjectionPhoto[]>(`${apiBase()}/api/projection-photos?limit=100`)
+      .then((next) => { setPhotos(next); setError(null); })
+      .catch((e) => setError(e instanceof Error ? e.message : 'Failed to load'));
   }, []);
+
+  useEffect(() => {
+    refetch().finally(() => setLoading(false));
+  }, [refetch]);
+
+  useRefetchOnVisible(refetch);
 
   const handleDelete = useCallback((uuid: string) => {
     setPhotos((prev) => prev.filter((p) => p.uuid !== uuid));

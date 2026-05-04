@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { ChevronLeft, ChevronRight, Plus, Search, X } from 'lucide-react';
 import type { Exercise } from '@/types';
@@ -55,11 +55,15 @@ export default function ExercisesPage() {
   const allExercises = useExercises({}) as unknown as Exercise[];
 
   const [search, setSearch] = useState('');
-  const [selectedExercise, setSelectedExercise] = useState<Exercise | null>(null);
+  // Hold KEYS only and derive live objects from allExercises on every render.
+  // Storing the exercise object itself froze a snapshot at click time, so
+  // edits made inside ExerciseDetail (description, tracking_mode, images,
+  // muscles) didn't reflow until the page remounted — hence the "close the
+  // app to see changes" symptom on iOS where Capacitor keeps the WebView
+  // alive across suspension.
+  const [selectedUuid, setSelectedUuid] = useState<string | null>(null);
   const [selectedMuscle, setSelectedMuscle] = useState<string | null>(null);
-  const [muscleExercises, setMuscleExercises] = useState<Exercise[]>([]);
   const [selectedEquipment, setSelectedEquipment] = useState<string | null>(null);
-  const [equipmentExercises, setEquipmentExercises] = useState<Exercise[]>([]);
   const [showCreateForm, setShowCreateForm] = useState(false);
 
   const searchResults = useMemo(() => {
@@ -68,25 +72,34 @@ export default function ExercisesPage() {
     return allExercises.filter((e) => exerciseMatchesSearch(e, q));
   }, [allExercises, search]);
 
-  const handleMuscleSelect = (muscle: string) => {
-    setSelectedMuscle(muscle);
-    setMuscleExercises(
-      muscle === 'all'
-        ? allExercises
-        : allExercises.filter((e) =>
-            exerciseMatchesMuscleGroup(e.primary_muscles, e.secondary_muscles, muscle)
-          )
-    );
-  };
+  const selectedExercise = useMemo<Exercise | null>(
+    () => (selectedUuid ? allExercises.find((e) => e.uuid === selectedUuid) ?? null : null),
+    [selectedUuid, allExercises],
+  );
 
-  const handleEquipmentSelect = (equipment: string) => {
-    setSelectedEquipment(equipment);
-    setEquipmentExercises(
-      allExercises.filter((e) =>
-        e.equipment.some((eq) => eq.toLowerCase().includes(equipment))
-      )
+  const muscleExercises = useMemo<Exercise[]>(() => {
+    if (!selectedMuscle) return [];
+    if (selectedMuscle === 'all') return allExercises;
+    if (selectedMuscle === 'Custom') return allExercises.filter((e) => e.is_custom);
+    return allExercises.filter((e) =>
+      exerciseMatchesMuscleGroup(e.primary_muscles, e.secondary_muscles, selectedMuscle),
     );
-  };
+  }, [selectedMuscle, allExercises]);
+
+  const equipmentExercises = useMemo<Exercise[]>(() => {
+    if (!selectedEquipment) return [];
+    return allExercises.filter((e) =>
+      e.equipment.some((eq) => eq.toLowerCase().includes(selectedEquipment)),
+    );
+  }, [selectedEquipment, allExercises]);
+
+  // If the open exercise gets deleted/hidden while the detail view is open,
+  // navigate back to the index automatically rather than rendering nothing.
+  useEffect(() => {
+    if (selectedUuid && !allExercises.some((e) => e.uuid === selectedUuid)) {
+      setSelectedUuid(null);
+    }
+  }, [selectedUuid, allExercises]);
 
   const countForMuscle = (muscle: string) =>
     allExercises.filter((e) =>
@@ -107,7 +120,7 @@ export default function ExercisesPage() {
     return (
       <ExerciseDetail
         exercise={selectedExercise}
-        onBack={() => setSelectedExercise(null)}
+        onBack={() => setSelectedUuid(null)}
       />
     );
   }
@@ -131,7 +144,7 @@ export default function ExercisesPage() {
             {equipmentExercises.map((ex) => (
               <button
                 key={ex.uuid}
-                onClick={() => setSelectedExercise(ex)}
+                onClick={() => setSelectedUuid(ex.uuid)}
                 className="ios-row w-full text-left"
               >
                 <span className="flex-1 text-sm font-medium">{ex.title}</span>
@@ -166,7 +179,7 @@ export default function ExercisesPage() {
             {muscleExercises.map((ex) => (
               <button
                 key={ex.uuid}
-                onClick={() => setSelectedExercise(ex)}
+                onClick={() => setSelectedUuid(ex.uuid)}
                 className="ios-row w-full text-left"
               >
                 <span className="flex-1 text-sm font-medium">{ex.title}</span>
@@ -238,7 +251,7 @@ export default function ExercisesPage() {
                     {searchResults.map((ex) => (
                       <button
                         key={ex.uuid}
-                        onClick={() => setSelectedExercise(ex)}
+                        onClick={() => setSelectedUuid(ex.uuid)}
                         className="ios-row w-full text-left"
                       >
                         <div className="flex-1">
@@ -255,7 +268,7 @@ export default function ExercisesPage() {
               <>
                 <div className="ios-section">
                   <button
-                    onClick={() => handleMuscleSelect('all')}
+                    onClick={() => setSelectedMuscle('all')}
                     className="ios-row w-full text-left"
                   >
                     <span className="flex-1 font-medium text-sm">All</span>
@@ -268,7 +281,7 @@ export default function ExercisesPage() {
                   {MUSCLE_GROUPS.map(({ key, label }) => (
                     <button
                       key={key}
-                      onClick={() => handleMuscleSelect(key)}
+                      onClick={() => setSelectedMuscle(key)}
                       className="ios-row w-full text-left"
                     >
                       <span className="flex-1 font-medium text-sm capitalize">{label}</span>
@@ -284,7 +297,7 @@ export default function ExercisesPage() {
                     {EQUIPMENT_FILTERS.map(({ key, label }) => (
                       <button
                         key={key}
-                        onClick={() => handleEquipmentSelect(key)}
+                        onClick={() => setSelectedEquipment(key)}
                         className="px-3 py-1.5 rounded-full bg-secondary text-sm font-medium hover:bg-secondary/80 transition-colors"
                       >
                         {label}
@@ -296,11 +309,7 @@ export default function ExercisesPage() {
 
                 <div className="ios-section">
                   <button
-                    onClick={() => {
-                      const custom = allExercises.filter((e) => e.is_custom);
-                      setSelectedMuscle('Custom');
-                      setMuscleExercises(custom);
-                    }}
+                    onClick={() => setSelectedMuscle('Custom')}
                     className="ios-row w-full text-left"
                   >
                     <span className="flex-1 font-medium text-sm">Custom</span>

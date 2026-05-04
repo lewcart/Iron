@@ -2,6 +2,28 @@
 
 All notable changes to Rebirth are documented here.
 
+## [0.9.1] - 2026-05-04
+
+### Fixed
+
+- **iOS exercise page now reflects edits without a force-quit.** `/exercises` held `selectedExercise` as a `useState` snapshot of `allExercises` at click time, so edits made via `ExerciseDetail` (description, tracking_mode, image regeneration, muscle map, steps, tips) didn't reflow until the page remounted. Capacitor's WKWebView keeps the page alive across iOS app suspension, so the only way to clear the stale state was to force-quit the app — Lou's reported "I literally have to close the app." Fix: store keys (`selectedUuid`, `selectedMuscle`, `selectedEquipment`) and derive live objects via `useMemo` over the live `useExercises()` query on every render. Auto-clears `selectedUuid` when the open exercise leaves the visible list (deleted / hidden).
+- **`/workout` [i] info modal defensive fix.** Same snapshot pattern — `infoExercise` was a `useState` of the exercise object. Doesn't manifest as a bug today (`chrome="modal"` gates all mutation UI), but now stored as `infoExerciseUuid` and derived from the live current-workout via `useMemo`. Identity stays stable across 500ms rest-timer ticks (so the `React.memo` on the modal still skips renders), but Dexie writes flow through immediately.
+
+### Added
+
+- **`useRefetchOnVisible` hook** (`src/lib/useRefetchOnVisible.ts`) — wires `document.visibilitychange` + Capacitor `App.appStateChange` so server-fetched pages refresh on iOS foreground transitions. Belt-and-braces because iOS visibilitychange has been flaky across versions. Wired into `/projections`, `/inspo`, `/measurements/inbody/compare`, `/nutrition/history`. MCP uploads, other-device changes, and background sync now appear without reload.
+
+### Architecture notes
+
+- **Why this is a single-page bug class.** The Dexie + `useLiveQuery` layer correctly propagates updates to consumers. The bug only manifests when a parent component snapshots a live row into `useState` before passing it to a mutating child. Audited the rest of the app: `/history`, `/plans`, `/workout` mostly consume only the UUID and re-query live (safe). The `/exercises` page was the only genuine offender; `/workout` [i] modal and the API-fetched gallery pages got defensive fixes.
+- **Why store UUIDs over objects.** Survives Dexie writes (live query rotates the array reference), keeps `React.memo` working (prop identity stays stable through unrelated re-renders), and forces every render to re-derive from the source of truth.
+
+### Tests
+
+- Snapshot regression test for `/exercises` (3 cases: live re-render of detail, auto-back when the open exercise is deleted, filtered list reactivity).
+- 5 unit tests for `useRefetchOnVisible` (no fire on mount, fires on visibilitychange, listener cleanup, Capacitor `appStateChange` subscription + cleanup, latest-callback-after-rerender).
+- Pre-existing 1392 tests all still pass; total suite now 1454.
+
 ## [0.9.0] - 2026-05-04
 
 ### Added (in-workout stopwatch for time-based exercises)

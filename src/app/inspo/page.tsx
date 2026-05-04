@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { ChevronLeft, Trash2 } from 'lucide-react';
 import type { InspoPhoto } from '@/types';
 import { apiBase, fetchJsonAuthed } from '@/lib/api/client';
+import { useRefetchOnVisible } from '@/lib/useRefetchOnVisible';
 
 function formatDate(iso: string) {
   return new Date(iso).toLocaleDateString('en-GB', {
@@ -187,12 +188,20 @@ export default function InspoGalleryPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    fetchJsonAuthed<InspoPhoto[]>(`${apiBase()}/api/inspo-photos?limit=100`)
-      .then(setPhotos)
-      .catch((e) => setError(e instanceof Error ? e.message : 'Failed to load'))
-      .finally(() => setLoading(false));
+  // Refresh-on-visible: not backed by Dexie liveQuery, so external uploads
+  // (MCP, other devices) wouldn't appear until reload without an explicit
+  // refetch. Initial load drives the skeleton; later refetches are silent.
+  const refetch = useCallback(() => {
+    return fetchJsonAuthed<InspoPhoto[]>(`${apiBase()}/api/inspo-photos?limit=100`)
+      .then((next) => { setPhotos(next); setError(null); })
+      .catch((e) => setError(e instanceof Error ? e.message : 'Failed to load'));
   }, []);
+
+  useEffect(() => {
+    refetch().finally(() => setLoading(false));
+  }, [refetch]);
+
+  useRefetchOnVisible(refetch);
 
   const handleDelete = useCallback((uuid: string) => {
     setPhotos((prev) => prev.filter((p) => p.uuid !== uuid));

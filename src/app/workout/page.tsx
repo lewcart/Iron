@@ -1568,8 +1568,15 @@ export default function WorkoutPage() {
   // mount survives re-renders driven by the rest-timer 500ms tick. The modal
   // itself is React.memo'd so stable props (exercise object, onClose) skip
   // those re-renders entirely.
-  const [infoExercise, setInfoExercise] = useState<Exercise | null>(null);
-  const closeInfoModal = useCallback(() => setInfoExercise(null), []);
+  //
+  // Stored as a UUID, not the exercise object: the latter would freeze a
+  // snapshot at click time, so an external edit to the exercise (e.g. via
+  // /exercises) wouldn't reflow into the open modal. Deriving from the live
+  // workout.exercises[] keeps memo identity stable through 500ms timer ticks
+  // (Dexie writes don't fire during rest) but updates immediately when
+  // edits actually land.
+  const [infoExerciseUuid, setInfoExerciseUuid] = useState<string | null>(null);
+  const closeInfoModal = useCallback(() => setInfoExerciseUuid(null), []);
   const headerRef = useRef<HTMLDivElement>(null);
   const [headerHeight, setHeaderHeight] = useState(48);
   const [scheduleTapHighlight, setScheduleTapHighlight] = useState(false);
@@ -1577,6 +1584,17 @@ export default function WorkoutPage() {
 
   const restTimer = useRestTimer();
   const elapsed = useElapsed(workout?.start_time ?? null);
+
+  // Derive the live exercise object for the [i] info modal from the current
+  // workout. Identity stays stable through 500ms timer-driven re-renders
+  // (workout.exercises[].exercise is itself memoized inside useCurrentWorkoutFull),
+  // and any Dexie edit reflows immediately because allExercises updates the
+  // join in the live query.
+  const infoExercise = useMemo<Exercise | null>(() => {
+    if (!infoExerciseUuid || !workout) return null;
+    const we = workout.exercises.find((e) => e.exercise?.uuid === infoExerciseUuid);
+    return (we?.exercise ?? null) as unknown as Exercise | null;
+  }, [infoExerciseUuid, workout]);
 
   // Stopwatch (count-up timer) for time-based exercises. State machine and
   // persistence live in useStopwatch; the sheet renders below as a sibling
@@ -2202,7 +2220,7 @@ export default function WorkoutPage() {
                       onUpdateSetRir={updateSetRir}
                       onUpdateSetRpe={updateSetRpe}
                       onDeleteSet={mutDeleteSet}
-                      onShowInfo={() => setInfoExercise(we.exercise as unknown as Exercise)}
+                      onShowInfo={() => setInfoExerciseUuid(we.exercise.uuid)}
                       onOpenStopwatch={handleOpenStopwatch}
                       stopwatchSetKey={stopwatchSetKey}
                       stopwatchElapsed={stopwatch.elapsed}

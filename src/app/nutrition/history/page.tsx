@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { MacroBar } from '@/components/ui/macro-bar';
@@ -8,6 +8,7 @@ import { rebirthJsonHeaders } from '@/lib/api/headers';
 import { useNutritionTargets } from '@/lib/useLocalDB-nutrition';
 import { computeDayAdherence, DEFAULT_BANDS } from '@/lib/adherence';
 import { formatDateLabel, todayLocal } from '@/lib/nutrition-time';
+import { useRefetchOnVisible } from '@/lib/useRefetchOnVisible';
 import type { HistoryDay } from '@/lib/nutrition-history-types';
 import type { MacroBands } from '@/db/local';
 
@@ -22,21 +23,29 @@ export default function NutritionHistoryPage() {
   const bands = (targets?.bands ?? DEFAULT_BANDS) as MacroBands;
   const today = todayLocal();
 
+  // Refresh-on-visible: nutrition history is a server-side aggregate, not a
+  // Dexie liveQuery. Meals logged via MCP / chat won't appear here until a
+  // foreground transition triggers a re-aggregate. The cancelled flag both
+  // protects against rapid range-chip switching AND lets us share one
+  // closure between the initial-load + visibility listener (so a fetch in
+  // flight when the user changes range doesn't overwrite the new range's
+  // data on resolve).
+  const refetch = useCallback(async (): Promise<void> => {
+    const data = await fetch(`/api/nutrition/history?range=${range}`, { headers: rebirthJsonHeaders() })
+      .then((r) => (r.ok ? r.json() : { days: [] }));
+    setDays((data as { days?: HistoryDay[] }).days ?? []);
+  }, [range]);
+
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
-    fetch(`/api/nutrition/history?range=${range}`, { headers: rebirthJsonHeaders() })
-      .then((r) => (r.ok ? r.json() : { days: [] }))
-      .then((data: { days: HistoryDay[] }) => {
-        if (!cancelled) setDays(data.days ?? []);
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [range]);
+    refetch().finally(() => {
+      if (!cancelled) setLoading(false);
+    });
+    return () => { cancelled = true; };
+  }, [refetch]);
+
+  useRefetchOnVisible(refetch);
 
   return (
     <div className="tab-content max-w-3xl mx-auto px-4 pt-4 pb-24">

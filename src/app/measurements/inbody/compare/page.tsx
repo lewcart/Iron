@@ -1,11 +1,12 @@
 'use client';
 
-import { useEffect, useState, useMemo } from 'react';
+import { useCallback, useEffect, useState, useMemo } from 'react';
 import Link from 'next/link';
 import { ChevronLeft } from 'lucide-react';
 import type { InbodyScan } from '@/types';
 import { apiBase } from '@/lib/api/client';
 import { METRICS, GROUP_LABELS, scanValue, formatValue, type MetricGroup, type MetricDef } from '@/lib/inbody';
+import { useRefetchOnVisible } from '@/lib/useRefetchOnVisible';
 
 function apiHeaders(): HeadersInit {
   const key = process.env.NEXT_PUBLIC_REBIRTH_API_KEY;
@@ -39,24 +40,26 @@ export default function CompareInbodyScansPage() {
   const [aUuid, setAUuid] = useState<string>('');
   const [bUuid, setBUuid] = useState<string>('');
 
-  useEffect(() => {
-    fetch(`${apiBase()}/api/measurements/inbody?limit=90`, { headers: apiHeaders() })
+  // Refresh-on-visible: scans live behind a server endpoint, not Dexie. New
+  // scans logged from another device or via MCP wouldn't appear until reload
+  // without an explicit refetch on foreground transitions.
+  const refetch = useCallback(() => {
+    return fetch(`${apiBase()}/api/measurements/inbody?limit=90`, { headers: apiHeaders() })
       .then(r => r.ok ? r.json() : [])
       .then((s: InbodyScan[]) => {
-        if (Array.isArray(s)) {
-          setScans(s);
-          // Default: compare most recent against the one before it.
-          if (s.length >= 2) {
-            setAUuid(s[1].uuid);
-            setBUuid(s[0].uuid);
-          } else if (s.length === 1) {
-            setAUuid(s[0].uuid);
-            setBUuid(s[0].uuid);
-          }
-        }
+        if (!Array.isArray(s)) return;
+        setScans(s);
+        // Set sensible defaults only on the first load, when the user hasn't
+        // picked anything yet. Don't clobber their selection on resume.
+        setAUuid(prev => prev !== '' ? prev : (s.length >= 2 ? s[1].uuid : s[0]?.uuid ?? ''));
+        setBUuid(prev => prev !== '' ? prev : (s.length >= 1 ? s[0].uuid : ''));
       })
       .catch(() => {});
   }, []);
+
+  useEffect(() => { refetch(); }, [refetch]);
+
+  useRefetchOnVisible(refetch);
 
   const a = useMemo(() => scans.find(s => s.uuid === aUuid) ?? null, [scans, aUuid]);
   const b = useMemo(() => scans.find(s => s.uuid === bUuid) ?? null, [scans, bUuid]);
