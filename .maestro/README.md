@@ -9,6 +9,39 @@ See `PLAN-maestro-tests.md` (repo root) for the full design rationale.
 
 ---
 
+## Architectural risk to verify on first run
+
+Maestro's `evalScript` documentation describes JS that runs in **flow context**
+(with access to `output`, `maestro` utility), not necessarily inside the iOS
+WebView's JS realm. If `evalScript` runs outside the WebView, then
+`window.__rebirthTestBridge` is unreachable and every flow that uses the
+bridge will fail immediately with `test bridge not present`.
+
+The smoke flow (`flows/smoke/launch.yaml`) is designed to surface this on
+the very first run. Run it before iterating:
+
+```bash
+npm run test:maestro -- .maestro/flows/smoke/
+```
+
+If the smoke flow's `bridge.ready()` step times out, the bridge transport
+needs to change. Two known fallbacks:
+
+1. **Capacitor custom plugin**: write a small native iOS plugin
+   (`TestBridgePlugin.swift`) that exposes the same API to the WebView.
+   Maestro can invoke the plugin via deep link / native button tap.
+2. **Deep link**: register `app.rebirth://e2e/reset`, `app.rebirth://e2e/seed/<name>`
+   handlers in `src/app/page.tsx`. Maestro `openLink` triggers them.
+
+Both paths preserve the bridge interface from flow YAMLs; only the
+plumbing changes. Keep the existing `src/lib/test-bridge.ts` either way —
+the deep-link handler / plugin both call into it.
+
+If the smoke flow's `bridge.ready()` step succeeds, the architecture is
+sound and you can iterate on the rest of the flows.
+
+---
+
 ## Quick start
 
 ```bash

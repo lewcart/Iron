@@ -114,14 +114,27 @@ function lintFlow(src, file) {
     }
   }
 
-  // Check 4: ambiguous `text:` matches
+  // Check 4: ambiguous text matches in BOTH forms:
+  //   - explicit:   text: "Save"
+  //   - shorthand:  - tapOn: "Save"  /  - assertVisible: "Save"
+  // Strip trailing comments before matching.
+  const ACTION_SHORTHANDS =
+    /^\s*-?\s*(tapOn|assertVisible|assertNotVisible|waitUntilVisible|waitUntilNotVisible):\s*["']([^"']+)["']\s*(?:#.*)?$/;
+  const TEXT_KEY = /^\s*text:\s*["']([^"']+)["']\s*(?:#.*)?$/;
   for (let i = 0; i < lines.length; i++) {
-    const m = /^\s*text:\s*["']([^"']+)["']\s*$/.exec(lines[i]);
-    if (m && AMBIGUOUS_TEXT.has(m[1])) {
+    let m = TEXT_KEY.exec(lines[i]);
+    let value;
+    if (m) {
+      value = m[1];
+    } else {
+      m = ACTION_SHORTHANDS.exec(lines[i]);
+      if (m) value = m[2];
+    }
+    if (value && AMBIGUOUS_TEXT.has(value)) {
       issues.push({
         level: 'warn',
         line: i + 1,
-        msg: `text: "${m[1]}" is ambiguous on most screens — add id="m-…" to the source element and use 'id:' selector instead`,
+        msg: `"${value}" matches >1 element on most screens. Add id="m-{surface}-{element}" to the source (e.g. id="m-vision-edit") and use 'id:' selector. See .maestro/README.md#selector-preference.`,
       });
     }
   }

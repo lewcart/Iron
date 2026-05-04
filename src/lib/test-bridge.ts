@@ -45,13 +45,27 @@ export function mountTestBridge(): void {
       // Drop everything: Dexie + localStorage + sessionStorage. Reload
       // so React tree boots clean. Bridge re-mounts itself on next
       // providers.tsx run.
+      //
+      // Race note: syncEngine, hydrateExercises, useLiveQuery subscribers
+      // can be mid-flight when this runs. Dexie.close() rejects in-flight
+      // transactions but live subscribers can throw. The window.location
+      // .reload() at the end tears the React tree down regardless, so the
+      // worst case is a flicker. If flow timing becomes flaky here, the
+      // fix is to stop the syncEngine + clear queryClient first.
       try {
         await db.close();
       } catch {
         // Already closed; carry on.
       }
-      const Dexie = (await import('dexie')).default;
-      await Dexie.delete('iron-db');
+      // Use the existing Dexie instance's own delete() rather than
+      // hardcoding the database name — keeps the bridge in sync if the
+      // name ever changes in src/db/local.ts.
+      try {
+        await db.delete();
+      } catch {
+        // Fall through to reload — anything left in IndexedDB will be
+        // overwritten on next open(), and storage is cleared below.
+      }
       try {
         window.localStorage.clear();
       } catch {

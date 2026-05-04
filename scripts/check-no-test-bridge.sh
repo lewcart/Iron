@@ -17,9 +17,19 @@ fi
 # NOT match "__rebirth" alone — that's used elsewhere in the codebase.
 PATTERN='__rebirthTestBridge'
 
-# Search compiled JS chunks. Limit to .js + .html to avoid scanning binary
-# assets (images, fonts).
-HITS="$(grep -rIE --include='*.js' --include='*.html' "$PATTERN" "$OUT_DIR" || true)"
+# Scan all text artifacts in the static export. Sourcemaps (.js.map),
+# Next/PWA manifests (.json), service-worker assets (sw.js, workbox-*.js),
+# and route payloads (.txt) all need checking — webpack DCE catches most
+# leaks at runtime, but bundle metadata or split chunks can still surface
+# the identifier even when the runtime path is dead. -I auto-skips binary
+# files (images, fonts).
+HITS="$(grep -rIE \
+  --include='*.js' \
+  --include='*.html' \
+  --include='*.json' \
+  --include='*.map' \
+  --include='*.txt' \
+  "$PATTERN" "$OUT_DIR" || true)"
 
 if [ -n "$HITS" ]; then
   echo "✗ check-no-test-bridge: '$PATTERN' found in prod build at $OUT_DIR/" >&2

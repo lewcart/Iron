@@ -27,11 +27,15 @@ tags:
     timeout: 3000
 - evalScript: |
     (() => {
-      // Find the open modal (role=dialog) and the TabBar. TabBar must be
-      // either hidden (display:none) or behind the modal in stacking order.
-      const modal = document.querySelector('[role="dialog"]');
+      // [role="dialog"] also matches Sheet (src/components/ui/sheet.tsx:81),
+      // so we explicitly target the modal by aria-label suffix " details"
+      // (set by ExerciseDetailModal at src/components/ExerciseDetailModal.tsx:52).
+      // If multiple dialogs are open, this picks the first matching one and
+      // ignores Sheets — exactly the disambiguation we want.
+      const modal = Array.from(document.querySelectorAll('[role="dialog"]'))
+        .find(d => /\sdetails$/.test(d.getAttribute('aria-label') || ''));
       const tabBar = document.querySelector('nav.fixed.bottom-0');
-      if (!modal) throw new Error("tabbar-during-modal: no [role=dialog] found");
+      if (!modal) throw new Error("tabbar-during-modal: no exercise detail modal [role=dialog][aria-label*=' details'] found");
       if (!tabBar) return; // hidden — fine
       const tabZ = parseInt(getComputedStyle(tabBar).zIndex, 10) || 0;
       const modalZ = parseInt(getComputedStyle(modal).zIndex, 10) || 0;

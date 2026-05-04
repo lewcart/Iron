@@ -38,26 +38,35 @@ npm run test:maestro:lint
 done_ "lint clean"
 
 # ── 3. maestro suite ──────────────────────────────────────────────────────────
+# SKIP_MAESTRO=1 skips ONLY the suite — the leak guard (step 5) is cheap and
+# load-bearing for prod safety, so it always runs. If you need to bypass that
+# too (truly emergency), set SKIP_LEAK_GUARD=1 explicitly and own the risk.
 if [ "${SKIP_MAESTRO:-0}" = "1" ]; then
-  note "SKIP_MAESTRO=1 — skipping maestro suite + grep guard"
-  echo "  (skip-log appended by orchestrator)"
-  bash scripts/maestro-run.sh run   # this records the skip and exits 0
-  exit 0
+  note "SKIP_MAESTRO=1 — skipping maestro suite (leak guard still runs)"
+  bash scripts/maestro-run.sh run   # records the skip in skip-log, exits 0
+else
+  note "maestro suite…"
+  npm run test:maestro
+  done_ "maestro suite passed"
 fi
-
-note "maestro suite…"
-npm run test:maestro
-done_ "maestro suite passed"
 
 # ── 4. clean prod build (no E2E flag) ─────────────────────────────────────────
 note "clean prod build (build:cap)…"
-rm -rf out .next/cache
+# Full nuke of .next/, not just .next/cache/. Webpack's persistent module
+# graph in .next/ can carry inlined NEXT_PUBLIC_E2E constants from a prior
+# E2E build across into the next prod build. The 30s rebuild cost is worth
+# provable isolation.
+rm -rf out .next
 npm run build:cap
 done_ "prod build done"
 
 # ── 5. grep guard against test-bridge leak ────────────────────────────────────
-note "grep guard…"
-npm run check:no-test-bridge
-done_ "grep guard clean"
+if [ "${SKIP_LEAK_GUARD:-0}" = "1" ]; then
+  note "SKIP_LEAK_GUARD=1 — bypassing prod leak guard (DANGEROUS)"
+else
+  note "grep guard…"
+  npm run check:no-test-bridge
+  done_ "grep guard clean"
+fi
 
 done_ "ship:checks all green"

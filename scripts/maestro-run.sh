@@ -110,15 +110,19 @@ build_and_install_if_stale() {
 }
 
 get_sim_udid() {
+  # Pass SIM_NAME via argv to python — never string-interpolate into the
+  # heredoc body. A sim name with a quote or backslash would otherwise
+  # break the script with a confusing SyntaxError.
   xcrun simctl list devices available -j 2>/dev/null \
-    | python3 -c "
+    | python3 -c '
 import json, sys
+target = sys.argv[1]
 data = json.load(sys.stdin)
-for runtime, devices in data.get('devices', {}).items():
+for runtime, devices in data.get("devices", {}).items():
     for d in devices:
-        if d.get('name') == '$SIM_NAME' and d.get('isAvailable', False):
-            print(d['udid']); sys.exit(0)
-" || true
+        if d.get("name") == target and d.get("isAvailable", False):
+            print(d["udid"]); sys.exit(0)
+' "$SIM_NAME" || true
 }
 
 ensure_sim_booted() {
@@ -131,14 +135,15 @@ ensure_sim_booted() {
     exit 1
   fi
   local state
-  state="$(xcrun simctl list devices -j | python3 -c "
-import json,sys
+  state="$(xcrun simctl list devices -j | python3 -c '
+import json, sys
+target = sys.argv[1]
 data = json.load(sys.stdin)
-for rt, devs in data.get('devices', {}).items():
+for rt, devs in data.get("devices", {}).items():
     for d in devs:
-        if d.get('udid') == '$udid':
-            print(d.get('state', '')); sys.exit(0)
-")"
+        if d.get("udid") == target:
+            print(d.get("state", "")); sys.exit(0)
+' "$udid")"
   if [ "$state" != "Booted" ]; then
     note "Booting sim $udid ($SIM_NAME)…"
     xcrun simctl boot "$udid"
@@ -224,8 +229,11 @@ cmd_failed() {
     err "No previous junit.xml found. Run \`npm run test:maestro\` first."
     exit 1
   fi
-  local failed_flows
-  failed_flows="$(python3 - "$prev_junit" <<'PY'
+  # junit emits flow display names (basenames without .yaml), not file
+  # paths. Resolve each name back to a file path under .maestro/flows/
+  # so `maestro test <path>` actually finds it.
+  local failed_names
+  failed_names="$(python3 - "$prev_junit" <<'PY'
 import sys, xml.etree.ElementTree as ET
 tree = ET.parse(sys.argv[1])
 root = tree.getroot()
@@ -237,21 +245,41 @@ for tc in root.iter('testcase'):
 print('\n'.join(out))
 PY
 )"
-  if [ -z "$failed_flows" ]; then
+  if [ -z "$failed_names" ]; then
     done_ "Last run had no failures."
     exit 0
   fi
   ensure_sim_booted
   build_and_install_if_stale 0
   mkdir -p "$RUN_DIR"
-  note "Re-running failed flows: $failed_flows"
+  note "Re-running failed flows:"
+  local fail=0
+  local resolved=""
+  while IFS= read -r name; do
+    [ -z "$name" ] && continue
+    # Match basename without extension. Maestro flow names (junit
+    # classname/name) are typically the file's stem.
+    local match
+    match="$(find .maestro/flows -name "$name.yaml" -type f 2>/dev/null | head -1)"
+    if [ -z "$match" ]; then
+      err "  could not resolve '$name' to a flow file under .maestro/flows/"
+      fail=1
+      continue
+    fi
+    note "  $match"
+    resolved="$resolved$match"$'\n'
+  done <<< "$failed_names"
+  if [ -z "$resolved" ]; then
+    err "No failed flows could be resolved to files."
+    exit "$fail"
+  fi
   set +e
-  echo "$failed_flows" | while read -r f; do
-    [ -n "$f" ] && maestro test --debug-output "$RUN_DIR" "$f"
-  done
-  local rc=$?
+  while IFS= read -r flow; do
+    [ -z "$flow" ] && continue
+    maestro test --debug-output "$RUN_DIR" "$flow" || fail=1
+  done <<< "$resolved"
   set -e
-  exit "$rc"
+  exit "$fail"
 }
 
 cmd_watch() {
@@ -279,12 +307,19 @@ cmd_tree() {
   local route="${1:-/feed}"
   ensure_sim_booted
   build_and_install_if_stale 0
-  note "Dumping a11y tree at route $route…"
-  # Launch app, navigate to route via deep link (capacitor doesn't expose
-  # one — fall back to bridge.evalScript navigating React Router).
-  # For now: launch + dump hierarchy. Author can navigate via studio if needed.
-  maestro hierarchy --output "$RUN_DIR/tree-${route//\//_}.json" || true
-  done_ "tree dumped to $RUN_DIR/"
+  mkdir -p "$RUN_DIR"
+  local out_file="$RUN_DIR/tree-${route//\//_}.json"
+  note "Dumping Maestro hierarchy at current route → $out_file"
+  # NOTE: this is `maestro hierarchy` against whatever is on screen, NOT
+  # bridge.getTree(). The route arg is currently informational only — we
+  # don't navigate before dumping. Authors who need a specific route
+  # should `tapOn` the tab via a launched app first (or via studio), then
+  # invoke this. See .maestro/AGENTS.md for the workflow.
+  if ! maestro hierarchy --output "$out_file"; then
+    err "maestro hierarchy failed — sim/app may not be ready"
+    exit 1
+  fi
+  done_ "tree dumped to $out_file"
 }
 
 summarize() {

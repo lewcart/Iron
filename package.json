@@ -6,6 +6,9 @@
   "bin": {
     "rebirth": "./dist/cli.js"
   },
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "dev": "next dev",
     "build": "next build",
