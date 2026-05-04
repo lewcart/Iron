@@ -27,6 +27,12 @@ import {
   updateInbodyScan,
   deleteInbodyScan,
   parseInbodyScan,
+  getWeekWorkouts,
+  getWeekVolume,
+  getWorkoutStreak,
+  getWeekMuscleFrequency,
+  getWeekSetsPerMuscle,
+  getOffsetWeekSessions,
 } from './queries';
 import type { DbRow } from './queries';
 
@@ -1576,5 +1582,128 @@ describe('deleteInbodyScan', () => {
     expect(calls.length).toBe(2);
     expect(calls[0][0]).toContain('DELETE FROM measurement_logs WHERE source');
     expect(calls[1][0]).toContain('DELETE FROM inbody_scans WHERE uuid');
+  });
+});
+
+// ===== Week-boundary TZ propagation =====
+//
+// Postgres runs in UTC. A naive `date_trunc('week', NOW())` rolls Mon at
+// 00:00 UTC, which in AEST (UTC+10) means /api/feed shows last week's
+// totals for ~10h every Sun→Mon while the page header already says "Mon
+// day 1 of 7". These tests pin the SQL strings + bind params so every
+// week-bounded query goes through the local-TZ projection.
+
+describe('week-boundary TZ propagation', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('getWeekWorkouts: uses (NOW() AT TIME ZONE $1) and binds the tz', async () => {
+    const db = await import('./db.js');
+    vi.mocked(db.query).mockResolvedValueOnce([]);
+    await getWeekWorkouts('Australia/Sydney');
+    const [sql, params] = vi.mocked(db.query).mock.calls[0] as unknown as [string, unknown[]];
+    expect(sql).toMatch(/NOW\(\) AT TIME ZONE \$1/);
+    expect(sql).toContain("date_trunc('week'");
+    expect(sql).not.toMatch(/date_trunc\('week',\s*CURRENT_DATE\)/);
+    expect(params).toEqual(['Australia/Sydney']);
+  });
+
+  it('getWeekWorkouts: defaults to APP_TZ when no tz arg', async () => {
+    const db = await import('./db.js');
+    vi.mocked(db.query).mockResolvedValueOnce([]);
+    await getWeekWorkouts();
+    const [, params] = vi.mocked(db.query).mock.calls[0] as unknown as [string, unknown[]];
+    expect(params).toHaveLength(1);
+    expect(typeof params[0]).toBe('string');
+    expect((params[0] as string).length).toBeGreaterThan(0);
+  });
+
+  it('getWeekVolume: anchors the week boundary in the user TZ', async () => {
+    const db = await import('./db.js');
+    vi.mocked(db.queryOne).mockResolvedValueOnce({ total_volume: 0 });
+    await getWeekVolume('Australia/Sydney');
+    const [sql, params] = vi.mocked(db.queryOne).mock.calls[0] as unknown as [string, unknown[]];
+    expect(sql).toMatch(/NOW\(\) AT TIME ZONE \$1/);
+    expect(params).toEqual(['Australia/Sydney']);
+  });
+
+  it('getWorkoutStreak: buckets each row by start_time AT TIME ZONE $tz', async () => {
+    const db = await import('./db.js');
+    vi.mocked(db.query).mockResolvedValueOnce([]);
+    await getWorkoutStreak('Australia/Sydney');
+    const [sql, params] = vi.mocked(db.query).mock.calls[0] as unknown as [string, unknown[]];
+    expect(sql).toMatch(/start_time AT TIME ZONE \$1/);
+    expect(params).toEqual(['Australia/Sydney']);
+  });
+
+  it('getWeekMuscleFrequency: anchors the week boundary in the user TZ', async () => {
+    const db = await import('./db.js');
+    vi.mocked(db.query).mockResolvedValueOnce([]);
+    await getWeekMuscleFrequency('Australia/Sydney');
+    const [sql, params] = vi.mocked(db.query).mock.calls[0] as unknown as [string, unknown[]];
+    expect(sql).toMatch(/NOW\(\) AT TIME ZONE \$1/);
+    expect(params).toEqual(['Australia/Sydney']);
+  });
+
+  it('getWeekSetsPerMuscle: passes weekOffset + tz, anchors bounds in user TZ', async () => {
+    const db = await import('./db.js');
+    vi.mocked(db.query).mockResolvedValueOnce([]);
+    await getWeekSetsPerMuscle(-1, 'Australia/Sydney');
+    const [sql, params] = vi.mocked(db.query).mock.calls[0] as unknown as [string, unknown[]];
+    expect(sql).toMatch(/NOW\(\) AT TIME ZONE \$2/);
+    // Convert back to timestamptz for comparison against workouts.start_time.
+    expect(sql).toMatch(/AT TIME ZONE \$2 AS week_start/);
+    expect(sql).not.toMatch(/date_trunc\('week',\s*CURRENT_DATE\)/);
+    expect(params).toEqual([-1, 'Australia/Sydney']);
+  });
+
+  it('getOffsetWeekSessions: returns local Mon/Sun + session count, accepts tz', async () => {
+    const db = await import('./db.js');
+    vi.mocked(db.queryOne).mockResolvedValueOnce({
+      week_start: '2026-04-27', week_end: '2026-05-03', session_count: 3,
+    });
+    const result = await getOffsetWeekSessions(-1, 'Australia/Sydney');
+    expect(result).toEqual({
+      week_start: '2026-04-27',
+      week_end: '2026-05-03',
+      session_count: 3,
+    });
+    const [sql, params] = vi.mocked(db.queryOne).mock.calls[0] as unknown as [string, unknown[]];
+    expect(sql).toMatch(/NOW\(\) AT TIME ZONE \$2/);
+    expect(params).toEqual([-1, 'Australia/Sydney']);
+  });
+
+  it('AEST regression: fix prevents the date_trunc week from rolling at UTC midnight', () => {
+    // Sanity check on the SQL projection chosen. In AEST (UTC+10) at 02:00
+    // local Mon, NOW() AT TIME ZONE 'Australia/Sydney' = 2026-05-04 02:00
+    // (a timestamp without timezone). date_trunc('week', ...) on that
+    // value returns 2026-05-04 00:00 — Monday of the local week.
+    //
+    // Without the AT TIME ZONE conversion, the same wall-clock moment is
+    // 2026-05-03 16:00 UTC and date_trunc('week', NOW()) would return
+    // 2026-04-27 — the *previous* Monday, which is the bug we just fixed.
+    //
+    // We can't pin Postgres NOW() in a unit test without spinning up a
+    // database, so this test verifies the JavaScript boundary logic that
+    // matches the SQL projection: the week start in Australia/Sydney for
+    // 2026-05-04 02:00 local is 2026-05-04 (Mon) — NOT 2026-04-27.
+    const fmt = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Australia/Sydney',
+      year: 'numeric', month: '2-digit', day: '2-digit', weekday: 'short',
+    });
+    // 02:00 Mon May 4 AEST = 16:00 Sun May 3 UTC.
+    const localMonAt0200 = new Date('2026-05-03T16:00:00Z');
+    const parts = fmt.formatToParts(localMonAt0200);
+    const day = parts.find(p => p.type === 'day')?.value;
+    const weekday = parts.find(p => p.type === 'weekday')?.value;
+    expect(weekday).toBe('Mon');
+    expect(day).toBe('04');
+    // Confirm UTC perception of the same instant is still Sunday (the
+    // conditions under which the legacy query returned the wrong week).
+    const utcFmt = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'UTC',
+      year: 'numeric', month: '2-digit', day: '2-digit', weekday: 'short',
+    });
+    const utcParts = utcFmt.formatToParts(localMonAt0200);
+    expect(utcParts.find(p => p.type === 'weekday')?.value).toBe('Sun');
   });
 });

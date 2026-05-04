@@ -18,6 +18,7 @@ import {
 import { computeCardioWeek } from '@/lib/server/health-data';
 import { getWeekSetsPerMuscle } from '@/db/queries';
 import { resolveMuscleSlug } from '@/lib/muscles';
+import { APP_TZ, resolveTz } from '@/lib/app-tz';
 
 // ── Result helpers ────────────────────────────────────────────────────────────
 
@@ -506,12 +507,21 @@ async function getBodyCompTrend(args: Record<string, unknown>) {
 
 async function getWeeklySummary(args: Record<string, unknown> = {}) {
   const weekOffset = Number(args.week_offset ?? 0);
+  const tz = resolveTz(args.tz ?? APP_TZ);
 
-  const weekBoundsRow = await queryOne<{ week_start: string; week_end: string }>(`
+  // One round-trip: returns user-local YYYY-MM-DD labels (week_start/end)
+  // AND timestamptz boundaries for the workout filter, both anchored in
+  // `tz`. Without the timestamptz boundaries a Sun-evening AEST session
+  // (Sat-night UTC) buckets into last week's UTC view.
+  const weekBoundsRow = await queryOne<{
+    week_start: string; week_end: string; start_at: string; end_at: string;
+  }>(`
     SELECT
-      date_trunc('week', NOW() + ($1 || ' weeks')::interval)::date::text AS week_start,
-      (date_trunc('week', NOW() + ($1 || ' weeks')::interval) + INTERVAL '7 days')::date::text AS week_end
-  `, [weekOffset]);
+      (date_trunc('week', (NOW() AT TIME ZONE $2)::timestamp) + ($1 || ' weeks')::interval)::date::text AS week_start,
+      (date_trunc('week', (NOW() AT TIME ZONE $2)::timestamp) + ($1 || ' weeks')::interval + INTERVAL '7 days')::date::text AS week_end,
+      (date_trunc('week', (NOW() AT TIME ZONE $2)::timestamp) + ($1 || ' weeks')::interval) AT TIME ZONE $2 AS start_at,
+      (date_trunc('week', (NOW() AT TIME ZONE $2)::timestamp) + ($1 || ' weeks')::interval + INTERVAL '7 days') AT TIME ZONE $2 AS end_at
+  `, [weekOffset, tz]);
 
   const weekStart = weekBoundsRow!.week_start;
   const weekEnd = weekBoundsRow!.week_end;
@@ -524,15 +534,15 @@ async function getWeeklySummary(args: Record<string, unknown> = {}) {
       FROM workouts w
       LEFT JOIN workout_exercises we ON we.workout_uuid = w.uuid
       LEFT JOIN workout_sets ws ON ws.workout_exercise_uuid = we.uuid
-      WHERE w.start_time >= $1 AND w.start_time < $2
+      WHERE w.start_time >= $1::timestamptz AND w.start_time < $2::timestamptz
         AND w.is_current = false
       GROUP BY w.uuid, w.title, w.start_time
       ORDER BY w.start_time
-    `, [weekStart, weekEnd]),
+    `, [weekBoundsRow!.start_at, weekBoundsRow!.end_at]),
     // Per-muscle aggregate using canonical taxonomy. Counts sets toward both
     // primary AND secondary muscles. Returns every canonical muscle (zero-set
     // ones too) for stable shape.
-    getWeekSetsPerMuscle(weekOffset),
+    getWeekSetsPerMuscle(weekOffset, tz),
     queryOne<{ routine_count: string }>(`
       SELECT COUNT(wr.uuid) AS routine_count
       FROM workout_routines wr
@@ -593,14 +603,15 @@ function muscleStatusOf(setCount: number, min: number, max: number): 'zero' | 'u
 async function getSetsPerMuscle(args: Record<string, unknown> = {}) {
   const weekOffset = Number(args.week_offset ?? 0);
   const includeZero = args.include_zero === undefined ? true : Boolean(args.include_zero);
+  const tz = resolveTz(args.tz ?? APP_TZ);
 
   const weekBoundsRow = await queryOne<{ week_start: string; week_end: string }>(`
     SELECT
-      date_trunc('week', NOW() + ($1 || ' weeks')::interval)::date::text AS week_start,
-      (date_trunc('week', NOW() + ($1 || ' weeks')::interval) + INTERVAL '7 days' - INTERVAL '1 day')::date::text AS week_end
-  `, [weekOffset]);
+      (date_trunc('week', (NOW() AT TIME ZONE $2)::timestamp) + ($1 || ' weeks')::interval)::date::text AS week_start,
+      (date_trunc('week', (NOW() AT TIME ZONE $2)::timestamp) + ($1 || ' weeks')::interval + INTERVAL '7 days' - INTERVAL '1 day')::date::text AS week_end
+  `, [weekOffset, tz]);
 
-  const muscles = await getWeekSetsPerMuscle(weekOffset);
+  const muscles = await getWeekSetsPerMuscle(weekOffset, tz);
 
   type MuscleOut = {
     slug: string;
@@ -2890,6 +2901,7 @@ export const tools: MCPTool[] = [
       type: 'object',
       properties: {
         week_offset: { type: 'number', description: '0 = current week, -1 = last week, etc. (default 0)' },
+        tz: { type: 'string', description: "IANA TZ name (e.g. 'Europe/London') used to anchor week boundaries. Defaults to the configured app TZ." },
       },
     },
     execute: getWeeklySummary,
@@ -2920,6 +2932,7 @@ export const tools: MCPTool[] = [
           type: 'boolean',
           description: 'If false, omit muscles with set_count=0. Default true (returns all rows).',
         },
+        tz: { type: 'string', description: "IANA TZ name (e.g. 'Europe/London') used to anchor week boundaries. Defaults to the configured app TZ." },
       },
     },
     execute: getSetsPerMuscle,

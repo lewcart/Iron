@@ -3,8 +3,8 @@
  * - User-specific data: add user id to keys when auth lands.
  */
 export const queryKeys = {
-  feed: (days: number, timelineLimit: number) =>
-    ['feed', { days, timelineLimit }] as const,
+  feed: (days: number, timelineLimit: number, weekOffset: number = 0) =>
+    ['feed', { days, timelineLimit, weekOffset }] as const,
 
   stats: () => ['stats'] as const,
   statsSummary: () => ['statsSummary'] as const,

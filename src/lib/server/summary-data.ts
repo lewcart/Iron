@@ -5,33 +5,55 @@ import {
   getWeekMuscleFrequency,
   getWeekSetsPerMuscle,
   getLastWorkoutsWithDetails,
+  getOffsetWeekSessions,
 } from '@/db/queries';
 import { muscleStatus, type MuscleStatus } from '@/lib/muscles';
+import { APP_TZ } from '@/lib/app-tz';
 import type { SetsByMuscleRow } from '@/lib/api/feed-types';
 
-function computeStreak(weekRows: { week_start: string }[]): number {
+/** Monday-of-this-week in `tz` as a YYYY-MM-DD string. Mirrors the SQL
+ *  `date_trunc('week', NOW() AT TIME ZONE $tz)`. */
+function localMondayIso(tz: string, now: Date): string {
+  // `en-CA` formatter outputs YYYY-MM-DD; locale-aware to the IANA tz.
+  const fmt = new Intl.DateTimeFormat('en-CA', {
+    timeZone: tz,
+    year: 'numeric', month: '2-digit', day: '2-digit', weekday: 'short',
+  });
+  const parts = fmt.formatToParts(now);
+  const get = (t: string) => parts.find(p => p.type === t)?.value ?? '';
+  const y = Number(get('year'));
+  const m = Number(get('month'));
+  const d = Number(get('day'));
+  const wd = get('weekday'); // Mon, Tue, ...
+  const wkIdx: Record<string, number> = { Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6, Sun: 7 };
+  const dow = wkIdx[wd] ?? 1;
+  // Subtract (dow-1) days to get Monday — anchor a UTC date and subtract,
+  // then format back. The civil date math is safe since we only add/sub days.
+  const utc = new Date(Date.UTC(y, m - 1, d));
+  utc.setUTCDate(utc.getUTCDate() - (dow - 1));
+  const yy = utc.getUTCFullYear();
+  const mm = String(utc.getUTCMonth() + 1).padStart(2, '0');
+  const dd = String(utc.getUTCDate()).padStart(2, '0');
+  return `${yy}-${mm}-${dd}`;
+}
+
+function computeStreak(weekRows: { week_start: string }[], tz: string): number {
   if (weekRows.length === 0) return 0;
 
-  const now = new Date();
-  const dayOfWeek = now.getDay();
-  const mondayOffset = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
-  const currentWeekMonday = new Date(now);
-  currentWeekMonday.setDate(now.getDate() + mondayOffset);
-  currentWeekMonday.setHours(0, 0, 0, 0);
-
   const weekSet = new Set(weekRows.map(r => String(r.week_start).slice(0, 10)));
-
   let streak = 0;
-  const checkDate = new Date(currentWeekMonday);
+  let cursor = localMondayIso(tz, new Date());
 
-  while (true) {
-    const iso = checkDate.toISOString().slice(0, 10);
-    if (weekSet.has(iso)) {
-      streak++;
-      checkDate.setDate(checkDate.getDate() - 7);
-    } else {
-      break;
-    }
+  while (weekSet.has(cursor)) {
+    streak++;
+    // Move cursor back 7 days (UTC-safe arithmetic).
+    const [y, m, d] = cursor.split('-').map(Number);
+    const utc = new Date(Date.UTC(y, m - 1, d));
+    utc.setUTCDate(utc.getUTCDate() - 7);
+    const yy = utc.getUTCFullYear();
+    const mm = String(utc.getUTCMonth() + 1).padStart(2, '0');
+    const dd = String(utc.getUTCDate()).padStart(2, '0');
+    cursor = `${yy}-${mm}-${dd}`;
   }
 
   return streak;
@@ -66,19 +88,41 @@ export interface SummaryPayload {
   /** @deprecated Use setsByMuscle. Kept for one release while UI migrates. */
   muscleFrequency: Record<string, number>;
   setsByMuscle: SetsByMuscleRow[];
+  /** Selected week (YYYY-MM-DD Monday) — anchored in the user's TZ. Sent
+   *  back so the client can label the week-picker without re-deriving. */
+  weekStart: string;
+  /** End of the selected week (Sunday inclusive, YYYY-MM-DD). */
+  weekEnd: string;
+  /** Offset relative to the current local week. 0 = this week, -1 = last. */
+  weekOffset: number;
+  /** Distinct strength sessions in the selected week — used to compute the
+   *  frequency-bound MRV for the priority-muscles tile. */
+  weekSessions: number;
 }
 
-export async function getSummaryData(): Promise<SummaryPayload> {
-  const [weekWorkoutsRows, weekVolume, streakRows, muscleRows, setsRows, lastWorkouts] = await Promise.all([
-    getWeekWorkouts(),
-    getWeekVolume(),
-    getWorkoutStreak(),
-    getWeekMuscleFrequency(),
-    getWeekSetsPerMuscle(0),
+export interface SummaryDataOpts {
+  /** IANA TZ name (e.g. `Europe/London`, `Australia/Sydney`). Used to
+   *  compute the "this week" Monday boundary. Defaults to APP_TZ. */
+  tz?: string;
+  /** 0=current local week, -1=last, etc. */
+  weekOffset?: number;
+}
+
+export async function getSummaryData(opts: SummaryDataOpts = {}): Promise<SummaryPayload> {
+  const tz = opts.tz ?? APP_TZ;
+  const weekOffset = opts.weekOffset ?? 0;
+
+  const [weekWorkoutsRows, weekVolume, streakRows, muscleRows, setsRows, lastWorkouts, offsetSessions] = await Promise.all([
+    getWeekWorkouts(tz),
+    getWeekVolume(tz),
+    getWorkoutStreak(tz),
+    getWeekMuscleFrequency(tz),
+    getWeekSetsPerMuscle(weekOffset, tz),
     getLastWorkoutsWithDetails(3),
+    getOffsetWeekSessions(weekOffset, tz),
   ]);
 
-  const currentStreak = computeStreak(streakRows);
+  const currentStreak = computeStreak(streakRows, tz);
   const muscleFrequency = aggregateMuscleFrequency(muscleRows);
 
   const setsByMuscle: SetsByMuscleRow[] = setsRows.map(r => ({
@@ -102,5 +146,9 @@ export async function getSummaryData(): Promise<SummaryPayload> {
     lastWorkouts,
     muscleFrequency,
     setsByMuscle,
+    weekStart: offsetSessions.week_start,
+    weekEnd: offsetSessions.week_end,
+    weekOffset,
+    weekSessions: offsetSessions.session_count,
   };
 }
