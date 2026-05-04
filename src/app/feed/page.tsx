@@ -1052,9 +1052,9 @@ export default function WeekPage() {
         className="px-4 pb-3 flex items-center gap-2 overflow-x-auto"
         aria-label="Other pages"
       >
-        <TopChip href="/strategy" icon={<Target className="h-3.5 w-3.5" />} label="Strategy" />
-        <TopChip href="/sleep" icon={<Moon className="h-3.5 w-3.5" />} label="Sleep" />
-        <TopChip href="/measurements?tab=log" icon={<Camera className="h-3.5 w-3.5" />} label="Photos" />
+        <TopChip id="m-feed-strategy-chip" href="/strategy" icon={<Target className="h-3.5 w-3.5" />} label="Strategy" />
+        <TopChip id="m-feed-sleep-chip" href="/sleep" icon={<Moon className="h-3.5 w-3.5" />} label="Sleep" />
+        <TopChip id="m-feed-photos-chip" href="/measurements?tab=log" icon={<Camera className="h-3.5 w-3.5" />} label="Photos" />
       </nav>
 
       <div className="px-4 space-y-4">
@@ -1140,10 +1140,25 @@ export default function WeekPage() {
   );
 }
 
-function TopChip({ href, icon, label }: { href: string; icon: React.ReactNode; label: string }) {
+function TopChip({
+  href,
+  icon,
+  label,
+  id,
+}: {
+  href: string;
+  icon: React.ReactNode;
+  label: string;
+  /** Optional stable selector for E2E tests. Becomes `id` AND part of the
+   *  Link's aria-label so Maestro can find it via text-match (HTML `id`
+   *  alone doesn't bridge through WKWebView a11y). */
+  id?: string;
+}) {
   return (
     <Link
+      id={id}
       href={href}
+      aria-label={id ? `${label} ${id}` : undefined}
       className="inline-flex items-center gap-1.5 rounded-full border border-border bg-card hover:bg-muted/40 active:scale-[0.97] transition-all px-3 py-1.5 min-h-[36px] shrink-0"
     >
       <span className="text-muted-foreground">{icon}</span>

@@ -84,6 +84,7 @@ export function GoalsSheet({ open, onClose }: Props) {
       open={open}
       onClose={onClose}
       title="Daily goals"
+      testId="m-sheet-goals"
       height="auto"
       footer={
         <Button onClick={save} disabled={saving} className="w-full">

@@ -1,0 +1,20 @@
+appId: app.rebirth
+tags:
+  - tabbar
+---
+# When ExerciseDetailModal is open, the TabBar (z-50) must be covered by
+# the modal (z-60) — never visible above it.
+#
+# The modal is opened via /history → tap a workout → tap an exercise inside
+# WorkoutDetail. Two-step navigation that depends on history state. Without
+# a fixture, history may be empty; bail early with a clear message.
+- runFlow: ../../helpers/launch.yaml
+- runFlow:
+    file: ../../helpers/actions/navigate.yaml
+    env:
+      ROUTE: /history
+- assertVisible: "History"
+- evalScript: |
+    (() => {
+      throw new Error("tabbar-during-modal: ExerciseDetailModal navigation requires a workout-with-history fixture (test-fixtures.ts seed pending). Skipping until seed lands.");
+    })()

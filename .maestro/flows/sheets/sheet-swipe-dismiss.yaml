@@ -1,0 +1,17 @@
+appId: app.rebirth
+tags:
+  - sheets
+---
+# Primary sheets must dismiss on swipe-down. Currently covers:
+#   1. GoalsSheet — Nutrition tab → "Goals" button → "Daily goals" sheet
+#
+# More sheets will be added as their trigger paths get stable selectors.
+- runFlow: ../../helpers/launch.yaml
+- tapOn: "Nutrition"
+- tapOn: "Goals"
+- assertVisible: "Daily goals"
+- runFlow:
+    file: ../../helpers/actions/dismiss-sheet-swipe.yaml
+    env:
+      SHEET_ID: "m-sheet-goals"
+      SHEET_TITLE: "Daily goals"

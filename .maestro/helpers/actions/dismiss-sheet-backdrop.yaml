@@ -1,0 +1,11 @@
+appId: app.rebirth
+---
+# Tap the backdrop above the sheet to dismiss. Tap point is high (10% Y)
+# so it lands on the dim layer, not on the sheet itself.
+#
+# env:
+#   SHEET_TITLE — aria-label of the sheet (asserted gone after tap)
+- tapOn:
+    point: 50%, 8%
+- assertNotVisible:
+    text: ${SHEET_TITLE}

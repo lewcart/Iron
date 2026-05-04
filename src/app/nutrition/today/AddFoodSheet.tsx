@@ -143,6 +143,7 @@ export function AddFoodSheet({ open, onClose, slot, date }: Props) {
         open={open}
         onClose={onClose}
         title={`Add to ${slot}`}
+        testId="m-sheet-addfood"
         height="auto"
         footer={
           <div className="flex gap-2">
@@ -174,7 +175,7 @@ export function AddFoodSheet({ open, onClose, slot, date }: Props) {
   }
 
   return (
-    <Sheet open={open} onClose={onClose} title={`Add to ${slot}`} height="90vh">
+    <Sheet open={open} onClose={onClose} title={`Add to ${slot}`} testId="m-sheet-addfood" height="90vh">
       <div className="p-4 space-y-3">
         <SearchInput
           value={query}

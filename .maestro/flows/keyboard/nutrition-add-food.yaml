@@ -1,0 +1,23 @@
+appId: app.rebirth
+tags:
+  - keyboard
+---
+# Regression test for capacitor.config.ts:23-32 (Keyboard.resize=body).
+# When the keyboard appears in the AddFoodSheet, the search input must
+# stay visible above the keyboard top — not slide off behind it.
+- runFlow: ../../helpers/launch.yaml
+- tapOn: "Nutrition"
+- assertVisible: "Goals"
+- tapOn: "Add food"
+# Skip the "sheet open" sentinel — Maestro's WKWebView a11y traversal
+# misses text in this React-portaled sheet, even with aria-label/testId
+# markers. The next `tapOn: "Search foods"` will fail loudly if the
+# sheet didn't actually open, which is the real signal.
+- tapOn:
+    text: "Search foods"
+- inputText: "chicken"
+- runFlow:
+    file: ../../helpers/actions/assert-above-keyboard.yaml
+    env:
+      SELECTOR_TEXT: "Search foods"
+- hideKeyboard

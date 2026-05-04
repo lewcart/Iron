@@ -1,0 +1,34 @@
+appId: app.rebirth
+tags:
+  - nav
+---
+# Round-trip through every tab. Each must paint without leaving a stuck
+# spinner, white screen, or broken state on return.
+- runFlow: ../../helpers/launch.yaml
+- tapOn: "HRT"
+- assertVisible:
+    text: "HRT"
+- tapOn: "Workout"
+- assertVisible:
+    text: "Workout"
+- tapOn: "Measure"
+- assertVisible:
+    text: "Measure"
+- tapOn: "Nutrition"
+- assertVisible:
+    text: "Today"
+- tapOn: "Week"
+- assertVisible:
+    text: "Week"
+# Final state check: TabBar still present, no error overlay.
+- assertVisible:
+    text: "Week"
+- evalScript: |
+    (() => {
+      // Sentinel: any visible element with text "Something went wrong"
+      // means an error boundary fired during the cycle.
+      const txt = document.body.innerText;
+      if (/Something went wrong|Failed to load/i.test(txt)) {
+        throw new Error("tabs-cycle: error boundary visible after cycle");
+      }
+    })()

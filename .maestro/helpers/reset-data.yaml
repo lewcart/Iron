@@ -1,0 +1,24 @@
+appId: app.rebirth
+---
+# Clear Dexie + localStorage + sessionStorage, then reload. The bridge
+# remounts itself on the next provider tree boot, so callers MUST follow
+# this with launch.yaml (or assert against the post-reload state).
+- evalScript: |
+    (async () => {
+      if (!window.__rebirthTestBridge) {
+        throw new Error("test bridge not present — reset cannot run");
+      }
+      await window.__rebirthTestBridge.reset();
+    })()
+# After reset() the page reloads. Wait for the bridge to come back up.
+- evalScript: |
+    (async () => {
+      const start = Date.now();
+      while (!window.__rebirthTestBridge && Date.now() - start < 10000) {
+        await new Promise(r => setTimeout(r, 100));
+      }
+      if (!window.__rebirthTestBridge) {
+        throw new Error("bridge did not remount after reset() reload");
+      }
+      await window.__rebirthTestBridge.ready();
+    })()

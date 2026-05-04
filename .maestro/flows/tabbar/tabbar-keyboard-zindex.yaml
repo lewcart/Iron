@@ -1,0 +1,37 @@
+appId: app.rebirth
+tags:
+  - tabbar
+---
+# When the keyboard is up, the TabBar must NOT float visibly between the
+# keyboard and the page content. Surface verdict via DOM marker because
+# Maestro's evalScript swallows runtime errors silently.
+- runFlow: ../../helpers/launch.yaml
+- tapOn: "Nutrition"
+- tapOn: "Add food"
+# Skip portaled-sheet visibility check — see nutrition-add-food.yaml note.
+- tapOn:
+    text: "Search foods"
+- inputText: "x"
+- evalScript: |
+    if (typeof window !== 'undefined') {
+      const tabBar = document.querySelector('nav.fixed.bottom-0');
+      let ok = true;
+      let diag = 'no-tabbar';
+      if (tabBar) {
+        const r = tabBar.getBoundingClientRect();
+        const vv = window.visualViewport;
+        const visibleBottom = vv ? vv.height : window.innerHeight;
+        if (r.top < visibleBottom - 10 && r.bottom > visibleBottom + 1) {
+          ok = false;
+          diag = 'tabTop=' + Math.round(r.top) + ' visBot=' + Math.round(visibleBottom) + ' tabBot=' + Math.round(r.bottom);
+        } else {
+          diag = 'OK top=' + Math.round(r.top);
+        }
+      }
+      const marker = document.createElement('span');
+      marker.style.cssText = 'position:fixed;top:0;left:0;width:1px;height:1px;opacity:0.01;z-index:9999';
+      marker.textContent = ok ? 'TabBarZOK' : 'TabBarZFAIL ' + diag;
+      document.body.appendChild(marker);
+    }
+- assertVisible: "TabBarZOK"
+- hideKeyboard

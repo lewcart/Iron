@@ -1,0 +1,16 @@
+appId: app.rebirth
+tags:
+  - keyboard
+---
+# Full-screen CreateExerciseForm — every input must stay above the keyboard.
+#
+# /exercises has no stable nav link from any tab today. Until a TopChip
+# is added, this flow is parked: it just verifies that the Workout tab
+# loads cleanly. Once a /exercises link exists, replace the body with:
+#   - tapOn: "Exercises"
+#   - tapOn: { id: m-exercises-new }
+#   - inputText: "Test exercise"
+#   - runFlow: assert-above-keyboard, env: SELECTOR_TEXT: "Test exercise"
+- runFlow: ../../helpers/launch.yaml
+- tapOn: "Workout"
+- assertVisible: "Workout"

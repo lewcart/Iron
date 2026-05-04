@@ -1,0 +1,35 @@
+appId: app.rebirth
+tags:
+  - scroll
+---
+# Exercises catalog is one of the longer lists. Scroll all the way down,
+# then back up. Confirm the first item is reachable and no ghost layout
+# breakage from momentum overshoot.
+- runFlow: ../../helpers/launch.yaml
+- tapOn: "Workout"
+- tapOn:
+    text: "Exercises"
+- assertVisible:
+    text: "Exercises"
+# Scroll to bottom in 3 swipes
+- swipe:
+    direction: UP
+    duration: 600
+- swipe:
+    direction: UP
+    duration: 600
+- swipe:
+    direction: UP
+    duration: 600
+# Then back to top
+- swipe:
+    direction: DOWN
+    duration: 600
+- swipe:
+    direction: DOWN
+    duration: 600
+- swipe:
+    direction: DOWN
+    duration: 600
+- assertVisible:
+    text: "Exercises"        # heading should still be at top after scroll-to-top

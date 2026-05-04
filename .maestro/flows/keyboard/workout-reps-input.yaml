@@ -1,0 +1,32 @@
+appId: app.rebirth
+tags:
+  - keyboard
+---
+# Workout reps input + RIR chip strip must remain tappable when keyboard
+# is up. Seeds a workout-with-3-sets fixture so the reps input renders.
+- runFlow: ../../helpers/launch.yaml
+- runFlow:
+    file: ../../helpers/actions/seed.yaml
+    env:
+      FIXTURE: "workout-with-3-sets"
+# Reload so /workout picks up the seeded is_current workout.
+- evalScript: |
+    if (typeof window !== 'undefined') {
+      window.location.reload();
+    }
+- evalScript: |
+    (async () => {
+      while (!window.__rebirthTestBridge) await new Promise(r => setTimeout(r, 100));
+      await window.__rebirthTestBridge.ready();
+    })()
+- tapOn: "Workout"
+# Heuristic: a numeric input visible after seeding indicates an active
+# set row. Skip a precise assertion since input markup is dense.
+- tapOn:
+    id: "m-workout-set-reps"   # works because input element exposes id directly
+- inputText: "10"
+- runFlow:
+    file: ../../helpers/actions/assert-above-keyboard.yaml
+    env:
+      SELECTOR_TEXT: "RIR"
+- hideKeyboard

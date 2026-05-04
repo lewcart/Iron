@@ -1,0 +1,20 @@
+appId: app.rebirth
+tags:
+  - nav
+---
+# Open ExerciseDetailModal, dismiss via Close button (aria-label="Close"
+# on src/components/ExerciseDetailModal.tsx:59), return to underlying
+# screen with scroll position preserved.
+#
+# Same fixture dependency as tabbar-during-modal — needs a workout-with-history
+# fixture before this can run. Skipped until the seed lands.
+- runFlow: ../../helpers/launch.yaml
+- runFlow:
+    file: ../../helpers/actions/navigate.yaml
+    env:
+      ROUTE: /history
+- assertVisible: "History"
+- evalScript: |
+    (() => {
+      throw new Error("modal-back: ExerciseDetailModal navigation requires a workout-with-history fixture. Implement test-fixtures.ts seed first.");
+    })()

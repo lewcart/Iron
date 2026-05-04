@@ -139,6 +139,27 @@ function AppBootstrap() {
   return null;
 }
 
+// E2E test bridge mount. Gated on a build-time env var so non-E2E builds
+// never load the bridge module. We gate the JSX itself (not just the
+// useEffect body) so the import call site, the component, and its hooks
+// are all eliminated as one unit by webpack DCE. scripts/check-no-test-bridge.sh
+// belt-and-braces greps the static export for `__rebirthTestBridge`.
+function TestBridgeMount() {
+  const router = useRouter();
+  useEffect(() => {
+    import('@/lib/test-bridge')
+      .then(m => m.mountTestBridge({ router }))
+      .catch(err => {
+        // Surface mount failures loudly. Without this, a transient HMR /
+        // module-load error in dev leaves the bridge un-mounted and the
+        // smoke flow times out 10s later with "bridge not present" and
+        // no clue why.
+        console.error('[test-bridge] mount failed', err);
+      });
+  }, [router]);
+  return null;
+}
+
 export function AppProviders({ children }: { children: ReactNode }) {
   const [queryClient] = useState(() => makeQueryClient());
 
@@ -146,6 +167,7 @@ export function AppProviders({ children }: { children: ReactNode }) {
     <QueryClientProvider client={queryClient}>
       <NotificationRouter />
       <AppBootstrap />
+      {process.env.NEXT_PUBLIC_E2E === '1' ? <TestBridgeMount /> : null}
       {children}
       {process.env.NODE_ENV === 'development' ? (
         <ReactQueryDevtools buttonPosition="bottom-left" />

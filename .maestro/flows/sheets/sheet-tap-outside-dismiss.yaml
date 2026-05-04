@@ -1,0 +1,13 @@
+appId: app.rebirth
+tags:
+  - sheets
+---
+# Tapping the dim backdrop above a sheet must dismiss it.
+- runFlow: ../../helpers/launch.yaml
+- tapOn: "Nutrition"
+- tapOn: "Goals"
+- assertVisible: "Daily goals"
+- runFlow:
+    file: ../../helpers/actions/dismiss-sheet-backdrop.yaml
+    env:
+      SHEET_TITLE: "Daily goals"

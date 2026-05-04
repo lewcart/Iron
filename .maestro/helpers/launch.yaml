@@ -1,0 +1,23 @@
+appId: app.rebirth
+---
+# Launch the app fresh and wait until the test bridge has finished
+# initializing Dexie. After bridge.ready() resolves we still confirm
+# first-paint via the Week tab text — covers the case where the bridge
+# is up but the React tree hasn't rendered the home screen yet.
+- launchApp:
+    clearState: false
+    stopApp: true
+- evalScript: |
+    (async () => {
+      // Wait up to 10s for the bridge to mount.
+      const start = Date.now();
+      while (!window.__rebirthTestBridge && Date.now() - start < 10000) {
+        await new Promise(r => setTimeout(r, 100));
+      }
+      if (!window.__rebirthTestBridge) {
+        throw new Error("test bridge not present — did you run `npm run build:cap:e2e`?");
+      }
+      await window.__rebirthTestBridge.ready();
+    })()
+- assertVisible:
+    text: "Week"

@@ -1,0 +1,35 @@
+appId: app.rebirth
+---
+# Assert that an element identified by SELECTOR_TEXT is visible AND its
+# bottom edge is above the keyboard top edge. Maestro's `assertVisible`
+# alone returns true even if the element is technically inside the
+# scroll viewport but obscured by the keyboard, so we cross-check via
+# evalScript reading getBoundingClientRect against window.visualViewport.
+#
+# env:
+#   SELECTOR_TEXT — visible text or aria-label of the element to check
+- assertVisible:
+    text: ${SELECTOR_TEXT}
+- evalScript: |
+    (() => {
+      const target = SELECTOR_TEXT;
+      const candidates = Array.from(document.querySelectorAll('*')).filter(el => {
+        const aria = el.getAttribute('aria-label') || '';
+        const txt = el.textContent || '';
+        return aria.includes(target) || txt.trim() === target;
+      });
+      if (candidates.length === 0) {
+        throw new Error("assert-above-keyboard: no element matched " + target);
+      }
+      const el = candidates[0];
+      const rect = el.getBoundingClientRect();
+      const vv = window.visualViewport;
+      const viewportBottom = vv ? vv.height : window.innerHeight;
+      if (rect.bottom > viewportBottom + 1) {
+        throw new Error(
+          "assert-above-keyboard: '" + target + "' bottom=" + rect.bottom +
+          " > viewportBottom=" + viewportBottom +
+          " (keyboard is covering it)"
+        );
+      }
+    })()

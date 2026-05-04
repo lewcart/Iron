@@ -1,0 +1,36 @@
+appId: app.rebirth
+---
+# Visual layout assertion: an element identified by SELECTOR_QUERY must
+# have its top edge in the Y range [Y_MIN, Y_MAX] (in CSS pixels, relative
+# to the viewport).
+#
+# Catches "menu too high / too low" and "header overlapping content"
+# regressions that pure visibility assertions miss.
+#
+# env:
+#   SELECTOR_QUERY — a CSS selector resolving to exactly one element
+#                    (e.g. "nav.fixed.bottom-0", '#m-exercises-new')
+#   Y_MIN          — minimum acceptable top-edge Y (px)
+#   Y_MAX          — maximum acceptable top-edge Y (px)
+#   LABEL          — human-readable name for the error message
+- evalScript: |
+    (() => {
+      const sel = SELECTOR_QUERY;
+      const yMin = Number(Y_MIN);
+      const yMax = Number(Y_MAX);
+      const label = LABEL;
+      const el = document.querySelector(sel);
+      if (!el) {
+        throw new Error(
+          "assert-y-range: " + label + " not found (selector: " + sel + ")"
+        );
+      }
+      const r = el.getBoundingClientRect();
+      if (r.top < yMin || r.top > yMax) {
+        throw new Error(
+          "assert-y-range: " + label + " top=" + Math.round(r.top) +
+          " outside [" + yMin + ", " + yMax + "]. " +
+          "Likely a layout regression — check viewport height " + window.innerHeight + "."
+        );
+      }
+    })()

@@ -1,0 +1,14 @@
+appId: app.rebirth
+---
+# Apply a named test-fixture via bridge.seed(). Fixtures live in
+# src/lib/test-fixtures.ts.
+#
+# env:
+#   FIXTURE — fixture name (e.g. "workout-with-3-sets")
+- evalScript: |
+    (async () => {
+      if (!window.__rebirthTestBridge) {
+        throw new Error("seed: bridge not present");
+      }
+      await window.__rebirthTestBridge.seed(FIXTURE);
+    })()

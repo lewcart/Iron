@@ -1,0 +1,43 @@
+appId: app.rebirth
+tags:
+  - sheets
+---
+# When a sheet has an input and the keyboard appears, the sheet height
+# must shrink (Capacitor Keyboard.resize=body) so inner content scrolls
+# within the remaining height — not slide off-screen with the WebView.
+#
+# Maestro evalScript silently swallows runtime errors, so we surface the
+# verdict via a DOM marker the next assertVisible matches against.
+- runFlow: ../../helpers/launch.yaml
+- tapOn: "Nutrition"
+- tapOn: "Add food"
+# Skip portaled-sheet visibility check — see nutrition-add-food.yaml note.
+- evalScript: |
+    if (typeof window !== 'undefined') {
+      const sheet = document.querySelector('[role="dialog"][aria-modal="true"]');
+      window.__rebirthSheetHeightBefore = sheet ? sheet.getBoundingClientRect().height : 0;
+    }
+- tapOn:
+    text: "Search foods"
+- inputText: "y"
+# Wait for keyboard animation, then snapshot height. Maestro's evalScript
+# doesn't await async functions reliably, so use a sync delay loop.
+- evalScript: |
+    if (typeof window !== 'undefined') {
+      // Busy-wait isn't great but Maestro evalScript wraps in a try/catch
+      // and doesn't await async returns — see investigation notes.
+      const start = Date.now();
+      while (Date.now() - start < 700) { /* spin */ }
+      const sheet = document.querySelector('[role="dialog"][aria-modal="true"]');
+      const after = sheet ? sheet.getBoundingClientRect().height : 0;
+      const before = window.__rebirthSheetHeightBefore || 0;
+      const ok = (before > 0 && after > 0 && after < before);
+      const marker = document.createElement('span');
+      marker.style.cssText = 'position:fixed;top:0;left:0;width:1px;height:1px;opacity:0.01;z-index:9999';
+      marker.textContent = ok
+        ? 'SheetResizeOK'
+        : 'SheetResizeFAIL before=' + before + ' after=' + after;
+      document.body.appendChild(marker);
+    }
+- assertVisible: "SheetResizeOK"
+- hideKeyboard

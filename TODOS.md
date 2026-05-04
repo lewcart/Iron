@@ -342,3 +342,76 @@ V1.1 inbox sources to add after V1 ships:
       Bundle this with the medication re-enable so the flow tests
       end-to-end.
 
+---
+
+## Maestro suite: lift pass count from 10/16 → 16/16
+
+Surfaced 2026-05-04 during full Maestro iteration session (commits
+1503f71, 3babbb5, be17ff5). Infrastructure is solid; 6 residual flow
+failures are Maestro+WKWebView a11y limitations, not app bugs. Each
+has a concrete fix path documented in `.maestro/README.md`. Listed by
+expected impact:
+
+- [ ] **Disable Sheet auto-focus when `NEXT_PUBLIC_E2E=1`.** AddFoodSheet's
+      auto-focus on the search input brings up the keyboard immediately,
+      which seems to disrupt Maestro's a11y tree query at the moment of
+      assertion (3 flows affected: nutrition-add-food, sheet-keyboard-resize,
+      tabbar-keyboard-zindex). One-line guard in `src/components/ui/sheet.tsx`
+      `useEffect`-focus hook: `if (process.env.NEXT_PUBLIC_E2E === '1') return;`.
+      Test will need to manually focus the input via `tapOn` first instead.
+      Expected impact: +3 flows.
+
+- [ ] **Replace swipe-dismiss gesture with bridge.dismissSheet() API.**
+      Maestro's coordinate swipe doesn't synthesize a TouchEvent that
+      React's onTouchStart handler fires reliably (tried 35-95%, 75-98%,
+      drag-handle id targeting — all fail). Add `dismissSheet()` to
+      `src/lib/test-bridge.ts` that calls a globally-registered
+      `__rebirthActiveSheetClose` callback the Sheet component sets when
+      it opens. Tests dismiss-via-API; gesture-dismiss stays untested
+      under Maestro (manual / XCUITest only). Expected impact: +1 flow
+      (sheet-swipe-dismiss).
+
+- [ ] **strategy-textarea: tighten "Plan" assertion timing.** /strategy
+      page renders slowly on cold sim — by the time Maestro asserts
+      "Plan" visible, the heading has either not yet painted or been
+      scrolled offscreen by the editor sheet. Try: increase implicit
+      timeout via `extendedWaitUntil`, OR replace "Plan" with a more
+      specific selector like the Vision card heading. Expected impact:
+      +1 flow.
+
+- [ ] **workout-reps-input: stop using `id:` selector for HTML id.**
+      Maestro's `id:` selector targets iOS XCUITest accessibility-identifier,
+      not HTML `id` in WKWebView. The reps input has `aria-label="m-workout-set-reps reps input"`
+      but Maestro's `text:` matcher in WKWebView doesn't surface aria-label
+      reliably for input elements. Try: text-match on placeholder, OR
+      coordinate-tap on the input position derived via evalScript +
+      `getBoundingClientRect()`. Expected impact: +1 flow.
+
+- [ ] **`exercise-create`: add `/exercises` nav link from a tab.** Currently
+      parked because the only path to `/exercises` is via the Workout tab's
+      exercise picker (deep nav). Add a TopChip or Settings link on /workout
+      or /feed pointing to /exercises. Then unpark the flow's full body:
+      tap to nav, tapOn `id="m-exercises-new"`, complete the form keyboard
+      assertion. Expected impact: +1 flow (and unblocks creating new
+      exercises generally — useful UX).
+
+- [ ] **`modal-back` + `tabbar-during-modal`: fully use the workout-with-3-sets
+      fixture.** The fixture is implemented and seeds an in-progress
+      workout, but the flows still bail early because they need the
+      ExerciseDetailModal route (history → tap workout → tap exercise inside
+      WorkoutDetail). Flow needs a 2-step nav implementation. Expected
+      impact: +2 flows.
+
+- [ ] **(Last resort) Migrate AddFoodSheet flows to XCUITest.** If the
+      auto-focus disable doesn't fix nutrition-add-food and friends, the
+      portal a11y limitation is a Maestro-level constraint. Write the
+      3 affected flows as Swift XCUITest cases in `ios/App/Tests/`. They'd
+      have direct iOS a11y access and can target HTML `id` via
+      `app.webViews.firstMatch.descendants(matching: .any)["m-sheet-addfood"]`.
+      Cost: ~1 day to set up the XCUITest target + write 3 tests.
+
+Tracking note: each item above is independently shippable. Do them in
+the listed order — earliest items are cheapest and have highest expected
+impact. Stop when the suite hits an acceptable pass rate or when the
+remaining items hit the XCUITest line.
+
