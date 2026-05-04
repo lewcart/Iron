@@ -57,6 +57,10 @@ export interface WorkoutSet {
   comment: string | null;
   is_completed: boolean;
   is_pr: boolean;
+  /** True when this set should NOT count toward PR / PB calculations
+   *  (form was wrong, partial reps, etc). The set still contributes to
+   *  volume, set-counts, and history. Default false. */
+  excluded_from_pb: boolean;
   order_index: number;
   /** Held duration in seconds — set on time-mode exercise sets only. */
   duration_seconds: number | null;

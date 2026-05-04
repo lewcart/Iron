@@ -397,6 +397,7 @@ function mapWorkoutSet(r: Record<string, unknown>) {
     comment: r.comment ?? null,
     is_completed: Boolean(r.is_completed),
     is_pr: Boolean(r.is_pr),
+    excluded_from_pb: Boolean(r.excluded_from_pb),
     order_index: Number(r.order_index),
     duration_seconds: nullableNumber(r.duration_seconds),
   };

@@ -76,6 +76,11 @@ export interface LocalWorkoutSet extends SyncMeta {
   comment: string | null;
   is_completed: boolean;
   is_pr: boolean;
+  /** True when this set should NOT count toward PR / PB calculations (form
+   *  was wrong, partial reps, etc). The set still contributes to volume,
+   *  set-counts, and history. Toggle from the per-set action sheet, or in
+   *  bulk via the "Adjust PB history" sheet. Default false. */
+  excluded_from_pb: boolean;
   order_index: number;
   /** Held duration in seconds. Populated only for time-mode exercise sets;
    *  null for reps-mode sets (which use weight + repetitions instead). */
@@ -817,6 +822,15 @@ export class IronDB extends Dexie {
       });
       await tx.table('inspo_photos').toCollection().modify(row => {
         if (row.crop_offset_x === undefined) row.crop_offset_x = null;
+      });
+    });
+    // v20: per-set "excluded from PB" flag. Lets Lou invalidate PRs that came
+    // from sets done with bad form without losing the workout record. Stores
+    // shape unchanged (excluded_from_pb is not indexed). Backfill to false on
+    // existing rows so reads after upgrade get a defined value, not undefined.
+    this.version(20).stores(v16Stores).upgrade(async tx => {
+      await tx.table('workout_sets').toCollection().modify(row => {
+        if (row.excluded_from_pb === undefined) row.excluded_from_pb = false;
       });
     });
   }

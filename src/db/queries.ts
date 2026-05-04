@@ -374,6 +374,7 @@ export async function updateSet(uuid: string, data: {
   tag?: 'dropSet' | 'failure' | null;
   isCompleted?: boolean;
   isPr?: boolean;
+  excludedFromPb?: boolean;
 }): Promise<WorkoutSet> {
   const fields: string[] = [];
   const values: unknown[] = [];
@@ -406,6 +407,10 @@ export async function updateSet(uuid: string, data: {
   if (data.isPr !== undefined) {
     fields.push(`is_pr = $${++paramCount}`);
     values.push(data.isPr);
+  }
+  if (data.excludedFromPb !== undefined) {
+    fields.push(`excluded_from_pb = $${++paramCount}`);
+    values.push(data.excludedFromPb);
   }
 
   if (fields.length > 0) {
@@ -1198,6 +1203,7 @@ export async function startWorkoutFromRoutine(routineUuid: string): Promise<Star
           comment: routineSet.comment ?? null,
           is_completed: false,
           is_pr: false,
+          excluded_from_pb: false,
           order_index: routineSet.order_index,
           duration_seconds: null,
         });
@@ -1222,6 +1228,7 @@ export async function startWorkoutFromRoutine(routineUuid: string): Promise<Star
           comment: null,
           is_completed: false,
           is_pr: false,
+          excluded_from_pb: false,
           order_index: i,
           duration_seconds: null,
         });
@@ -1527,6 +1534,7 @@ export function parseWorkoutSet(row: DbRow): WorkoutSet {
     comment: row.comment as string | null,
     is_completed: Boolean(row.is_completed),
     is_pr: Boolean(row.is_pr),
+    excluded_from_pb: Boolean(row.excluded_from_pb),
     order_index: row.order_index as number,
     duration_seconds: (row.duration_seconds as number | null) ?? null,
   };

@@ -71,10 +71,12 @@ const mockSet = {
   min_target_reps: null,
   max_target_reps: null,
   rpe: null,
+  rir: null,
   tag: null,
   comment: null,
   is_completed: false,
   is_pr: false,
+  excluded_from_pb: false,
   order_index: 0,
   duration_seconds: null,
 };

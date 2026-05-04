@@ -140,6 +140,7 @@ export async function addSet(
     comment: null,
     is_completed: false,
     is_pr: false,
+    excluded_from_pb: false,
     order_index,
     duration_seconds: null,
     ...syncMeta(),
