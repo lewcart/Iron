@@ -110,15 +110,22 @@ function fetchSleepBaseline(): Promise<SleepBaselineResponse | { status: 'not_co
 }
 
 // v1.1: cardio compliance fetch for the new tile in slot 4.
+// Calendar-week-to-date (Mon→today), matching how every other "this week"
+// tile counts. Rolling 7d would over-count on early-week days.
 function fetchCardioWeek(): Promise<CardioTileResponse> {
-  return fetchJsonAuthed<CardioTileResponse>(`/api/health/cardio-week?window_days=7`).catch(
-    (err: unknown) => {
-      if (err instanceof ApiError && err.status === 503) {
-        return { status: 'not_connected' as const, reason: 'unknown' };
-      }
-      throw err;
-    },
-  );
+  const monday = new Date();
+  monday.setHours(0, 0, 0, 0);
+  const dow = monday.getDay();
+  monday.setDate(monday.getDate() + (dow === 0 ? -6 : 1 - dow));
+  const startDate = `${monday.getFullYear()}-${String(monday.getMonth() + 1).padStart(2, '0')}-${String(monday.getDate()).padStart(2, '0')}`;
+  return fetchJsonAuthed<CardioTileResponse>(
+    `/api/health/cardio-week?start_date=${startDate}`,
+  ).catch((err: unknown) => {
+    if (err instanceof ApiError && err.status === 503) {
+      return { status: 'not_connected' as const, reason: 'unknown' };
+    }
+    throw err;
+  });
 }
 
 export default function WeekPage() {
