@@ -13,8 +13,25 @@ import RebirthModels
 struct ActiveWorkoutGlance: View {
     let snapshot: ActiveWorkoutSnapshot
     let onRequestComplete: (ActiveExercise, WorkoutSet) -> Void
+    let onEditWeight: (WorkoutSet, Double) -> Void
+    let onEditReps: (WorkoutSet, Int) -> Void
+    /// Per-set in-progress edits — looked up so the hero shows the edited
+    /// value before confirmation.
+    let editsBySet: [String: SetCompletionCoordinator.SetEdits]
 
     @State private var visibleExerciseIndex: Int = 0
+    @State private var dialMode: DialMode?
+
+    private enum DialMode: Identifiable {
+        case weight(WorkoutSet, prevSession: Double?)
+        case reps(WorkoutSet)
+        var id: String {
+            switch self {
+            case .weight(let s, _): return "weight-\(s.uuid)"
+            case .reps(let s): return "reps-\(s.uuid)"
+            }
+        }
+    }
 
     private var visibleExercise: ActiveExercise? {
         guard !snapshot.exercises.isEmpty else { return nil }
@@ -29,7 +46,15 @@ struct ActiveWorkoutGlance: View {
                     exercise: exercise,
                     exerciseIndex: visibleExerciseIndex,
                     exerciseCount: snapshot.exercises.count,
-                    onRequestComplete: { set in onRequestComplete(exercise, set) }
+                    edits: editsBySet,
+                    onRequestComplete: { set in onRequestComplete(exercise, set) },
+                    onTapWeight: { set in
+                        let prev = exercise.history?.sets.first?.actualWeight ?? exercise.history?.sets.first?.targetWeight
+                        dialMode = .weight(set, prevSession: prev)
+                    },
+                    onTapReps: { set in
+                        dialMode = .reps(set)
+                    }
                 )
             } else {
                 EmptyGlanceContent()
@@ -52,6 +77,31 @@ struct ActiveWorkoutGlance: View {
             // New workout — re-anchor on the server's current index.
             visibleExerciseIndex = snapshot.currentExerciseIndex
         }
+        .sheet(item: $dialMode) { mode in
+            switch mode {
+            case .weight(let set, let prev):
+                let initial = editsBySet[set.uuid]?.weight ?? set.targetWeight ?? 0
+                WeightDial(
+                    initialWeight: initial,
+                    prevSessionWeight: prev,
+                    onConfirm: { value in
+                        onEditWeight(set, value)
+                        dialMode = nil
+                    },
+                    onCancel: { dialMode = nil }
+                )
+            case .reps(let set):
+                let initial = editsBySet[set.uuid]?.reps ?? set.targetReps ?? 0
+                RepsDial(
+                    initialReps: initial,
+                    onConfirm: { value in
+                        onEditReps(set, value)
+                        dialMode = nil
+                    },
+                    onCancel: { dialMode = nil }
+                )
+            }
+        }
     }
 }
 
@@ -61,7 +111,10 @@ private struct ExerciseGlanceContent: View {
     let exercise: ActiveExercise
     let exerciseIndex: Int
     let exerciseCount: Int
+    let edits: [String: SetCompletionCoordinator.SetEdits]
     let onRequestComplete: (WorkoutSet) -> Void
+    let onTapWeight: (WorkoutSet) -> Void
+    let onTapReps: (WorkoutSet) -> Void
 
     private var currentSet: WorkoutSet? {
         exercise.sets.first(where: { !$0.isCompleted }) ?? exercise.sets.first
@@ -99,7 +152,15 @@ private struct ExerciseGlanceContent: View {
 
             // Hero
             if let set = currentSet {
-                HeroTarget(set: set, mode: exercise.trackingMode)
+                let edit = edits[set.uuid]
+                HeroTarget(
+                    set: set,
+                    mode: exercise.trackingMode,
+                    editedWeight: edit?.weight,
+                    editedReps: edit?.reps,
+                    onTapWeight: { onTapWeight(set) },
+                    onTapReps: { onTapReps(set) }
+                )
             }
 
             Spacer(minLength: 0)
@@ -126,24 +187,39 @@ private struct ExerciseGlanceContent: View {
 private struct HeroTarget: View {
     let set: WorkoutSet
     let mode: TrackingMode
+    let editedWeight: Double?
+    let editedReps: Int?
+    let onTapWeight: () -> Void
+    let onTapReps: () -> Void
+
+    private var displayWeight: Double? { editedWeight ?? set.targetWeight }
+    private var displayReps: Int? { editedReps ?? set.targetReps }
 
     var body: some View {
         switch mode {
         case .reps:
             HStack(alignment: .firstTextBaseline, spacing: 4) {
-                Text(formatWeight(set.targetWeight))
-                    .font(.system(size: 56, weight: .bold, design: .rounded))
-                    .minimumScaleFactor(0.6)
-                    .lineLimit(1)
+                Button(action: onTapWeight) {
+                    Text(formatWeight(displayWeight))
+                        .font(.system(size: 56, weight: .bold, design: .rounded))
+                        .minimumScaleFactor(0.6)
+                        .lineLimit(1)
+                        .foregroundStyle(editedWeight != nil ? .green : .primary)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Target weight \(formatWeight(displayWeight)) kilograms — tap to adjust")
                 Text("kg")
                     .font(.caption)
                     .fontWeight(.medium)
                     .foregroundStyle(.secondary)
             }
-            Text("× \(set.targetReps.map(String.init) ?? "—") reps")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .accessibilityLabel("Target \(formatWeight(set.targetWeight)) kilograms by \(set.targetReps.map(String.init) ?? "no") reps")
+            Button(action: onTapReps) {
+                Text("× \(displayReps.map(String.init) ?? "—") reps")
+                    .font(.caption)
+                    .foregroundStyle(editedReps != nil ? .green : .secondary)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Target \(displayReps.map(String.init) ?? "no") reps — tap to adjust")
         case .time:
             VStack(spacing: 0) {
                 Text(formatDuration(set.targetDurationSeconds))

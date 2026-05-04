@@ -36,7 +36,14 @@ struct RootView: View {
                     snapshot: snapshot,
                     onRequestComplete: { exercise, set in
                         pickerContext = PickerContext(exercise: exercise, workoutSet: set)
-                    }
+                    },
+                    onEditWeight: { set, weight in
+                        completion.setEditWeight(setUUID: set.uuid, weight: weight)
+                    },
+                    onEditReps: { set, reps in
+                        completion.setEditReps(setUUID: set.uuid, reps: reps)
+                    },
+                    editsBySet: completion.edits
                 )
                 .overlay(alignment: .top) {
                     if completion.isAuthHalted {

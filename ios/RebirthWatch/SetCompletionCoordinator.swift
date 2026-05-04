@@ -28,6 +28,17 @@ final class SetCompletionCoordinator: ObservableObject {
     @Published var lastError: String?
     @Published var isAuthHalted: Bool = false
 
+    /// Per-set in-progress edits made via tap-to-dial. Cleared when the set
+    /// is completed (or undone). Survives navigation between exercises but
+    /// not app cold-launch (intentional — uncommitted edits are ephemeral).
+    @Published var edits: [String: SetEdits] = [:]
+
+    struct SetEdits: Equatable {
+        var weight: Double?
+        var reps: Int?
+        var durationSeconds: Int?
+    }
+
     private let appGroup = RebirthAppGroup()
     private let log = RebirthWatchLog.shared
     private let outbox: RebirthOutbox?
@@ -72,24 +83,49 @@ final class SetCompletionCoordinator: ObservableObject {
         }
     }
 
+    func setEditWeight(setUUID: String, weight: Double) {
+        var current = edits[setUUID] ?? SetEdits()
+        current.weight = weight
+        edits[setUUID] = current
+    }
+
+    func setEditReps(setUUID: String, reps: Int) {
+        var current = edits[setUUID] ?? SetEdits()
+        current.reps = reps
+        edits[setUUID] = current
+    }
+
+    func setEditDuration(setUUID: String, durationSeconds: Int) {
+        var current = edits[setUUID] ?? SetEdits()
+        current.durationSeconds = durationSeconds
+        edits[setUUID] = current
+    }
+
+    func clearEdits(setUUID: String) {
+        edits.removeValue(forKey: setUUID)
+    }
+
     /// Mark a set complete with the given RIR. RIR may be nil (user dismissed
-    /// the picker without confirming).
+    /// the picker without confirming). Pulls in any in-progress edits the
+    /// user dialed in via tap-to-dial.
     func completeSet(
         in exercise: ActiveExercise,
         set: WorkoutSet,
         rir: Int?
     ) async {
+        let edit = edits[set.uuid]
         let row = WorkoutSetCDCRow.fromCompletion(
             snapshotSet: set,
             workoutExerciseUUID: exercise.workoutExerciseUUID,
-            editedWeight: nil,            // Day 5 wires inline weight/rep dial
-            editedRepetitions: nil,
-            editedDurationSeconds: nil,
+            editedWeight: edit?.weight,
+            editedRepetitions: edit?.reps,
+            editedDurationSeconds: edit?.durationSeconds,
             editedRir: rir
         )
+        clearEdits(setUUID: set.uuid)
 
         // 1. Optimistic snapshot update
-        applyOptimistic(setUUID: set.uuid, rir: rir)
+        applyOptimistic(setUUID: set.uuid, rir: rir, editedWeight: edit?.weight, editedReps: edit?.reps, editedDurationSeconds: edit?.durationSeconds)
 
         // 2. Enqueue
         let payload: Data
@@ -172,24 +208,33 @@ final class SetCompletionCoordinator: ObservableObject {
         lastError = nil
     }
 
-    private func applyOptimistic(setUUID: String, rir: Int?) {
+    private func applyOptimistic(
+        setUUID: String,
+        rir: Int?,
+        editedWeight: Double?,
+        editedReps: Int?,
+        editedDurationSeconds: Int?
+    ) {
         guard var current = (try? appGroup.readSnapshot()) else { return }
         var newExercises: [ActiveExercise] = []
         for ex in current.exercises {
             var newSets: [WorkoutSet] = []
             for s in ex.sets {
                 if s.uuid == setUUID {
+                    let actualWeight = editedWeight ?? s.targetWeight
+                    let actualReps = editedReps ?? s.targetReps
+                    let actualDuration = editedDurationSeconds ?? s.targetDurationSeconds
                     newSets.append(WorkoutSet(
                         uuid: s.uuid,
                         workoutExerciseUUID: s.workoutExerciseUUID,
                         orderIndex: s.orderIndex,
                         isCompleted: true,
-                        targetWeight: s.targetWeight,
-                        targetReps: s.targetReps,
-                        targetDurationSeconds: s.targetDurationSeconds,
-                        actualWeight: s.targetWeight,
-                        actualReps: s.targetReps,
-                        actualDurationSeconds: s.targetDurationSeconds,
+                        targetWeight: editedWeight ?? s.targetWeight,
+                        targetReps: editedReps ?? s.targetReps,
+                        targetDurationSeconds: editedDurationSeconds ?? s.targetDurationSeconds,
+                        actualWeight: actualWeight,
+                        actualReps: actualReps,
+                        actualDurationSeconds: actualDuration,
                         rir: rir,
                         minTargetReps: s.minTargetReps,
                         maxTargetReps: s.maxTargetReps,
