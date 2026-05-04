@@ -38,8 +38,13 @@ struct RootView: View {
                         pickerContext = PickerContext(exercise: exercise, workoutSet: set)
                     }
                 )
+                .overlay(alignment: .top) {
+                    if completion.isAuthHalted {
+                        ReAuthBanner(onDismiss: { completion.clearAuthHalt() })
+                    }
+                }
                 .overlay(alignment: .bottom) {
-                    if completion.pendingCount > 0 {
+                    if completion.pendingCount > 0 && !completion.isAuthHalted {
                         FooterPip(text: "syncing · \(completion.pendingCount) pending")
                     }
                 }
@@ -113,5 +118,27 @@ private struct FooterPip: View {
             .padding(.vertical, 2)
             .background(Color.gray.opacity(0.15), in: Capsule())
             .padding(.bottom, 2)
+    }
+}
+
+private struct ReAuthBanner: View {
+    let onDismiss: () -> Void
+    var body: some View {
+        VStack(spacing: 2) {
+            Text("Re-auth from phone")
+                .font(.system(size: 11, weight: .semibold))
+            Text("Tap when fixed")
+                .font(.system(size: 9))
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 4)
+        .background(Color.orange.opacity(0.85))
+        .foregroundStyle(.black)
+        .accessibilityLabel("Re-authenticate from phone")
+        .accessibilityHint("Outbox halted on auth failure; tap to clear once the phone updates the key.")
+        .onTapGesture {
+            onDismiss()
+        }
     }
 }

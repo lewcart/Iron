@@ -1,4 +1,5 @@
 import Foundation
+import Network
 import RebirthAppGroup
 import RebirthAPI
 import RebirthModels
@@ -18,13 +19,21 @@ import RebirthWatchLog
 ///      On 5xx/network, leave queued for next reachability change
 @MainActor
 final class SetCompletionCoordinator: ObservableObject {
+    /// Drop a non-completion (edit-only) mutation after this many failed
+    /// attempts. Completion mutations (is_completed=true) retry indefinitely
+    /// — that's the data the user explicitly captured.
+    private static let maxAttemptsForNonCompletion = 3
+
     @Published var pendingCount: Int = 0
     @Published var lastError: String?
+    @Published var isAuthHalted: Bool = false
 
     private let appGroup = RebirthAppGroup()
     private let log = RebirthWatchLog.shared
     private let outbox: RebirthOutbox?
     private let api: RebirthAPIClient
+    private let pathMonitor = NWPathMonitor()
+    private var monitorStarted = false
 
     init(baseURL: URL = URL(string: "https://rebirth.app")!) {
         self.api = RebirthAPIClient(baseURL: baseURL)
@@ -35,6 +44,23 @@ final class SetCompletionCoordinator: ObservableObject {
             log.error("Outbox init failed: \(error)")
         }
         refreshPendingCount()
+        startPathMonitor()
+    }
+
+    /// Auto-flush outbox when network reachability flips to satisfied.
+    private func startPathMonitor() {
+        guard !monitorStarted else { return }
+        monitorStarted = true
+        pathMonitor.pathUpdateHandler = { [weak self] path in
+            guard path.status == .satisfied else { return }
+            Task { @MainActor in
+                guard let self else { return }
+                if !self.isAuthHalted {
+                    await self.flush()
+                }
+            }
+        }
+        pathMonitor.start(queue: .global(qos: .utility))
     }
 
     func refreshPendingCount() {
@@ -91,9 +117,11 @@ final class SetCompletionCoordinator: ObservableObject {
     }
 
     /// Drains outbox. Stops on first 401 (auth halted). Removes 200 + 4xx rows.
-    /// Leaves 5xx + network errors for next attempt.
+    /// 5xx/network errors are retried, with non-completion mutations dropping
+    /// after `maxAttemptsForNonCompletion`.
     func flush() async {
         guard let outbox else { return }
+        if isAuthHalted { return }
         let pending: [PendingMutation]
         do {
             pending = try outbox.pending(limit: 50)
@@ -103,27 +131,45 @@ final class SetCompletionCoordinator: ObservableObject {
         }
         for mutation in pending {
             do {
-                try await postRaw(endpoint: mutation.endpoint, body: mutation.bodyJSON)
+                try await api.rawPost(path: mutation.endpoint, body: mutation.bodyJSON)
                 try? outbox.remove(mutationId: mutation.mutationId)
             } catch APIError.unauthorized {
                 log.error("Outbox flush halted on 401")
                 lastError = "Re-auth from phone"
+                isAuthHalted = true
                 break
             } catch APIError.clientError(let code, let body) {
                 log.error("Outbox dropping \(mutation.mutationId) on \(code): \(body)")
                 try? outbox.remove(mutationId: mutation.mutationId)
+                lastError = "Server rejected: \(code)"
             } catch {
-                try? outbox.recordAttempt(mutationId: mutation.mutationId, error: String(describing: error))
-                // Leave queued — retry next time.
+                let errStr = String(describing: error)
+                try? outbox.recordAttempt(mutationId: mutation.mutationId, error: errStr)
+                if !isCompletionMutation(mutation) && mutation.attemptCount + 1 >= Self.maxAttemptsForNonCompletion {
+                    log.error("Outbox dead-lettering \(mutation.mutationId) after \(mutation.attemptCount + 1) attempts: \(errStr)")
+                    try? outbox.remove(mutationId: mutation.mutationId)
+                }
+                // Otherwise leave queued for next reachability change.
             }
         }
         refreshPendingCount()
     }
 
-    /// Raw POST to a Rebirth endpoint with the watch's API key. Throws
-    /// `APIError` on failure.
-    private func postRaw(endpoint: String, body: Data) async throws {
-        try await api.rawPost(path: endpoint, body: body)
+    /// Heuristic: a mutation that contains `"is_completed":true` somewhere in
+    /// its body is treated as a completion (retried forever). Edit-only
+    /// mutations (weight/rep dial without is_completed change) drop after
+    /// `maxAttemptsForNonCompletion`. Cheap string check — no need to decode.
+    private func isCompletionMutation(_ mutation: PendingMutation) -> Bool {
+        guard let body = String(data: mutation.bodyJSON, encoding: .utf8) else { return false }
+        return body.contains("\"is_completed\":true")
+    }
+
+    /// Manually clear the auth-halted state. Called after Lou re-pastes the
+    /// API key (Day 4 wires the banner action; Day 3 leaves this method
+    /// callable from anywhere a recovery flow is needed).
+    func clearAuthHalt() {
+        isAuthHalted = false
+        lastError = nil
     }
 
     private func applyOptimistic(setUUID: String, rir: Int?) {

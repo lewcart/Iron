@@ -39,6 +39,15 @@ public final class RebirthOutbox: @unchecked Sendable {
         try migrate()
     }
 
+    /// Test/internal init: lets callers point at any SQLite file path. Used
+    /// by RebirthOutboxTests so the suite doesn't depend on App Group
+    /// entitlements.
+    public init(url: URL) throws {
+        self.url = url
+        try open()
+        try migrate()
+    }
+
     deinit {
         if let db { sqlite3_close(db) }
     }
