@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		171FD88FDFBDB06632673BE7 /* RebirthKeychain in Frameworks */ = {isa = PBXBuildFile; productRef = 9F09162EEE5586FDA870FE14 /* RebirthKeychain */; };
 		186D56AEB447BC06EEBBC3FC /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 67F27BA56D37FF469FD62FE0 /* Foundation.framework */; };
+		1A8E98C86D0C4F1775B27419 /* PBDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7E424E1270A78B776B158CEF /* PBDetector.swift */; };
 		1D348AA49807803F085E89DB /* RebirthWatchComplications.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = E4BEA78AC3B864F81CF8105E /* RebirthWatchComplications.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		21339E17616EE88FDDE84EDE /* RebirthWatchComplications.swift in Sources */ = {isa = PBXBuildFile; fileRef = C22DA6AFA7A32BA4F76B430C /* RebirthWatchComplications.swift */; };
 		213B1B8A6AC6702409B2C19C /* RebirthAPI in Frameworks */ = {isa = PBXBuildFile; productRef = 6930916107C6D7E0B2BDA8DD /* RebirthAPI */; };
@@ -133,6 +134,7 @@
 		66DA4F51204F40D8A7AA3617 /* SetCompletionCoordinator.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = SetCompletionCoordinator.swift; path = SetCompletionCoordinator.swift; sourceTree = "<group>"; };
 		6719304ECF1C3B40062B8170 /* RestTimerLiveActivity.entitlements */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.entitlements; path = RestTimerLiveActivity.entitlements; sourceTree = "<group>"; };
 		67F27BA56D37FF469FD62FE0 /* Foundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Foundation.framework; path = Platforms/WatchOS.platform/Developer/SDKs/WatchOS11.0.sdk/System/Library/Frameworks/Foundation.framework; sourceTree = DEVELOPER_DIR; };
+		7E424E1270A78B776B158CEF /* PBDetector.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = PBDetector.swift; path = PBDetector.swift; sourceTree = "<group>"; };
 		958DCC722DB07C7200EA8C5F /* debug.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; name = debug.xcconfig; path = ../debug.xcconfig; sourceTree = SOURCE_ROOT; };
 		95B0D3245656B25E47BA3FE9 /* Foundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Foundation.framework; path = Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS18.0.sdk/System/Library/Frameworks/Foundation.framework; sourceTree = DEVELOPER_DIR; };
 		984637B68F4B9C52AE4CA5BB /* RepsDial.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = RepsDial.swift; path = RepsDial.swift; sourceTree = "<group>"; };
@@ -318,6 +320,7 @@
 				B26E20E85A8E8608BDB08D0B /* CountdownRing.swift */,
 				DB75C7B55D81A811D7F97EA7 /* WorkoutSessionManager.swift */,
 				5563638CF699DB160CF07F0C /* SessionEndView.swift */,
+				7E424E1270A78B776B158CEF /* PBDetector.swift */,
 			);
 			name = RebirthWatch;
 			path = ../RebirthWatch;
@@ -598,6 +601,7 @@
 				C3BC5EDC7FE866C9A74D6C25 /* CountdownRing.swift in Sources */,
 				ACD416F980BCC7404673E381 /* WorkoutSessionManager.swift in Sources */,
 				8A08E915E9EF546EE05D1BBA /* SessionEndView.swift in Sources */,
+				1A8E98C86D0C4F1775B27419 /* PBDetector.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

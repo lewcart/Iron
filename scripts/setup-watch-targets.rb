@@ -27,6 +27,7 @@ WATCH_SOURCES = [
   'ios/RebirthWatch/CountdownRing.swift',
   'ios/RebirthWatch/WorkoutSessionManager.swift',
   'ios/RebirthWatch/SessionEndView.swift',
+  'ios/RebirthWatch/PBDetector.swift',
   'ios/RebirthWatch/SetCompletionCoordinator.swift',
   'ios/RebirthWatch/MockSnapshot.swift',
 ]

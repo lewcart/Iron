@@ -183,25 +183,52 @@ public struct ActiveExercise: Codable, Sendable, Equatable {
     }
 }
 
+public struct HRVHint: Codable, Sendable, Equatable {
+    public let currentMs: Double
+    public let baselineMeanMs: Double
+    public let baselineStdevMs: Double
+
+    public init(currentMs: Double, baselineMeanMs: Double, baselineStdevMs: Double) {
+        self.currentMs = currentMs
+        self.baselineMeanMs = baselineMeanMs
+        self.baselineStdevMs = baselineStdevMs
+    }
+
+    /// Returns deviation from baseline in standard deviations. Negative = below.
+    public var sigma: Double {
+        guard baselineStdevMs > 0 else { return 0 }
+        return (currentMs - baselineMeanMs) / baselineStdevMs
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case currentMs = "current_ms"
+        case baselineMeanMs = "baseline_mean_ms"
+        case baselineStdevMs = "baseline_stdev_ms"
+    }
+}
+
 public struct ActiveWorkoutSnapshot: Codable, Sendable, Equatable {
     public let workoutUUID: String
     public let pushedAt: Date
     public let currentExerciseIndex: Int
     public let exercises: [ActiveExercise]
     public let restTimerDefaultSeconds: Int
+    public let hrvHint: HRVHint?
 
     public init(
         workoutUUID: String,
         pushedAt: Date,
         currentExerciseIndex: Int,
         exercises: [ActiveExercise],
-        restTimerDefaultSeconds: Int
+        restTimerDefaultSeconds: Int,
+        hrvHint: HRVHint? = nil
     ) {
         self.workoutUUID = workoutUUID
         self.pushedAt = pushedAt
         self.currentExerciseIndex = currentExerciseIndex
         self.exercises = exercises
         self.restTimerDefaultSeconds = restTimerDefaultSeconds
+        self.hrvHint = hrvHint
     }
 
     enum CodingKeys: String, CodingKey {
@@ -210,5 +237,16 @@ public struct ActiveWorkoutSnapshot: Codable, Sendable, Equatable {
         case currentExerciseIndex = "current_exercise_index"
         case exercises
         case restTimerDefaultSeconds = "rest_timer_default_seconds"
+        case hrvHint = "hrv_hint"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        workoutUUID = try c.decode(String.self, forKey: .workoutUUID)
+        pushedAt = try c.decode(Date.self, forKey: .pushedAt)
+        currentExerciseIndex = try c.decode(Int.self, forKey: .currentExerciseIndex)
+        exercises = try c.decode([ActiveExercise].self, forKey: .exercises)
+        restTimerDefaultSeconds = try c.decode(Int.self, forKey: .restTimerDefaultSeconds)
+        hrvHint = try c.decodeIfPresent(HRVHint.self, forKey: .hrvHint)
     }
 }

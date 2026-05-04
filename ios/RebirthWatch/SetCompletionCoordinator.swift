@@ -1,5 +1,6 @@
 import Foundation
 import Network
+import WatchKit
 import RebirthAppGroup
 import RebirthAPI
 import RebirthModels
@@ -27,6 +28,9 @@ final class SetCompletionCoordinator: ObservableObject {
     @Published var pendingCount: Int = 0
     @Published var lastError: String?
     @Published var isAuthHalted: Bool = false
+    /// Set when the most recent completeSet detected a local PB. UI reads
+    /// this to render the "+Δkg PB" pill briefly. Cleared on next confirm.
+    @Published var lastPBDeltaKg: Double?
 
     /// Per-set in-progress edits made via tap-to-dial. Cleared when the set
     /// is completed (or undone). Survives navigation between exercises but
@@ -123,6 +127,27 @@ final class SetCompletionCoordinator: ObservableObject {
             editedRir: rir
         )
         clearEdits(setUUID: set.uuid)
+
+        // PB detection — fire haptic immediately on confirm for a direct
+        // emotional cue. Server-side PR recompute may flip is_pr later;
+        // this is the optimistic, local-cache-only check.
+        let (isPB, deltaKg) = PBDetector.detect(
+            candidate: set,
+            completedWeight: edit?.weight ?? set.targetWeight,
+            completedReps: edit?.reps ?? set.targetReps,
+            history: exercise.history
+        )
+        if isPB {
+            WKInterfaceDevice.current().play(.success)
+            lastPBDeltaKg = deltaKg
+            // Auto-clear the pill after 4s.
+            Task {
+                try? await Task.sleep(nanoseconds: 4_000_000_000)
+                await MainActor.run { self.lastPBDeltaKg = nil }
+            }
+        } else {
+            lastPBDeltaKg = nil
+        }
 
         // 1. Optimistic snapshot update
         applyOptimistic(setUUID: set.uuid, rir: rir, editedWeight: edit?.weight, editedReps: edit?.reps, editedDurationSeconds: edit?.durationSeconds)

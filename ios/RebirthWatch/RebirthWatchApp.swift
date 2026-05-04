@@ -70,17 +70,18 @@ struct RootView: View {
                     elapsedSeconds: workoutSession.elapsedSeconds
                 )
                 .overlay(alignment: .top) {
-                    if completion.isAuthHalted {
-                        ReAuthBanner(onDismiss: { completion.clearAuthHalt() })
-                    } else if let target = undoTarget {
-                        UndoBanner(onUndo: {
-                            // Day 10: best-effort optimistic UI undo. The
-                            // server CDC row is already in flight; full
-                            // server-side undo via compensating mutation
-                            // lands on Day 12 polish.
-                            undoTarget = nil
-                        })
-                        .id(target.uuid)
+                    VStack(spacing: 2) {
+                        if completion.isAuthHalted {
+                            ReAuthBanner(onDismiss: { completion.clearAuthHalt() })
+                        } else if let target = undoTarget {
+                            UndoBanner(onUndo: { undoTarget = nil })
+                                .id(target.uuid)
+                        }
+                        if let delta = completion.lastPBDeltaKg, delta > 0 {
+                            PBPill(deltaKg: delta)
+                        } else if let hint = snapshot.hrvHint, hint.sigma <= -1 {
+                            HRVPill(hint: hint)
+                        }
                     }
                 }
                 .overlay(alignment: .bottom) {
@@ -239,6 +240,37 @@ private struct FooterPip: View {
             .padding(.vertical, 2)
             .background(Color.gray.opacity(0.15), in: Capsule())
             .padding(.bottom, 2)
+    }
+}
+
+private struct PBPill: View {
+    let deltaKg: Double
+    var body: some View {
+        let formatted = deltaKg.truncatingRemainder(dividingBy: 1) == 0
+            ? "+\(Int(deltaKg))kg"
+            : String(format: "+%.1fkg", deltaKg)
+        Text("\(formatted) PB")
+            .font(.system(size: 11, weight: .bold, design: .rounded))
+            .foregroundStyle(.yellow)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 2)
+            .background(Color.yellow.opacity(0.15), in: Capsule())
+            .accessibilityLabel("Personal best, plus \(formatted)")
+    }
+}
+
+private struct HRVPill: View {
+    let hint: HRVHint
+    var body: some View {
+        let sigma = hint.sigma
+        let sigmaStr = String(format: "%.1f", sigma)
+        Text("ⓘ HRV \(Int(hint.currentMs)) · \(sigmaStr)σ vs 30d")
+            .font(.system(size: 9))
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(Color.gray.opacity(0.15), in: Capsule())
+            .accessibilityLabel("HRV \(Int(hint.currentMs)) milliseconds, \(sigmaStr) standard deviations vs 30 day baseline")
     }
 }
 
