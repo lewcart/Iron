@@ -88,8 +88,8 @@ function Toggle({ on, onToggle }: { on: boolean; onToggle: () => void }) {
       }`}
     >
       <span
-        className={`absolute top-0.5 w-6 h-6 rounded-full bg-white shadow transition-transform ${
-          on ? 'translate-x-5' : 'translate-x-0.5'
+        className={`absolute top-0.5 w-6 h-6 rounded-full bg-white shadow transition-all ${
+          on ? 'left-0.5 right-auto' : 'right-0.5 left-auto'
         }`}
       />
     </button>

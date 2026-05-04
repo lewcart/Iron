@@ -711,7 +711,15 @@ public class GeofencePlugin: CAPPlugin, CAPBridgedPlugin {
         case .notDetermined:
             pendingAuthCompletion = completion
             locationManager.requestAlwaysAuthorization()
+        case .authorizedWhenInUse:
+            // User already granted WhileInUse (e.g., from navigator.geolocation
+            // in JS land). Request the upgrade to Always — iOS shows a one-time
+            // prompt asking "always allow?".
+            pendingAuthCompletion = completion
+            locationManager.requestAlwaysAuthorization()
         default:
+            // .denied or .restricted — can't recover here; user must change
+            // permission in iOS Settings.
             completion(false)
         }
     }
