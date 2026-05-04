@@ -31,6 +31,18 @@ declare global {
 }
 
 export function mountTestBridge(): void {
+  // Dead-code-eliminate the entire body in non-E2E builds. SWC inlines
+  // `process.env.NEXT_PUBLIC_E2E` to its build-time value, so when the
+  // flag is unset this becomes `'undefined' !== '1'` → unconditional early
+  // return → SWC eliminates everything below. Webpack then tree-shakes
+  // `db`, `nowProvider`, the `Dexie` dynamic import, the `getTree` DOM
+  // walk — none of it enters the prod bundle. The `__rebirthTestBridge`
+  // string literal disappears with the dead code.
+  //
+  // scripts/check-no-test-bridge.sh greps the static export for
+  // `__rebirthTestBridge` as a belt-and-braces guard.
+  if (process.env.NEXT_PUBLIC_E2E !== '1') return;
+
   if (typeof window === 'undefined') return;
   if (window.__rebirthTestBridge) return;
 
