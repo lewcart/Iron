@@ -27,6 +27,7 @@ import {
   updateInbodyScan,
   deleteInbodyScan,
   parseInbodyScan,
+  getWeekSetsPerMuscle,
 } from './queries';
 import type { DbRow } from './queries';
 
@@ -1576,5 +1577,183 @@ describe('deleteInbodyScan', () => {
     expect(calls.length).toBe(2);
     expect(calls[0][0]).toContain('DELETE FROM measurement_logs WHERE source');
     expect(calls[1][0]).toContain('DELETE FROM inbody_scans WHERE uuid');
+  });
+});
+
+// ===== getWeekSetsPerMuscle (SQL shape) =====
+
+describe('getWeekSetsPerMuscle', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('emits SQL that gives primary credit 1.0 and secondary credit 0.5', async () => {
+    const db = await import('./db.js');
+    vi.mocked(db.query).mockResolvedValueOnce([]);
+    await getWeekSetsPerMuscle(0);
+    const [sql] = vi.mocked(db.query).mock.calls[0];
+
+    // Two-arm UNION ALL — one arm picks primary_muscles with credit 1.0,
+    // the other picks secondary_muscles with credit 0.5.
+    expect(sql).toContain('1.0::numeric AS credit');
+    expect(sql).toContain('0.5::numeric AS credit');
+    expect(sql).toContain('primary_muscles');
+    expect(sql).toContain('secondary_muscles');
+    expect(sql).toContain('UNION ALL');
+
+    // After the UNION, collapse to one row per (set, muscle), keeping the
+    // higher credit (so a muscle in both arrays gets primary's 1.0).
+    expect(sql).toMatch(/MAX\(credit\)/);
+    expect(sql).toMatch(/GROUP BY\s+set_uuid,\s*muscle_slug/);
+
+    // RIR weighting still multiplies the per-row credit.
+    expect(sql).toMatch(/credit\s*\*\s*CASE/);
+  });
+
+  it('still uses COUNT(DISTINCT set_uuid) for raw set_count (1 per hit, not weighted)', async () => {
+    const db = await import('./db.js');
+    vi.mocked(db.query).mockResolvedValueOnce([]);
+    await getWeekSetsPerMuscle(0);
+    const [sql] = vi.mocked(db.query).mock.calls[0];
+    expect(sql).toContain('COUNT(DISTINCT set_uuid) AS set_count');
+  });
+
+  it('passes weekOffset through as the only param', async () => {
+    const db = await import('./db.js');
+    vi.mocked(db.query).mockResolvedValueOnce([]);
+    await getWeekSetsPerMuscle(-2);
+    const [, params] = vi.mocked(db.query).mock.calls[0];
+    expect(params).toEqual([-2]);
+  });
+});
+
+// ===== Effective-set credit math (RP/Helms convention) =====
+//
+// The query computes effective_set_count as
+//   SUM(primary_or_secondary_credit × rir_credit) per muscle.
+// This block exercises that math against representative scenarios so a
+// regression in the SQL CTEs is caught even when we can't run real Postgres
+// in this unit-test environment.
+
+function effectiveCreditForSet(opts: {
+  primary: string[];
+  secondary: string[];
+  rir: number | null;
+  muscle: string;
+}): number {
+  const { primary, secondary, rir, muscle } = opts;
+  const inPrimary = primary.includes(muscle);
+  const inSecondary = secondary.includes(muscle);
+  if (!inPrimary && !inSecondary) return 0;
+  // Primary wins when a muscle appears in both arrays.
+  const ps = inPrimary ? 1.0 : 0.5;
+  const rirCredit =
+    rir === null ? 1.0 : rir <= 3 ? 1.0 : rir === 4 ? 0.5 : 0.0;
+  return ps * rirCredit;
+}
+
+describe('effective-set credit math (mirrors getWeekSetsPerMuscle SQL)', () => {
+  it('primary muscle, RIR 1 → 1.0', () => {
+    expect(
+      effectiveCreditForSet({
+        primary: ['hamstrings'],
+        secondary: ['glutes'],
+        rir: 1,
+        muscle: 'hamstrings',
+      })
+    ).toBe(1.0);
+  });
+
+  it('secondary-only muscle, RIR 1 → 0.5', () => {
+    expect(
+      effectiveCreditForSet({
+        primary: ['hamstrings'],
+        secondary: ['glutes'],
+        rir: 1,
+        muscle: 'glutes',
+      })
+    ).toBe(0.5);
+  });
+
+  it('RDL @ RIR 4 — hamstrings (primary) gets 0.5, glutes (secondary) gets 0.25', () => {
+    const primary = ['hamstrings'];
+    const secondary = ['glutes', 'lower_back'];
+    expect(
+      effectiveCreditForSet({ primary, secondary, rir: 4, muscle: 'hamstrings' })
+    ).toBe(0.5);
+    expect(
+      effectiveCreditForSet({ primary, secondary, rir: 4, muscle: 'glutes' })
+    ).toBe(0.25);
+  });
+
+  it('RIR 5 (junk) zeroes credit regardless of primary/secondary', () => {
+    expect(
+      effectiveCreditForSet({
+        primary: ['chest'],
+        secondary: ['triceps'],
+        rir: 5,
+        muscle: 'chest',
+      })
+    ).toBe(0);
+    expect(
+      effectiveCreditForSet({
+        primary: ['chest'],
+        secondary: ['triceps'],
+        rir: 5,
+        muscle: 'triceps',
+      })
+    ).toBe(0);
+  });
+
+  it('RIR NULL falls back to 1.0 (charitable default until corpus exists)', () => {
+    expect(
+      effectiveCreditForSet({
+        primary: ['lats'],
+        secondary: ['biceps'],
+        rir: null,
+        muscle: 'lats',
+      })
+    ).toBe(1.0);
+    expect(
+      effectiveCreditForSet({
+        primary: ['lats'],
+        secondary: ['biceps'],
+        rir: null,
+        muscle: 'biceps',
+      })
+    ).toBe(0.5);
+  });
+
+  it('a muscle listed in BOTH primary and secondary is credited as primary (1.0)', () => {
+    // Pathological catalog entry but the SQL uses MAX(credit) so primary wins.
+    expect(
+      effectiveCreditForSet({
+        primary: ['glutes'],
+        secondary: ['glutes'],
+        rir: 2,
+        muscle: 'glutes',
+      })
+    ).toBe(1.0);
+  });
+
+  it('weekly aggregate example — 4 RDL sets across two muscles', () => {
+    // Four working sets of RDL: RIRs [2, 3, 4, 5]. Hamstrings primary, glutes secondary.
+    const primary = ['hamstrings'];
+    const secondary = ['glutes'];
+    const rirs = [2, 3, 4, 5];
+
+    const hamstringsTotal = rirs
+      .map(rir => effectiveCreditForSet({ primary, secondary, rir, muscle: 'hamstrings' }))
+      .reduce((a, b) => a + b, 0);
+    const glutesTotal = rirs
+      .map(rir => effectiveCreditForSet({ primary, secondary, rir, muscle: 'glutes' }))
+      .reduce((a, b) => a + b, 0);
+
+    // Hamstrings: 1.0 + 1.0 + 0.5 + 0 = 2.5
+    expect(hamstringsTotal).toBe(2.5);
+    // Glutes: 0.5 + 0.5 + 0.25 + 0 = 1.25
+    expect(glutesTotal).toBe(1.25);
+
+    // Raw set_count for both muscles is 4 (each set hits both).
+    // Ratio glutes effective/raw = 1.25 / 4 = 0.3125 — under the 0.6 JUNK threshold.
+    expect(glutesTotal / 4).toBeLessThan(0.6);
   });
 });

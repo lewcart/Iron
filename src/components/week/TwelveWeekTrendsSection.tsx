@@ -235,7 +235,7 @@ export function TwelveWeekTrendsSection({ data }: { data: TwelveWeekTrendsData }
         onClose={() => setOpen(null)}
         title="Priority muscles · sets / week"
         series={priorityModalSeries}
-        rule="Effective working sets per week, RIR-weighted (RIR 0–3 = 1.0, 4 = 0.5, 5+ = 0.0). Both primary and secondary muscle credits count fully. Last 12 weeks."
+        rule="Effective working sets per week. Primary muscle credit 1.0, secondary 0.5, then RIR-weighted (RIR 0–3 = 1.0, 4 = 0.5, 5+ = 0.0). Last 12 weeks."
       />
       <TrendDetailModal
         open={open === 'anchor'}

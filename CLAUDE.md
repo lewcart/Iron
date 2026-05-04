@@ -113,9 +113,14 @@ Canonical muscle taxonomy: 18 slugs. Always use canonical slugs (`chest`, `lats`
 - **"Find a glute exercise"** → `find_exercises({ query: 'romanian deadlift', muscle_group: 'glutes' })` — `muscle_group` accepts canonical slugs OR legacy synonyms.
 
 Set quality:
-- A working set = `is_completed=true AND (reps>=1 OR duration_seconds>0)`. Drop sets count as 1 each. Each set credits BOTH primary AND secondary muscles (full credit, not fractional).
+- A working set = `is_completed=true AND (reps>=1 OR duration_seconds>0)`. Drop sets count as 1 each.
+- **`set_count`** is a raw hit count: every set credits 1 to every muscle in the exercise's `primary_muscles` OR `secondary_muscles` array (counted once per set, even if a muscle appears in both). It answers "did this muscle get worked at all this week?"
 - **RIR (Reps in Reserve, 0–5)** is collected per-set in the workout UI as a chip strip below each completed set row (0=failure, 5=5+ left). Stored on `workout_sets.rir`. NULL = not recorded.
-- **`effective_set_count`** (Phase 3) is the RIR-weighted variant on every `get_sets_per_muscle` row and `get_weekly_summary.by_muscle` row: RIR 0–3 counts 1.0, RIR 4 counts 0.5, RIR 5+ counts 0.0, RIR NULL counts 1.0 (charitable default until corpus exists). Until RIR is logged on most sets, `effective_set_count ≈ set_count`. The /feed Muscles This Week tile flags a muscle with a "JUNK" badge when `effective / set_count < 0.6` AND `set_count > 0` — meaning most logged sets were too far from failure to drive hypertrophy.
+- **`effective_set_count`** is the stimulus-weighted variant on every `get_sets_per_muscle` row and `get_weekly_summary.by_muscle` row. Two factors stack:
+  - Primary/secondary credit (RP / Helms convention): primary muscle = 1.0, secondary-only = 0.5, in-both = 1.0 (primary wins).
+  - RIR credit: RIR 0–3 = 1.0, RIR 4 = 0.5, RIR 5+ = 0.0, RIR NULL = 1.0 (charitable default until corpus exists).
+  - Worked example: an RDL set @ RIR 4 contributes 0.25 effective sets to glutes (secondary 0.5 × RIR 0.5) and 0.5 effective sets to hamstrings (primary 1.0 × RIR 0.5).
+  - The /feed Muscles This Week tile flags a muscle with a "JUNK" badge when `effective / set_count < 0.6` AND `set_count > 0` — meaning most logged sets were sub-stimulus, either too far from failure OR mostly secondary work.
 
 `coverage` flag on `get_sets_per_muscle` rows: `'none'` means no exercise in the catalog tags this muscle (yet — the audit pass will populate). Until then those muscles can't accumulate sets. UI collapses them into a footer.
 
