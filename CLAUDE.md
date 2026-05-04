@@ -175,3 +175,100 @@ Notes:
 - Optional `source_progress_photo_uuid` links the projection to the photo it was generated from — the compare viewer prefers that pairing if set.
 - `target_horizon` is a label (`'3mo'|'6mo'|'12mo'` or freeform), not a date.
 - Generation happens outside this app. Lou uploads pre-generated images; there is no in-app image generation.
+
+## Watch workflow (for any code touching the watch companion)
+
+The Apple Watch companion lives in `ios/RebirthWatch/`. It's a native SwiftUI
+watchOS 10+ app with a sibling complications widget extension at
+`ios/RebirthWatchComplications/`. Both targets depend on the local Swift
+package at `RebirthShared/` (Models, API, Keychain, AppGroup, Outbox,
+WatchLog).
+
+The watchOS targets are added to `ios/App/App.xcodeproj` programmatically
+via `scripts/setup-watch-targets.rb` (idempotent — safe to re-run if
+`cap:sync` ever strips them).
+
+### Snapshot push (phone → watch)
+
+`src/lib/watch.ts:buildWatchSnapshot()` converts `LocalWorkoutWithExercises`
+into the WC envelope. `src/app/workout/page.tsx` calls
+`pushSnapshotToWatch(snapshot)` from a `useEffect` whenever the Dexie live
+query changes — every set mutation, exercise add/remove, completion. The
+iOS plugin (`WatchConnectivityPlugin.swift`) wraps the snapshot as
+`{ schema_version, body }` and calls
+`WCSession.updateApplicationContext`. The watch's `WatchSessionStore`
+writes the inbound envelope to its own App Group UserDefaults so
+cold-launches render instantly.
+
+Snapshot byte budget: hard cap 50KB. History hint = last 1 session only,
+max 10 sets per exercise.
+
+`schema_version` is on every payload. Decoders use `decodeIfPresent` for
+unknown future fields. If a watch sees `schema_version > supported`, it
+shows "Watch needs update" instead of crashing.
+
+### Set logging (watch → server)
+
+The watch hits `/api/sync/push` directly with a single-row CDC payload
+under `body.workout_sets[]`. NOT `update_sets` — that MCP tool is a
+routine-target editor and would clobber set state. Auth: API key from
+shared keychain (`group.app.rebirth` access group), validated by
+`rejectIfBadApiKey()` in the route. Phone Dexie sync calls the same route
+with no auth header (preserved for backwards compat).
+
+CDC row must include EVERY column the upsert touches — `tag`, `comment`,
+`is_pr`, `excluded_from_pb`, etc. The watch echoes them from the snapshot
+even though it doesn't render them. Otherwise the server-side
+`EXCLUDED.column` clause NULLs out fields the watch didn't touch.
+
+### Outbox
+
+SQLite file at `<App Group>/outbox.sqlite`. Atomic single-row writes
+survive watch process suspension. `mutation_id` is client-generated UUID
+for idempotency. `NWPathMonitor` flushes on connectivity restore.
+
+Retry policy: 200 → drop. 4xx → drop with toast. 401 → halt outbox + show
+re-auth banner; tap clears halt after Lou re-keys. 5xx/network → retry.
+Non-completion mutations dead-letter after 3 attempts; completions retry
+forever.
+
+### HealthKit (HKLiveWorkoutBuilder)
+
+Watch starts an `HKWorkoutSession` on first set approval. `HKLiveWorkoutBuilder`
+collects HR + active energy in real time. On finish, the workout is
+written with `HKMetadataKeyExternalUUID` = Rebirth workout UUID — phone-side
+`fetchWorkouts` (`HealthKitPlugin.swift workoutToFullDict`) reads that
+key for dedup. No explicit watch→phone WC round-trip needed for the UUID.
+
+### API key bootstrap (one-time)
+
+`WatchConnectivityPlugin.setApiKey(key)` writes to shared keychain;
+`hasApiKey()` returns presence. JS wrappers: `setWatchApiKey()`,
+`hasWatchApiKey()`. Same Apple Developer Team required across both
+targets — keychain access groups won't resolve cross-team.
+
+### Mock snapshot dev flag
+
+Set `WATCH_MOCK_SNAPSHOT` in the watch target's Other Swift Flags. The
+watch bypasses WC and loads `MockSnapshot.midStrengthSession` (3
+exercises across reps + time modes). Useful for fast UI iteration without
+paired sims.
+
+### Conflict policy (single-user)
+
+Server stamps `updated_at = NOW()` on every push. For a phone Dexie +
+watch direct write race within the same second, watch typically wins
+(direct write vs batched Dexie). This is acceptable single-user behavior
+— see `src/app/api/sync/push/route.ts:14` comment.
+
+### What NOT to do
+
+- Don't have the watch call `update_sets` for set completion — it's the
+  wrong tool. Use `/api/sync/push`.
+- Don't try to generate the `HKWorkout.uuid` watch-side — it's HK-assigned
+  at finish time. Stamp `HKMetadataKeyExternalUUID` instead.
+- Don't render an HRV recommendation on the pill ("consider RIR 4"). The
+  pill is descriptive only — Week-page prescription engine has the monopoly
+  per the prescription-engine note above.
+- Don't put new RebirthShared modules at iOS 17+ deployment target — the
+  iOS App target is iOS 15. Match it.
