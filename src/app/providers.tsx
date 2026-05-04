@@ -139,6 +139,18 @@ function AppBootstrap() {
   return null;
 }
 
+// E2E test bridge mount. Gated on a build-time env var so non-E2E builds
+// never load the bridge module — the dynamic `import()` is dead-eliminated
+// by webpack when NEXT_PUBLIC_E2E !== '1'. scripts/check-no-test-bridge.sh
+// belt-and-braces greps the static export for `__rebirthTestBridge`.
+function TestBridgeMount() {
+  useEffect(() => {
+    if (process.env.NEXT_PUBLIC_E2E !== '1') return;
+    import('@/lib/test-bridge').then(m => m.mountTestBridge());
+  }, []);
+  return null;
+}
+
 export function AppProviders({ children }: { children: ReactNode }) {
   const [queryClient] = useState(() => makeQueryClient());
 
@@ -146,6 +158,7 @@ export function AppProviders({ children }: { children: ReactNode }) {
     <QueryClientProvider client={queryClient}>
       <NotificationRouter />
       <AppBootstrap />
+      <TestBridgeMount />
       {children}
       {process.env.NODE_ENV === 'development' ? (
         <ReactQueryDevtools buttonPosition="bottom-left" />

@@ -1,0 +1,32 @@
+appId: app.rebirth
+tags:
+  - tabbar
+---
+# Detect missing pb-[var(--tab-bar-height)] on any of the 5 main routes.
+# For each tab, scroll to the bottom and assert the last item is fully
+# visible (not occluded by the fixed-bottom TabBar).
+#
+# Strategy: scroll a meaningful amount, then check via getBoundingClientRect
+# that the bottom-most interactive element on the page is above the
+# TabBar top edge.
+- runFlow: ../../helpers/launch.yaml
+- runFlow:
+    file: ../../helpers/actions/assert-tabbar-clear.yaml
+    env:
+      TAB: "Week"
+- runFlow:
+    file: ../../helpers/actions/assert-tabbar-clear.yaml
+    env:
+      TAB: "HRT"
+- runFlow:
+    file: ../../helpers/actions/assert-tabbar-clear.yaml
+    env:
+      TAB: "Workout"
+- runFlow:
+    file: ../../helpers/actions/assert-tabbar-clear.yaml
+    env:
+      TAB: "Measure"
+- runFlow:
+    file: ../../helpers/actions/assert-tabbar-clear.yaml
+    env:
+      TAB: "Nutrition"

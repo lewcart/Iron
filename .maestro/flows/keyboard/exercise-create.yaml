@@ -1,0 +1,29 @@
+appId: app.rebirth
+tags:
+  - keyboard
+---
+# Full-screen CreateExerciseForm — every input must stay above the keyboard
+# as the user moves through the form.
+- runFlow: ../../helpers/launch.yaml
+- tapOn:
+    text: "Workout"
+- assertVisible: "Workout"
+- tapOn:
+    text: "Exercises"        # link from Workout → Exercises catalog
+- assertVisible: "Exercises"
+# CreateExerciseForm trigger button has visible text "New" with a Plus icon.
+# "New" is in AMBIGUOUS_TEXT — selector-lint will warn. Patch:
+# add id="m-exercises-new" to src/app/exercises/page.tsx:215.
+- tapOn:
+    id: "m-exercises-new"
+- assertVisible:
+    text: "Create"           # form heading
+    timeout: 3000
+- tapOn:
+    text: "Name"             # label of first text input (TODO confirm in tree dump)
+- inputText: "Test exercise"
+- runFlow:
+    file: ../../helpers/actions/assert-above-keyboard.yaml
+    env:
+      SELECTOR_TEXT: "Test exercise"
+- hideKeyboard

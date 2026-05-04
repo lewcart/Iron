@@ -212,6 +212,7 @@ export default function ExercisesPage() {
             <h1 className="text-2xl font-bold">Exercises</h1>
           </div>
           <button
+            id="m-exercises-new"
             onClick={() => setShowCreateForm(true)}
             className="flex items-center gap-1.5 px-3 py-1.5 bg-primary text-primary-foreground text-sm font-medium rounded-full"
           >

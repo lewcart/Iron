@@ -1,0 +1,13 @@
+appId: app.rebirth
+---
+# Open a sheet by tapping its trigger and waiting for the sheet container
+# (role=dialog, aria-modal=true) to render.
+#
+# env:
+#   TRIGGER_TEXT — visible text of the button that opens the sheet
+#   SHEET_TITLE  — aria-label of the sheet (used to assert it's open)
+- tapOn:
+    text: ${TRIGGER_TEXT}
+- assertVisible:
+    text: ${SHEET_TITLE}
+    timeout: 4000

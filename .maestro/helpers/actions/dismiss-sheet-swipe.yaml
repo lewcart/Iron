@@ -1,0 +1,12 @@
+appId: app.rebirth
+---
+# Swipe the sheet down to dismiss. Sheet must already be open.
+#
+# env:
+#   SHEET_TITLE — aria-label of the sheet (asserted gone after swipe)
+- swipe:
+    direction: DOWN
+    duration: 400
+- assertNotVisible:
+    text: ${SHEET_TITLE}
+    timeout: 2000

@@ -1,0 +1,38 @@
+appId: app.rebirth
+tags:
+  - sheets
+---
+# When a sheet has an input and the keyboard appears, the sheet height
+# must shrink (Capacitor Keyboard.resize=body) so inner content scrolls
+# within the remaining height — not slide off-screen with the WebView.
+- runFlow: ../../helpers/launch.yaml
+- tapOn: "Nutrition"
+- tapOn: "Add food"
+- assertVisible:
+    text: "Add to"
+- evalScript: |
+    (() => {
+      // Capture sheet height before keyboard.
+      const sheet = document.querySelector('[role="dialog"][aria-modal="true"]');
+      if (!sheet) throw new Error("sheet-keyboard-resize: sheet not found pre-keyboard");
+      window.__rebirthSheetHeightBefore = sheet.getBoundingClientRect().height;
+    })()
+- tapOn:
+    text: "Search foods"
+- inputText: "y"
+- evalScript: |
+    (async () => {
+      // Give the WebView a beat to settle after focus.
+      await new Promise(r => setTimeout(r, 600));
+      const sheet = document.querySelector('[role="dialog"][aria-modal="true"]');
+      if (!sheet) throw new Error("sheet-keyboard-resize: sheet vanished after keyboard");
+      const after = sheet.getBoundingClientRect().height;
+      const before = window.__rebirthSheetHeightBefore;
+      if (after >= before) {
+        throw new Error(
+          "sheet-keyboard-resize: sheet did not shrink. before=" + before +
+          " after=" + after + " — Keyboard.resize=body may have regressed"
+        );
+      }
+    })()
+- hideKeyboard

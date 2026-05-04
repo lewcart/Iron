@@ -1,0 +1,42 @@
+appId: app.rebirth
+tags:
+  - scroll
+---
+# History page can have many workouts. Scroll deep — ensure no jank,
+# no items vanish, last item lands above TabBar.
+- runFlow: ../../helpers/launch.yaml
+- tapOn: "History"
+- assertVisible:
+    text: "History"
+    timeout: 4000
+- swipe:
+    direction: UP
+    duration: 800
+- swipe:
+    direction: UP
+    duration: 800
+- swipe:
+    direction: UP
+    duration: 800
+- evalScript: |
+    (() => {
+      // After 3 swipes, the last visible row should still have its bottom
+      // above the TabBar top. Same check as tabbar-content-overlap but
+      // post-scroll on a long list.
+      const tabBar = document.querySelector('nav.fixed.bottom-0');
+      if (!tabBar) return;
+      const tabTop = tabBar.getBoundingClientRect().top;
+      const items = Array.from(document.querySelectorAll('article, li, [role="button"]'))
+        .filter(el => {
+          const r = el.getBoundingClientRect();
+          return r.height > 16 && r.top >= 0 && r.top < window.innerHeight;
+        });
+      const last = items[items.length - 1];
+      if (!last) return;
+      if (last.getBoundingClientRect().bottom > tabTop + 1) {
+        throw new Error(
+          "history-scroll: last visible item bottom=" + last.getBoundingClientRect().bottom +
+          " > tabTop=" + tabTop + " — content under TabBar"
+        );
+      }
+    })()

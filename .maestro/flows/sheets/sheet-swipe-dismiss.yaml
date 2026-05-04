@@ -1,0 +1,50 @@
+appId: app.rebirth
+tags:
+  - sheets
+---
+# All primary sheets must dismiss on swipe-down. Cycle through 3 sheets
+# we can reliably reach without seed data:
+#   1. GoalsSheet ("Daily goals") — from /nutrition
+#   2. ProjectionUploadSheet ("Add Projection") — from /projections
+#   3. InbodyScanSheet ("New InBody Scan") — from /measurements
+- runFlow: ../../helpers/launch.yaml
+
+# 1. GoalsSheet
+- tapOn: "Nutrition"
+- tapOn:
+    text: "Goals"            # link/button to GoalsSheet
+- assertVisible:
+    text: "Daily goals"
+    timeout: 3000
+- runFlow:
+    file: ../../helpers/actions/dismiss-sheet-swipe.yaml
+    env:
+      SHEET_TITLE: "Daily goals"
+
+# 2. ProjectionUploadSheet
+- tapOn: "Measure"           # projections is reachable from measurements area
+- tapOn:
+    text: "Projections"      # TODO confirm route + link text
+- tapOn:
+    text: "Upload"           # AMBIGUOUS — TODO id="m-projection-upload"
+- assertVisible:
+    text: "Add Projection"
+    timeout: 3000
+- runFlow:
+    file: ../../helpers/actions/dismiss-sheet-swipe.yaml
+    env:
+      SHEET_TITLE: "Add Projection"
+
+# 3. InbodyScanSheet
+- tapOn: "Measure"
+- tapOn:
+    text: "InBody"
+- tapOn:
+    text: "New scan"         # AMBIGUOUS — TODO id="m-inbody-new"
+- assertVisible:
+    text: "New InBody Scan"
+    timeout: 3000
+- runFlow:
+    file: ../../helpers/actions/dismiss-sheet-swipe.yaml
+    env:
+      SHEET_TITLE: "New InBody Scan"
