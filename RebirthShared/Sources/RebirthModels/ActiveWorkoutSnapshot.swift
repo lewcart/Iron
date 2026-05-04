@@ -25,6 +25,7 @@ public struct RepWindow: Codable, Sendable, Equatable {
 
 public struct WorkoutSet: Codable, Sendable, Equatable {
     public let uuid: String
+    public let workoutExerciseUUID: String?
     public let orderIndex: Int
     public let isCompleted: Bool
     public let targetWeight: Double?
@@ -34,9 +35,20 @@ public struct WorkoutSet: Codable, Sendable, Equatable {
     public let actualReps: Int?
     public let actualDurationSeconds: Int?
     public let rir: Int?
+    /// Round-trip fields — the watch doesn't render these but echoes them in
+    /// the CDC payload so /api/sync/push doesn't NULL out server columns the
+    /// watch didn't touch.
+    public let minTargetReps: Int?
+    public let maxTargetReps: Int?
+    public let rpe: Double?
+    public let tag: String?
+    public let comment: String?
+    public let isPr: Bool
+    public let excludedFromPb: Bool
 
     public init(
         uuid: String,
+        workoutExerciseUUID: String? = nil,
         orderIndex: Int,
         isCompleted: Bool,
         targetWeight: Double? = nil,
@@ -45,9 +57,17 @@ public struct WorkoutSet: Codable, Sendable, Equatable {
         actualWeight: Double? = nil,
         actualReps: Int? = nil,
         actualDurationSeconds: Int? = nil,
-        rir: Int? = nil
+        rir: Int? = nil,
+        minTargetReps: Int? = nil,
+        maxTargetReps: Int? = nil,
+        rpe: Double? = nil,
+        tag: String? = nil,
+        comment: String? = nil,
+        isPr: Bool = false,
+        excludedFromPb: Bool = false
     ) {
         self.uuid = uuid
+        self.workoutExerciseUUID = workoutExerciseUUID
         self.orderIndex = orderIndex
         self.isCompleted = isCompleted
         self.targetWeight = targetWeight
@@ -57,10 +77,18 @@ public struct WorkoutSet: Codable, Sendable, Equatable {
         self.actualReps = actualReps
         self.actualDurationSeconds = actualDurationSeconds
         self.rir = rir
+        self.minTargetReps = minTargetReps
+        self.maxTargetReps = maxTargetReps
+        self.rpe = rpe
+        self.tag = tag
+        self.comment = comment
+        self.isPr = isPr
+        self.excludedFromPb = excludedFromPb
     }
 
     enum CodingKeys: String, CodingKey {
         case uuid
+        case workoutExerciseUUID = "workout_exercise_uuid"
         case orderIndex = "order_index"
         case isCompleted = "is_completed"
         case targetWeight = "target_weight"
@@ -70,6 +98,35 @@ public struct WorkoutSet: Codable, Sendable, Equatable {
         case actualReps = "actual_reps"
         case actualDurationSeconds = "actual_duration_seconds"
         case rir
+        case minTargetReps = "min_target_reps"
+        case maxTargetReps = "max_target_reps"
+        case rpe
+        case tag
+        case comment
+        case isPr = "is_pr"
+        case excludedFromPb = "excluded_from_pb"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        uuid = try c.decode(String.self, forKey: .uuid)
+        workoutExerciseUUID = try c.decodeIfPresent(String.self, forKey: .workoutExerciseUUID)
+        orderIndex = try c.decode(Int.self, forKey: .orderIndex)
+        isCompleted = try c.decode(Bool.self, forKey: .isCompleted)
+        targetWeight = try c.decodeIfPresent(Double.self, forKey: .targetWeight)
+        targetReps = try c.decodeIfPresent(Int.self, forKey: .targetReps)
+        targetDurationSeconds = try c.decodeIfPresent(Int.self, forKey: .targetDurationSeconds)
+        actualWeight = try c.decodeIfPresent(Double.self, forKey: .actualWeight)
+        actualReps = try c.decodeIfPresent(Int.self, forKey: .actualReps)
+        actualDurationSeconds = try c.decodeIfPresent(Int.self, forKey: .actualDurationSeconds)
+        rir = try c.decodeIfPresent(Int.self, forKey: .rir)
+        minTargetReps = try c.decodeIfPresent(Int.self, forKey: .minTargetReps)
+        maxTargetReps = try c.decodeIfPresent(Int.self, forKey: .maxTargetReps)
+        rpe = try c.decodeIfPresent(Double.self, forKey: .rpe)
+        tag = try c.decodeIfPresent(String.self, forKey: .tag)
+        comment = try c.decodeIfPresent(String.self, forKey: .comment)
+        isPr = try c.decodeIfPresent(Bool.self, forKey: .isPr) ?? false
+        excludedFromPb = try c.decodeIfPresent(Bool.self, forKey: .excludedFromPb) ?? false
     }
 }
 

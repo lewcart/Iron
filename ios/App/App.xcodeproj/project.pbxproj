@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		171FD88FDFBDB06632673BE7 /* RebirthKeychain in Frameworks */ = {isa = PBXBuildFile; productRef = 9F09162EEE5586FDA870FE14 /* RebirthKeychain */; };
 		186D56AEB447BC06EEBBC3FC /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 67F27BA56D37FF469FD62FE0 /* Foundation.framework */; };
 		1D348AA49807803F085E89DB /* RebirthWatchComplications.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = E4BEA78AC3B864F81CF8105E /* RebirthWatchComplications.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		21339E17616EE88FDDE84EDE /* RebirthWatchComplications.swift in Sources */ = {isa = PBXBuildFile; fileRef = C22DA6AFA7A32BA4F76B430C /* RebirthWatchComplications.swift */; };
@@ -21,6 +22,7 @@
 		504EC30F1FED79650016851F /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 504EC30E1FED79650016851F /* Assets.xcassets */; };
 		504EC3121FED79650016851F /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 504EC3101FED79650016851F /* LaunchScreen.storyboard */; };
 		50B271D11FEDC1A000F3C39B /* public in Resources */ = {isa = PBXBuildFile; fileRef = 50B271D01FEDC1A000F3C39B /* public */; };
+		5279E81BD5BEBCB5A0640233 /* RIRPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = C9BA14D94DEDD9B952AB0B24 /* RIRPicker.swift */; };
 		6E5DE5F1666A3B2916B5D955 /* RestTimerAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = E821CA38A7C622120A207A08 /* RestTimerAttributes.swift */; };
 		794BDB1E5761A90F5C5795C8 /* WatchConnectivityPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = 58F7A926B1F60B6F1A1EA46A /* WatchConnectivityPlugin.swift */; };
 		85F21FFD55CAB24CF4BA32BF /* RebirthWatchLog in Frameworks */ = {isa = PBXBuildFile; productRef = 1113416ACE7F0B67FDB5D59F /* RebirthWatchLog */; };
@@ -44,6 +46,7 @@
 		ED5330C7A68AF9CFC81F4F99 /* FitspoBurstIntent.swift in Sources */ = {isa = PBXBuildFile; fileRef = E64E87D18C5A9BB8F67CCC7F /* FitspoBurstIntent.swift */; };
 		EFEC343B25B3909D984DB111 /* RebirthAppGroup in Frameworks */ = {isa = PBXBuildFile; productRef = 407A33EF6FE03EC60FD3A0F8 /* RebirthAppGroup */; };
 		F16790B3473C6AC6DC8E27A8 /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 67F27BA56D37FF469FD62FE0 /* Foundation.framework */; };
+		F7B73EF14DEAE92C49C8B8C1 /* SetCompletionCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 66DA4F51204F40D8A7AA3617 /* SetCompletionCoordinator.swift */; };
 		GP0000000000000000000100 /* GeofencePlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = GP0000000000000000000200 /* GeofencePlugin.swift */; };
 		HK0000000000000000000001 /* HealthKitPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = HK0000000000000000000002 /* HealthKitPlugin.swift */; };
 		HK0000000000000000000003 /* HealthKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = HK0000000000000000000004 /* HealthKit.framework */; settings = {ATTRIBUTES = (Required, ); }; };
@@ -120,6 +123,7 @@
 		50B271D01FEDC1A000F3C39B /* public */ = {isa = PBXFileReference; lastKnownFileType = folder; path = public; sourceTree = "<group>"; };
 		58F7A926B1F60B6F1A1EA46A /* WatchConnectivityPlugin.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = WatchConnectivityPlugin.swift; sourceTree = "<group>"; };
 		5EC6C38970F00C7EEB816A32 /* InspoBurstPlugin.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = InspoBurstPlugin.swift; sourceTree = "<group>"; };
+		66DA4F51204F40D8A7AA3617 /* SetCompletionCoordinator.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = SetCompletionCoordinator.swift; path = SetCompletionCoordinator.swift; sourceTree = "<group>"; };
 		6719304ECF1C3B40062B8170 /* RestTimerLiveActivity.entitlements */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.entitlements; path = RestTimerLiveActivity.entitlements; sourceTree = "<group>"; };
 		67F27BA56D37FF469FD62FE0 /* Foundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Foundation.framework; path = Platforms/WatchOS.platform/Developer/SDKs/WatchOS11.0.sdk/System/Library/Frameworks/Foundation.framework; sourceTree = DEVELOPER_DIR; };
 		958DCC722DB07C7200EA8C5F /* debug.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; name = debug.xcconfig; path = ../debug.xcconfig; sourceTree = SOURCE_ROOT; };
@@ -130,6 +134,7 @@
 		B72C4CFA9F269091844B4FFE /* RestTimerLiveActivity.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RestTimerLiveActivity.swift; sourceTree = "<group>"; };
 		C22DA6AFA7A32BA4F76B430C /* RebirthWatchComplications.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = RebirthWatchComplications.swift; path = RebirthWatchComplications.swift; sourceTree = "<group>"; };
 		C3C8B189A272DBD88E2B5226 /* Info.plist */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		C9BA14D94DEDD9B952AB0B24 /* RIRPicker.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = RIRPicker.swift; path = RIRPicker.swift; sourceTree = "<group>"; };
 		D121A798D2850322D0EBD90E /* FitspoControlWidget.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = FitspoControlWidget.swift; sourceTree = "<group>"; };
 		D6ED0494C3B066937838629B /* RebirthWatch.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = RebirthWatch.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		E4BEA78AC3B864F81CF8105E /* RebirthWatchComplications.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = RebirthWatchComplications.appex; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -163,6 +168,7 @@
 				EFEC343B25B3909D984DB111 /* RebirthAppGroup in Frameworks */,
 				EA260001ED54458AB0D38D42 /* RebirthModels in Frameworks */,
 				EC350F17282B89C3013F60EF /* RebirthWatchLog in Frameworks */,
+				171FD88FDFBDB06632673BE7 /* RebirthKeychain in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -295,6 +301,8 @@
 				349A0C5255D0D831EC5C60A8 /* WatchSessionStore.swift */,
 				4D7A98029420E80219B15B2F /* ActiveWorkoutGlance.swift */,
 				B3BDB8B5588979A91F96AC46 /* MockSnapshot.swift */,
+				C9BA14D94DEDD9B952AB0B24 /* RIRPicker.swift */,
+				66DA4F51204F40D8A7AA3617 /* SetCompletionCoordinator.swift */,
 			);
 			name = RebirthWatch;
 			path = ../RebirthWatch;
@@ -359,6 +367,7 @@
 				407A33EF6FE03EC60FD3A0F8 /* RebirthAppGroup */,
 				056B63FD737130F648673F1A /* RebirthModels */,
 				96AACD157BB724DDADD4FA76 /* RebirthWatchLog */,
+				9F09162EEE5586FDA870FE14 /* RebirthKeychain */,
 			);
 			productName = App;
 			productReference = 504EC3041FED79650016851F /* App.app */;
@@ -567,6 +576,8 @@
 				DC72741408B72F2C96AA5D9F /* WatchSessionStore.swift in Sources */,
 				95C50736A5AE4368A2CC47F8 /* ActiveWorkoutGlance.swift in Sources */,
 				CFE1352CAFFB12EDFC9337E5 /* MockSnapshot.swift in Sources */,
+				5279E81BD5BEBCB5A0640233 /* RIRPicker.swift in Sources */,
+				F7B73EF14DEAE92C49C8B8C1 /* SetCompletionCoordinator.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -1055,6 +1066,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = B439AC3F8B2613F7E94B510D /* XCLocalSwiftPackageReference "RebirthShared" */;
 			productName = RebirthWatchLog;
+		};
+		9F09162EEE5586FDA870FE14 /* RebirthKeychain */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = B439AC3F8B2613F7E94B510D /* XCLocalSwiftPackageReference "RebirthShared" */;
+			productName = RebirthKeychain;
 		};
 		A68EF85EEC9AFFF977144D00 /* RebirthModels */ = {
 			isa = XCSwiftPackageProductDependency;

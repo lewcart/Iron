@@ -25,6 +25,7 @@ export interface WatchRepWindow {
 
 export interface WatchSet {
   uuid: string;
+  workout_exercise_uuid: string;
   order_index: number;
   is_completed: boolean;
   target_weight: number | null;
@@ -34,6 +35,15 @@ export interface WatchSet {
   actual_reps: number | null;
   actual_duration_seconds: number | null;
   rir: number | null;
+  /** Round-trip-only fields: watch echoes them in CDC payload so /api/sync/push
+   *  doesn't NULL out server columns the watch didn't touch. */
+  min_target_reps: number | null;
+  max_target_reps: number | null;
+  rpe: number | null;
+  tag: 'dropSet' | 'failure' | null;
+  comment: string | null;
+  is_pr: boolean;
+  excluded_from_pb: boolean;
 }
 
 export interface WatchExerciseHistory {
@@ -77,6 +87,8 @@ interface WatchConnectivityPlugin {
   pushActiveWorkout(options: { snapshot: WatchSnapshot }): Promise<{ delivered: boolean }>;
   pushSetMutation(options: { mutation: WatchSetMutation }): Promise<{ queued: boolean }>;
   getWatchPaired(): Promise<{ isPaired: boolean; isReachable: boolean; isWatchAppInstalled: boolean }>;
+  setApiKey(options: { key: string }): Promise<{ stored: boolean }>;
+  hasApiKey(): Promise<{ present: boolean }>;
 }
 
 const WatchConnectivity = registerPlugin<WatchConnectivityPlugin>('WatchConnectivity');
@@ -157,6 +169,7 @@ function toWatchSet(s: import('@/db/local').LocalWorkoutSet): WatchSet {
   const isTime = s.duration_seconds !== null && s.duration_seconds !== undefined;
   return {
     uuid: s.uuid,
+    workout_exercise_uuid: s.workout_exercise_uuid,
     order_index: s.order_index,
     is_completed: s.is_completed,
     target_weight: s.weight,
@@ -166,6 +179,13 @@ function toWatchSet(s: import('@/db/local').LocalWorkoutSet): WatchSet {
     actual_reps: s.is_completed && !isTime ? s.repetitions : null,
     actual_duration_seconds: s.is_completed && isTime ? s.duration_seconds : null,
     rir: s.rir,
+    min_target_reps: s.min_target_reps,
+    max_target_reps: s.max_target_reps,
+    rpe: s.rpe,
+    tag: s.tag,
+    comment: s.comment,
+    is_pr: s.is_pr,
+    excluded_from_pb: s.excluded_from_pb,
   };
 }
 
@@ -198,5 +218,29 @@ export async function getWatchPaired(): Promise<{ isPaired: boolean; isReachable
     return await WatchConnectivity.getWatchPaired();
   } catch {
     return { isPaired: false, isReachable: false, isWatchAppInstalled: false };
+  }
+}
+
+/** Writes the Rebirth API key to the shared keychain access group so the
+ *  watch app can read it. Single-user app — call this once after the user
+ *  pastes their key in iOS settings. Subsequent calls overwrite. */
+export async function setWatchApiKey(key: string): Promise<boolean> {
+  if (!isNativeIOS()) return false;
+  try {
+    const r = await WatchConnectivity.setApiKey({ key });
+    return r.stored;
+  } catch (err) {
+    console.warn('[watch] setApiKey failed:', err);
+    return false;
+  }
+}
+
+export async function hasWatchApiKey(): Promise<boolean> {
+  if (!isNativeIOS()) return false;
+  try {
+    const r = await WatchConnectivity.hasApiKey();
+    return r.present;
+  } catch {
+    return false;
   }
 }

@@ -29,12 +29,22 @@ public actor RebirthAPIClient {
         self.keychain = keychain
     }
 
-    public func pushSetCompletion(_ row: WorkoutSetCDCRow) async throws {
+    /// Push one or more workout_set CDC rows via /api/sync/push. Builds the
+    /// envelope shape `{ workout_sets: [row, ...] }` that the route expects.
+    public func pushSetCompletion(_ rows: [WorkoutSetCDCRow]) async throws {
         var request = try buildRequest(path: "/api/sync/push", method: "POST")
-        let payload = SyncPushPayload(rows: [.init(table: "workout_sets", row: row)])
+        let envelope = SyncPushBody(workout_sets: rows)
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
-        request.httpBody = try encoder.encode(payload)
+        request.httpBody = try encoder.encode(envelope)
+        _ = try await perform(request, decode: EmptyResponse.self)
+    }
+
+    /// Raw POST with a pre-encoded body. Used by the outbox flusher to avoid
+    /// re-encoding stored payloads.
+    public func rawPost(path: String, body: Data) async throws {
+        var request = try buildRequest(path: path, method: "POST")
+        request.httpBody = body
         _ = try await perform(request, decode: EmptyResponse.self)
     }
 
@@ -89,12 +99,8 @@ public actor RebirthAPIClient {
     }
 }
 
-private struct SyncPushPayload: Encodable {
-    let rows: [Row]
-    struct Row: Encodable {
-        let table: String
-        let row: WorkoutSetCDCRow
-    }
+private struct SyncPushBody: Encodable {
+    let workout_sets: [WorkoutSetCDCRow]
 }
 
 public struct EmptyResponse: Codable, Sendable {

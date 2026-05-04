@@ -12,6 +12,7 @@ import RebirthModels
 /// uses tap-to-enter modals on later days).
 struct ActiveWorkoutGlance: View {
     let snapshot: ActiveWorkoutSnapshot
+    let onRequestComplete: (ActiveExercise, WorkoutSet) -> Void
 
     @State private var visibleExerciseIndex: Int = 0
 
@@ -24,7 +25,12 @@ struct ActiveWorkoutGlance: View {
     var body: some View {
         Group {
             if let exercise = visibleExercise {
-                ExerciseGlanceContent(exercise: exercise, exerciseIndex: visibleExerciseIndex, exerciseCount: snapshot.exercises.count)
+                ExerciseGlanceContent(
+                    exercise: exercise,
+                    exerciseIndex: visibleExerciseIndex,
+                    exerciseCount: snapshot.exercises.count,
+                    onRequestComplete: { set in onRequestComplete(exercise, set) }
+                )
             } else {
                 EmptyGlanceContent()
             }
@@ -55,6 +61,7 @@ private struct ExerciseGlanceContent: View {
     let exercise: ActiveExercise
     let exerciseIndex: Int
     let exerciseCount: Int
+    let onRequestComplete: (WorkoutSet) -> Void
 
     private var currentSet: WorkoutSet? {
         exercise.sets.first(where: { !$0.isCompleted }) ?? exercise.sets.first
@@ -97,10 +104,19 @@ private struct ExerciseGlanceContent: View {
 
             Spacer(minLength: 0)
 
-            // Approve pill
-            ApprovePill()
+            // Approve pill — disabled if there's no incomplete set or no current set.
+            if let set = currentSet, !set.isCompleted {
+                Button(action: { onRequestComplete(set) }) {
+                    ApprovePill()
+                }
+                .buttonStyle(.plain)
                 .accessibilityLabel("Mark set complete")
-                .accessibilityHint("Day 2 read-only — RIR picker lands on Day 3.")
+                .accessibilityHint("Opens RIR picker for set \(currentSetNumber)")
+            } else {
+                ApprovePill()
+                    .opacity(0.4)
+                    .accessibilityLabel("All sets done")
+            }
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 6)

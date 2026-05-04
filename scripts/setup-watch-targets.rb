@@ -21,6 +21,8 @@ WATCH_SOURCES = [
   'ios/RebirthWatch/RebirthWatchApp.swift',
   'ios/RebirthWatch/WatchSessionStore.swift',
   'ios/RebirthWatch/ActiveWorkoutGlance.swift',
+  'ios/RebirthWatch/RIRPicker.swift',
+  'ios/RebirthWatch/SetCompletionCoordinator.swift',
   'ios/RebirthWatch/MockSnapshot.swift',
 ]
 WATCH_INFO_PLIST = 'ios/RebirthWatch/Info.plist'
@@ -34,7 +36,7 @@ COMPLICATIONS_ENTITLEMENTS = 'ios/RebirthWatchComplications/RebirthWatchComplica
 
 WATCH_LINKED_PRODUCTS = %w[RebirthAPI RebirthAppGroup RebirthKeychain RebirthModels RebirthOutbox RebirthWatchLog]
 COMPLICATIONS_LINKED_PRODUCTS = %w[RebirthModels]
-APP_LINKED_PRODUCTS = %w[RebirthAppGroup RebirthModels RebirthWatchLog]
+APP_LINKED_PRODUCTS = %w[RebirthAppGroup RebirthKeychain RebirthModels RebirthWatchLog]
 APP_PLUGIN_SOURCE = 'ios/App/App/WatchConnectivityPlugin.swift'
 
 project = Xcodeproj::Project.open(PROJECT_PATH)

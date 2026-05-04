@@ -2,6 +2,26 @@ import { NextResponse } from 'next/server';
 import { query } from '@/db/db';
 import { recomputePRFlagsForExercise } from '@/db/queries';
 
+/**
+ * Reject requests that present a malformed API key. Phone Dexie sync calls
+ * this endpoint with no auth header (relies on Vercel deployment protection);
+ * the watch app sends `Authorization: Bearer <REBIRTH_API_KEY>`. We reject
+ * only when a header is present AND wrong — preserving the phone path
+ * exactly while authenticating the watch.
+ */
+function rejectIfBadApiKey(req: Request): NextResponse | null {
+  const apiKey = process.env.REBIRTH_API_KEY;
+  if (!apiKey) return null;
+  const authHeader = req.headers.get('authorization');
+  const xApiKey = req.headers.get('x-api-key');
+  if (!authHeader && !xApiKey) return null; // phone path
+  const provided = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : xApiKey;
+  if (provided !== apiKey) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+  return null;
+}
+
 // ─── /api/sync/push ───────────────────────────────────────────────────────────
 //
 // Accepts a payload of unsynced rows from any subset of the synced tables
@@ -53,6 +73,8 @@ interface PushPayload {
 }
 
 export async function POST(req: Request) {
+  const authReject = rejectIfBadApiKey(req);
+  if (authReject) return authReject;
   try {
     const body: PushPayload = await req.json();
 

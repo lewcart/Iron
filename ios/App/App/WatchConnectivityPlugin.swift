@@ -2,6 +2,7 @@ import Foundation
 import Capacitor
 import WatchConnectivity
 import RebirthAppGroup
+import RebirthKeychain
 import RebirthModels
 import RebirthWatchLog
 
@@ -30,6 +31,8 @@ public class WatchConnectivityPlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "pushActiveWorkout", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "pushSetMutation", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "getWatchPaired", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "setApiKey", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "hasApiKey", returnType: CAPPluginReturnPromise),
     ]
 
     private let coordinator = WCSessionCoordinator()
@@ -86,6 +89,28 @@ public class WatchConnectivityPlugin: CAPPlugin, CAPBridgedPlugin {
             "isReachable": info.isReachable,
             "isWatchAppInstalled": info.isWatchAppInstalled,
         ])
+    }
+
+    /// Stores the Rebirth API key in the shared keychain access group so the
+    /// watch app can read it. Same access group `group.app.rebirth` — both
+    /// targets must be signed by the same Apple Developer Team for this to
+    /// resolve. Idempotent: re-keying overwrites the existing entry.
+    @objc func setApiKey(_ call: CAPPluginCall) {
+        guard let key = call.getString("key"), !key.isEmpty else {
+            call.reject("missing key")
+            return
+        }
+        do {
+            try RebirthKeychain().setAPIKey(key)
+            call.resolve(["stored": true])
+        } catch {
+            call.reject("keychain write failed: \(error.localizedDescription)")
+        }
+    }
+
+    @objc func hasApiKey(_ call: CAPPluginCall) {
+        let present = (try? RebirthKeychain().getAPIKey()) != nil
+        call.resolve(["present": present])
     }
 }
 

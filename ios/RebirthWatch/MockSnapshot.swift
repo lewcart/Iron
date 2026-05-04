@@ -18,15 +18,15 @@ enum MockSnapshot {
                 trackingMode: .reps,
                 repWindow: RepWindow(goal: "build", minReps: 8, maxReps: 12),
                 sets: [
-                    WorkoutSet(uuid: "s1", orderIndex: 0, isCompleted: true,  targetWeight: 100, targetReps: 10, actualWeight: 100, actualReps: 11, rir: 2),
-                    WorkoutSet(uuid: "s2", orderIndex: 1, isCompleted: true,  targetWeight: 100, targetReps: 10, actualWeight: 100, actualReps: 10, rir: 2),
-                    WorkoutSet(uuid: "s3", orderIndex: 2, isCompleted: false, targetWeight: 100, targetReps: 10),
-                    WorkoutSet(uuid: "s4", orderIndex: 3, isCompleted: false, targetWeight: 100, targetReps: 10),
+                    WorkoutSet(uuid: "s1", workoutExerciseUUID: "mock-wex-1", orderIndex: 0, isCompleted: true,  targetWeight: 100, targetReps: 10, actualWeight: 100, actualReps: 11, rir: 2, minTargetReps: 8, maxTargetReps: 12),
+                    WorkoutSet(uuid: "s2", workoutExerciseUUID: "mock-wex-1", orderIndex: 1, isCompleted: true,  targetWeight: 100, targetReps: 10, actualWeight: 100, actualReps: 10, rir: 2, minTargetReps: 8, maxTargetReps: 12),
+                    WorkoutSet(uuid: "s3", workoutExerciseUUID: "mock-wex-1", orderIndex: 2, isCompleted: false, targetWeight: 100, targetReps: 10, minTargetReps: 8, maxTargetReps: 12),
+                    WorkoutSet(uuid: "s4", workoutExerciseUUID: "mock-wex-1", orderIndex: 3, isCompleted: false, targetWeight: 100, targetReps: 10, minTargetReps: 8, maxTargetReps: 12),
                 ],
                 history: ExerciseHistoryHint(
                     lastSessionDate: "2026-04-30",
                     sets: [
-                        WorkoutSet(uuid: "h1", orderIndex: 0, isCompleted: true, targetWeight: 95, targetReps: 10, actualWeight: 95, actualReps: 11, rir: 2),
+                        WorkoutSet(uuid: "h1", orderIndex: 0, isCompleted: true, targetWeight: 95, targetReps: 10, actualWeight: 95, actualReps: 11, rir: 2, minTargetReps: 8, maxTargetReps: 12),
                     ]
                 )
             ),
@@ -37,9 +37,9 @@ enum MockSnapshot {
                 trackingMode: .reps,
                 repWindow: RepWindow(goal: "build", minReps: 8, maxReps: 12),
                 sets: [
-                    WorkoutSet(uuid: "s5", orderIndex: 0, isCompleted: false, targetWeight: 22.5, targetReps: 10),
-                    WorkoutSet(uuid: "s6", orderIndex: 1, isCompleted: false, targetWeight: 22.5, targetReps: 10),
-                    WorkoutSet(uuid: "s7", orderIndex: 2, isCompleted: false, targetWeight: 22.5, targetReps: 10),
+                    WorkoutSet(uuid: "s5", workoutExerciseUUID: "mock-wex-2", orderIndex: 0, isCompleted: false, targetWeight: 22.5, targetReps: 10, minTargetReps: 8, maxTargetReps: 12),
+                    WorkoutSet(uuid: "s6", workoutExerciseUUID: "mock-wex-2", orderIndex: 1, isCompleted: false, targetWeight: 22.5, targetReps: 10, minTargetReps: 8, maxTargetReps: 12),
+                    WorkoutSet(uuid: "s7", workoutExerciseUUID: "mock-wex-2", orderIndex: 2, isCompleted: false, targetWeight: 22.5, targetReps: 10, minTargetReps: 8, maxTargetReps: 12),
                 ],
                 history: nil
             ),
@@ -50,8 +50,8 @@ enum MockSnapshot {
                 trackingMode: .time,
                 repWindow: nil,
                 sets: [
-                    WorkoutSet(uuid: "s8", orderIndex: 0, isCompleted: false, targetDurationSeconds: 60),
-                    WorkoutSet(uuid: "s9", orderIndex: 1, isCompleted: false, targetDurationSeconds: 60),
+                    WorkoutSet(uuid: "s8", workoutExerciseUUID: "mock-wex-3", orderIndex: 0, isCompleted: false, targetDurationSeconds: 60),
+                    WorkoutSet(uuid: "s9", workoutExerciseUUID: "mock-wex-3", orderIndex: 1, isCompleted: false, targetDurationSeconds: 60),
                 ],
                 history: nil
             ),
