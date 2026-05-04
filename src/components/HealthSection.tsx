@@ -3,8 +3,9 @@
 import { useEffect, useState, useCallback } from 'react';
 import Link from 'next/link';
 import { App } from '@capacitor/app';
-import { Activity, Flame, Footprints, ChevronRight } from 'lucide-react';
+import { Flame, Footprints, ChevronRight } from 'lucide-react';
 import { fetchHealthSummary, type HealthSummary } from '@/lib/healthkit';
+import { workoutStyle } from '@/lib/workout-style';
 
 type State =
   | { phase: 'loading' }
@@ -110,13 +111,15 @@ export function HealthSection() {
         <div>
           <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1 px-1">Recent Workouts</p>
           <div className="ios-section">
-            {summary.recentWorkouts.slice(0, 5).map((w, i) => (
+            {summary.recentWorkouts.slice(0, 5).map((w, i) => {
+              const { Icon, iconClass, bgClass } = workoutStyle(w.activityType);
+              return (
               <div
                 key={i}
                 className="flex items-center gap-3 px-4 py-3 border-b border-border last:border-0"
               >
-                <div className="w-8 h-8 rounded-full bg-blue-500/15 flex items-center justify-center flex-shrink-0">
-                  <Activity className="h-4 w-4 text-blue-400" strokeWidth={1.75} />
+                <div className={`w-8 h-8 rounded-full ${bgClass} flex items-center justify-center flex-shrink-0`}>
+                  <Icon className={`h-4 w-4 ${iconClass}`} strokeWidth={1.75} />
                 </div>
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-medium truncate">{w.activityType}</p>
@@ -129,7 +132,8 @@ export function HealthSection() {
                   )}
                 </div>
               </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       )}

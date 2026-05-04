@@ -2,6 +2,13 @@
 
 All notable changes to Rebirth are documented here.
 
+## [0.8.2] - 2026-05-04
+
+### Changed (Recent Workouts visual differentiation)
+
+- **Recent-workout rows in `HealthSection` now color-code by activity family** instead of every row showing the same blue Activity glyph. Mirrors the existing pastel triad already used by rep-windows + muscle chips: purple = strength, blue = cardio, pink = recovery. Same `bg-{color}-500/15` + `text-{color}-300` pattern, so it feels native rather than a new palette. Per-type icons: Dumbbell (Strength/Functional/Core), Zap (HIIT), Footprints (Walking), Mountain (Hiking), Activity wave (Running/Elliptical/Mixed/Cross/default), Bike (Cycling), Waves (Rowing/Swimming), Dog (Dog Walk), Flower2 (Yoga). New helper at `src/lib/workout-style.ts` keyed on the post-remap activityType strings emitted by the iOS HealthKit plugin (so Hiking → Dog Walk remap from `healthkit.ts` resolves to the rose/Dog style, not the sky/Mountain one).
+- **Tailwind content-scan now includes `src/lib/**`.** Previously the JIT scanner only covered `src/pages`, `src/components`, `src/app`, so any class string constructed inside a `lib/` helper got pruned at build time. Caught during browser validation when the new style helper's tints rendered as plain transparent circles. Fix is general — any future `lib/` helper that builds class names will now work without a per-class safelist workaround.
+
 ## [0.8.1] - 2026-05-04
 
 ### Added (MCP chunked-upload protocol)
