@@ -33,6 +33,16 @@ struct RootView: View {
     @State private var pickerContext: PickerContext?
     @State private var restCountdown: Int?    // total seconds for an active rest timer
     @State private var timeModeContext: TimeModeContext?
+    @State private var showSessionEnd: Bool = false
+    @State private var lastCompletedAt: Date?
+    @State private var undoTarget: WorkoutSet?
+
+    private func allSetsCompleted(in snapshot: ActiveWorkoutSnapshot) -> Bool {
+        guard !snapshot.exercises.isEmpty else { return false }
+        return snapshot.exercises.allSatisfy { ex in
+            !ex.sets.isEmpty && ex.sets.allSatisfy(\.isCompleted)
+        }
+    }
 
     var body: some View {
         Group {
@@ -62,6 +72,15 @@ struct RootView: View {
                 .overlay(alignment: .top) {
                     if completion.isAuthHalted {
                         ReAuthBanner(onDismiss: { completion.clearAuthHalt() })
+                    } else if let target = undoTarget {
+                        UndoBanner(onUndo: {
+                            // Day 10: best-effort optimistic UI undo. The
+                            // server CDC row is already in flight; full
+                            // server-side undo via compensating mutation
+                            // lands on Day 12 polish.
+                            undoTarget = nil
+                        })
+                        .id(target.uuid)
                     }
                 }
                 .overlay(alignment: .bottom) {
@@ -83,8 +102,7 @@ struct RootView: View {
                     Task { await completion.completeSet(in: ctx.exercise, set: ctx.workoutSet, rir: rir) }
                     session.loadFromAppGroup()
                     pickerContext = nil
-                    // Auto-start rest timer (Tier 2 feature). Use snapshot default;
-                    // skip on time-mode (already had its own countdown).
+                    undoTarget = ctx.workoutSet
                     if ctx.exercise.trackingMode == .reps,
                        let s = session.snapshot {
                         restCountdown = s.restTimerDefaultSeconds
@@ -94,6 +112,7 @@ struct RootView: View {
                     Task { await completion.completeSet(in: ctx.exercise, set: ctx.workoutSet, rir: nil) }
                     session.loadFromAppGroup()
                     pickerContext = nil
+                    undoTarget = ctx.workoutSet
                     if ctx.exercise.trackingMode == .reps,
                        let s = session.snapshot {
                         restCountdown = s.restTimerDefaultSeconds
@@ -117,7 +136,6 @@ struct RootView: View {
             CountdownRing(
                 totalSeconds: ctx.workoutSet.targetDurationSeconds ?? 60,
                 onFinish: {
-                    // Hold complete → open RIR picker so the user can rate it.
                     let exercise = ctx.exercise
                     let set = ctx.workoutSet
                     timeModeContext = nil
@@ -125,6 +143,48 @@ struct RootView: View {
                 },
                 onCancel: { timeModeContext = nil }
             )
+        }
+        .sheet(isPresented: $showSessionEnd) {
+            if let snapshot = session.snapshot {
+                SessionEndView(
+                    snapshot: snapshot,
+                    elapsedSeconds: workoutSession.elapsedSeconds,
+                    onFinish: {
+                        await workoutSession.endSession()
+                        await completion.flush()
+                    },
+                    onResume: { showSessionEnd = false }
+                )
+            }
+        }
+        .onChange(of: session.snapshot) { _, new in
+            guard let snap = new else { return }
+            if allSetsCompleted(in: snap) {
+                if let last = lastCompletedAt, Date().timeIntervalSince(last) > 300 {
+                    showSessionEnd = true
+                } else if lastCompletedAt == nil {
+                    lastCompletedAt = Date()
+                }
+            } else {
+                lastCompletedAt = nil
+            }
+        }
+        .onOpenURL { url in
+            // Complications launch the app via rebirthwatch:// scheme.
+            // Day 10: log + route to the appropriate state. Walk/Dog Walk
+            // start triggers wire on Day 11 (walk-while-working glance).
+            switch url.absoluteString {
+            case "rebirthwatch://session-status":
+                if session.snapshot != nil { showSessionEnd = true }
+            case "rebirthwatch://start-workout",
+                 "rebirthwatch://walk-now",
+                 "rebirthwatch://dog-walk":
+                // Default landing — root view will show the active workout
+                // glance if a snapshot is present, otherwise the empty-state.
+                break
+            default:
+                break
+            }
         }
     }
 }
@@ -179,6 +239,31 @@ private struct FooterPip: View {
             .padding(.vertical, 2)
             .background(Color.gray.opacity(0.15), in: Capsule())
             .padding(.bottom, 2)
+    }
+}
+
+private struct UndoBanner: View {
+    let onUndo: () -> Void
+    @State private var visible = true
+
+    var body: some View {
+        if visible {
+            HStack(spacing: 4) {
+                Text("Marked complete")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+                Button("Undo", action: onUndo)
+                    .font(.system(size: 10, weight: .semibold))
+            }
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(Color.gray.opacity(0.2), in: Capsule())
+            .padding(.top, 2)
+            .task {
+                try? await Task.sleep(nanoseconds: 5_000_000_000)
+                visible = false
+            }
+        }
     }
 }
 
