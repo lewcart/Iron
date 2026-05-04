@@ -66,7 +66,6 @@ public class GeofencePlugin: CAPPlugin, CAPBridgedPlugin {
     private static let walkCompletedNotifPrefix   = "rebirth-walk-completed"
     private static let walkPartialNotifPrefix     = "rebirth-walk-partial"
     private static let walkSaveFailedNotifPrefix  = "rebirth-walk-save-failed"
-    private static let homeArrivalNotifPrefix     = "rebirth-home-arrival"
     private static let permissionRevokedNotifId   = "rebirth-perm-revoked"
 
     // ── Notification action category ─────────────────────────────────────────
@@ -244,66 +243,93 @@ public class GeofencePlugin: CAPPlugin, CAPBridgedPlugin {
         call.resolve(["started": true])
     }
 
+    /// Pick a route centre point. Prefers the midpoint between home and gym
+    /// if both are set. Falls back to home + a small northward offset when
+    /// only home is set (useful for sim before the user has been to the gym).
+    /// If home isn't set, returns nil — sim can't generate a plausible route.
+    private func simulationCenter() -> (lat: Double, lon: Double)? {
+        let home = loadPersisted(StoredRegion.self, key: GeofencePlugin.prefsHomeKey)
+        let gym = loadPersisted(StoredRegion.self, key: GeofencePlugin.prefsGymKey)
+        if let h = home, let g = gym {
+            return ((h.lat + g.lat) / 2, (h.lon + g.lon) / 2)
+        }
+        if let h = home {
+            // ~700m north of home (0.0063° lat ≈ 700m). No gym needed.
+            return (h.lat + 0.0063, h.lon)
+        }
+        return nil
+    }
+
     /// DEV: simulate the outbound walk (depart-home → gym arrival → save).
-    /// Bypasses the time-window gate. Uses the configured home + gym coords as
-    /// the route's spatial centre. Saves a real HKWorkout with a synthetic
-    /// 18-min, 1.2km route.
+    /// Requests HealthKit write permission first if needed, then bypasses the
+    /// time-window gate and saves a real HKWorkout with an 18-min synthetic
+    /// route. Works with home set; gym is optional (route lives ~700m north
+    /// of home if no gym configured).
     @objc func simulateWalkOutbound(_ call: CAPPluginCall) {
-        guard
-            let home = loadPersisted(StoredRegion.self, key: GeofencePlugin.prefsHomeKey),
-            let gym = loadPersisted(StoredRegion.self, key: GeofencePlugin.prefsGymKey)
-        else {
-            call.reject("Set home and gym before simulating")
+        guard let centre = simulationCenter() else {
+            call.reject("Set Home before simulating")
             return
         }
         let durationMin = call.getInt("durationMinutes") ?? 18
         let durationSec = TimeInterval(durationMin * 60)
-        let now = Date()
-        let _ = walkTracker.start(reason: .departHome, at: now.addingTimeInterval(-durationSec))
-        // Centre route between home and gym for a plausible-looking line.
-        let midLat = (home.lat + gym.lat) / 2
-        let midLon = (home.lon + gym.lon) / 2
-        walkTracker.injectSyntheticRoute(
-            centerLat: midLat,
-            centerLon: midLon,
-            sampleCount: 20,
-            durationSeconds: durationSec,
-            endsAt: now
-        )
-        notifyWalkStateChanged()
-        // Trigger gym entry which finalises the walk.
-        handleGymEntry(at: now)
-        call.resolve(["simulated": true, "durationMinutes": durationMin])
+        walkTracker.requestHKWriteAuthorization { [weak self] granted, _ in
+            guard let self else { return }
+            if !granted {
+                call.reject("HealthKit write permission denied. Open iOS Settings → Health → Rebirth and turn on Workouts + Workout Routes.")
+                return
+            }
+            let now = Date()
+            let _ = self.walkTracker.start(reason: .departHome, at: now.addingTimeInterval(-durationSec))
+            self.walkTracker.injectSyntheticRoute(
+                centerLat: centre.lat,
+                centerLon: centre.lon,
+                sampleCount: 20,
+                durationSeconds: durationSec,
+                endsAt: now
+            )
+            self.notifyWalkStateChanged()
+            // Force the gym-entry path even if no real gym geofence exists —
+            // this is the dev shortcut to finalise the walk.
+            self.walkTracker.transition(to: .atGymWalkSaved)
+            self.walkTracker.finish(at: now) { [weak self] result in
+                self?.handleWalkFinishResult(result, leg: .outbound, partial: false)
+            }
+            call.resolve(["simulated": true, "durationMinutes": durationMin])
+        }
     }
 
     /// DEV: simulate the inbound walk (start walk-2 → home arrival → save).
-    /// Uses gym + home coords. Useful when the user has just tapped Finish on
-    /// a strength workout in the simulator and wants to verify walk-2 saves.
+    /// Same auth + home-only fallback rules as outbound. Bypasses the
+    /// startWalkNow phase gate.
     @objc func simulateWalkInbound(_ call: CAPPluginCall) {
-        guard
-            let home = loadPersisted(StoredRegion.self, key: GeofencePlugin.prefsHomeKey),
-            let gym = loadPersisted(StoredRegion.self, key: GeofencePlugin.prefsGymKey)
-        else {
-            call.reject("Set home and gym before simulating")
+        guard let centre = simulationCenter() else {
+            call.reject("Set Home before simulating")
             return
         }
         let durationMin = call.getInt("durationMinutes") ?? 16
         let durationSec = TimeInterval(durationMin * 60)
-        let now = Date()
-        // Bypass startWalkNow's phase gate by calling the tracker directly.
-        let _ = walkTracker.start(reason: .postWorkout, at: now.addingTimeInterval(-durationSec))
-        let midLat = (home.lat + gym.lat) / 2
-        let midLon = (home.lon + gym.lon) / 2
-        walkTracker.injectSyntheticRoute(
-            centerLat: midLat,
-            centerLon: midLon,
-            sampleCount: 20,
-            durationSeconds: durationSec,
-            endsAt: now
-        )
-        notifyWalkStateChanged()
-        handleHomeEntry(at: now)
-        call.resolve(["simulated": true, "durationMinutes": durationMin])
+        walkTracker.requestHKWriteAuthorization { [weak self] granted, _ in
+            guard let self else { return }
+            if !granted {
+                call.reject("HealthKit write permission denied. Open iOS Settings → Health → Rebirth and turn on Workouts + Workout Routes.")
+                return
+            }
+            let now = Date()
+            let _ = self.walkTracker.start(reason: .postWorkout, at: now.addingTimeInterval(-durationSec))
+            self.walkTracker.injectSyntheticRoute(
+                centerLat: centre.lat,
+                centerLon: centre.lon,
+                sampleCount: 20,
+                durationSeconds: durationSec,
+                endsAt: now
+            )
+            self.notifyWalkStateChanged()
+            self.walkTracker.transition(to: .completed)
+            self.walkTracker.finish(at: now) { [weak self] result in
+                self?.handleWalkFinishResult(result, leg: .inbound, partial: false)
+            }
+            call.resolve(["simulated": true, "durationMinutes": durationMin])
+        }
     }
 
     @objc func cancelActiveWalk(_ call: CAPPluginCall) {
@@ -531,7 +557,9 @@ public class GeofencePlugin: CAPPlugin, CAPBridgedPlugin {
         guard let entered = homeRegionEnteredAt else { return }
         let elapsed = Date().timeIntervalSince(entered)
         if elapsed >= GeofencePlugin.dwellThreshold {
-            postHomeArrivalNotification()
+            // Notification is only posted by the walk-2 finish path (postWalkCompletedNotification)
+            // when there's something meaningful to surface. The bare home-arrival event still
+            // fires for the JS layer to use as a fallback to end any open strength workout.
             notifyListeners("homeArrival", data: [
                 "timestamp": ISO8601DateFormatter().string(from: Date())
             ])
@@ -654,17 +682,6 @@ public class GeofencePlugin: CAPPlugin, CAPBridgedPlugin {
             content.body = "Always-Location was disabled. Re-enable it in Settings to resume morning walks."
             content.sound = .default
             UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: GeofencePlugin.permissionRevokedNotifId, content: content, trigger: nil))
-        }
-    }
-
-    private func postHomeArrivalNotification() {
-        requestNotifPermissionThen {
-            let content = UNMutableNotificationContent()
-            content.title = "Home"
-            content.body = "Workout ended automatically."
-            content.sound = .default
-            let id = "\(GeofencePlugin.homeArrivalNotifPrefix)-\(ISO8601DateFormatter().string(from: Date()))"
-            UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: id, content: content, trigger: nil))
         }
     }
 

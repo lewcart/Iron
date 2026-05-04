@@ -200,6 +200,26 @@ final class WalkTracker {
         self.healthStore = healthStore
     }
 
+    /// Request HealthKit write permissions for workout + route + the sample
+    /// types we attach to the workout. Idempotent; iOS only prompts once and
+    /// remembers the answer per type.
+    func requestHKWriteAuthorization(completion: @escaping (Bool, Error?) -> Void) {
+        guard let store = healthStore else {
+            completion(false, nil)
+            return
+        }
+        var write: Set<HKSampleType> = [HKObjectType.workoutType(), HKSeriesType.workoutRoute()]
+        if let d = HKQuantityType.quantityType(forIdentifier: .distanceWalkingRunning) {
+            write.insert(d)
+        }
+        if let e = HKQuantityType.quantityType(forIdentifier: .activeEnergyBurned) {
+            write.insert(e)
+        }
+        store.requestAuthorization(toShare: write, read: []) { success, err in
+            DispatchQueue.main.async { completion(success, err) }
+        }
+    }
+
     // MARK: - State persistence
 
     func loadState() -> WalkTrackerState {
