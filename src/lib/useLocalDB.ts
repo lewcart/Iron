@@ -475,6 +475,8 @@ export interface ExerciseSessionGroup {
     duration_seconds: number | null;
     rpe: number | null;
     tag: string | null;
+    is_pr: boolean;
+    excluded_from_pb: boolean;
     order_index: number;
   }>;
 }
@@ -489,8 +491,6 @@ export interface ExerciseProgressLocal {
   }>;
   prs: {
     estimated1RM: { weight: number; repetitions: number; estimated_1rm: number; date: string; workout_uuid: string } | null;
-    heaviestWeight: { weight: number; repetitions: number; estimated_1rm: number; date: string; workout_uuid: string } | null;
-    mostReps: { weight: number; repetitions: number; estimated_1rm: number; date: string; workout_uuid: string } | null;
   };
   volumeTrend: Array<{ date: string; totalVolume: number }>;
 }
@@ -506,7 +506,7 @@ export interface ExerciseProgressLocal {
  *    - 'any': used by session-history reads, where time-mode exercises need
  *      to merge their own duplicates (e.g. two "Plank" rows from catalog +
  *      custom both contribute their hold history). */
-async function resolveCanonicalExerciseUuids(
+export async function resolveCanonicalExerciseUuids(
   exerciseUuid: string,
   modeFilter: 'reps' | 'any' = 'reps',
 ): Promise<Set<string>> {
@@ -543,7 +543,7 @@ export async function getExerciseProgressLocal(
   if (groupUuids.size === 0) {
     return {
       progress: [],
-      prs: { estimated1RM: null, heaviestWeight: null, mostReps: null },
+      prs: { estimated1RM: null },
       volumeTrend: [],
     };
   }
@@ -555,7 +555,7 @@ export async function getExerciseProgressLocal(
   if (allWes.length === 0) {
     return {
       progress: [],
-      prs: { estimated1RM: null, heaviestWeight: null, mostReps: null },
+      prs: { estimated1RM: null },
       volumeTrend: [],
     };
   }
@@ -565,7 +565,8 @@ export async function getExerciseProgressLocal(
     ? await db.workout_sets
         .where('workout_exercise_uuid')
         .anyOf(weUuids)
-        .filter(s => s.is_completed && !s._deleted && s.weight != null && s.repetitions != null)
+        .filter(s => s.is_completed && !s._deleted && !s.excluded_from_pb
+          && s.weight != null && s.repetitions != null)
         .toArray()
     : [];
 
@@ -625,15 +626,12 @@ export async function getExerciseProgressLocal(
     })
     .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
 
-  // PRs across all annotated sets.
+  // PR across all annotated sets — only e1RM. Heaviest-weight and
+  // most-reps were dropped (gameable; not honest progress signals).
   let best1rm: AnnotatedSet | null = null; let best1rmVal = -Infinity;
-  let heaviest: AnnotatedSet | null = null; let heaviestVal = -Infinity;
-  let mostReps: AnnotatedSet | null = null; let mostRepsVal = -Infinity;
   for (const s of annotated) {
     const orm = estimate1RM(s.weight, s.repetitions);
     if (orm > best1rmVal) { best1rmVal = orm; best1rm = s; }
-    if (s.weight > heaviestVal) { heaviestVal = s.weight; heaviest = s; }
-    if (s.repetitions > mostRepsVal) { mostRepsVal = s.repetitions; mostReps = s; }
   }
   const toRecord = (s: AnnotatedSet | null) => s ? {
     weight: s.weight,
@@ -649,8 +647,6 @@ export async function getExerciseProgressLocal(
     progress,
     prs: {
       estimated1RM: toRecord(best1rm),
-      heaviestWeight: toRecord(heaviest),
-      mostReps: toRecord(mostReps),
     },
     volumeTrend,
   };
@@ -721,6 +717,8 @@ export async function getExerciseSessionHistoryLocal(
           duration_seconds: s.duration_seconds ?? null,
           rpe: s.rpe,
           tag: s.tag,
+          is_pr: s.is_pr,
+          excluded_from_pb: s.excluded_from_pb,
           order_index: s.order_index,
         })),
       };
@@ -802,7 +800,7 @@ export async function getExerciseTimePRsLocal(
   const allSets = await db.workout_sets
     .where('workout_exercise_uuid')
     .anyOf(weUuids)
-    .filter(s => s.is_completed && !s._deleted && (
+    .filter(s => s.is_completed && !s._deleted && !s.excluded_from_pb && (
       (s.duration_seconds != null && s.duration_seconds > 0)
       || (s.duration_seconds == null && (s.repetitions ?? 0) > 0)
     ))

@@ -1,9 +1,16 @@
 import { describe, it, expect } from 'vitest';
 import { buildAnchorLiftTrend, type AnchorLiftSetInput } from './anchor-lift-trend';
 
-function set(weight: number, reps: number, weUuid: string, completed = true): AnchorLiftSetInput {
+function set(
+  weight: number,
+  reps: number,
+  weUuid: string,
+  completed = true,
+  excluded = false,
+): AnchorLiftSetInput {
   return {
     is_completed: completed,
+    excluded_from_pb: excluded,
     weight,
     repetitions: reps,
     workout_exercise_uuid: weUuid,

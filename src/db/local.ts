@@ -82,6 +82,11 @@ export interface LocalWorkoutSet extends SyncMeta {
   comment: string | null;
   is_completed: boolean;
   is_pr: boolean;
+  /** True when this set should NOT count toward PR / PB calculations (form
+   *  was wrong, partial reps, etc). The set still contributes to volume,
+   *  set-counts, and history. Toggle from the per-set action sheet, or in
+   *  bulk via the "Adjust PB history" sheet. Default false. */
+  excluded_from_pb: boolean;
   order_index: number;
   /** Held duration in seconds. Populated only for time-mode exercise sets;
    *  null for reps-mode sets (which use weight + repetitions instead). */
@@ -835,8 +840,20 @@ export class IronDB extends Dexie {
       });
     });
 
+    // v21: per-set "excluded from PB" flag. Lets Lou invalidate PRs that came
+    // from sets done with bad form without losing the workout record. Stores
+    // shape unchanged (excluded_from_pb is not indexed). Backfill to false on
+    // existing rows so reads after upgrade get a defined value, not undefined.
+    // Renumbered from v20 → v21 during merge: v20 is taken by has_sides on main.
+    // Mirrors Postgres migration 042 (renumbered from 041 same reason).
+    this.version(21).stores(v16Stores).upgrade(async tx => {
+      await tx.table('workout_sets').toCollection().modify(row => {
+        if (row.excluded_from_pb === undefined) row.excluded_from_pb = false;
+      });
+    });
+
     // versionchange handler — when a new SW activates and the next page
-    // load opens the DB at v21+, Dexie fires versionchange on existing
+    // load opens the DB at v22+, Dexie fires versionchange on existing
     // open connections. Without handling, those connections deadlock the
     // upgrade. Close + reload so the new schema actually takes effect.
     this.on('versionchange', () => {

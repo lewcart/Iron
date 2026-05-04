@@ -7,6 +7,7 @@ import { getMuscleColor } from '@/lib/muscle-colors';
 import { useUnit } from '@/context/UnitContext';
 import { useWorkoutFull } from '@/lib/useLocalDB';
 import { apiBase } from '@/lib/api/client';
+import { SetActionSheet, type SetActionSheetTarget } from '@/components/SetActionSheet';
 function formatDuration(start: string, end: string | null) {
   if (!end) return '—';
   const ms = new Date(end).getTime() - new Date(start).getTime();
@@ -21,6 +22,7 @@ export default function WorkoutDetail({ workout, onBack }: { workout: { uuid: st
   const router = useRouter();
   const { toDisplay, label } = useUnit();
   const [repeating, setRepeating] = useState(false);
+  const [actionTarget, setActionTarget] = useState<SetActionSheetTarget | null>(null);
 
   const detail = useWorkoutFull(workout.uuid);
 
@@ -46,7 +48,7 @@ export default function WorkoutDetail({ workout, onBack }: { workout: { uuid: st
   const totalWeight = detail?.exercises.reduce((sum, e) =>
     sum + e.sets.filter(s => s.is_completed).reduce((s2, set) =>
       s2 + (set.weight ?? 0) * (set.repetitions ?? 0), 0), 0) ?? 0;
-  const totalPRs = detail?.exercises.reduce((sum, e) => sum + e.sets.filter(s => s.is_pr).length, 0) ?? 0;
+  const totalPRs = detail?.exercises.reduce((sum, e) => sum + e.sets.filter(s => s.is_pr && !s.excluded_from_pb).length, 0) ?? 0;
 
   return (
     <main className="tab-content bg-background">
@@ -123,7 +125,7 @@ export default function WorkoutDetail({ workout, onBack }: { workout: { uuid: st
               <div className="space-y-3">
                 {detail.exercises.map((we) => {
                   const completedSets = we.sets.filter(s => s.is_completed);
-                  const prCount = we.sets.filter(s => s.is_pr).length;
+                  const prCount = we.sets.filter(s => s.is_pr && !s.excluded_from_pb).length;
                   return (
                     <div key={we.uuid} className="ios-section">
                       <div className="px-4 py-3 border-b border-border">
@@ -139,19 +141,48 @@ export default function WorkoutDetail({ workout, onBack }: { workout: { uuid: st
                           <p className="text-xs text-muted-foreground italic mt-0.5">{we.comment}</p>
                         )}
                       </div>
-                      {completedSets.map((set, i) => (
-                        <div key={set.uuid} className={`flex items-center gap-3 px-4 py-2.5 border-b border-border last:border-0 ${set.is_pr ? 'bg-amber-500/5' : ''}`}>
-                          <div className={`w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 ${set.is_pr ? 'bg-amber-400' : 'bg-green-500'}`}>
-                            <span className="text-white text-[10px] font-bold">{i + 1}</span>
-                          </div>
-                          <p className="text-sm font-mono text-muted-foreground flex-1">
-                            {set.weight != null ? `${toDisplay(set.weight)} ${label}` : '—'} × {set.repetitions ?? '—'}
-                          </p>
-                          {set.is_pr && (
-                            <span className="text-[10px] font-bold text-amber-400">PR</span>
-                          )}
-                        </div>
-                      ))}
+                      {completedSets.map((set, i) => {
+                        const excluded = set.excluded_from_pb;
+                        const isPr = set.is_pr && !excluded;
+                        return (
+                          <button
+                            type="button"
+                            key={set.uuid}
+                            onClick={() => setActionTarget({
+                              set_uuid: set.uuid,
+                              is_excluded: excluded,
+                              weight: set.weight,
+                              repetitions: set.repetitions,
+                              duration_seconds: set.duration_seconds,
+                              label: `Set ${i + 1} of ${we.exercise?.title ?? ''}`,
+                            })}
+                            className={`w-full flex items-center gap-3 px-4 py-2.5 border-b border-border last:border-0 text-left active:bg-card/70 ${
+                              excluded
+                                ? 'border-l-2 border-l-slate-500/60'
+                                : isPr ? 'bg-amber-500/5' : ''
+                            }`}
+                          >
+                            <div className={`w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 ${
+                              excluded ? 'bg-slate-500' : isPr ? 'bg-amber-400' : 'bg-green-500'
+                            }`}>
+                              <span className="text-white text-[10px] font-bold">{i + 1}</span>
+                            </div>
+                            <p className={`text-sm font-mono flex-1 ${
+                              excluded ? 'text-muted-foreground/60 line-through' : 'text-muted-foreground'
+                            }`}>
+                              {set.weight != null ? `${toDisplay(set.weight)} ${label}` : '—'} × {set.repetitions ?? '—'}
+                            </p>
+                            {excluded && (
+                              <span className="text-[10px] font-bold text-slate-300 bg-slate-500/20 border border-slate-500/30 px-1.5 py-0.5 rounded-full">
+                                EX
+                              </span>
+                            )}
+                            {isPr && (
+                              <span className="text-[10px] font-bold text-amber-400">PR</span>
+                            )}
+                          </button>
+                        );
+                      })}
                       {completedSets.length === 0 && (
                         <div className="px-4 py-3">
                           <p className="text-sm text-muted-foreground">No completed sets</p>
@@ -165,6 +196,11 @@ export default function WorkoutDetail({ workout, onBack }: { workout: { uuid: st
           )}
         </div>
       )}
+      <SetActionSheet
+        target={actionTarget}
+        onClose={() => setActionTarget(null)}
+        unitLabel={label}
+      />
     </main>
   );
 }

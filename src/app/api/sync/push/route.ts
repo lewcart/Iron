@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { query } from '@/db/db';
+import { recomputePRFlagsForExercise } from '@/db/queries';
 
 // ─── /api/sync/push ───────────────────────────────────────────────────────────
 //
@@ -62,7 +63,16 @@ export async function POST(req: Request) {
 
     for (const r of body.workouts ?? []) await pushWorkout(r);
     for (const r of body.workout_exercises ?? []) await pushWorkoutExercise(r);
-    for (const r of body.workout_sets ?? []) await pushWorkoutSet(r);
+
+    // Track which workout_exercise_uuids were touched by workout_set pushes
+    // so we can recompute is_pr flags once per canonical exercise group at
+    // the end of the batch — instead of N times during the per-row loop.
+    const touchedWeUuids = new Set<string>();
+    for (const r of body.workout_sets ?? []) {
+      await pushWorkoutSet(r);
+      const weUuid = typeof r.workout_exercise_uuid === 'string' ? r.workout_exercise_uuid : null;
+      if (weUuid) touchedWeUuids.add(weUuid);
+    }
 
     for (const r of body.workout_plans ?? []) await pushWorkoutPlan(r);
     for (const r of body.workout_routines ?? []) await pushWorkoutRoutine(r);
@@ -94,6 +104,24 @@ export async function POST(req: Request) {
     for (const r of body.clothes_test_logs ?? []) await pushClothesTest(r);
 
     for (const r of body.progress_photos ?? []) await pushProgressPhoto(r);
+
+    // End-of-batch is_pr recompute. Resolve distinct exercise_uuids from
+    // the touched workout_exercise rows, then recompute each canonical
+    // group exactly once. Avoids N×M recomputes on multi-set workouts and
+    // matches what slice 7 wires into the per-set API route — sync push
+    // and direct API hits use the same correctness path.
+    if (touchedWeUuids.size > 0) {
+      const weRows = await query<{ exercise_uuid: string }>(
+        `SELECT DISTINCT exercise_uuid FROM workout_exercises WHERE uuid = ANY($1::uuid[])`,
+        [Array.from(touchedWeUuids)],
+      );
+      const seen = new Set<string>();
+      for (const row of weRows) {
+        if (seen.has(row.exercise_uuid)) continue;
+        seen.add(row.exercise_uuid);
+        await recomputePRFlagsForExercise(row.exercise_uuid);
+      }
+    }
 
     return NextResponse.json({ ok: true });
   } catch (err) {
@@ -167,16 +195,17 @@ async function pushWorkoutSet(r: Record<string, unknown>): Promise<void> {
   }
 
   await query(
-    `INSERT INTO workout_sets (uuid, workout_exercise_uuid, weight, repetitions, min_target_reps, max_target_reps, rpe, rir, tag, comment, is_completed, is_pr, order_index, duration_seconds, updated_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW())
+    `INSERT INTO workout_sets (uuid, workout_exercise_uuid, weight, repetitions, min_target_reps, max_target_reps, rpe, rir, tag, comment, is_completed, is_pr, excluded_from_pb, order_index, duration_seconds, updated_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, NOW())
      ON CONFLICT (uuid) DO UPDATE SET
        weight = EXCLUDED.weight, repetitions = EXCLUDED.repetitions,
        min_target_reps = EXCLUDED.min_target_reps, max_target_reps = EXCLUDED.max_target_reps,
        rpe = EXCLUDED.rpe, rir = EXCLUDED.rir, tag = EXCLUDED.tag, comment = EXCLUDED.comment,
        is_completed = EXCLUDED.is_completed, is_pr = EXCLUDED.is_pr,
+       excluded_from_pb = EXCLUDED.excluded_from_pb,
        order_index = EXCLUDED.order_index,
        duration_seconds = EXCLUDED.duration_seconds, updated_at = NOW()`,
-    [r.uuid, r.workout_exercise_uuid, r.weight, r.repetitions, r.min_target_reps, r.max_target_reps, rpeNum, rirParam, r.tag, r.comment, r.is_completed, r.is_pr, r.order_index, r.duration_seconds ?? null],
+    [r.uuid, r.workout_exercise_uuid, r.weight, r.repetitions, r.min_target_reps, r.max_target_reps, rpeNum, rirParam, r.tag, r.comment, r.is_completed, r.is_pr, r.excluded_from_pb ?? false, r.order_index, r.duration_seconds ?? null],
   );
 }
 

@@ -1,4 +1,4 @@
-import { query, queryOne } from './db';
+import { query, queryOne, transaction } from './db';
 import type {
   Exercise,
   Workout,
@@ -374,6 +374,7 @@ export async function updateSet(uuid: string, data: {
   tag?: 'dropSet' | 'failure' | null;
   isCompleted?: boolean;
   isPr?: boolean;
+  excludedFromPb?: boolean;
 }): Promise<WorkoutSet> {
   const fields: string[] = [];
   const values: unknown[] = [];
@@ -407,6 +408,10 @@ export async function updateSet(uuid: string, data: {
     fields.push(`is_pr = $${++paramCount}`);
     values.push(data.isPr);
   }
+  if (data.excludedFromPb !== undefined) {
+    fields.push(`excluded_from_pb = $${++paramCount}`);
+    values.push(data.excludedFromPb);
+  }
 
   if (fields.length > 0) {
     values.push(uuid);
@@ -432,6 +437,13 @@ export async function getHistoricalBestsForExercise(
   exerciseUuid: string,
   excludeWorkoutUuid: string,
 ): Promise<{ best1RM: number }> {
+  // Two changes from the original query:
+  //   1. Use exerciseGroupMatch so historical bests merge across catalog
+  //      duplicates (same everkinetic_id) — matches getExercisePRs and the
+  //      PB cards on ExerciseDetail. Without this, live PR detection saw a
+  //      different history than the PB cards rendered.
+  //   2. Filter excluded_from_pb. Sets Lou has flagged as bad-form / partial
+  //      stay in workout history but never count toward PR detection.
   const rows = await query<{
     weight: string;
     repetitions: number;
@@ -440,9 +452,10 @@ export async function getHistoricalBestsForExercise(
     FROM workout_sets ws
     JOIN workout_exercises we ON ws.workout_exercise_uuid = we.uuid
     JOIN workouts w ON we.workout_uuid = w.uuid
-    WHERE we.exercise_uuid = $1
+    WHERE we.exercise_uuid IN (${exerciseGroupMatch(1)})
       AND w.uuid != $2
       AND ws.is_completed = true
+      AND ws.excluded_from_pb = false
       AND ws.weight IS NOT NULL
       AND ws.repetitions IS NOT NULL
   `, [exerciseUuid, excludeWorkoutUuid]);
@@ -519,6 +532,7 @@ export async function getExerciseProgress(exerciseUuid: string, since?: Date): P
       JOIN workouts w ON we.workout_uuid = w.uuid
       WHERE we.exercise_uuid IN (${exerciseGroupMatch(1)})
         AND ws.is_completed = true
+        AND ws.excluded_from_pb = false
         AND ws.weight IS NOT NULL
         AND ws.repetitions IS NOT NULL
         ${sinceClause}
@@ -551,8 +565,6 @@ export async function getExerciseProgress(exerciseUuid: string, since?: Date): P
 
 export async function getExercisePRs(exerciseUuid: string): Promise<{
   estimated1RM: PersonalRecord | null;
-  heaviestWeight: PersonalRecord | null;
-  mostReps: PersonalRecord | null;
 }> {
   const rows = await query<{
     date: string;
@@ -570,6 +582,7 @@ export async function getExercisePRs(exerciseUuid: string): Promise<{
     JOIN workouts w ON we.workout_uuid = w.uuid
     WHERE we.exercise_uuid IN (${exerciseGroupMatch(1)})
       AND ws.is_completed = true
+      AND ws.excluded_from_pb = false
       AND ws.weight IS NOT NULL
       AND ws.repetitions IS NOT NULL
     ORDER BY w.start_time ASC
@@ -681,6 +694,7 @@ export async function getExercisePBPerSet(
     JOIN workout_exercises we ON ws.workout_exercise_uuid = we.uuid
     WHERE we.exercise_uuid IN (${exerciseGroupMatch(1)})
       AND ws.is_completed = true
+      AND ws.excluded_from_pb = false
       AND ws.weight IS NOT NULL
       AND ws.repetitions IS NOT NULL
     ORDER BY ws.order_index, ws.weight DESC, ws.repetitions DESC
@@ -691,6 +705,112 @@ export async function getExercisePBPerSet(
     weight: parseFloat(row.weight),
     repetitions: row.repetitions,
   }));
+}
+
+/**
+ * Recompute the `is_pr` flag for every completed, non-excluded set in the
+ * canonical exercise group containing `exerciseUuid`.
+ *
+ * Walks the group chronologically (workout start_time, then order_index for
+ * intra-session order) and stamps `is_pr = true` on each set whose Epley
+ * e1RM strictly beats the running best. All other completed-non-excluded
+ * sets are stamped `is_pr = false`. Sets that are not completed, are
+ * excluded_from_pb, or lack weight/reps are left alone (they were never
+ * candidates).
+ *
+ * Use after: per-set excluded_from_pb toggle, weight/reps edit on a
+ * completed set, bulk reset over a date range, or any operation that
+ * could have shifted the historical PR position.
+ *
+ * Concurrency note: the Neon HTTP driver is stateless — no session-level
+ * SELECT FOR UPDATE row locks. We batch the read and the writes inside a
+ * single transaction() call (atomic write batch), but the read→compute→
+ * write window itself is not locked. For Rebirth's single-user reality
+ * this is acceptable: races require two concurrent edits to the same
+ * exercise across devices in the same sub-second window, and the helper
+ * is idempotent — re-running it converges on the correct flags.
+ */
+export async function recomputePRFlagsForExercise(exerciseUuid: string): Promise<void> {
+  // Resolve canonical group + read all candidate sets in one round-trip.
+  // Ordering: workout start_time ASC, then order_index ASC (so intra-session
+  // sets walk in the order they were performed).
+  type CandidateRow = {
+    set_uuid: string;
+    we_uuid: string;
+    weight: string;
+    repetitions: number;
+    order_index: number;
+    is_pr: boolean;
+    start_time: string;
+  };
+  const candidates = await query<CandidateRow>(`
+    SELECT
+      ws.uuid AS set_uuid,
+      ws.workout_exercise_uuid AS we_uuid,
+      ws.weight,
+      ws.repetitions,
+      ws.order_index,
+      ws.is_pr,
+      w.start_time
+    FROM workout_sets ws
+    JOIN workout_exercises we ON ws.workout_exercise_uuid = we.uuid
+    JOIN workouts w ON we.workout_uuid = w.uuid
+    WHERE we.exercise_uuid IN (${exerciseGroupMatch(1)})
+      AND ws.is_completed = true
+      AND ws.excluded_from_pb = false
+      AND ws.weight IS NOT NULL
+      AND ws.repetitions IS NOT NULL
+    ORDER BY w.start_time ASC, ws.order_index ASC
+  `, [exerciseUuid]);
+
+  // We also need to know which workout_exercise_uuids belong to the
+  // canonical group so the bulk "clear is_pr" UPDATE doesn't touch sets
+  // outside it. Reusing exerciseGroupMatch via a dedicated query keeps
+  // this lookup colocated with the recompute scope.
+  const groupWERows = await query<{ uuid: string }>(`
+    SELECT we.uuid
+    FROM workout_exercises we
+    WHERE we.exercise_uuid IN (${exerciseGroupMatch(1)})
+  `, [exerciseUuid]);
+  const groupWEUuids = groupWERows.map(r => r.uuid);
+
+  if (groupWEUuids.length === 0) return;
+
+  // Walk and decide which set_uuids should end up with is_pr = true.
+  let bestE1RM = 0;
+  const winners = new Set<string>();
+  for (const row of candidates) {
+    const orm = estimate1RM(parseFloat(row.weight), row.repetitions);
+    if (orm > bestE1RM) {
+      bestE1RM = orm;
+      winners.add(row.set_uuid);
+    }
+  }
+
+  // Atomic write batch: clear is_pr on every candidate-eligible set in the
+  // canonical group, then re-stamp the winners. Two statements, one
+  // transaction. Excluded / incomplete sets keep whatever is_pr they had
+  // (irrelevant — they won't render as PRs anyway thanks to slice 3's
+  // read-site filtering).
+  const statements: Array<{ text: string; params?: unknown[] }> = [
+    {
+      text: `UPDATE workout_sets
+             SET is_pr = false
+             WHERE workout_exercise_uuid = ANY($1::uuid[])
+               AND is_completed = true
+               AND excluded_from_pb = false
+               AND weight IS NOT NULL
+               AND repetitions IS NOT NULL`,
+      params: [groupWEUuids],
+    },
+  ];
+  if (winners.size > 0) {
+    statements.push({
+      text: `UPDATE workout_sets SET is_pr = true WHERE uuid = ANY($1::uuid[])`,
+      params: [Array.from(winners)],
+    });
+  }
+  await transaction(statements);
 }
 
 /** Session-grouped paginated history for an exercise.
@@ -719,6 +839,8 @@ export async function getExerciseSessionHistoryPaged(
       duration_seconds: number | null;
       rpe: number | null;
       tag: string | null;
+      is_pr: boolean;
+      excluded_from_pb: boolean;
       order_index: number;
     }>;
   }>;
@@ -779,6 +901,8 @@ export async function getExerciseSessionHistoryPaged(
     duration_seconds: number | null;
     rpe: string | null;
     tag: string | null;
+    is_pr: boolean;
+    excluded_from_pb: boolean;
     order_index: number;
   }>(`
     SELECT
@@ -789,6 +913,8 @@ export async function getExerciseSessionHistoryPaged(
       ws.duration_seconds,
       ws.rpe,
       ws.tag,
+      ws.is_pr,
+      ws.excluded_from_pb,
       ws.order_index
     FROM workout_sets ws
     JOIN workout_exercises we ON ws.workout_exercise_uuid = we.uuid
@@ -806,6 +932,8 @@ export async function getExerciseSessionHistoryPaged(
     duration_seconds: number | null;
     rpe: number | null;
     tag: string | null;
+    is_pr: boolean;
+    excluded_from_pb: boolean;
     order_index: number;
   };
   const setsByWorkout = new Map<string, SessionSet[]>();
@@ -818,6 +946,8 @@ export async function getExerciseSessionHistoryPaged(
       duration_seconds: s.duration_seconds,
       rpe: s.rpe ? parseFloat(s.rpe) : null,
       tag: s.tag,
+      is_pr: Boolean(s.is_pr),
+      excluded_from_pb: Boolean(s.excluded_from_pb),
       order_index: s.order_index,
     });
   }
@@ -1198,6 +1328,7 @@ export async function startWorkoutFromRoutine(routineUuid: string): Promise<Star
           comment: routineSet.comment ?? null,
           is_completed: false,
           is_pr: false,
+          excluded_from_pb: false,
           order_index: routineSet.order_index,
           duration_seconds: null,
         });
@@ -1222,6 +1353,7 @@ export async function startWorkoutFromRoutine(routineUuid: string): Promise<Star
           comment: null,
           is_completed: false,
           is_pr: false,
+          excluded_from_pb: false,
           order_index: i,
           duration_seconds: null,
         });
@@ -1616,6 +1748,7 @@ export function parseWorkoutSet(row: DbRow): WorkoutSet {
     comment: row.comment as string | null,
     is_completed: Boolean(row.is_completed),
     is_pr: Boolean(row.is_pr),
+    excluded_from_pb: Boolean(row.excluded_from_pb),
     order_index: row.order_index as number,
     duration_seconds: (row.duration_seconds as number | null) ?? null,
   };

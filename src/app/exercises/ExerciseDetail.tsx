@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ChevronLeft, Trophy, Medal, Award, Timer } from 'lucide-react';
+import { ChevronLeft, Trophy, Timer } from 'lucide-react';
 import type { Exercise } from '@/types';
 import { useUnit } from '@/context/UnitContext';
 import { apiBase, fetchJsonAuthed } from '@/lib/api/client';
@@ -9,6 +9,8 @@ import type { ContentKind } from '@/lib/exercise-content-prompt';
 import { ExerciseDemoStrip } from '@/components/ExerciseDemoStrip';
 import { ExerciseImageManager } from '@/components/ExerciseImageManager';
 import { EditableTextSection } from '@/components/EditableTextSection';
+import { SetActionSheet, type SetActionSheetTarget } from '@/components/SetActionSheet';
+import { AdjustPBHistorySheet } from '@/components/AdjustPBHistorySheet';
 import { MuscleMap } from '@/components/MuscleMap';
 import { MUSCLE_DEFS, normalizeMuscleTags } from '@/lib/muscles';
 import { updateExercise } from '@/lib/mutations-exercises';
@@ -70,8 +72,6 @@ interface ProgressData {
   progress: ProgressPoint[];
   prs: {
     estimated1RM: PRRecord | null;
-    heaviestWeight: PRRecord | null;
-    mostReps: PRRecord | null;
   };
   volumeTrend: VolumeTrendPoint[];
   recentSets: RecentSet[];
@@ -97,27 +97,6 @@ function readCssVarColor(varName: string, fallback: string): string {
 }
 
 // ── Sub-components ─────────────────────────────────────────────────────────
-
-function PRBadge({
-  icon,
-  label,
-  value,
-  sub,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  value: string;
-  sub: string;
-}) {
-  return (
-    <div className="flex-1 flex flex-col items-center gap-1 bg-card border border-border rounded-xl p-3 min-w-0">
-      <div className="text-muted-foreground">{icon}</div>
-      <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide text-center">{label}</p>
-      <p className="text-base font-bold text-foreground text-center leading-tight">{value}</p>
-      <p className="text-[10px] text-muted-foreground text-center">{sub}</p>
-    </div>
-  );
-}
 
 /** Headline 1RM block — promoted from the 3-up secondary row in the
  *  previous layout. Shows the naked Epley estimate (no confidence band — see
@@ -413,6 +392,8 @@ export default function ExerciseDetail({
   const [sessionsServerCursor, setSessionsServerCursor] = useState<string | null>(null);
   const [sessionsServerDone, setSessionsServerDone] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
+  const [setActionTarget, setSetActionTarget] = useState<SetActionSheetTarget | null>(null);
+  const [adjustPbOpen, setAdjustPbOpen] = useState(false);
 
   // Time-mode PR — only populated for time-mode exercises. Drives the
   // LongestHoldHero block in place of OneRMHero.
@@ -452,8 +433,6 @@ export default function ExerciseDetail({
           progress: local.progress,
           prs: {
             estimated1RM: local.prs.estimated1RM ? { ...local.prs.estimated1RM, exercise_uuid: exercise.uuid } : null,
-            heaviestWeight: local.prs.heaviestWeight ? { ...local.prs.heaviestWeight, exercise_uuid: exercise.uuid } : null,
-            mostReps: local.prs.mostReps ? { ...local.prs.mostReps, exercise_uuid: exercise.uuid } : null,
           },
           volumeTrend: local.volumeTrend,
           recentSets: [],
@@ -461,7 +440,7 @@ export default function ExerciseDetail({
           // Time-mode: empty rep-shaped fields. The hero + chart branches
           // off `isTimeMode` so this empty payload never gets rendered.
           progress: [],
-          prs: { estimated1RM: null, heaviestWeight: null, mostReps: null },
+          prs: { estimated1RM: null },
           volumeTrend: [],
           recentSets: [],
         };
@@ -679,69 +658,57 @@ export default function ExerciseDetail({
           <>
             {isTimeMode ? (
               !stripWillUseLeadingSlot && (
-                <LongestHoldHero
-                  longestSeconds={timePRs?.longestHold?.duration_seconds ?? null}
-                  longestDate={
-                    timePRs?.longestHold
-                      ? formatDate(timePRs.longestHold.date)
-                      : 'No data'
-                  }
-                  longestWeight={
-                    timePRs?.longestHold?.weight != null
-                      ? Math.round(toDisplay(timePRs.longestHold.weight) * 10) / 10
-                      : null
-                  }
-                  weightLabel={label}
-                  totalSeconds={timePRs?.totalSeconds ?? 0}
-                />
+                <>
+                  <LongestHoldHero
+                    longestSeconds={timePRs?.longestHold?.duration_seconds ?? null}
+                    longestDate={
+                      timePRs?.longestHold
+                        ? formatDate(timePRs.longestHold.date)
+                        : 'No data'
+                    }
+                    longestWeight={
+                      timePRs?.longestHold?.weight != null
+                        ? Math.round(toDisplay(timePRs.longestHold.weight) * 10) / 10
+                        : null
+                    }
+                    weightLabel={label}
+                    totalSeconds={timePRs?.totalSeconds ?? 0}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setAdjustPbOpen(true)}
+                    className="self-start text-[11px] font-semibold text-muted-foreground hover:text-foreground active:text-foreground -mt-1 px-1"
+                  >
+                    Set after a form fix? Adjust PB history…
+                  </button>
+                </>
               )
             ) : (<>
             {!stripWillUseLeadingSlot && (
-              <OneRMHero
-                value={
-                  progressData != null && progressData.prs.estimated1RM
-                    ? `${Math.round(toDisplay(progressData.prs.estimated1RM.estimated_1rm))}`
-                    : '—'
-                }
-                unit={label}
-                date={
-                  progressData != null && progressData.prs.estimated1RM
-                    ? formatDate(progressData.prs.estimated1RM.date)
-                    : 'No data'
-                }
-              />
+              <>
+                <OneRMHero
+                  value={
+                    progressData != null && progressData.prs.estimated1RM
+                      ? `${Math.round(toDisplay(progressData.prs.estimated1RM.estimated_1rm))}`
+                      : '—'
+                  }
+                  unit={label}
+                  date={
+                    progressData != null && progressData.prs.estimated1RM
+                      ? formatDate(progressData.prs.estimated1RM.date)
+                      : 'No data'
+                  }
+                />
+                <button
+                  type="button"
+                  onClick={() => setAdjustPbOpen(true)}
+                  className="self-start text-[11px] font-semibold text-muted-foreground hover:text-foreground active:text-foreground -mt-1 px-1"
+                >
+                  Set after a form fix? Adjust PB history…
+                </button>
+              </>
             )}
 
-            <div className="flex gap-2">
-              <PRBadge
-                icon={<Medal className="h-4 w-4" />}
-                label="Heaviest"
-                value={
-                  progressData != null && progressData.prs.heaviestWeight
-                    ? `${toDisplay(progressData.prs.heaviestWeight.weight)} ${label}`
-                    : '—'
-                }
-                sub={
-                  progressData != null && progressData.prs.heaviestWeight
-                    ? formatDate(progressData.prs.heaviestWeight.date)
-                    : 'No data'
-                }
-              />
-              <PRBadge
-                icon={<Award className="h-4 w-4" />}
-                label="Most Reps"
-                value={
-                  progressData != null && progressData.prs.mostReps
-                    ? `${progressData.prs.mostReps.repetitions}`
-                    : '—'
-                }
-                sub={
-                  progressData != null && progressData.prs.mostReps
-                    ? `@ ${toDisplay(progressData.prs.mostReps.weight)} ${label}`
-                    : 'No data'
-                }
-              />
-            </div>
             </>)}
 
             {!isTimeMode && chartData.length > 0 && (
@@ -930,37 +897,64 @@ export default function ExerciseDetail({
                         // held duration (Lou's pre-feature workaround).
                         const isTime = isTimeMode || set.duration_seconds != null;
                         const effectiveSeconds = set.duration_seconds ?? set.repetitions ?? null;
+                        const excluded = set.excluded_from_pb;
+                        const isPr = set.is_pr && !excluded;
                         return (
-                          <div
+                          <button
+                            type="button"
                             key={set.uuid}
-                            className={`flex items-baseline gap-3 px-3 py-1.5 ${i % 2 === 0 ? 'bg-card' : 'bg-muted/30'}`}
+                            onClick={() => setSetActionTarget({
+                              set_uuid: set.uuid,
+                              is_excluded: excluded,
+                              weight: set.weight,
+                              repetitions: set.repetitions,
+                              duration_seconds: set.duration_seconds,
+                              label: `Set ${i + 1} · ${formatDate(s.date)}`,
+                            })}
+                            className={`w-full flex items-baseline gap-3 px-3 py-1.5 text-left active:bg-card/70 ${
+                              excluded
+                                ? 'border-l-2 border-l-slate-500/60 bg-card/40'
+                                : isPr
+                                ? 'bg-amber-500/10'
+                                : i % 2 === 0 ? 'bg-card' : 'bg-muted/30'
+                            }`}
                           >
-                            <span className="text-[10px] text-muted-foreground w-5 text-center flex-shrink-0">{i + 1}</span>
+                            <span className={`text-[10px] w-5 text-center flex-shrink-0 ${
+                              excluded ? 'text-muted-foreground/60' : 'text-muted-foreground'
+                            }`}>{i + 1}</span>
                             {isTime ? (
                               <>
-                                <span className="text-xs text-foreground flex-1">
+                                <span className={`text-xs flex-1 ${excluded ? 'text-muted-foreground/60 line-through' : 'text-foreground'}`}>
                                   {set.weight != null && set.weight > 0 ? toDisplay(set.weight) : '—'}
                                   <span className="text-muted-foreground ml-0.5">{label}</span>
                                 </span>
                                 <span className="text-xs text-muted-foreground">×</span>
-                                <span className="text-xs text-foreground flex-1">
+                                <span className={`text-xs flex-1 ${excluded ? 'text-muted-foreground/60 line-through' : 'text-foreground'}`}>
                                   {effectiveSeconds != null ? `${effectiveSeconds}s` : '—'}
                                 </span>
                               </>
                             ) : (
                               <>
-                                <span className="text-xs text-foreground flex-1">
+                                <span className={`text-xs flex-1 ${excluded ? 'text-muted-foreground/60 line-through' : 'text-foreground'}`}>
                                   {set.weight != null ? toDisplay(set.weight) : '—'}
                                   <span className="text-muted-foreground ml-0.5">{label}</span>
                                 </span>
                                 <span className="text-xs text-muted-foreground">×</span>
-                                <span className="text-xs text-foreground flex-1">{set.repetitions ?? '—'} reps</span>
+                                <span className={`text-xs flex-1 ${excluded ? 'text-muted-foreground/60 line-through' : 'text-foreground'}`}>{set.repetitions ?? '—'} reps</span>
                               </>
                             )}
-                            <span className="text-[11px] text-muted-foreground w-10 text-right flex-shrink-0">
-                              {set.rpe != null ? `RPE ${set.rpe}` : ''}
-                            </span>
-                          </div>
+                            {excluded ? (
+                              <span className="text-[10px] font-bold text-slate-300 bg-slate-500/20 border border-slate-500/30 px-1.5 py-0 rounded-full">
+                                EX
+                              </span>
+                            ) : isPr ? (
+                              <span className="text-[10px] font-bold text-amber-400">PR</span>
+                            ) : (
+                              <span className="text-[11px] text-muted-foreground w-10 text-right flex-shrink-0">
+                                {set.rpe != null ? `RPE ${set.rpe}` : ''}
+                              </span>
+                            )}
+                          </button>
                         );
                       })}
                     </div>
@@ -1146,6 +1140,17 @@ export default function ExerciseDetail({
           </div>
         )}
       </div>
+      <SetActionSheet
+        target={setActionTarget}
+        onClose={() => setSetActionTarget(null)}
+        unitLabel={label}
+      />
+      <AdjustPBHistorySheet
+        exerciseUuid={exercise.uuid}
+        exerciseTitle={exercise.title}
+        open={adjustPbOpen}
+        onClose={() => setAdjustPbOpen(false)}
+      />
     </main>
   );
 }

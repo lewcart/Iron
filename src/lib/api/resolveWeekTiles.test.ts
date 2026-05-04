@@ -61,6 +61,7 @@ function healthyFacts(): WeekFacts {
         exercise_uuid: exId,
         workout_exercise_uuid: `${exId}-we${i}`,
         is_completed: true,
+        excluded_from_pb: false,
         weight: 100 + i,
         repetitions: 5,
         rir: 2,

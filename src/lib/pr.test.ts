@@ -75,30 +75,23 @@ describe('isNewEstimated1RM', () => {
 // ===== calculatePRs =====
 
 describe('calculatePRs', () => {
-  it('returns all nulls for empty array', () => {
+  it('returns null for empty array', () => {
     const result = calculatePRs([]);
     expect(result.estimated1RM).toBeNull();
-    expect(result.heaviestWeight).toBeNull();
-    expect(result.mostReps).toBeNull();
   });
 
-  it('returns the single set for all categories when only one set', () => {
+  it('returns the only set when one set', () => {
     const sets = [{ weight: 100, repetitions: 5, date: '2026-01-01' }];
     const result = calculatePRs(sets);
-
     expect(result.estimated1RM).not.toBeNull();
-    expect(result.heaviestWeight).not.toBeNull();
-    expect(result.mostReps).not.toBeNull();
-
     expect(result.estimated1RM?.weight).toBe(100);
-    expect(result.heaviestWeight?.weight).toBe(100);
-    expect(result.mostReps?.repetitions).toBe(5);
+    expect(result.estimated1RM?.repetitions).toBe(5);
   });
 
   it('picks the set with highest estimated 1RM', () => {
     const sets = [
       { weight: 100, repetitions: 5, date: '2026-01-01' },
-      { weight: 80, repetitions: 15, date: '2026-01-02' },  // higher 1RM
+      { weight: 80, repetitions: 15, date: '2026-01-02' },
       { weight: 120, repetitions: 1, date: '2026-01-03' },
     ];
     // 100*(1+5/30)=116.67, 80*(1+15/30)=120, 120*(1+1/30)=124
@@ -107,33 +100,20 @@ describe('calculatePRs', () => {
     expect(result.estimated1RM?.repetitions).toBe(1);
   });
 
-  it('picks the set with heaviest weight', () => {
+  it('rejects pure-volume gaming: high reps at low weight does not beat heavier 1RM', () => {
     const sets = [
-      { weight: 100, repetitions: 5, date: '2026-01-01' },
-      { weight: 120, repetitions: 1, date: '2026-01-02' },
-      { weight: 80, repetitions: 12, date: '2026-01-03' },
+      { weight: 100, repetitions: 5, date: '2026-01-01' },   // e1RM 116.67
+      { weight: 60, repetitions: 20, date: '2026-01-02' },   // e1RM 100
     ];
     const result = calculatePRs(sets);
-    expect(result.heaviestWeight?.weight).toBe(120);
+    expect(result.estimated1RM?.weight).toBe(100);
+    expect(result.estimated1RM?.repetitions).toBe(5);
   });
 
-  it('picks the set with most reps', () => {
-    const sets = [
-      { weight: 100, repetitions: 5, date: '2026-01-01' },
-      { weight: 60, repetitions: 20, date: '2026-01-02' },
-      { weight: 80, repetitions: 12, date: '2026-01-03' },
-    ];
-    const result = calculatePRs(sets);
-    expect(result.mostReps?.repetitions).toBe(20);
-    expect(result.mostReps?.weight).toBe(60);
-  });
-
-  it('includes estimated_1rm in each PR record', () => {
+  it('includes estimated_1rm on the record', () => {
     const sets = [{ weight: 100, repetitions: 10, date: '2026-01-01' }];
     const result = calculatePRs(sets);
     expect(result.estimated1RM?.estimated_1rm).toBeCloseTo(133.33, 1);
-    expect(result.heaviestWeight?.estimated_1rm).toBeCloseTo(133.33, 1);
-    expect(result.mostReps?.estimated_1rm).toBeCloseTo(133.33, 1);
   });
 
   it('preserves date and workout_uuid on the record', () => {
@@ -159,7 +139,7 @@ describe('calculatePRs', () => {
     ];
     const result = calculatePRs(sets);
     // First set wins (strict greater-than comparison)
-    expect(result.heaviestWeight?.date).toBe('2026-01-01');
+    expect(result.estimated1RM?.date).toBe('2026-01-01');
   });
 });
 

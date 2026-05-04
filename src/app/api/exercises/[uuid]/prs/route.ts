@@ -7,8 +7,8 @@ export async function GET(
 ) {
   try {
     const { uuid } = await params;
-    const { estimated1RM, heaviestWeight, mostReps } = await getExercisePRs(uuid);
-    return NextResponse.json({ estimated1RM, heaviestWeight, mostReps });
+    const { estimated1RM } = await getExercisePRs(uuid);
+    return NextResponse.json({ estimated1RM });
   } catch {
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }

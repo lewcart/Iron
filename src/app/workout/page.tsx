@@ -1838,6 +1838,7 @@ export default function WorkoutPage() {
             comment: s.comment,
             is_completed: false,
             is_pr: false,
+            excluded_from_pb: false,
             order_index: s.order_index,
             duration_seconds: null,
             ...syncMeta,

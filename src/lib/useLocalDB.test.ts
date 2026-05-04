@@ -74,8 +74,10 @@ async function seedSet(opts: {
     comment: null,
     is_completed: true,
     is_pr: false,
+    excluded_from_pb: false,
     order_index: opts.orderIndex ?? 0,
     _synced: true,
+    _updated_at: 0,
     _deleted: false,
   });
 }
@@ -173,8 +175,8 @@ describe('getExerciseTimePRsLocal — retroactive interpretation after mode flip
       weight: 0, repetitions: 999, duration_seconds: null,
       min_target_reps: null, max_target_reps: null,
       rpe: null, rir: null, tag: null, comment: null,
-      is_completed: true, is_pr: false, order_index: 1,
-      _synced: true, _deleted: true,
+      is_completed: true, is_pr: false, excluded_from_pb: false, order_index: 1,
+      _synced: true, _updated_at: 0, _deleted: true,
     });
     await db.workout_sets.put({
       uuid: 'incomplete',
@@ -182,8 +184,8 @@ describe('getExerciseTimePRsLocal — retroactive interpretation after mode flip
       weight: 0, repetitions: 999, duration_seconds: null,
       min_target_reps: null, max_target_reps: null,
       rpe: null, rir: null, tag: null, comment: null,
-      is_completed: false, is_pr: false, order_index: 2,
-      _synced: true, _deleted: false,
+      is_completed: false, is_pr: false, excluded_from_pb: false, order_index: 2,
+      _synced: true, _updated_at: 0, _deleted: false,
     });
 
     const result = await getExerciseTimePRsLocal(PLANK_UUID);
