@@ -1733,16 +1733,20 @@ export default function WorkoutPage() {
   }, [workout?.uuid, workout?.exercises.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Push snapshot whenever the live workout changes (any set update, exercise
-  // add/remove, completion). useCurrentWorkoutFull is the Dexie live query, so
-  // this effect re-fires the moment a mutation lands. Best-effort — failures
-  // log to console and don't surface in the UI.
+  // add/remove, completion). Trailing-edge debounce so three rapid mutations
+  // (e.g. dial weight → dial reps → tap complete) collapse into one IPC push
+  // instead of three. WC's updateApplicationContext is overwrite-only anyway;
+  // last-write-wins semantics make the debounce a free win.
   useEffect(() => {
     if (!workout) return;
-    const snapshot = buildWatchSnapshot({
-      workout,
-      goalWindowByExercise: pageGoalWindowByExercise,
-    });
-    void pushSnapshotToWatch(snapshot);
+    const handle = setTimeout(() => {
+      const snapshot = buildWatchSnapshot({
+        workout,
+        goalWindowByExercise: pageGoalWindowByExercise,
+      });
+      void pushSnapshotToWatch(snapshot);
+    }, 200);
+    return () => clearTimeout(handle);
   }, [workout, pageGoalWindowByExercise]);
 
   // Collapse all plans except the first one once the local data has loaded.

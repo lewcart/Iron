@@ -9,6 +9,7 @@ struct RebirthWatchApp: App {
     @StateObject private var session = WatchSessionStore()
     @StateObject private var completion = SetCompletionCoordinator()
     @StateObject private var workoutSession = WorkoutSessionManager()
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some Scene {
         WindowGroup {
@@ -20,6 +21,15 @@ struct RebirthWatchApp: App {
                     RebirthWatchLog.shared.info("RebirthWatch launched")
                     session.activate()
                     Task { await completion.flush() }
+                }
+                .onChange(of: scenePhase) { _, phase in
+                    // Flush on every foreground transition. NWPathMonitor only
+                    // fires on connectivity transitions; if the watch sleeps with
+                    // network already satisfied and wakes 10min later, no NWPath
+                    // event fires. This catches that case.
+                    if phase == .active {
+                        Task { await completion.flush() }
+                    }
                 }
         }
     }

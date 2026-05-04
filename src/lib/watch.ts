@@ -165,8 +165,17 @@ export function buildWatchSnapshot(input: BuildSnapshotInput): WatchSnapshot {
   };
 }
 
+/** Cap per-set comment payload so a long note can't blow the 50KB WC envelope.
+ *  Watch UI doesn't render comments — but the watch echoes them on CDC writes
+ *  to avoid NULLing the server column on round-trip, so we keep them present
+ *  but truncate. Long comments persist on phone Dexie unaffected. */
+const COMMENT_MAX_CHARS = 200;
+
 function toWatchSet(s: import('@/db/local').LocalWorkoutSet): WatchSet {
   const isTime = s.duration_seconds !== null && s.duration_seconds !== undefined;
+  const comment = s.comment != null && s.comment.length > COMMENT_MAX_CHARS
+    ? s.comment.slice(0, COMMENT_MAX_CHARS)
+    : s.comment;
   return {
     uuid: s.uuid,
     workout_exercise_uuid: s.workout_exercise_uuid,
@@ -183,7 +192,7 @@ function toWatchSet(s: import('@/db/local').LocalWorkoutSet): WatchSet {
     max_target_reps: s.max_target_reps,
     rpe: s.rpe,
     tag: s.tag,
-    comment: s.comment,
+    comment,
     is_pr: s.is_pr,
     excluded_from_pb: s.excluded_from_pb,
   };

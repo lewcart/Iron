@@ -55,11 +55,11 @@ struct StartWorkoutProvider: TimelineProvider {
         completion(.now(label: "Workout"))
     }
     func getTimeline(in context: Context, completion: @escaping (Timeline<RelevanceEntry>) -> Void) {
-        // Higher relevance during typical training hours: weekdays 16:00–21:00,
-        // weekends 09:00–13:00. Defaults to a low score otherwise.
-        let now = Date()
-        let entry = RelevanceEntry(date: now, label: "Workout", relevance: trainingRelevance(at: now))
-        completion(Timeline(entries: [entry], policy: .after(now.addingTimeInterval(3600))))
+        // Stamp 24 hourly entries, each with the relevance score computed for
+        // its own hour. Smart Stack reads the entry whose date is currently
+        // active; without these per-hour entries it stays anchored on the
+        // provider-eval-time score and the time-of-day bump never fires.
+        completion(Timeline(entries: hourlyEntries(label: "Workout", relevance: trainingRelevance), policy: .atEnd))
     }
 }
 
@@ -109,9 +109,10 @@ struct WalkNowProvider: TimelineProvider {
         completion(.now(label: "Walk"))
     }
     func getTimeline(in context: Context, completion: @escaping (Timeline<RelevanceEntry>) -> Void) {
-        let now = Date()
-        let entry = RelevanceEntry(date: now, label: "Walk", relevance: morningRelevance(at: now))
-        completion(Timeline(entries: [entry], policy: .after(now.addingTimeInterval(1800))))
+        // Per-hour entries so the depart-home window bump (04:30–06:00 weekday,
+        // 05:00–08:00 weekend, mirrored from src/lib/geofence.ts) actually
+        // fires when Smart Stack reads at the relevant hour.
+        completion(Timeline(entries: hourlyEntries(label: "Walk", relevance: morningRelevance), policy: .atEnd))
     }
 }
 
@@ -210,4 +211,24 @@ struct RelevanceEntry: TimelineEntry {
     static func now(label: String) -> RelevanceEntry {
         RelevanceEntry(date: Date(), label: label, relevance: nil)
     }
+}
+
+/// Build 24 hourly entries starting at the next round hour. Each entry's
+/// relevance is computed for its own date so Smart Stack picks up the
+/// time-of-day-driven score without waiting for the provider to re-evaluate.
+private func hourlyEntries(
+    label: String,
+    relevance: (Date) -> TimelineEntryRelevance?
+) -> [RelevanceEntry] {
+    let cal = Calendar.current
+    let now = Date()
+    var nextHour = cal.dateInterval(of: .hour, for: now)?.end ?? now.addingTimeInterval(3600)
+    var entries: [RelevanceEntry] = []
+    // Include "now" first so the relevance updates immediately on widget refresh.
+    entries.append(RelevanceEntry(date: now, label: label, relevance: relevance(now)))
+    for _ in 0..<24 {
+        entries.append(RelevanceEntry(date: nextHour, label: label, relevance: relevance(nextHour)))
+        nextHour = nextHour.addingTimeInterval(3600)
+    }
+    return entries
 }

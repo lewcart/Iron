@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { timingSafeEqual } from 'node:crypto';
 import { query } from '@/db/db';
 import { recomputePRFlagsForExercise } from '@/db/queries';
 
@@ -8,6 +9,9 @@ import { recomputePRFlagsForExercise } from '@/db/queries';
  * the watch app sends `Authorization: Bearer <REBIRTH_API_KEY>`. We reject
  * only when a header is present AND wrong — preserving the phone path
  * exactly while authenticating the watch.
+ *
+ * Comparison is constant-time via `timingSafeEqual` so an attacker can't
+ * leak the key one byte at a time via response-time deltas.
  */
 function rejectIfBadApiKey(req: Request): NextResponse | null {
   const apiKey = process.env.REBIRTH_API_KEY;
@@ -16,7 +20,14 @@ function rejectIfBadApiKey(req: Request): NextResponse | null {
   const xApiKey = req.headers.get('x-api-key');
   if (!authHeader && !xApiKey) return null; // phone path
   const provided = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : xApiKey;
-  if (provided !== apiKey) {
+  if (!provided) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+  const a = Buffer.from(provided, 'utf8');
+  const b = Buffer.from(apiKey, 'utf8');
+  // Length check before timingSafeEqual to avoid throwing on length mismatch
+  // (which would itself leak length); collapse to a single rejection.
+  if (a.length !== b.length || !timingSafeEqual(a, b)) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
   return null;
