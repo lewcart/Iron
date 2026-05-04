@@ -2,6 +2,40 @@
 
 All notable changes to Rebirth are documented here.
 
+## [0.9.0] - 2026-05-04
+
+### Added (in-workout stopwatch for time-based exercises)
+
+- **Stopwatch overlay on time-mode SetRows.** Tap the new Timer icon next to the duration input to launch a count-up stopwatch. Stop manually; elapsed seconds drop into the duration field. Mirrors the rest-timer's background-safe persistence model (`Date.now()` against absolute `startedAt`, separate `rebirth-stopwatch-state` localStorage key) so a running rest timer and stopwatch coexist. New files: `src/app/workout/stopwatch-utils.ts` (pure-fn state machine + tests), `useStopwatch.ts` (hook with appStateChange resync), `StopwatchSheet.tsx` (full-screen sheet with all 7 phases).
+- **Switch-sides countdown for unilateral exercises.** New `exercises.has_sides` boolean (toggle on the exercise edit page) drives a 10-second "switch sides" countdown after side 1 stops, then resumes counting up for side 2. Logs the longer-of-two side as `duration_seconds` with a 1.5s confirmation card showing both side times. Force-quit during the switch lands on a new `switch_expired_paused` phase that requires explicit "Start second side" rather than silently crediting time-away. Sticky resume bar surfaces when the sheet is closed but the stopwatch is still running.
+- **RPE 1-10 chip strip replaces RIR on time-mode SetRows.** RIR is the wrong proxy for held-duration sets — the literature uses RPE for isometrics. New chip strip (own row, post-completion) with anchor labels at chips 6-10 (`easy / mod / hard / near / fail`). Legacy time-mode rows with `rir` populated but no `rpe` pre-fill the chip strip from `10 - rir` (display only — not written until the user taps a chip).
+- **Server-side RIR bridge.** `pushWorkoutSet` derives `rir = clamp(10 - rpe, 0, 5)` for time-mode rows so the existing RIR-weighted `effective_set_count` SQL at `queries.ts:1367` keeps crediting hypertrophy volume without a SQL change. Single source of truth: client only writes `rpe` for time-mode; server overwrites `rir`. Defends against PWA two-tab races and bridge-formula drift.
+- **Two-tab arbitration.** `ownerTabId` + `storage` event sync — only the tab that opened the stopwatch commits on Stop; other tabs render read-only with a recovery affordance.
+- **Has-sides toggle on exercise edit page.** iOS-style switch on `/exercises/:uuid` page chrome (mirrors the existing tracking_mode toggle).
+
+### Changed
+
+- **Migration 041** drops the legacy `workout_sets_rpe_check` (allowed 7.0–10.0 only — would have rejected the new 1–10 range) and adds `CHECK (rpe IS NULL OR (rpe BETWEEN 1 AND 10 AND rpe = floor(rpe)))`. Defense-in-depth: rejects decimal RPE at the database boundary regardless of which client wrote it.
+- **`handleComplete` skips `rir` auto-fill on time-mode rows.** First-completion auto-fill (carry-over from previous session's RIR) was silently faking the RPE→RIR bridge for time-mode sets — Lou would tap "complete" and the row got `rir = rirDefault` before any RPE was selected, credit-pinning the muscle math. Now time-mode requires an explicit RPE chip tap. Rep-mode behavior unchanged.
+- **Dexie v20** upgrade backfills `has_sides = false` on existing exercise rows. Adds a `versionchange` handler that closes + reloads when a future SW activates mid-workout.
+
+### Architecture notes
+
+- **Why not unify with `useRestTimer`.** Both hooks share `appStateChange` listener, persistence pattern, and `setInterval` poll, but they differ on direction (count-up vs countdown), persisted shape, and state-machine semantics. Plan-eng-review agreed: unifying behind a `useTimer({direction})` would couple a state machine into a primitive used by every SetRow — wrong abstraction. Two hooks, separate localStorage namespaces, no contention.
+- **Why server-side bridge instead of client-side.** Three problems with deriving `rir` in client `mutations.ts:updateSet`: (1) the function lacks exercise context — would need a Dexie load that races under concurrent tabs; (2) two PWA tabs racing on different `rpe` values would push inconsistent `(rpe, rir)` pairs; (3) any future bridge-formula change is irreversible because the server already stored the bridged value. Server-side derivation makes `rpe` the single source of truth.
+- **Why longer-of-two for unilateral, not sum.** Each side is its own work bout. Summing would double-count and compare unfavorably against historical bilateral holds. Confirmation card surfaces both side times before close.
+- **Why `setInterval(1000ms)` for stopwatch (not 500ms like rest timer).** Count-up display only ever shows whole seconds. Halving the wakeup rate matters under iOS background-CPU budget when both timers run.
+- **Why audio is inlined, not extracted.** Plan called for a shared `playBeep` util with single AudioContext + 200ms collision lock. Deferred — single-user app, low collision risk in practice. TODO documented in `useStopwatch.ts`.
+
+### Tests
+
+- 21 new tests in `src/app/workout/stopwatch-utils.test.ts` covering the full state machine: `restoreState` switch-expired-paused gating, `onStop` for non-unilateral / side-1 / side-2, `onSwitchComplete`, `onResumeFromPause`, `onLogFirstOnly`, `finalDurationSeconds` longer-of-two, `isOwnerTab` two-tab arbitration. Total suite: 1407 tests, all passing.
+- Build green; tsc has 12 fewer errors than main pre-merge (test fixture cleanup along the way), zero new production errors.
+
+### Process
+
+- First feature shipped via `/autoplan` with CEO phase explicitly skipped at the user's request. Design + eng dual voices ran (Codex + Claude subagent each). 35 auto-decisions logged in `PLAN-exercise-timer.md`. Notable critical fixes the reviews caught before any code was written: legacy RPE check constraint blocking the new range, restore-after-expired-switch silently crediting fake elapsed, client-side bridge race across PWA tabs, `handleComplete` auto-fill faking the bridge.
+
 ## [0.8.2] - 2026-05-04
 
 ### Changed (Recent Workouts visual differentiation)
