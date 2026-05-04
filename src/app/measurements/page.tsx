@@ -1,7 +1,7 @@
 'use client';
 
-import { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
-import { ChevronLeft, Trash2, ImageIcon, Activity, Target, Plus, GitCompare, Move, Tag } from 'lucide-react';
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Camera, ChevronLeft, Trash2, ImageIcon, Activity, Target, Plus, GitCompare, Move, Tag } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useUnit } from '@/context/UnitContext';
@@ -12,14 +12,13 @@ import {
 import type { InbodyScan, MeasurementLog, ProjectionPhoto, InspoPhoto, ProgressPhotoPose } from '@/types';
 import type { LocalProgressPhoto } from '@/db/local';
 import { useMeasurements, useProgressPhotos, useInbodyScans, useBodyGoal } from '@/lib/useLocalDB-measurements';
-import { logMeasurement, deleteMeasurement, deleteProgressPhoto } from '@/lib/mutations-measurements';
+import { logMeasurement, deleteMeasurement, deleteProgressPhoto, recordProgressPhotoFromBlob } from '@/lib/mutations-measurements';
 import { logBodyweight, deleteBodyweightLog } from '@/lib/mutations';
 import { useBodyweightLogs } from '@/lib/useLocalDB';
 import { db } from '@/db/local';
 import { syncEngine } from '@/lib/sync';
 import { Sheet } from '@/components/ui/sheet';
 import { isLocalStub } from '@/lib/photo-upload-queue';
-import { PhotoSheet } from './PhotoSheet';
 import { InbodyScanSheet } from './InbodyScanSheet';
 import { AdjustOffsetDialog, type AdjustablePhotoKind } from './AdjustOffsetDialog';
 import { AlignedPhoto } from './AlignedPhoto';
@@ -35,7 +34,24 @@ const SITES = [
 ] as const;
 
 type SiteKey = typeof SITES[number]['key'];
-type TabKey = 'measurements' | 'photos' | 'inbody';
+type TabKey = 'log' | 'inbody';
+
+// `?tab=measurements` and `?tab=photos` are legacy deep-links from /feed,
+// /photos/compare, and PhotoCadenceFooter. They resolve to the merged 'log'
+// tab so callers don't need a coordinated rename.
+function normalizeTabParam(raw: string | null | undefined): TabKey {
+  if (raw === 'inbody') return 'inbody';
+  return 'log';
+}
+
+const POSE_GUIDANCE: Record<string, string> = {
+  front:      'Face the camera, arms slightly away from your body, feet hip-width apart.',
+  side:       'Stand sideways, arms relaxed, feet together, looking straight ahead.',
+  back:       'Back to the camera, arms slightly away from your body, feet hip-width apart.',
+  face_front: 'Camera at eye level, neutral expression, hair clear of the face.',
+  face_side:  'Profile shot, ear and jawline visible, eyes forward.',
+  other:      'Anything else worth tracking — outfit, lighting, angle.',
+};
 
 // Distinct Tailwind-equivalent colors for multi-site overlay (no --chart-N tokens in globals.css)
 const SITE_COLORS: Record<SiteKey, string> = {
@@ -106,7 +122,7 @@ function MeasurementsInner() {
   const { fromInput, toDisplay, label } = useUnit();
   const router = useRouter();
   const searchParams = useSearchParams();
-  const initialTab = (searchParams?.get('tab') as TabKey | null) ?? 'measurements';
+  const initialTab = normalizeTabParam(searchParams?.get('tab'));
   const [activeTab, setActiveTab] = useState<TabKey>(initialTab);
 
   // All reads come from Dexie via useLiveQuery — no spinner needed beyond
@@ -129,8 +145,44 @@ function MeasurementsInner() {
   const [saving, setSaving] = useState(false);
   const [chartSite, setChartSite] = useState<SiteKey>('waist');
   const [logSheetOpen, setLogSheetOpen] = useState(false);
-  const [photoSheetOpen, setPhotoSheetOpen] = useState(false);
   const [inbodySheetOpen, setInbodySheetOpen] = useState(false);
+
+  // Unified Log sheet state — photo + measurements + bodyweight + note,
+  // all optional, all share the same `measured_at` so a single capture
+  // session writes consistent timestamps across all three tables.
+  const [logPose, setLogPose] = useState<ProgressPhotoPose>('front');
+  const [logPhotoBlob, setLogPhotoBlob] = useState<File | Blob | null>(null);
+  const [logPhotoPreview, setLogPhotoPreview] = useState<string | null>(null);
+  const [logNote, setLogNote] = useState('');
+  const logFileRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (!logSheetOpen) {
+      setLogPose('front');
+      setLogPhotoBlob(null);
+      setLogPhotoPreview((prev) => {
+        if (prev) URL.revokeObjectURL(prev);
+        return null;
+      });
+      setLogNote('');
+    }
+  }, [logSheetOpen]);
+
+  // `?tab=log&compose=front` (or legacy `?tab=photos&compose=front` from
+  // PhotoCadenceFooter) auto-opens the log sheet with the requested pose
+  // pre-selected. Strip the param after handling so a SPA back-nav doesn't
+  // re-trigger.
+  useEffect(() => {
+    const compose = searchParams?.get('compose');
+    if (!compose) return;
+    const validPose = (ALL_POSES as readonly string[]).includes(compose);
+    if (!validPose) return;
+    setLogPose(compose as ProgressPhotoPose);
+    setLogSheetOpen(true);
+    const next = new URLSearchParams(searchParams.toString());
+    next.delete('compose');
+    router.replace(`/measurements${next.toString() ? `?${next.toString()}` : ''}`, { scroll: false });
+  }, [searchParams, router]);
 
   // Compare flow: lightweight existence checks so the "Compare with…" CTAs
   // only render when there's something to compare against. The compare page
@@ -210,28 +262,44 @@ function MeasurementsInner() {
     }
   }, []);
 
-  const handleSaveMeasurements = async () => {
-    const hasAny = SITES.some(s => inputs[s.key]) || !!weightInput;
-    if (!hasAny) return;
+  const handleSaveLog = async () => {
+    const hasMeasurement = SITES.some(s => inputs[s.key]);
+    const hasWeight = !!weightInput;
+    const hasPhoto = !!logPhotoBlob;
+    if (!hasMeasurement && !hasWeight && !hasPhoto) return;
     setSaving(true);
     try {
-      const measured_at = date ? new Date(date).toISOString() : undefined;
+      const measured_at = date ? new Date(date).toISOString() : new Date().toISOString();
+      const note = logNote.trim() || undefined;
       const writes: Promise<unknown>[] = [];
 
       for (const site of SITES) {
         const val = inputs[site.key];
         if (val) {
-          writes.push(logMeasurement({ site: site.key, value_cm: parseFloat(val), measured_at }));
+          writes.push(logMeasurement({
+            site: site.key,
+            value_cm: parseFloat(val),
+            measured_at,
+            notes: note ?? null,
+          }));
         }
       }
 
-      if (weightInput) {
-        writes.push(logBodyweight(fromInput(parseFloat(weightInput))));
+      if (hasWeight) {
+        writes.push(logBodyweight(fromInput(parseFloat(weightInput)), note, measured_at));
+      }
+
+      if (hasPhoto && logPhotoBlob) {
+        writes.push(recordProgressPhotoFromBlob({
+          blob: logPhotoBlob,
+          pose: logPose,
+          notes: note ?? null,
+          taken_at: measured_at,
+        }));
       }
 
       await Promise.all(writes);
 
-      // useLiveQuery picks up the new rows automatically — no manual setLogs.
       setInputs({});
       setWeightInput('');
       setDate(toDateInputValue());
@@ -239,6 +307,22 @@ function MeasurementsInner() {
     } finally {
       setSaving(false);
     }
+  };
+
+  const handleLogPhotoPick = (file: File) => {
+    setLogPhotoBlob(file);
+    setLogPhotoPreview((prev) => {
+      if (prev) URL.revokeObjectURL(prev);
+      return URL.createObjectURL(file);
+    });
+  };
+
+  const clearLogPhoto = () => {
+    setLogPhotoBlob(null);
+    setLogPhotoPreview((prev) => {
+      if (prev) URL.revokeObjectURL(prev);
+      return null;
+    });
   };
 
   const handleDeleteMeasurement = async (uuid: string) => {
@@ -329,7 +413,7 @@ function MeasurementsInner() {
     };
   }
 
-  const hasInput = SITES.some(s => inputs[s.key]) || !!weightInput;
+  const hasInput = SITES.some(s => inputs[s.key]) || !!weightInput || !!logPhotoBlob;
 
   // InBody trend chart — uses PBF% by default, most recent scans oldest-first
   const inbodyTrendData = inbodyScans
@@ -499,12 +583,9 @@ function MeasurementsInner() {
         </div>
       )}
 
-      {/* History — grouped by calendar day. Lou often saves multiple sites in
-          one Sheet submit, which creates N rows in measurement_logs. Showing
-          them as N separate History rows is noisy, so we collapse same-day
-          entries into one card. If a site appears twice in the same day we
-          keep only the latest (logs are pre-sorted desc by measured_at, so
-          the first match wins). */}
+      {/* History — one compact row per day with an inline summary of every
+          site logged. Multi-row expanded view was using too much vertical
+          space; delete acts on the whole day's logs at once. */}
       {!loading && logs.length > 0 && (() => {
         type DayEntry = { log: MeasurementLog; label: string };
         type DayGroup = { day: string; measured_at: string; entries: DayEntry[] };
@@ -514,7 +595,6 @@ function MeasurementsInner() {
           const day = log.measured_at.slice(0, 10);
           const label = humanizeSite(log.site);
           const group = byDay.get(day) ?? { day, measured_at: log.measured_at, entries: [] };
-          // Keep only the latest entry per site label within a day
           if (!group.entries.some(e => e.label === label)) {
             group.entries.push({ log, label });
           }
@@ -528,56 +608,30 @@ function MeasurementsInner() {
         return (
           <div>
             <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1 px-1">History</p>
-            <div className="space-y-2">
-              {groups.map(group => {
-                if (group.entries.length === 1) {
-                  // Compact single-row layout — matches pre-grouping look
-                  const { log, label } = group.entries[0];
-                  return (
-                    <div key={group.day} className="ios-section">
-                      <div className="ios-row justify-between">
-                        <div className="flex-1 min-w-0">
-                          <span className="text-sm font-medium">{label}</span>
-                          <span className="text-sm text-muted-foreground ml-2">{log.value_cm} cm</span>
-                        </div>
-                        <span className="text-xs text-muted-foreground mr-3">
-                          {formatDate(log.measured_at)}
-                        </span>
-                        <button
-                          onClick={() => handleDeleteMeasurement(log.uuid)}
-                          className="text-red-500 p-1 min-h-[44px] min-w-[44px] flex items-center justify-center"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </button>
-                      </div>
-                    </div>
-                  );
-                }
-
-                // Multi-site day — header row with the date, then a sub-row per site
+            <div className="ios-section">
+              {groups.map((group, i) => {
+                const summary = group.entries
+                  .map(e => `${e.label.split(' ').map(w => w[0]).join('').toUpperCase()} ${e.log.value_cm}`)
+                  .join(' · ');
                 return (
-                  <div key={group.day} className="ios-section">
-                    <div className="ios-row justify-between border-b border-border">
-                      <span className="text-sm font-semibold">{formatDate(group.measured_at)}</span>
-                      <span className="text-xs text-muted-foreground">{group.entries.length} sites</span>
+                  <div
+                    key={group.day}
+                    className={`ios-row justify-between ${i < groups.length - 1 ? 'border-b border-border' : ''}`}
+                  >
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm font-medium">{formatDate(group.measured_at)}</div>
+                      <div className="text-xs text-muted-foreground truncate">{summary}</div>
                     </div>
-                    {group.entries.map((e, i) => (
-                      <div
-                        key={e.log.uuid}
-                        className={`ios-row justify-between ${i < group.entries.length - 1 ? 'border-b border-border' : ''}`}
-                      >
-                        <div className="flex-1 min-w-0">
-                          <span className="text-sm font-medium">{e.label}</span>
-                          <span className="text-sm text-muted-foreground ml-2">{e.log.value_cm} cm</span>
-                        </div>
-                        <button
-                          onClick={() => handleDeleteMeasurement(e.log.uuid)}
-                          className="text-red-500 p-1 min-h-[44px] min-w-[44px] flex items-center justify-center"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </button>
-                      </div>
-                    ))}
+                    <button
+                      onClick={() => {
+                        if (!confirm(`Delete ${group.entries.length} entr${group.entries.length === 1 ? 'y' : 'ies'} from ${formatDate(group.measured_at)}?`)) return;
+                        group.entries.forEach(e => { void handleDeleteMeasurement(e.log.uuid); });
+                      }}
+                      className="text-red-500 p-1 min-h-[44px] min-w-[44px] flex items-center justify-center"
+                      aria-label={`Delete ${formatDate(group.measured_at)} entries`}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
                   </div>
                 );
               })}
@@ -627,23 +681,35 @@ function MeasurementsInner() {
     </div>
   );
 
-  // Group photos by calendar date (local) so a single capture session reads
-  // as one entry rather than 3-6. Within a group, sort poses in canonical
-  // order (front → side → back → face_front → face_side → other). Edge
-  // case: if Lou retakes a pose on the same day, all of those photos appear
-  // in the group.
+  // Group photos by capture *session*, not calendar date. A "session" is
+  // anchored on a 04:00 London boundary so photos taken at 23:59 and 00:01
+  // (seconds apart, but on opposite sides of midnight) count as the same
+  // session. Mirrors the sleep-summary nap-before-04:00 convention.
+  // Within a group, sort poses in canonical order
+  // (front → side → back → face_front → face_side → other).
   const photoGroups = useMemo(() => {
     const POSE_ORDER: Record<string, number> = {
       front: 0, side: 1, back: 2, face_front: 3, face_side: 4, other: 5,
     };
     const byDate = new Map<string, LocalProgressPhoto[]>();
-    // Group by Lou's local (London) date, not UTC. Photos taken near
-    // midnight London time straddle UTC dates and would otherwise split
-    // a single capture session across two cards. en-CA gives YYYY-MM-DD.
     const LOCALE = 'en-CA';
     const TZ = 'Europe/London';
+    const partsFmt = new Intl.DateTimeFormat(LOCALE, {
+      timeZone: TZ, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', hour12: false,
+    });
+    const sessionDate = (iso: string) => {
+      const parts = partsFmt.formatToParts(new Date(iso));
+      const get = (t: string) => parts.find(p => p.type === t)?.value ?? '00';
+      const y = parseInt(get('year'), 10);
+      const m = parseInt(get('month'), 10);
+      const d = parseInt(get('day'), 10);
+      const h = parseInt(get('hour'), 10);
+      const ref = new Date(Date.UTC(y, m - 1, d));
+      if (h < 4) ref.setUTCDate(ref.getUTCDate() - 1);
+      return ref.toISOString().slice(0, 10);
+    };
     for (const p of photos) {
-      const date = new Date(p.taken_at).toLocaleDateString(LOCALE, { timeZone: TZ });
+      const date = sessionDate(p.taken_at);
       if (!byDate.has(date)) byDate.set(date, []);
       byDate.get(date)!.push(p);
     }
@@ -711,11 +777,12 @@ function MeasurementsInner() {
                     {group.photos.length} {group.photos.length === 1 ? 'shot' : 'shots'}
                   </span>
                 </div>
-                <div className="grid grid-cols-3 gap-1 p-1">
-                  {group.photos.map((photo) => (
+                <div className="flex gap-1 p-1 overflow-x-auto scrollbar-none snap-x snap-mandatory">
+                  {group.photos.map((photo, idx) => (
                     <PhotoTile
                       key={photo.uuid}
                       photo={photo}
+                      isFirst={idx === 0}
                       onDelete={handleDeletePhoto}
                       onCompare={(kind) => openCompare(photo.uuid, kind)}
                       onAdjust={() =>
@@ -922,26 +989,19 @@ function MeasurementsInner() {
           <button
             type="button"
             onClick={() => {
-              if (activeTab === 'photos') setPhotoSheetOpen(true);
-              else if (activeTab === 'inbody') setInbodySheetOpen(true);
+              if (activeTab === 'inbody') setInbodySheetOpen(true);
               else setLogSheetOpen(true);
             }}
             className="ml-auto flex items-center justify-center text-muted-foreground min-h-[44px] min-w-[44px]"
-            aria-label={
-              activeTab === 'photos'
-                ? 'Add photo'
-                : activeTab === 'inbody'
-                  ? 'New InBody scan'
-                  : 'Log measurement'
-            }
+            aria-label={activeTab === 'inbody' ? 'New InBody scan' : 'Log entry'}
           >
             <Plus className="h-5 w-5" strokeWidth={1.75} />
           </button>
         </div>
 
-        {/* Mobile tab switcher — hidden at md:+ (grid renders all three sections) */}
+        {/* Mobile tab switcher — hidden at md:+ (grid renders both sides) */}
         <div className="flex border-b border-border mx-4 mb-4 md:hidden">
-          {(['measurements', 'photos', 'inbody'] as const).map(tab => (
+          {(['log', 'inbody'] as const).map(tab => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
@@ -951,36 +1011,27 @@ function MeasurementsInner() {
                   : 'border-transparent text-muted-foreground'
               }`}
             >
-              {tab === 'measurements' ? 'Measurements' : tab === 'photos' ? 'Photos' : 'InBody'}
+              {tab === 'log' ? 'Log' : 'InBody'}
             </button>
           ))}
         </div>
 
         {/* Content grid:
             - mobile: single column, section visibility driven by activeTab
-            - md:+    3-column grid, all three sections visible side-by-side
-                     layout hierarchy (D1): InBody left (col-span-2), Measurements+Photos stacked right (col-span-1)
+            - md:+    2-column grid, both sides visible
         */}
-        <div className="px-4 pb-8 grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-6 auto-rows-min">
-          {/* InBody — primary pane on iPad (md:col-span-2), hidden on mobile unless tab active */}
+        <div className="px-4 pb-8 grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6 auto-rows-min">
           <section
-            className={`${activeTab === 'inbody' ? 'block' : 'hidden'} md:block md:col-span-2 md:row-span-2`}
-          >
-            {inbodySection}
-          </section>
-
-          {/* Measurements — right rail top */}
-          <section
-            className={`${activeTab === 'measurements' ? 'block' : 'hidden'} md:block md:col-span-1`}
+            className={`${activeTab === 'log' ? 'block' : 'hidden'} md:block md:col-span-1 space-y-6`}
           >
             {measurementsSection}
+            {photosSection}
           </section>
 
-          {/* Photos — right rail bottom */}
           <section
-            className={`${activeTab === 'photos' ? 'block' : 'hidden'} md:block md:col-span-1`}
+            className={`${activeTab === 'inbody' ? 'block' : 'hidden'} md:block md:col-span-1`}
           >
-            {photosSection}
+            {inbodySection}
           </section>
         </div>
       </div>
@@ -988,12 +1039,12 @@ function MeasurementsInner() {
       <Sheet
         open={logSheetOpen}
         onClose={() => setLogSheetOpen(false)}
-        title="Log Measurement"
+        title="Log Entry"
         height="auto"
         footer={
           <div className="flex justify-end">
             <button
-              onClick={handleSaveMeasurements}
+              onClick={handleSaveLog}
               disabled={saving || !hasInput}
               className="px-4 py-2 bg-primary text-white text-sm font-medium rounded-lg disabled:opacity-40"
             >
@@ -1002,7 +1053,7 @@ function MeasurementsInner() {
           </div>
         }
       >
-        <div className="p-4">
+        <div className="p-4 space-y-3">
           <div className="ios-section">
             <div className="ios-row justify-between">
               <span className="text-sm text-muted-foreground">Date</span>
@@ -1013,34 +1064,116 @@ function MeasurementsInner() {
                 className="bg-transparent text-sm text-right outline-none min-h-[44px] text-muted-foreground"
               />
             </div>
-            <div className="ios-row flex-wrap gap-3">
-              {SITES.map(s => (
+          </div>
+
+          <div>
+            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1 px-1">Photo</p>
+            <div className="ios-section">
+              <div className="ios-row py-2 px-2">
+                <div className="flex-1 flex gap-2 overflow-x-auto scrollbar-none flex-nowrap">
+                  {ALL_POSES.map(pose => (
+                    <button
+                      key={pose}
+                      onClick={() => setLogPose(pose)}
+                      className={`shrink-0 px-3 py-2 text-xs font-medium rounded-lg border whitespace-nowrap transition-colors ${
+                        logPose === pose
+                          ? 'bg-primary text-white border-primary'
+                          : 'border-border text-muted-foreground'
+                      }`}
+                    >
+                      {POSE_LABELS[pose]}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="ios-row py-1">
+                <p className="text-xs text-muted-foreground">{POSE_GUIDANCE[logPose]}</p>
+              </div>
+              <div className="ios-row justify-between gap-3">
                 <input
-                  key={s.key}
+                  ref={logFileRef}
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={e => {
+                    const file = e.target.files?.[0];
+                    if (file) handleLogPhotoPick(file);
+                    e.target.value = '';
+                  }}
+                />
+                {logPhotoPreview ? (
+                  <div className="flex items-center gap-3 flex-1">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={logPhotoPreview} alt="" className="h-12 w-12 rounded-md object-cover" />
+                    <button
+                      onClick={() => logFileRef.current?.click()}
+                      className="text-xs text-primary"
+                    >
+                      Replace
+                    </button>
+                    <button
+                      onClick={clearLogPhoto}
+                      className="text-xs text-muted-foreground ml-auto"
+                    >
+                      Remove
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => logFileRef.current?.click()}
+                    className="flex items-center gap-2 px-3 py-2 border border-border text-sm font-medium rounded-lg text-muted-foreground"
+                  >
+                    <Camera className="h-4 w-4" />
+                    Choose photo
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+
+          <div>
+            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1 px-1">Measurements</p>
+            <div className="ios-section">
+              <div className="ios-row flex-wrap gap-3">
+                {SITES.map(s => (
+                  <input
+                    key={s.key}
+                    type="number"
+                    inputMode="decimal"
+                    placeholder={`${s.label} (cm)`}
+                    value={inputs[s.key] ?? ''}
+                    onChange={e => setInputs(prev => ({ ...prev, [s.key]: e.target.value }))}
+                    className="flex-1 min-w-[110px] bg-transparent text-sm outline-none min-h-[44px]"
+                  />
+                ))}
+              </div>
+              <div className="ios-row">
+                <input
                   type="number"
                   inputMode="decimal"
-                  placeholder={`${s.label} (cm)`}
-                  value={inputs[s.key] ?? ''}
-                  onChange={e => setInputs(prev => ({ ...prev, [s.key]: e.target.value }))}
-                  className="flex-1 min-w-[110px] bg-transparent text-sm outline-none min-h-[44px]"
+                  placeholder={`Weight (${label})`}
+                  value={weightInput}
+                  onChange={e => setWeightInput(e.target.value)}
+                  className="flex-1 bg-transparent text-sm outline-none min-h-[44px]"
                 />
-              ))}
+              </div>
             </div>
+          </div>
+
+          <div className="ios-section">
             <div className="ios-row">
               <input
-                type="number"
-                inputMode="decimal"
-                placeholder={`Weight (${label})`}
-                value={weightInput}
-                onChange={e => setWeightInput(e.target.value)}
-                className="flex-1 bg-transparent text-sm outline-none min-h-[44px]"
+                type="text"
+                placeholder="Note (optional)"
+                value={logNote}
+                onChange={e => setLogNote(e.target.value)}
+                className="flex-1 bg-transparent text-sm outline-none min-h-[44px] text-muted-foreground"
               />
             </div>
           </div>
         </div>
       </Sheet>
 
-      <PhotoSheet open={photoSheetOpen} onClose={() => setPhotoSheetOpen(false)} />
       <InbodyScanSheet open={inbodySheetOpen} onClose={() => setInbodySheetOpen(false)} />
       <AdjustOffsetDialog
         open={adjustState !== null}
@@ -1059,6 +1192,7 @@ function MeasurementsInner() {
 
 function PhotoTile({
   photo,
+  isFirst,
   onDelete,
   onCompare,
   onAdjust,
@@ -1067,6 +1201,7 @@ function PhotoTile({
   hasInspo,
 }: {
   photo: LocalProgressPhoto;
+  isFirst?: boolean;
   onDelete: (uuid: string) => void;
   onCompare: (kind: 'projection' | 'inspo') => void;
   onAdjust: () => void;
@@ -1077,12 +1212,13 @@ function PhotoTile({
   const [menuOpen, setMenuOpen] = useState(false);
   const [poseEditOpen, setPoseEditOpen] = useState(false);
   const stub = isLocalStub(photo.blob_url);
-  // Compare only makes sense for poses that have a counterpart in the
-  // projection/inspo sets. 'other' is excluded.
   const canCompare = isComparablePose(photo.pose);
+  // First tile sits at the left edge of the horizontal scroller — anchoring
+  // the dropdown to `right-1` would push it off-screen left. Flip the anchor.
+  const menuAnchor = isFirst ? 'top-9 left-1' : 'top-9 right-1';
 
   return (
-    <div className="relative group">
+    <div className="relative group shrink-0 w-[33%] md:w-[160px] snap-start">
       <div className="relative">
         <AlignedPhoto
           blobUrl={photo.blob_url}
@@ -1116,23 +1252,26 @@ function PhotoTile({
         </button>
       </div>
 
-      {/* Dropdown menus — z-30 so they stack over neighbouring tiles. The
-          parent group card has overflow-visible so this isn't clipped. */}
+      {/* Dropdown menus — z-30 so they stack over neighbouring tiles. */}
       {menuOpen && !poseEditOpen && (
-        <div className="absolute top-9 right-1 z-30 w-44 rounded-lg bg-zinc-900 border border-white/10 shadow-xl overflow-hidden">
-          {hasProjection && !stub && canCompare && (
+        <div className={`absolute ${menuAnchor} z-30 w-44 rounded-lg bg-zinc-900 border border-white/10 shadow-xl overflow-hidden`}>
+          {!stub && canCompare && (
             <button
               onClick={() => { onCompare('projection'); setMenuOpen(false); }}
-              className="w-full text-left px-3 py-2 text-xs flex items-center gap-2 hover:bg-white/5 text-trans-blue"
+              className="w-full text-left px-3 py-2 text-xs flex items-center gap-2 hover:bg-white/5 text-trans-blue disabled:opacity-40"
+              disabled={!hasProjection}
+              title={hasProjection ? undefined : 'Upload a projection first'}
             >
               <GitCompare className="h-3.5 w-3.5" />
               Compare to projection
             </button>
           )}
-          {hasInspo && !stub && canCompare && (
+          {!stub && canCompare && (
             <button
               onClick={() => { onCompare('inspo'); setMenuOpen(false); }}
-              className="w-full text-left px-3 py-2 text-xs flex items-center gap-2 hover:bg-white/5 text-trans-pink"
+              className="w-full text-left px-3 py-2 text-xs flex items-center gap-2 hover:bg-white/5 text-trans-pink disabled:opacity-40"
+              disabled={!hasInspo}
+              title={hasInspo ? undefined : 'Upload an inspo photo first'}
             >
               <GitCompare className="h-3.5 w-3.5" />
               Compare to inspo
@@ -1163,7 +1302,7 @@ function PhotoTile({
       )}
 
       {poseEditOpen && (
-        <div className="absolute top-9 right-1 z-30 w-48 rounded-lg bg-zinc-900 border border-white/10 shadow-xl overflow-hidden">
+        <div className={`absolute ${menuAnchor} z-30 w-48 rounded-lg bg-zinc-900 border border-white/10 shadow-xl overflow-hidden`}>
           <p className="px-3 pt-2 pb-1 text-[10px] uppercase tracking-wide text-white/50">Tag as…</p>
           {ALL_POSES.map((p) => {
             const isCurrent = p === photo.pose;

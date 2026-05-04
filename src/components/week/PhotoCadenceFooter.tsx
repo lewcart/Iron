@@ -8,7 +8,7 @@
  *   - Renders ONLY when status is 'soon' | 'overdue' | 'no-photo-ever'.
  *     'fresh' → returns null (silent — no nag).
  *   - Two affordances when a front-pose projection exists:
- *       primary: "Capture →" links to /measurements?tab=photos&compose=front
+ *       primary: "Capture →" links to /measurements?tab=log&compose=front
  *       secondary: "Compare projection" links to the projection compare deep-link
  *   - Touch target ≥44pt (full chip is the tap area).
  *   - 'overdue' and 'no-photo-ever' promote above Section B (urgency overrides
@@ -31,8 +31,8 @@ export function PhotoCadenceFooter({ state, hasFrontProjection }: PhotoCadenceFo
   if (state == null) return null;
   if (state.status === 'fresh') return null;
 
-  const captureHref = '/measurements?tab=photos&compose=front';
-  const compareHref = '/measurements?tab=photos&compare=front';
+  const captureHref = '/measurements?tab=log&compose=front';
+  const compareHref = '/measurements?tab=log&compare=front';
 
   const primaryCopy = primaryCopyFor(state);
   const tone = state.status === 'overdue' || state.status === 'no-photo-ever'

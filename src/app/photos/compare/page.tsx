@@ -241,7 +241,7 @@ function ComparePageInner() {
     return (
       <div className="min-h-screen bg-black/95 flex flex-col items-center justify-center text-white/70 p-8 gap-3">
         <p className="text-sm">No source photo selected.</p>
-        <Link href="/measurements?tab=photos" className="text-trans-blue text-sm">Go to Photos →</Link>
+        <Link href="/measurements?tab=log" className="text-trans-blue text-sm">Go to Photos →</Link>
       </div>
     );
   }

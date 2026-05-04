@@ -1046,7 +1046,7 @@ export default function WeekPage() {
       >
         <TopChip href="/strategy" icon={<Target className="h-3.5 w-3.5" />} label="Strategy" />
         <TopChip href="/sleep" icon={<Moon className="h-3.5 w-3.5" />} label="Sleep" />
-        <TopChip href="/measurements?tab=photos" icon={<Camera className="h-3.5 w-3.5" />} label="Photos" />
+        <TopChip href="/measurements?tab=log" icon={<Camera className="h-3.5 w-3.5" />} label="Photos" />
       </nav>
 
       <div className="px-4 space-y-4">

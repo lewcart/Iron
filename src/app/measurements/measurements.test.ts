@@ -136,21 +136,22 @@ describe('toDateInputValue', () => {
 });
 
 // ===== URL-driven activeTab initialization =====
-// Mirrors the derivation logic inside MeasurementsInner:
-//   const initialTab = (searchParams?.get('tab') as TabKey | null) ?? 'measurements';
-// We test the derivation directly rather than rendering the component (which
-// would require a full next/navigation mock harness).
+// Mirrors normalizeTabParam in MeasurementsInner. Two real tabs ('log' and
+// 'inbody'); legacy '?tab=measurements' / '?tab=photos' aliases resolve to
+// 'log' so existing deep-links keep working.
 
-type TabKey = 'measurements' | 'photos' | 'inbody';
+type TabKey = 'log' | 'inbody';
 
 function deriveInitialTab(searchParamsGet: (k: string) => string | null): TabKey {
-  return (searchParamsGet('tab') as TabKey | null) ?? 'measurements';
+  const raw = searchParamsGet('tab');
+  if (raw === 'inbody') return 'inbody';
+  return 'log';
 }
 
 describe('measurements activeTab initialization', () => {
-  it('defaults to "measurements" when no tab param is in the URL', () => {
+  it('defaults to "log" when no tab param is in the URL', () => {
     const get = (_k: string) => null;
-    expect(deriveInitialTab(get)).toBe('measurements');
+    expect(deriveInitialTab(get)).toBe('log');
   });
 
   it('initializes to "inbody" when ?tab=inbody is in the URL', () => {
@@ -158,9 +159,14 @@ describe('measurements activeTab initialization', () => {
     expect(deriveInitialTab(get)).toBe('inbody');
   });
 
-  it('initializes to "photos" when ?tab=photos is in the URL', () => {
+  it('aliases legacy ?tab=photos to "log"', () => {
     const get = (k: string) => k === 'tab' ? 'photos' : null;
-    expect(deriveInitialTab(get)).toBe('photos');
+    expect(deriveInitialTab(get)).toBe('log');
+  });
+
+  it('aliases legacy ?tab=measurements to "log"', () => {
+    const get = (k: string) => k === 'tab' ? 'measurements' : null;
+    expect(deriveInitialTab(get)).toBe('log');
   });
 });
 

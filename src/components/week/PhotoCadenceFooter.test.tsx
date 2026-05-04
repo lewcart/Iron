@@ -51,7 +51,7 @@ describe('PhotoCadenceFooter', () => {
   it('renders Capture link', () => {
     render(<PhotoCadenceFooter state={{ status: 'soon', dueIn: 6 }} hasFrontProjection={false} />);
     const link = screen.getByRole('link', { name: /capture/i });
-    expect(link.getAttribute('href')).toBe('/measurements?tab=photos&compose=front');
+    expect(link.getAttribute('href')).toBe('/measurements?tab=log&compose=front');
   });
 
   it('omits Compare projection link when hasFrontProjection=false', () => {
@@ -63,7 +63,7 @@ describe('PhotoCadenceFooter', () => {
     render(<PhotoCadenceFooter state={{ status: 'overdue', dueIn: -5 }} hasFrontProjection={true} />);
     const link = screen.getByRole('link', { name: /compare projection/i });
     expect(link).toBeInTheDocument();
-    expect(link.getAttribute('href')).toBe('/measurements?tab=photos&compare=front');
+    expect(link.getAttribute('href')).toBe('/measurements?tab=log&compare=front');
   });
 
   it('Capture link has min-h-[44px] for iOS touch target', () => {

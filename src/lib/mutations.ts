@@ -164,12 +164,12 @@ export async function deleteSet(uuid: string): Promise<void> {
 
 // ─── Bodyweight logs ───────────────────────────────────────────────────────────
 
-export async function logBodyweight(weight_kg: number, note?: string): Promise<string> {
+export async function logBodyweight(weight_kg: number, note?: string, logged_at?: string): Promise<string> {
   const id = genUUID();
   const row: LocalBodyweightLog = {
     uuid: id,
     weight_kg,
-    logged_at: new Date().toISOString(),
+    logged_at: logged_at ?? new Date().toISOString(),
     note: note ?? null,
     ...syncMeta(),
   };
