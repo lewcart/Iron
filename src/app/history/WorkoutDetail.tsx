@@ -170,7 +170,7 @@ export default function WorkoutDetail({ workout, onBack }: { workout: { uuid: st
                             <p className={`text-sm font-mono flex-1 ${
                               excluded ? 'text-muted-foreground/60 line-through' : 'text-muted-foreground'
                             }`}>
-                              {set.weight != null ? `${toDisplay(set.weight)} ${label}` : '—'} × {set.repetitions ?? '—'}
+                              {set.weight != null && set.weight > 0 ? `${toDisplay(set.weight)} ${label}` : '—'} × {set.duration_seconds != null ? `${set.duration_seconds}s` : (set.repetitions ?? '—')}
                             </p>
                             {excluded && (
                               <span className="text-[10px] font-bold text-slate-300 bg-slate-500/20 border border-slate-500/30 px-1.5 py-0.5 rounded-full">

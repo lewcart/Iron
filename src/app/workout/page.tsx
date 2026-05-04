@@ -1085,7 +1085,7 @@ function SetRow({
   onEditDuration: (weUuid: string, setUuid: string, weight: number, durationSeconds: number) => Promise<void>;
   onUpdateRir: (setUuid: string, rir: number | null) => Promise<void>;
   onUpdateRpe: (setUuid: string, rpe: number | null) => Promise<void>;
-  onOpenStopwatch: (setRowKey: string, hasSides: boolean, replacingSeconds: number | null) => void;
+  onOpenStopwatch: (setRowKey: string, hasSides: boolean, replacingSeconds: number | null, currentWeightKg: number) => void;
   onDelete: (setUuid: string) => Promise<void>;
   allTimeBest1RM?: number | null;
   previousRir?: number | null;
@@ -1235,7 +1235,8 @@ function SetRow({
                 const setRowKey = `${workoutExerciseUuid}:${set.uuid}`;
                 const replacing = set.duration_seconds && set.duration_seconds > 0
                   ? set.duration_seconds : null;
-                onOpenStopwatch(setRowKey, hasSides, replacing);
+                const weightKg = fromInput(parseFloat(weight) || 0);
+                onOpenStopwatch(setRowKey, hasSides, replacing, weightKg);
               }}
               className={
                 'flex-shrink-0 w-9 h-9 min-w-[44px] min-h-[44px] -mx-1 rounded-full flex items-center justify-center ' +
@@ -1376,7 +1377,7 @@ function SortableExerciseCard({
   onUpdateSetRpe: (setUuid: string, rpe: number | null) => Promise<void>;
   onDeleteSet: (uuid: string) => Promise<void>;
   onShowInfo: () => void;
-  onOpenStopwatch: (setRowKey: string, hasSides: boolean, replacingSeconds: number | null) => void;
+  onOpenStopwatch: (setRowKey: string, hasSides: boolean, replacingSeconds: number | null, currentWeightKg: number) => void;
   stopwatchSetKey: string | null;
   stopwatchElapsed: number;
 }) {
@@ -1614,7 +1615,17 @@ export default function WorkoutPage() {
   const [stopwatchReplacing, setStopwatchReplacing] = useState<number | null>(null);
 
   const handleOpenStopwatch = useCallback(
-    (setRowKey: string, hasSides: boolean, replacingSeconds: number | null) => {
+    async (setRowKey: string, hasSides: boolean, replacingSeconds: number | null, currentWeightKg: number) => {
+      // Persist the user's typed weight before opening the stopwatch. The
+      // SetRow's weight input is local state until handleTimeBlur fires, but
+      // blur is gated on `completed` and the stopwatch commits weight from
+      // Dexie's `set.weight`. Without this write, weight typed pre-stopwatch
+      // is silently dropped on commit (the May-2 fix only covered the
+      // green-check path; this is the parallel completion flow).
+      const [, setUuid] = setRowKey.split(':');
+      if (setUuid) {
+        await mutUpdateSet(setUuid, { weight: currentWeightKg });
+      }
       setStopwatchReplacing(replacingSeconds);
       stopwatch.open({ setRowKey, hasSides });
       setStopwatchOpen(true);
