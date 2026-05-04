@@ -14,12 +14,15 @@ struct WeightDial: View {
     @State private var rawSteps: Double = 0      // Crown delta in 1.25kg steps
     @State private var lastCrossedPrev: Bool = false
 
-    private static let step: Double = 1.25
+    private static let step: Double = 1.0
     private static let minWeight: Double = 0
     private static let maxWeight: Double = 500
 
     private var currentWeight: Double {
-        let candidate = initialWeight + (rawSteps * Self.step)
+        // Round rawSteps to whole units. SwiftUI's digitalCrownRotation with
+        // a Double binding can interpolate fractional values between steps;
+        // explicit rounding snaps to true 1kg increments.
+        let candidate = initialWeight + (rawSteps.rounded() * Self.step)
         return min(max(candidate, Self.minWeight), Self.maxWeight)
     }
 

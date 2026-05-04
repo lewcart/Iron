@@ -1,30 +1,26 @@
 import Foundation
-import Network
+import WatchConnectivity
 import WatchKit
 import RebirthAppGroup
-import RebirthAPI
 import RebirthModels
-import RebirthOutbox
 import RebirthWatchLog
 
 /// Coordinates the "approve set + RIR" flow on the watch.
 ///
-/// Flow:
+/// Flow (post-Day-13 rework — watch is a remote control):
 ///   1. UI calls `completeSet(in:set:rir:)`
-///   2. Build a `WorkoutSetCDCRow` from the snapshot's row + edits
-///   3. Optimistically update the App Group snapshot so UI redraws marked-complete
-///   4. Enqueue in outbox (always — single source of truth)
-///   5. Try POST `/api/sync/push` immediately; on 200, drop from outbox
-///      On 4xx, log + drop (validation error — won't succeed on retry)
-///      On 401, halt outbox (key bad — Day 4 wires the banner)
-///      On 5xx/network, leave queued for next reachability change
+///   2. Optimistically update the App Group snapshot so the watch UI redraws
+///      marked-complete immediately
+///   3. Send the CDC row to the paired iPhone via WC.transferUserInfo
+///      (kind="watchWroteSet"). The iPhone's WatchConnectivityPlugin emits a
+///      JS event; WatchInboundBridge applies the row via mutations.updateSet,
+///      and the existing phone sync engine pushes to Postgres.
+///
+/// No outbox, no direct API call, no API key on watch. WC.transferUserInfo
+/// has its own delivery queue (persists across reachability), so unreachable-
+/// phone scenarios are handled by the OS, not by us.
 @MainActor
 final class SetCompletionCoordinator: ObservableObject {
-    /// Drop a non-completion (edit-only) mutation after this many failed
-    /// attempts. Completion mutations (is_completed=true) retry indefinitely
-    /// — that's the data the user explicitly captured.
-    private static let maxAttemptsForNonCompletion = 3
-
     @Published var pendingCount: Int = 0
     @Published var lastError: String?
     @Published var isAuthHalted: Bool = false
@@ -45,46 +41,42 @@ final class SetCompletionCoordinator: ObservableObject {
 
     private let appGroup = RebirthAppGroup()
     private let log = RebirthWatchLog.shared
-    private let outbox: RebirthOutbox?
-    private let api: RebirthAPIClient
-    private let pathMonitor = NWPathMonitor()
-    private var monitorStarted = false
 
-    init(baseURL: URL = URL(string: "https://rebirth.app")!) {
-        self.api = RebirthAPIClient(baseURL: baseURL)
-        do {
-            self.outbox = try RebirthOutbox(appGroup: appGroup)
-        } catch {
-            self.outbox = nil
-            log.error("Outbox init failed: \(error)")
-        }
+    init() {
+        // Watch routes all set-completion writes through the paired iPhone via
+        // WatchConnectivity. The phone applies the change to its Dexie store
+        // and the existing phone sync engine pushes to the server. This means
+        // the phone is the single writer to Postgres, and the watch is a
+        // remote control. Lou's case is "phone always present", so the
+        // simpler model wins over the original direct-API hybrid.
+        cancelStaleTransfers()
         refreshPendingCount()
-        startPathMonitor()
     }
 
-    /// Auto-flush outbox when network reachability flips to satisfied.
-    private func startPathMonitor() {
-        guard !monitorStarted else { return }
-        monitorStarted = true
-        pathMonitor.pathUpdateHandler = { [weak self] path in
-            guard path.status == .satisfied else { return }
-            Task { @MainActor in
-                guard let self else { return }
-                if !self.isAuthHalted {
-                    await self.flush()
-                }
-            }
+    /// Cancel any leftover outstandingUserInfoTransfers from previous builds.
+    /// WC keeps queued transfers across app reinstalls, so a refactor that
+    /// changed payload shape can leave undeliverable messages stuck forever.
+    /// Lou should see pendingCount drop to 0 immediately after this runs.
+    func cancelStaleTransfers() {
+        guard WCSession.isSupported() else { return }
+        let session = WCSession.default
+        guard session.activationState == .activated else { return }
+        let stale = session.outstandingUserInfoTransfers
+        for transfer in stale {
+            transfer.cancel()
         }
-        pathMonitor.start(queue: .global(qos: .utility))
+        if !stale.isEmpty {
+            log.info("Cancelled \(stale.count) stale WC transfers from previous build")
+        }
     }
+
+    // NWPathMonitor removed — WC.transferUserInfo handles its own retry +
+    // queueing across reachability transitions. Nothing for us to flush.
 
     func refreshPendingCount() {
-        guard let outbox else { return }
-        do {
-            pendingCount = try outbox.count()
-        } catch {
-            log.error("Outbox count failed: \(error)")
-        }
+        // No watch-side outbox under WC-routed model — WC.transferUserInfo
+        // owns its own delivery queue (persists across reachability).
+        pendingCount = WCSession.default.outstandingUserInfoTransfers.count
     }
 
     func setEditWeight(setUUID: String, weight: Double) {
@@ -149,88 +141,70 @@ final class SetCompletionCoordinator: ObservableObject {
             lastPBDeltaKg = nil
         }
 
-        // 1. Optimistic snapshot update
+        // 1. Optimistic snapshot update — watch UI flips to "complete" instantly
         applyOptimistic(setUUID: set.uuid, rir: rir, editedWeight: edit?.weight, editedReps: edit?.reps, editedDurationSeconds: edit?.durationSeconds)
 
-        // 2. Enqueue
-        let payload: Data
-        do {
-            let envelope = SyncPushPayload(rows: [row])
-            let encoder = JSONEncoder()
-            encoder.dateEncodingStrategy = .iso8601
-            payload = try encoder.encode(envelope)
-        } catch {
-            log.error("Failed to encode CDC row: \(error)")
-            lastError = "encode failed"
-            return
-        }
-        do {
-            try outbox?.enqueue(mutationId: row.mutationId, endpoint: "/api/sync/push", body: payload)
-            refreshPendingCount()
-        } catch {
-            log.error("Outbox enqueue failed: \(error)")
-            lastError = "outbox full?"
-            return
-        }
-
-        // 3. Best-effort immediate flush
-        await flush()
+        // 2. Send the CDC row to the paired iPhone via WC.transferUserInfo.
+        //    The iPhone applies it via Dexie mutations.updateSet and pushes
+        //    to Postgres via the existing sync engine.
+        sendRowToPhone(row)
     }
 
-    /// Drains outbox. Stops on first 401 (auth halted). Removes 200 + 4xx rows.
-    /// 5xx/network errors are retried, with non-completion mutations dropping
-    /// after `maxAttemptsForNonCompletion`.
-    func flush() async {
-        guard let outbox else { return }
-        if isAuthHalted { return }
-        let pending: [PendingMutation]
-        do {
-            pending = try outbox.pending(limit: 50)
-        } catch {
-            log.error("Outbox read failed: \(error)")
-            return
-        }
-        for mutation in pending {
-            do {
-                try await api.rawPost(path: mutation.endpoint, body: mutation.bodyJSON)
-                try? outbox.remove(mutationId: mutation.mutationId)
-            } catch APIError.unauthorized {
-                log.error("Outbox flush halted on 401")
-                lastError = "Re-auth from phone"
-                isAuthHalted = true
-                break
-            } catch APIError.clientError(let code, let body) {
-                log.error("Outbox dropping \(mutation.mutationId) on \(code): \(body)")
-                try? outbox.remove(mutationId: mutation.mutationId)
-                lastError = "Server rejected: \(code)"
-            } catch {
-                let errStr = String(describing: error)
-                try? outbox.recordAttempt(mutationId: mutation.mutationId, error: errStr)
-                if !isCompletionMutation(mutation) && mutation.attemptCount + 1 >= Self.maxAttemptsForNonCompletion {
-                    log.error("Outbox dead-lettering \(mutation.mutationId) after \(mutation.attemptCount + 1) attempts: \(errStr)")
-                    try? outbox.remove(mutationId: mutation.mutationId)
-                }
-                // Otherwise leave queued for next reachability change.
-            }
-        }
-        refreshPendingCount()
-    }
-
-    /// Heuristic: a mutation that contains `"is_completed":true` somewhere in
-    /// its body is treated as a completion (retried forever). Edit-only
-    /// mutations (weight/rep dial without is_completed change) drop after
-    /// `maxAttemptsForNonCompletion`. Cheap string check — no need to decode.
-    private func isCompletionMutation(_ mutation: PendingMutation) -> Bool {
-        guard let body = String(data: mutation.bodyJSON, encoding: .utf8) else { return false }
-        return body.contains("\"is_completed\":true")
-    }
-
-    /// Manually clear the auth-halted state. Called after Lou re-pastes the
-    /// API key (Day 4 wires the banner action; Day 3 leaves this method
-    /// callable from anywhere a recovery flow is needed).
+    /// No-op kept for UI compat — re-auth banner still binds to this.
     func clearAuthHalt() {
         isAuthHalted = false
         lastError = nil
+    }
+
+    private func sendRowToPhone(_ row: WorkoutSetCDCRow) {
+        guard WCSession.isSupported() else {
+            lastError = "WC unavailable"
+            return
+        }
+        let session = WCSession.default
+        guard session.activationState == .activated else {
+            lastError = "WC not activated"
+            return
+        }
+        // Encode row → JSON → dictionary so transferUserInfo accepts it
+        // (property-list types only; NSNull would throw).
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        do {
+            let data = try encoder.encode(row)
+            guard let dict = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                lastError = "encode shape error"
+                return
+            }
+            let cleaned = stripNulls(dict)
+            session.transferUserInfo([
+                "kind": "watchWroteSet",
+                "row": cleaned,
+            ])
+            refreshPendingCount()
+            log.info("Sent setCompletion via WC: \(row.uuid)")
+        } catch {
+            log.error("Failed to encode/send set completion: \(error)")
+            lastError = "send failed"
+        }
+    }
+
+    /// Recursively drop NSNull values so the result is property-list-safe for
+    /// WCSession.transferUserInfo. Mirrors the iOS plugin's stripNulls.
+    private func stripNulls(_ value: Any) -> Any {
+        if value is NSNull { return [String: Any]() }   // unreachable at top-level
+        if let dict = value as? [String: Any] {
+            var result: [String: Any] = [:]
+            for (k, v) in dict {
+                if v is NSNull { continue }
+                result[k] = stripNulls(v)
+            }
+            return result
+        }
+        if let arr = value as? [Any] {
+            return arr.compactMap { v -> Any? in v is NSNull ? nil : stripNulls(v) }
+        }
+        return value
     }
 
     private func applyOptimistic(
@@ -294,12 +268,3 @@ final class SetCompletionCoordinator: ObservableObject {
     }
 }
 
-// MARK: - Encoding helpers
-
-private struct SyncPushPayload: Encodable {
-    let workout_sets: [WorkoutSetCDCRow]
-
-    init(rows: [WorkoutSetCDCRow]) {
-        self.workout_sets = rows
-    }
-}

@@ -253,3 +253,33 @@ export async function hasWatchApiKey(): Promise<boolean> {
     return false;
   }
 }
+
+interface WatchInboundEvent {
+  kind: string;
+  payload?: Record<string, unknown>;
+}
+
+interface WatchConnectivityListener {
+  remove(): Promise<void>;
+}
+
+interface WatchConnectivityWithEvents extends WatchConnectivityPlugin {
+  addListener(eventName: 'watchInbound', listenerFunc: (event: WatchInboundEvent) => void): Promise<WatchConnectivityListener>;
+}
+
+/** Subscribe to inbound watch → phone messages. Returns an unsubscribe fn.
+ *  Today only `watchWroteSet` is fired (after the watch successfully posts
+ *  a CDC row to /api/sync/push). The phone reacts by pulling Dexie from
+ *  the server so set updates land in the workout page within ~1s instead of
+ *  waiting for the next foreground sync. */
+export function subscribeToWatchInbound(handler: (event: WatchInboundEvent) => void): () => void {
+  if (!isNativeIOS()) return () => {};
+  const wcWithEvents = WatchConnectivity as unknown as WatchConnectivityWithEvents;
+  let listenerHandle: WatchConnectivityListener | null = null;
+  void wcWithEvents.addListener('watchInbound', handler).then((h) => {
+    listenerHandle = h;
+  });
+  return () => {
+    void listenerHandle?.remove();
+  };
+}

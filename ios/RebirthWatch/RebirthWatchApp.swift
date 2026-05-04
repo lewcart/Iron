@@ -9,8 +9,6 @@ struct RebirthWatchApp: App {
     @StateObject private var session = WatchSessionStore()
     @StateObject private var completion = SetCompletionCoordinator()
     @StateObject private var workoutSession = WorkoutSessionManager()
-    @Environment(\.scenePhase) private var scenePhase
-
     var body: some Scene {
         WindowGroup {
             RootView()
@@ -20,16 +18,6 @@ struct RebirthWatchApp: App {
                 .onAppear {
                     RebirthWatchLog.shared.info("RebirthWatch launched")
                     session.activate()
-                    Task { await completion.flush() }
-                }
-                .onChange(of: scenePhase) { _, phase in
-                    // Flush on every foreground transition. NWPathMonitor only
-                    // fires on connectivity transitions; if the watch sleeps with
-                    // network already satisfied and wakes 10min later, no NWPath
-                    // event fires. This catches that case.
-                    if phase == .active {
-                        Task { await completion.flush() }
-                    }
                 }
         }
     }
@@ -45,7 +33,6 @@ struct RootView: View {
     @State private var timeModeContext: TimeModeContext?
     @State private var showSessionEnd: Bool = false
     @State private var lastCompletedAt: Date?
-    @State private var undoTarget: WorkoutSet?
 
     private func allSetsCompleted(in snapshot: ActiveWorkoutSnapshot) -> Bool {
         guard !snapshot.exercises.isEmpty else { return false }
@@ -83,9 +70,6 @@ struct RootView: View {
                     VStack(spacing: 2) {
                         if completion.isAuthHalted {
                             ReAuthBanner(onDismiss: { completion.clearAuthHalt() })
-                        } else if let target = undoTarget {
-                            UndoBanner(onUndo: { undoTarget = nil })
-                                .id(target.uuid)
                         }
                         if let delta = completion.lastPBDeltaKg, delta > 0 {
                             PBPill(deltaKg: delta)
@@ -113,7 +97,6 @@ struct RootView: View {
                     Task { await completion.completeSet(in: ctx.exercise, set: ctx.workoutSet, rir: rir) }
                     session.loadFromAppGroup()
                     pickerContext = nil
-                    undoTarget = ctx.workoutSet
                     if ctx.exercise.trackingMode == .reps,
                        let s = session.snapshot {
                         restCountdown = s.restTimerDefaultSeconds
@@ -123,7 +106,6 @@ struct RootView: View {
                     Task { await completion.completeSet(in: ctx.exercise, set: ctx.workoutSet, rir: nil) }
                     session.loadFromAppGroup()
                     pickerContext = nil
-                    undoTarget = ctx.workoutSet
                     if ctx.exercise.trackingMode == .reps,
                        let s = session.snapshot {
                         restCountdown = s.restTimerDefaultSeconds
@@ -162,7 +144,6 @@ struct RootView: View {
                     elapsedSeconds: workoutSession.elapsedSeconds,
                     onFinish: {
                         await workoutSession.endSession()
-                        await completion.flush()
                     },
                     onResume: { showSessionEnd = false }
                 )

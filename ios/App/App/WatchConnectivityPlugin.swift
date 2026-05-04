@@ -39,6 +39,20 @@ public class WatchConnectivityPlugin: CAPPlugin, CAPBridgedPlugin {
 
     public override func load() {
         coordinator.activate()
+        // Bridge inbound watch messages → Capacitor event so JS can react.
+        // The watch fires transferUserInfo with kind="watchWroteSet" right
+        // after a successful API write so the phone Dexie can pull immediately.
+        NotificationCenter.default.addObserver(
+            forName: .watchInboundMessage,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            guard let info = notification.userInfo else { return }
+            self?.notifyListeners("watchInbound", data: [
+                "kind": info["kind"] ?? "",
+                "payload": info["payload"] ?? [:],
+            ])
+        }
     }
 
     @objc func pushActiveWorkout(_ call: CAPPluginCall) {
@@ -52,12 +66,21 @@ public class WatchConnectivityPlugin: CAPPlugin, CAPBridgedPlugin {
         // to ITS App Group container on receipt — App Groups are per-device,
         // not shared phone↔watch, so iPhone-side persistence here would not
         // reach the watch.
+        //
+        // CRITICAL: WCSession.updateApplicationContext only accepts property-
+        // list types (String/Number/Date/Data/Array/Dictionary/Bool). NSNull
+        // (from JS `null` values) is NOT allowed and throws
+        // "payload contains unsupported type". Capacitor's getObject preserves
+        // JS nulls as NSNull, so we recursively strip NSNull keys before
+        // passing to WC. Watch-side decoders use decodeIfPresent for all
+        // optionals, so missing keys decode as nil correctly.
         let envelope: [String: Any] = [
             "schema_version": SchemaVersion.current,
             "body": snapshot,
         ]
+        let cleaned = (Self.stripNulls(envelope) as? [String: Any]) ?? [:]
 
-        coordinator.pushApplicationContext(envelope) { result in
+        coordinator.pushApplicationContext(cleaned) { result in
             switch result {
             case .success:
                 call.resolve(["delivered": true])
@@ -65,6 +88,23 @@ public class WatchConnectivityPlugin: CAPPlugin, CAPBridgedPlugin {
                 call.reject("WC application context push failed: \(err.localizedDescription)")
             }
         }
+    }
+
+    /// Recursively remove NSNull values from a nested dict/array so the result
+    /// is property-list-safe for WCSession.updateApplicationContext.
+    private static func stripNulls(_ value: Any) -> Any? {
+        if value is NSNull { return nil }
+        if let dict = value as? [String: Any] {
+            var result: [String: Any] = [:]
+            for (k, v) in dict {
+                if let cleaned = stripNulls(v) { result[k] = cleaned }
+            }
+            return result
+        }
+        if let arr = value as? [Any] {
+            return arr.compactMap { stripNulls($0) }
+        }
+        return value
     }
 
     @objc func pushSetMutation(_ call: CAPPluginCall) {
@@ -196,15 +236,20 @@ private final class WCSessionCoordinator: NSObject, WCSessionDelegate {
         WCSession.default.activate()
     }
 
-    // Inbound: watch acks (e.g., set synced from watch). Forward via Capacitor event.
+    // Inbound: watch messages (e.g., set completion from watch). Forward via
+    // Capacitor event. Pass the FULL inbound dict as the payload — the watch
+    // doesn't wrap fields under a "payload" key (it puts kind + row at the
+    // top level), so we must forward verbatim minus the kind we already
+    // extracted.
     func session(_ session: WCSession, didReceiveUserInfo userInfo: [String: Any] = [:]) {
-        if let kind = userInfo["kind"] as? String {
-            NotificationCenter.default.post(
-                name: .watchInboundMessage,
-                object: nil,
-                userInfo: ["kind": kind, "payload": userInfo["payload"] ?? [:]]
-            )
-        }
+        guard let kind = userInfo["kind"] as? String else { return }
+        var payload = userInfo
+        payload.removeValue(forKey: "kind")
+        NotificationCenter.default.post(
+            name: .watchInboundMessage,
+            object: nil,
+            userInfo: ["kind": kind, "payload": payload]
+        )
     }
 }
 

@@ -6,14 +6,20 @@
     <string>Rebirth</string>
     <key>CFBundleDisplayName</key>
     <string>Rebirth</string>
+    <key>CFBundleExecutable</key>
+    <string>$(EXECUTABLE_NAME)</string>
     <key>CFBundleIdentifier</key>
     <string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+    <key>CFBundlePackageType</key>
+    <string>$(PRODUCT_BUNDLE_PACKAGE_TYPE)</string>
     <key>CFBundleVersion</key>
     <string>1</string>
     <key>CFBundleShortVersionString</key>
     <string>0.1</string>
     <key>WKApplication</key>
     <true/>
+    <key>WKCompanionAppBundleIdentifier</key>
+    <string>app.rebirth</string>
     <key>WKBackgroundModes</key>
     <array>
         <string>workout-processing</string>

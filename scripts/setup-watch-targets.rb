@@ -149,7 +149,17 @@ watch_target.build_configurations.each do |config|
     'ENABLE_PREVIEWS' => 'YES',
     'SKIP_INSTALL' => 'NO',
     'ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES' => 'YES',
+    'ASSETCATALOG_COMPILER_APPICON_NAME' => 'AppIcon',
   )
+end
+
+# Asset catalog (icon)
+assets_ref = watch_group.files.find { |f| f.path == 'Assets.xcassets' }
+assets_ref ||= watch_group.new_file('Assets.xcassets')
+assets_ref.last_known_file_type = 'folder.assetcatalog'
+unless watch_target.resources_build_phase.files_references.include?(assets_ref)
+  watch_target.resources_build_phase.add_file_reference(assets_ref)
+  puts "  + Added Assets.xcassets to #{WATCH_TARGET_NAME} resources"
 end
 
 # Source files
@@ -230,6 +240,38 @@ end
 unless watch_target.dependencies.any? { |d| d.target == complications_target }
   watch_target.add_dependency(complications_target)
   puts "  + Added build dependency: #{WATCH_TARGET_NAME} -> #{COMPLICATIONS_TARGET_NAME}"
+end
+
+# ----------------------------------------------------------------
+# 5b. Embed watch app INTO the iOS App target via "Embed Watch Content"
+# ----------------------------------------------------------------
+# Without this, installing the iOS app via devicectl/Xcode does NOT push the
+# watch app to the paired watch through the iPhone's Watch sync infrastructure.
+# Result: WCSession.isWatchAppInstalled returns false from the iOS side, and
+# updateApplicationContext silently no-ops. Embedding the watch app as a
+# build artifact in the iOS .app/Watch/ folder makes installd push it to the
+# paired watch and register the companion relationship.
+
+embed_watch_phase = app_target.copy_files_build_phases.find { |p| p.name == 'Embed Watch Content' }
+unless embed_watch_phase
+  embed_watch_phase = app_target.new_copy_files_build_phase('Embed Watch Content')
+  embed_watch_phase.dst_subfolder_spec = '16'   # ProductsDirectory
+  embed_watch_phase.dst_path = '$(CONTENTS_FOLDER_PATH)/Watch'
+  puts "+ Added Embed Watch Content phase to App target"
+end
+
+watch_product = watch_target.product_reference
+already_embedded_watch = embed_watch_phase.files_references.include?(watch_product)
+unless already_embedded_watch
+  build_file = embed_watch_phase.add_file_reference(watch_product)
+  build_file.settings = { 'ATTRIBUTES' => ['RemoveHeadersOnCopy'] }
+  puts "  + Embedded #{WATCH_TARGET_NAME}.app in App target"
+end
+
+# iOS App must build watch app first
+unless app_target.dependencies.any? { |d| d.target == watch_target }
+  app_target.add_dependency(watch_target)
+  puts "  + Added build dependency: App -> #{WATCH_TARGET_NAME}"
 end
 
 # ----------------------------------------------------------------

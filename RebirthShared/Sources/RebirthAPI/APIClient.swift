@@ -54,16 +54,17 @@ public actor RebirthAPIClient {
         guard let url = URL(string: path, relativeTo: baseURL) else {
             throw APIError.invalidURL
         }
-        let key: String
-        do {
-            key = try keychain.getAPIKey()
-        } catch {
-            throw APIError.missingAPIKey
-        }
         var request = URLRequest(url: url)
         request.httpMethod = method
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
+        // Send Authorization header only if we have a key. The server allows
+        // missing-header requests when REBIRTH_API_KEY is unset in env (the
+        // existing phone-Dexie path), and rejects mismatched-key requests
+        // when env IS set (the watch's authenticated path). So sending no
+        // header is a valid degraded mode, not an error.
+        if let key = try? keychain.getAPIKey(), !key.isEmpty {
+            request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
+        }
         return request
     }
 

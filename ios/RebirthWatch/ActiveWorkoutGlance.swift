@@ -140,38 +140,23 @@ private struct ExerciseGlanceContent: View {
     }
 
     var body: some View {
-        VStack(spacing: 8) {
-            // Live HR + elapsed pill (only when a session is running)
-            if let hr = liveHeartRate {
-                HStack(spacing: 6) {
-                    Text("♥ \(hr)")
-                        .font(.system(size: 10, weight: .semibold, design: .rounded))
-                        .foregroundStyle(.red)
-                    Text(elapsedDisplay)
-                        .font(.system(size: 10, design: .rounded))
-                        .foregroundStyle(.secondary)
-                }
-                .accessibilityLabel("Heart rate \(hr), elapsed \(elapsedDisplay)")
-            }
-
-            // Header: name + set chip
-            HStack(alignment: .top, spacing: 6) {
+        VStack(spacing: 4) {
+            // Header row — exercise name takes full width; HR pill on right
+            // when session active. Set chip moves down to overlay the ✓ pill
+            // (saves a column of header real estate on 40mm watches).
+            HStack(alignment: .center, spacing: 4) {
                 Text(exercise.name)
-                    .font(.callout)
-                    .fontWeight(.semibold)
-                    .lineLimit(2)
-                    .multilineTextAlignment(.leading)
+                    .font(.system(size: 14, weight: .semibold))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .accessibilityLabel(exercise.name)
 
-                if !exercise.sets.isEmpty {
-                    Text("\(currentSetNumber)/\(exercise.sets.count)")
-                        .font(.caption2)
-                        .fontWeight(.semibold)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 3)
-                        .background(Color.gray.opacity(0.25), in: Capsule())
-                        .accessibilityLabel("Set \(currentSetNumber) of \(exercise.sets.count)")
+                if let hr = liveHeartRate {
+                    Text("♥\(hr)")
+                        .font(.system(size: 10, weight: .semibold, design: .rounded))
+                        .foregroundStyle(.red)
+                        .accessibilityLabel("Heart rate \(hr)")
                 }
             }
 
@@ -192,16 +177,17 @@ private struct ExerciseGlanceContent: View {
 
             Spacer(minLength: 0)
 
-            // Approve pill — disabled if there's no incomplete set or no current set.
+            // Approve pill — set chip overlays the LEFT side of the pill so
+            // the header has more room for the exercise name on small watches.
             if let set = currentSet, !set.isCompleted {
                 Button(action: { onRequestComplete(set) }) {
-                    ApprovePill()
+                    ApprovePill(setLabel: "\(currentSetNumber)/\(exercise.sets.count)")
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("Mark set complete")
-                .accessibilityHint("Opens RIR picker for set \(currentSetNumber)")
+                .accessibilityLabel("Mark set \(currentSetNumber) of \(exercise.sets.count) complete")
+                .accessibilityHint("Opens RIR picker")
             } else {
-                ApprovePill()
+                ApprovePill(setLabel: "\(exercise.sets.count)/\(exercise.sets.count)")
                     .opacity(0.4)
                     .accessibilityLabel("All sets done")
             }
@@ -227,37 +213,48 @@ private struct HeroTarget: View {
     var body: some View {
         switch mode {
         case .reps:
+            // Single-line hero: "80 kg × 8 reps" — separate tappable regions
+            // for weight and reps so the dial-in still works per spec.
             HStack(alignment: .firstTextBaseline, spacing: 4) {
                 Button(action: onTapWeight) {
-                    Text(formatWeight(displayWeight))
-                        .font(.system(size: 56, weight: .bold, design: .rounded))
-                        .minimumScaleFactor(0.6)
-                        .lineLimit(1)
-                        .foregroundStyle(editedWeight != nil ? .green : .primary)
-                        .opacity(isAOD ? 0.3 : 1)
+                    HStack(alignment: .firstTextBaseline, spacing: 2) {
+                        Text(formatWeight(displayWeight))
+                            .font(.system(size: 36, weight: .bold, design: .rounded))
+                            .minimumScaleFactor(0.6)
+                            .lineLimit(1)
+                            .foregroundStyle(editedWeight != nil ? .green : .primary)
+                            .opacity(isAOD ? 0.3 : 1)
+                        Text("kg")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(.secondary)
+                    }
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("Target weight \(formatWeight(displayWeight)) kilograms — tap to adjust")
-                Text("kg")
-                    .font(.caption)
-                    .fontWeight(.medium)
-                    .foregroundStyle(.secondary)
+
+                Text("×")
+                    .font(.system(size: 16))
+                    .foregroundStyle(.tertiary)
+
+                Button(action: onTapReps) {
+                    Text("\(displayReps.map(String.init) ?? "—")")
+                        .font(.system(size: 36, weight: .bold, design: .rounded))
+                        .minimumScaleFactor(0.6)
+                        .lineLimit(1)
+                        .foregroundStyle(editedReps != nil ? .green : .primary)
+                        .opacity(isAOD ? 0.3 : 1)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Target \(displayReps.map(String.init) ?? "no") reps — tap to adjust")
             }
-            Button(action: onTapReps) {
-                Text("× \(displayReps.map(String.init) ?? "—") reps")
-                    .font(.caption)
-                    .foregroundStyle(editedReps != nil ? .green : .secondary)
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Target \(displayReps.map(String.init) ?? "no") reps — tap to adjust")
         case .time:
-            VStack(spacing: 0) {
+            HStack(alignment: .firstTextBaseline, spacing: 4) {
                 Text(formatDuration(set.targetDurationSeconds))
-                    .font(.system(size: 48, weight: .bold, design: .rounded))
+                    .font(.system(size: 36, weight: .bold, design: .rounded))
                     .minimumScaleFactor(0.7)
                     .lineLimit(1)
                 Text("hold")
-                    .font(.caption)
+                    .font(.system(size: 12))
                     .foregroundStyle(.secondary)
             }
             .accessibilityLabel("Hold for \(formatDuration(set.targetDurationSeconds))")
@@ -283,16 +280,31 @@ private struct HeroTarget: View {
 }
 
 private struct ApprovePill: View {
+    let setLabel: String
     var body: some View {
         ZStack {
             RoundedRectangle(cornerRadius: 30)
-                .fill(Color.green.opacity(0.2))
+                .fill(Color.green.opacity(0.25))
                 .frame(maxWidth: .infinity)
                 .frame(height: 44)
-            Text("✓")
-                .font(.title3)
-                .fontWeight(.bold)
-                .foregroundStyle(.green)
+            HStack {
+                Text(setLabel)
+                    .font(.system(size: 11, weight: .bold, design: .rounded))
+                    .foregroundStyle(.green.opacity(0.9))
+                    .padding(.leading, 14)
+                Spacer()
+                Text("✓")
+                    .font(.title3)
+                    .fontWeight(.bold)
+                    .foregroundStyle(.green)
+                Spacer()
+                // Right-side spacer to keep ✓ visually centered against the
+                // left-side set chip.
+                Text(setLabel)
+                    .font(.system(size: 11, weight: .bold, design: .rounded))
+                    .foregroundStyle(.clear)
+                    .padding(.trailing, 14)
+            }
         }
     }
 }
