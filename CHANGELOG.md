@@ -2,6 +2,22 @@
 
 All notable changes to Rebirth are documented here.
 
+## [0.9.2] - 2026-05-05
+
+### Added
+
+- **Metric selector on the InBody trend chart.** Was hard-coded PBF%; now a horizontally-scrollable chip strip with 13 metrics grouped build → segmental → fat → summary. Default switched to **Skeletal Muscle Mass** — plan-aligned for an intentional build phase, and the androgodess monitoring protocol explicitly flags InBody PBF% as unreliable for Lou (~7–8 points low). Section heading, tooltip, goal reference line, and previous-scan reference line all reactively follow the selected metric. Includes the segmental-lean rows (R/L arm + R/L leg) named in `north_star_metrics` so shoulder-cap and glute-shelf progress now have a visible trend, plus `seg_fat_trunk_pct` for HRT-driven redistribution.
+- **Weight option on the Log/Trend chart.** Bodyweight was already shown as a history list below the chart; now also selectable in the trend strip and rendered as a single-series line in the user's display unit (kg/lb) — same data source (`bodyweight_logs`) as the history rows so the values match. Trend section now appears when only bodyweight has 2+ entries (previously gated on cm-site logs).
+- **Multi-site overlay handling.** Selecting Weight on `lg:+` switches to the single-series chart (mixing kg with cm on one axis would have been wrong); cm sites still produce the all-five overlay.
+
+### Changed
+
+- **`<ChipGroup>` extracted** to `src/components/ui/ChipGroup.tsx` — used by both trend selectors. Variants: `wrap` (Log selector, 6 short chips) and `scroll` (InBody selector, 13 longer chips). Each chip carries `aria-pressed` and a `focus-visible` ring so keyboard tabbing through the strip is visible.
+
+### Notes
+
+- No schema changes. Segmental lean / trunk fat % were already populated on every InBody scan row and surfaced on the detail page; they were just not exposed in the trend selector before.
+
 ## [0.9.1] - 2026-05-04
 
 ### Fixed
