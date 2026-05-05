@@ -32,6 +32,11 @@ struct RootView: View {
     @State private var timeModeContext: TimeModeContext?
     @State private var showSessionEnd: Bool = false
     @State private var lastCompletedAt: Date?
+    /// setUuid the user just dismissed via Skip/Done. Hides the sheet
+    /// optimistically so the user gets instant feedback even when the
+    /// iPhone Rebirth app isn't running to process the WC stopRest. Reset
+    /// when the snapshot publishes a different setUuid (next rest period).
+    @State private var dismissedRestSetUuid: String? = nil
 
     private func allSetsCompleted(in snapshot: ActiveWorkoutSnapshot) -> Bool {
         guard !snapshot.exercises.isEmpty else { return false }
@@ -108,20 +113,28 @@ struct RootView: View {
                 }
             )
         }
-        // Rest timer sheet — phone is the only writer. The sheet's presence
-        // derives from snapshot.restTimer != nil; dismissal happens when the
-        // phone publishes a snapshot with rest_timer = null (Skip / Done /
-        // workout finished). The Binding's set is a no-op so SE 1st-gen's
-        // swipe-down doesn't tear the sheet from local state — the snapshot
-        // is truth.
+        // Rest timer sheet — phone is the source of truth. The sheet's
+        // presence derives from snapshot.restTimer != nil, with one
+        // exception: optimistic local dismiss when the user taps Skip/Done.
+        // Without that, if the iPhone Rebirth app isn't running the WC
+        // stopRest message lands at the iOS plugin level but no JS listener
+        // processes it — the snapshot would never publish null and the
+        // watch sheet would stay forever. The optimistic-dismiss state
+        // resets when a NEW setUuid arrives (next rest period).
         .sheet(isPresented: Binding(
-            get: { session.snapshot?.restTimer != nil },
+            get: {
+                guard let hint = session.snapshot?.restTimer else { return false }
+                return hint.setUuid != dismissedRestSetUuid
+            },
             set: { _ in })
         ) {
             if let hint = session.snapshot?.restTimer {
                 RestTimerView(
                     hint: hint,
-                    onSkip: { completion.sendStopRest(setUuid: hint.setUuid) },
+                    onSkip: {
+                        dismissedRestSetUuid = hint.setUuid
+                        completion.sendStopRest(setUuid: hint.setUuid)
+                    },
                     onExtend30: { completion.sendExtendRest(seconds: 30, setUuid: hint.setUuid) }
                 )
                 // Force fresh SwiftUI identity per timer so haptic @State

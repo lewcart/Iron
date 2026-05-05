@@ -1848,9 +1848,19 @@ export default function WorkoutPage() {
 
   const finishWorkout = async () => {
     if (!workout) return;
-    await mutFinishWorkout(workout.uuid);
-    setShowFinishModal(false);
+    // Push a snapshot with rest_timer cleared BEFORE the workout is removed.
+    // The snapshot effect early-returns when `workout == null`, so without
+    // this synchronous push the watch keeps its last-seen rest hint and the
+    // ring stays up until the next workout starts.
     restTimer.cancel();
+    const cleanup = buildWatchSnapshot({
+      workout,
+      goalWindowByExercise: pageGoalWindowByExercise,
+      restTimer: null,
+    });
+    void pushSnapshotToWatch(cleanup);
+    setShowFinishModal(false);
+    await mutFinishWorkout(workout.uuid);
   };
 
   const handleAddExercise = async (exercise: Exercise) => {
@@ -2297,8 +2307,16 @@ export default function WorkoutPage() {
               <button
                 onClick={() => {
                   if (workout) {
-                    mutDeleteWorkout(workout.uuid);
+                    // Same flush-before-delete as finishWorkout — snapshot
+                    // push effect early-returns when workout is null.
                     restTimer.cancel();
+                    const cleanup = buildWatchSnapshot({
+                      workout,
+                      goalWindowByExercise: pageGoalWindowByExercise,
+                      restTimer: null,
+                    });
+                    void pushSnapshotToWatch(cleanup);
+                    mutDeleteWorkout(workout.uuid);
                   }
                   setShowCancelModal(false);
                 }}
