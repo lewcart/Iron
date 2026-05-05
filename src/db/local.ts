@@ -1025,6 +1025,7 @@ export async function hydrateExercises(): Promise<void> {
           youtube_url: ex.youtube_url ?? null,
           image_urls: ex.image_urls ?? null,
           has_sides: ex.has_sides ?? false,
+          lateral_emphasis: ex.lateral_emphasis ?? false,
         });
       }
     });
