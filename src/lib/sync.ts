@@ -37,6 +37,32 @@ import type {
 export type SyncStatus = 'idle' | 'syncing' | 'offline' | 'error';
 type SyncStatusListener = (status: SyncStatus) => void;
 
+/** Rich error context captured on the most recent push/pull failure. The pill
+ * formats this into a clipboard-friendly blob so Lou can paste a complete bug
+ * report back to the assistant without having to dig through devtools. */
+export interface SyncErrorDetails {
+  kind: 'push' | 'pull';
+  message: string;
+  /** HTTP status if the failure was a non-2xx response. */
+  status?: number;
+  /** Full request URL that failed (push or pull endpoint). */
+  url?: string;
+  method?: 'GET' | 'POST';
+  /** Response body (truncated to 2000 chars) if HTTP error. */
+  responseBody?: string;
+  /** ISO-8601 timestamp (with offset) when the error was captured. */
+  at: string;
+  /** Push only: per-table dirty row counts + a few sample uuids. */
+  payloadSummary?: { table: string; count: number; sampleUuids: string[] }[];
+  /** Pull only: change_log cursor at time of failure. */
+  cursor?: number;
+  /** JS error stack if available (truncated). */
+  stack?: string;
+  /** UA + page URL — helpful to know which device/route hit it. */
+  userAgent?: string;
+  pageUrl?: string;
+}
+
 /** Names of every Dexie table that participates in change_log sync. Order is
  * load-bearing on push: parents before children so foreign keys never reference
  * a not-yet-pushed row. */
@@ -149,6 +175,7 @@ const POLL_INTERVAL_MS = 15_000;
 class SyncEngine {
   private _status: SyncStatus = 'idle';
   private _lastError: string | null = null;
+  private _lastErrorDetails: SyncErrorDetails | null = null;
   private _listeners = new Set<SyncStatusListener>();
   private _pushDebounceTimer: ReturnType<typeof setTimeout> | null = null;
   private _periodicTimer: ReturnType<typeof setInterval> | null = null;
@@ -164,6 +191,7 @@ class SyncEngine {
 
   get status(): SyncStatus { return this._status; }
   get lastError(): string | null { return this._lastError; }
+  get lastErrorDetails(): SyncErrorDetails | null { return this._lastErrorDetails; }
 
   private setStatus(s: SyncStatus) {
     this._status = s;
@@ -182,6 +210,9 @@ class SyncEngine {
     if (!navigator.onLine) { this.setStatus('offline'); return; }
 
     this._pushing = true;
+    // Hoisted so the catch block can summarise what we tried to push when
+    // building lastErrorDetails.
+    const payload: PushPayload = {};
     try {
       // Read every dirty row across all synced tables in parallel.
       // _synced filter is a full-table scan (Dexie doesn't index booleans
@@ -195,7 +226,6 @@ class SyncEngine {
         }),
       );
 
-      const payload: PushPayload = {};
       let total = 0;
       for (const [name, rows] of dirty) {
         if (rows.length > 0) {
@@ -211,6 +241,7 @@ class SyncEngine {
         // pill forever.
         if (this._status === 'error') {
           this._lastError = null;
+          this._lastErrorDetails = null;
           this.setStatus('idle');
         }
         return;
@@ -218,7 +249,8 @@ class SyncEngine {
 
       this.setStatus('syncing');
 
-      const res = await fetch(`${apiBase()}/api/sync/push`, {
+      const url = `${apiBase()}/api/sync/push`;
+      const res = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -226,7 +258,9 @@ class SyncEngine {
 
       if (!res.ok) {
         const body = await res.text().catch(() => '');
-        throw new Error(`HTTP ${res.status}: ${body.slice(0, 200)}`);
+        const httpErr = new Error(`HTTP ${res.status}: ${body.slice(0, 200)}`) as Error & { _syncCtx?: { status: number; url: string; method: 'POST'; responseBody: string } };
+        httpErr._syncCtx = { status: res.status, url, method: 'POST', responseBody: body.slice(0, 2000) };
+        throw httpErr;
       }
 
       // Mark all pushed rows as synced. Hard-purge soft-deleted ones now that
@@ -252,10 +286,32 @@ class SyncEngine {
       });
 
       this._lastError = null;
+      this._lastErrorDetails = null;
       this.setStatus('idle');
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       this._lastError = `push: ${msg}`;
+      const ctx = (err as Error & { _syncCtx?: { status: number; url: string; method: 'POST'; responseBody: string } })._syncCtx;
+      const payloadSummary = Object.entries(payload).map(([table, rows]) => ({
+        table,
+        count: (rows as unknown[]).length,
+        sampleUuids: ((rows as Array<{ uuid?: string; metric_key?: string; id?: number | string }>) ?? [])
+          .slice(0, 3)
+          .map(r => String(r.uuid ?? r.metric_key ?? r.id ?? '?')),
+      })).filter(s => s.count > 0);
+      this._lastErrorDetails = {
+        kind: 'push',
+        message: msg,
+        status: ctx?.status,
+        url: ctx?.url,
+        method: ctx?.method ?? 'POST',
+        responseBody: ctx?.responseBody,
+        at: new Date().toISOString(),
+        payloadSummary,
+        stack: err instanceof Error ? err.stack?.slice(0, 1500) : undefined,
+        userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : undefined,
+        pageUrl: typeof window !== 'undefined' ? window.location.href : undefined,
+      };
       console.error('[sync] push error:', err);
       this.setStatus(navigator.onLine ? 'error' : 'offline');
     } finally {
@@ -270,18 +326,22 @@ class SyncEngine {
     if (!navigator.onLine) { this.setStatus('offline'); return; }
 
     this._pulling = true;
+    let cursor = Number(await getMeta('last_seq') ?? 0);
+    let lastUrl: string | undefined;
     try {
-      let cursor = Number(await getMeta('last_seq') ?? 0);
       let pages = 0;
       const MAX_PAGES = 100; // safety cap — 100 pages × 1000 rows = 100k changes per pull
 
       while (pages < MAX_PAGES) {
         this.setStatus('syncing');
         const url = `${apiBase()}/api/sync/changes?since=${cursor}&limit=${PAGE_SIZE}`;
+        lastUrl = url;
         const res = await fetch(url);
         if (!res.ok) {
           const body = await res.text().catch(() => '');
-          throw new Error(`HTTP ${res.status}: ${body.slice(0, 200)}`);
+          const httpErr = new Error(`HTTP ${res.status}: ${body.slice(0, 200)}`) as Error & { _syncCtx?: { status: number; url: string; method: 'GET'; responseBody: string } };
+          httpErr._syncCtx = { status: res.status, url, method: 'GET', responseBody: body.slice(0, 2000) };
+          throw httpErr;
         }
 
         const data = await res.json() as ChangesResponse;
@@ -298,10 +358,25 @@ class SyncEngine {
       }
 
       this._lastError = null;
+      this._lastErrorDetails = null;
       this.setStatus('idle');
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       this._lastError = `pull: ${msg}`;
+      const ctx = (err as Error & { _syncCtx?: { status: number; url: string; method: 'GET'; responseBody: string } })._syncCtx;
+      this._lastErrorDetails = {
+        kind: 'pull',
+        message: msg,
+        status: ctx?.status,
+        url: ctx?.url ?? lastUrl,
+        method: ctx?.method ?? 'GET',
+        responseBody: ctx?.responseBody,
+        at: new Date().toISOString(),
+        cursor,
+        stack: err instanceof Error ? err.stack?.slice(0, 1500) : undefined,
+        userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : undefined,
+        pageUrl: typeof window !== 'undefined' ? window.location.href : undefined,
+      };
       console.error('[sync] pull error:', err);
       this.setStatus(navigator.onLine ? 'error' : 'offline');
     } finally {
