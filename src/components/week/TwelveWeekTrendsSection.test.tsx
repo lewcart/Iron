@@ -13,6 +13,7 @@ const empty: TwelveWeekTrendsData = {
   anchorLifts: [],
   bodyweight: null,
   hrv: null,
+  cardio: null,
   compliance: null,
 };
 
@@ -22,7 +23,7 @@ describe('TwelveWeekTrendsSection', () => {
     expect(screen.getByText(/12-Week Trends/i)).toBeInTheDocument();
   });
 
-  it('renders all 5 trend block labels (a-e) even when data is missing', () => {
+  it('renders all 6 trend block labels (a-f) even when data is missing', () => {
     render(<TwelveWeekTrendsSection data={empty} />);
     // Use exact label substrings (not /Priority muscles/ which also appears
     // in the empty-state copy below the label).
@@ -30,6 +31,7 @@ describe('TwelveWeekTrendsSection', () => {
     expect(screen.getByText(/Anchor-lift e1RM/i)).toBeInTheDocument();
     expect(screen.getByText(/Bodyweight EWMA · 90 day/i)).toBeInTheDocument();
     expect(screen.getByText(/HRV · 7-day mean vs 28-day baseline/i)).toBeInTheDocument();
+    expect(screen.getByText(/Cardio · weekly minutes/i)).toBeInTheDocument();
     expect(screen.getByText(/Weekly compliance · sets executed vs plan/i)).toBeInTheDocument();
   });
 
@@ -39,6 +41,7 @@ describe('TwelveWeekTrendsSection', () => {
     expect(screen.getByText(/Log a few sessions on your anchor lifts/i)).toBeInTheDocument();
     expect(screen.getByText(/Need more weigh-ins/i)).toBeInTheDocument();
     expect(screen.getByText(/HRV baseline still calibrating/i)).toBeInTheDocument();
+    expect(screen.getByText(/Cardio trend will appear/i)).toBeInTheDocument();
     expect(screen.getByText(/Compliance trend will appear/i)).toBeInTheDocument();
   });
 
@@ -111,6 +114,51 @@ describe('TwelveWeekTrendsSection', () => {
   it('section is exposed via aria-label for screen readers', () => {
     render(<TwelveWeekTrendsSection data={empty} />);
     expect(screen.getByLabelText('12-week trends')).toBeInTheDocument();
+  });
+
+  // ── Cardio row (new in cardio-trends-backfill) ───────────────────────
+
+  it('renders cardio row with sparkline + direction chip when ≥4 weeks of data', () => {
+    const data: TwelveWeekTrendsData = {
+      ...empty,
+      cardio: {
+        weekly: [60, 80, 100, 120, 140, 160, 180, 200, 180, 160, 200, 220],
+        target_total_minutes: 180,
+      },
+    };
+    render(<TwelveWeekTrendsSection data={data} />);
+    expect(
+      screen.getByRole('button', { name: /Cardio · weekly minutes — open detail/i }),
+    ).toBeInTheDocument();
+    // Direction chip carries the % change with the target suffix.
+    expect(screen.getByText(/180m target/i)).toBeInTheDocument();
+  });
+
+  it('renders cardio row WITHOUT target suffix when no target is set', () => {
+    const data: TwelveWeekTrendsData = {
+      ...empty,
+      cardio: {
+        weekly: [60, 80, 100, 120, 140, 160, 180, 200, 180, 160, 200, 220],
+        target_total_minutes: null,
+      },
+    };
+    render(<TwelveWeekTrendsSection data={data} />);
+    expect(
+      screen.getByRole('button', { name: /Cardio · weekly minutes — open detail/i }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/target/i)).not.toBeInTheDocument();
+  });
+
+  it('cardio row falls back to empty-state when fewer than 4 weeks of data', () => {
+    const data: TwelveWeekTrendsData = {
+      ...empty,
+      cardio: { weekly: [60, 80, 100], target_total_minutes: 180 }, // 3 weeks
+    };
+    render(<TwelveWeekTrendsSection data={data} />);
+    expect(screen.getByText(/Cardio trend will appear/i)).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: /Cardio · weekly minutes — open detail/i }),
+    ).not.toBeInTheDocument();
   });
 
   // ── Regression: HRV row when baseline is calibrating ──────────────────────
