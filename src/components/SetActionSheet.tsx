@@ -67,7 +67,7 @@ export function SetActionSheet({ target, onClose, unitLabel }: Props) {
   }
 
   const setSummary = target.duration_seconds != null
-    ? `${target.duration_seconds}s hold`
+    ? `${target.weight != null && target.weight > 0 ? `${target.weight} ${unitLabel} × ` : ''}${target.duration_seconds}s hold`
     : `${target.weight ?? '—'} ${unitLabel} × ${target.repetitions ?? '—'}`;
 
   return (
