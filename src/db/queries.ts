@@ -1485,10 +1485,11 @@ export async function getWeekMuscleFrequency(tz: string = APP_TZ): Promise<{ pri
  *      - muscle in secondary_muscles only → 0.5
  *      - muscle in both → 1.0 (primary wins; not double-counted)
  *
- *   2. RIR (Reps in Reserve) credit:
+ *   2. RIR (Reps in Reserve) credit (5-tier per TD2 2026-05-06):
  *      - RIR 0–3 → 1.0  (close to failure; full hypertrophy stimulus)
  *      - RIR 4   → 0.5  (sub-stimulus; partial credit)
- *      - RIR 5+  → 0.0  (junk set; no hypertrophy contribution)
+ *      - RIR 5   → 0.25 (pump finishers; sub-stimulus but not zero)
+ *      - RIR 6+  → 0.0  (warm-up territory; no hypertrophy contribution)
  *      - RIR NULL → 1.0 (charitable default until RIR is logged broadly)
  *
  * Effective contribution per (set, muscle) = primary_secondary_credit ×
@@ -1581,12 +1582,15 @@ export async function getWeekSetsPerMuscle(weekOffset: number = 0, tz: string = 
         muscle_slug,
         COUNT(DISTINCT set_uuid) AS set_count,
         -- Effective sets — primary/secondary credit × RIR credit.
-        --   primary=1.0, secondary=0.5; RIR 0–3=1.0, RIR 4=0.5, RIR 5+=0.0, NULL=1.0
+        --   primary=1.0, secondary=0.5
+        --   RIR 0-3=1.0, RIR 4=0.5, RIR 5=0.25, RIR 6+=0.0, NULL=1.0
+        --   (5-tier per TD2 2026-05-06; mirrors src/lib/training/volume-math.ts)
         COALESCE(SUM(
           credit * CASE
             WHEN rir IS NULL THEN 1.0
             WHEN rir <= 3    THEN 1.0
             WHEN rir = 4     THEN 0.5
+            WHEN rir = 5     THEN 0.25
             ELSE 0.0
           END
         ), 0)::numeric AS effective_set_count,
