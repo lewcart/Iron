@@ -15,7 +15,8 @@
  *   (b) anchor-lift e1RM trends
  *   (c) bodyweight EWMA (90-day)
  *   (d) HRV 7-day mean vs 28-day baseline (band overlay)
- *   (e) weekly compliance % — empty state for now (data not available);
+ *   (e) cardio weekly minutes (with target marker via direction chip)
+ *   (f) weekly compliance % — empty state for now (data not available);
  *       rendered as a non-tappable note instead of an action row.
  */
 
@@ -67,15 +68,25 @@ export interface ComplianceSeries {
   weekly_pct: number[];
 }
 
+export interface CardioWeeklySeries {
+  /** Total cardio minutes per ISO-Monday week (oldest → newest). 12 entries. */
+  weekly: number[];
+  /** Umbrella weekly target from the active body plan, in minutes. Null when
+   *  no targets are set — the row still renders the trend, just without the
+   *  vs-target framing on the direction chip. */
+  target_total_minutes: number | null;
+}
+
 export interface TwelveWeekTrendsData {
   priorityMuscles: PriorityMuscleSeries[];
   anchorLifts: AnchorLiftSeries[];
   bodyweight: BodyweightSeries | null;
   hrv: HrvBalanceSeries | null;
+  cardio: CardioWeeklySeries | null;
   compliance: ComplianceSeries | null;
 }
 
-type DetailKey = 'priority' | 'anchor' | 'bodyweight' | 'hrv' | null;
+type DetailKey = 'priority' | 'anchor' | 'bodyweight' | 'hrv' | 'cardio' | null;
 
 export function TwelveWeekTrendsSection({ data }: { data: TwelveWeekTrendsData }) {
   const [open, setOpen] = useState<DetailKey>(null);
@@ -110,6 +121,11 @@ export function TwelveWeekTrendsSection({ data }: { data: TwelveWeekTrendsData }
       data.hrv.baseline28 + data.hrv.baselineSd,
     ]);
   }, [data.hrv]);
+
+  const cardioDir = useMemo(() => {
+    if (!data.cardio || data.cardio.weekly.length === 0) return null;
+    return summarizeDirection(data.cardio.weekly);
+  }, [data.cardio]);
 
   // ── Modal series builders (only computed when modal opens) ──────────
   const priorityModalSeries = useMemo<TrendDetailSeries[]>(() => {
@@ -149,6 +165,16 @@ export function TwelveWeekTrendsSection({ data }: { data: TwelveWeekTrendsData }
       unit: 'ms',
     }];
   }, [data.hrv]);
+
+  const cardioModalSeries = useMemo<TrendDetailSeries[]>(() => {
+    if (!data.cardio || data.cardio.weekly.length === 0) return [];
+    return [{
+      label: 'Cardio · weekly minutes',
+      values: data.cardio.weekly,
+      xLabels: data.cardio.weekly.map((_, i) => `W-${data.cardio!.weekly.length - i - 1}`),
+      unit: ' min',
+    }];
+  }, [data.cardio]);
 
   const hrvBand: [number, number] | null =
     data.hrv && data.hrv.baseline28 != null && data.hrv.baselineSd != null
@@ -216,7 +242,26 @@ export function TwelveWeekTrendsSection({ data }: { data: TwelveWeekTrendsData }
           onTap={hrvBand && data.hrv && data.hrv.rolling7.length >= 7 ? () => setOpen('hrv') : undefined}
         />
 
-        {/* (e) Weekly compliance — non-tappable note (data not available V1) */}
+        {/* (e) Cardio weekly minutes */}
+        <TrendRow
+          label="Cardio · weekly minutes"
+          direction={cardioDir
+            ? <DirectionChip
+                {...cardioDir}
+                suffix={data.cardio?.target_total_minutes
+                  ? ` / ${data.cardio.target_total_minutes}m target`
+                  : undefined}
+              />
+            : null}
+          spark={data.cardio && data.cardio.weekly.length >= 4
+            ? <SparkInline values={data.cardio.weekly} ariaLabel="Cardio weekly minutes sparkline" minSamples={4} />
+            : null}
+          empty={!data.cardio || data.cardio.weekly.length < 4
+            ? 'Cardio trend will appear once you have a few weeks of cardio logged.' : null}
+          onTap={data.cardio && data.cardio.weekly.length >= 4 ? () => setOpen('cardio') : undefined}
+        />
+
+        {/* (f) Weekly compliance — non-tappable note (data not available V1) */}
         <div>
           <div className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground mb-1">
             Weekly compliance · sets executed vs plan
@@ -258,6 +303,13 @@ export function TwelveWeekTrendsSection({ data }: { data: TwelveWeekTrendsData }
         series={hrvModalSeries}
         band={hrvBand}
         rule="HRV 7-day rolling mean (line) vs 28-day baseline ± 1 SD (shaded band). 'In band' = within ±1 SD of personal baseline; below the band for multiple days suggests accumulated fatigue."
+      />
+      <TrendDetailModal
+        open={open === 'cardio'}
+        onClose={() => setOpen(null)}
+        title="Cardio · weekly minutes"
+        series={cardioModalSeries}
+        rule="Total cardio minutes per ISO Mon→Sun week from HealthKit. Strength workouts excluded. Direction chip compares the most recent week to its 4-week trailing average; the suffix shows the umbrella weekly target from your active plan when set."
       />
     </section>
   );

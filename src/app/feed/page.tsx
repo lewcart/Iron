@@ -109,6 +109,27 @@ function fetchSleepBaseline(): Promise<SleepBaselineResponse | { status: 'not_co
   });
 }
 
+// 12-week cardio trend fetch for Section B (TwelveWeekTrendsSection).
+// Mirrors the cardio-week envelope but returns a 12-element weekly array.
+interface CardioTrendResponse {
+  status: 'ok' | 'no_targets' | 'not_connected' | 'invalid_input';
+  weekly?: number[];
+  target_total_minutes?: number | null;
+  message?: string;
+  reason?: string;
+}
+
+function fetchCardioTrend(): Promise<CardioTrendResponse> {
+  return fetchJsonAuthed<CardioTrendResponse>(
+    `/api/health/cardio-trend?weeks=12`,
+  ).catch((err: unknown) => {
+    if (err instanceof ApiError && err.status === 503) {
+      return { status: 'not_connected' as const };
+    }
+    throw err;
+  });
+}
+
 // v1.1: cardio compliance fetch for the new tile in slot 4.
 // Calendar-week-to-date (Mon→today), matching how every other "this week"
 // tile counts. Rolling 7d would over-count on early-week days.
@@ -195,6 +216,13 @@ export default function WeekPage() {
   const { data: cardioWeek } = useQuery({
     queryKey: ['week', 'cardio-week'],
     queryFn: fetchCardioWeek,
+    staleTime: 5 * 60_000,
+  });
+
+  // 12-week cardio trend for Section B's new sparkline row.
+  const { data: cardioTrend } = useQuery({
+    queryKey: ['week', 'cardio-trend'],
+    queryFn: fetchCardioTrend,
     staleTime: 5 * 60_000,
   });
 
@@ -1011,17 +1039,28 @@ export default function WeekPage() {
       };
     }
 
+    // Cardio trend: only surface when the endpoint returned weekly data
+    // (status 'ok' or 'no_targets' both populate `weekly`). The row
+    // collapses to its empty state for not_connected / invalid_input.
+    const cardioSeries = cardioTrend && (cardioTrend.status === 'ok' || cardioTrend.status === 'no_targets') && cardioTrend.weekly
+      ? {
+          weekly: cardioTrend.weekly,
+          target_total_minutes: cardioTrend.target_total_minutes ?? null,
+        }
+      : null;
+
     return {
       priorityMuscles: priorityMusclesByWeek ?? [],
       anchorLifts: anchorLiftsByWeek ?? [],
       bodyweight: bwSeries,
       hrv: hrvSeries,
+      cardio: cardioSeries,
       // Compliance series isn't computable until plan-vs-actual aggregation
       // exists at the data layer (planned routine sets aren't currently
       // tracked weekly). The section degrades to its empty state for now.
       compliance: null,
     };
-  }, [bodyweight, snapshot, priorityMusclesByWeek, anchorLiftsByWeek]);
+  }, [bodyweight, snapshot, priorityMusclesByWeek, anchorLiftsByWeek, cardioTrend]);
 
   const today = new Date();
   const dayLabel = today.toLocaleDateString('en-US', { weekday: 'short', day: 'numeric', month: 'short' });
