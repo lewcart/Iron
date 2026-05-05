@@ -46,7 +46,9 @@ target needs the workspace so the local SPM package resolves).
 
 9. Link RebirthShared modules to the watch target:
    - Watch target → **General → Frameworks, Libraries, and Embedded Content** → **+**
-   - Add: `RebirthAPI`, `RebirthAppGroup`, `RebirthKeychain`, `RebirthModels`, `RebirthOutbox`, `RebirthWatchLog`.
+   - Add: `RebirthAppGroup`, `RebirthModels`, `RebirthWatchLog`.
+     (RebirthAPI, RebirthKeychain, RebirthOutbox were removed on Day 13 —
+     watch no longer makes its own network calls.)
 
 ## 3. Add a Complications WidgetKit extension
 

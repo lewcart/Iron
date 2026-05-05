@@ -1,5 +1,17 @@
 # PLAN — Apple Watch Companion App (revised post-review)
 
+> **⚠ HISTORICAL — partly superseded by Day-13 architectural pivot.**
+> The original plan had the watch holding an API key and calling
+> `/api/sync/push` directly via a SQLite outbox + `RebirthAPI` +
+> `RebirthKeychain` + `RebirthOutbox` SPM modules. Day 13 removed all of
+> that: phone is the single writer; watch sends set completions via
+> `WC.transferUserInfo` and the phone's existing Dexie sync engine
+> handles the server push. **Refer to `docs/watch-architecture.md` for
+> the current design.** This file remains for historical context — the
+> Surface 1+2 routing, snapshot model, schema versioning, glance UI, HK
+> live builder, and complications sections are still accurate; the
+> Surface 3 (outbox + API client + keychain) sections are not.
+
 **Status:** Revised after design + eng + DX review
 **Owner:** Lou (single user)
 **Branch:** worktree-watch-companion-plan

@@ -7,16 +7,13 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		171FD88FDFBDB06632673BE7 /* RebirthKeychain in Frameworks */ = {isa = PBXBuildFile; productRef = 9F09162EEE5586FDA870FE14 /* RebirthKeychain */; };
 		186D56AEB447BC06EEBBC3FC /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 67F27BA56D37FF469FD62FE0 /* Foundation.framework */; };
 		1A8E98C86D0C4F1775B27419 /* PBDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7E424E1270A78B776B158CEF /* PBDetector.swift */; };
 		1D348AA49807803F085E89DB /* RebirthWatchComplications.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = E4BEA78AC3B864F81CF8105E /* RebirthWatchComplications.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		21339E17616EE88FDDE84EDE /* RebirthWatchComplications.swift in Sources */ = {isa = PBXBuildFile; fileRef = C22DA6AFA7A32BA4F76B430C /* RebirthWatchComplications.swift */; };
-		213B1B8A6AC6702409B2C19C /* RebirthAPI in Frameworks */ = {isa = PBXBuildFile; productRef = 6930916107C6D7E0B2BDA8DD /* RebirthAPI */; };
 		2B45C91C5E68670CD444FF3D /* WeightDial.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5CDD02C5F83D8B1EA88EC391 /* WeightDial.swift */; };
 		2FAD9763203C412B000D30F8 /* config.xml in Resources */ = {isa = PBXBuildFile; fileRef = 2FAD9762203C412B000D30F8 /* config.xml */; };
 		35976665B93CB7279F053E62 /* RestTimerPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = FD5E740390A75C0F2061E3BF /* RestTimerPlugin.swift */; };
-		37768B6C34C05D84ED80401A /* RebirthKeychain in Frameworks */ = {isa = PBXBuildFile; productRef = 1D1DB6EEA272D43876E73051 /* RebirthKeychain */; };
 		38FC3ABC8FE5B5D3C25327A9 /* RepsDial.swift in Sources */ = {isa = PBXBuildFile; fileRef = 984637B68F4B9C52AE4CA5BB /* RepsDial.swift */; };
 		4080C7577461D5F0BD615707 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = C1FD58D302416BF2D4FBEC1D /* Assets.xcassets */; };
 		4D22ABE92AF431CB00220026 /* CapApp-SPM in Frameworks */ = {isa = PBXBuildFile; productRef = 4D22ABE82AF431CB00220026 /* CapApp-SPM */; };
@@ -35,7 +32,6 @@
 		8A08E915E9EF546EE05D1BBA /* SessionEndView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5563638CF699DB160CF07F0C /* SessionEndView.swift */; };
 		8AAE170FA2FC1B2107046A00 /* RestTimerLiveActivity.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = B70ECA36E07E47254F7A8C94 /* RestTimerLiveActivity.appex */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		95C50736A5AE4368A2CC47F8 /* ActiveWorkoutGlance.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D7A98029420E80219B15B2F /* ActiveWorkoutGlance.swift */; };
-		98EE23C6C281D82C4EB2A32D /* RebirthOutbox in Frameworks */ = {isa = PBXBuildFile; productRef = 86C0BC3FE18502D842503A21 /* RebirthOutbox */; };
 		995DECA840D4453CDDB51624 /* RestTimerAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = E821CA38A7C622120A207A08 /* RestTimerAttributes.swift */; };
 		A9401796DFFB4961E62B1B17 /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 95B0D3245656B25E47BA3FE9 /* Foundation.framework */; };
 		ACD416F980BCC7404673E381 /* WorkoutSessionManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = DB75C7B55D81A811D7F97EA7 /* WorkoutSessionManager.swift */; };
@@ -201,7 +197,6 @@
 				EFEC343B25B3909D984DB111 /* RebirthAppGroup in Frameworks */,
 				EA260001ED54458AB0D38D42 /* RebirthModels in Frameworks */,
 				EC350F17282B89C3013F60EF /* RebirthWatchLog in Frameworks */,
-				171FD88FDFBDB06632673BE7 /* RebirthKeychain in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -217,11 +212,8 @@
 			buildActionMask = 2147483647;
 			files = (
 				F16790B3473C6AC6DC8E27A8 /* Foundation.framework in Frameworks */,
-				213B1B8A6AC6702409B2C19C /* RebirthAPI in Frameworks */,
 				C79BFF79A46570A814F39165 /* RebirthAppGroup in Frameworks */,
-				37768B6C34C05D84ED80401A /* RebirthKeychain in Frameworks */,
 				C399A66DF6D58A717E02ECAC /* RebirthModels in Frameworks */,
-				98EE23C6C281D82C4EB2A32D /* RebirthOutbox in Frameworks */,
 				85F21FFD55CAB24CF4BA32BF /* RebirthWatchLog in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -409,7 +401,6 @@
 				407A33EF6FE03EC60FD3A0F8 /* RebirthAppGroup */,
 				056B63FD737130F648673F1A /* RebirthModels */,
 				96AACD157BB724DDADD4FA76 /* RebirthWatchLog */,
-				9F09162EEE5586FDA870FE14 /* RebirthKeychain */,
 			);
 			productName = App;
 			productReference = 504EC3041FED79650016851F /* App.app */;
@@ -468,11 +459,8 @@
 			);
 			name = RebirthWatch;
 			packageProductDependencies = (
-				6930916107C6D7E0B2BDA8DD /* RebirthAPI */,
 				CBFCC65D6373CEB9843140F1 /* RebirthAppGroup */,
-				1D1DB6EEA272D43876E73051 /* RebirthKeychain */,
 				167B3C8338D8D7232CD433A8 /* RebirthModels */,
-				86C0BC3FE18502D842503A21 /* RebirthOutbox */,
 				1113416ACE7F0B67FDB5D59F /* RebirthWatchLog */,
 			);
 			productName = RebirthWatch;
@@ -1092,11 +1080,6 @@
 			package = B439AC3F8B2613F7E94B510D /* XCLocalSwiftPackageReference "RebirthShared" */;
 			productName = RebirthModels;
 		};
-		1D1DB6EEA272D43876E73051 /* RebirthKeychain */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = B439AC3F8B2613F7E94B510D /* XCLocalSwiftPackageReference "RebirthShared" */;
-			productName = RebirthKeychain;
-		};
 		407A33EF6FE03EC60FD3A0F8 /* RebirthAppGroup */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = B439AC3F8B2613F7E94B510D /* XCLocalSwiftPackageReference "RebirthShared" */;
@@ -1107,25 +1090,10 @@
 			package = D4C12C0A2AAA248700AAC8A2 /* XCLocalSwiftPackageReference "CapApp-SPM" */;
 			productName = "CapApp-SPM";
 		};
-		6930916107C6D7E0B2BDA8DD /* RebirthAPI */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = B439AC3F8B2613F7E94B510D /* XCLocalSwiftPackageReference "RebirthShared" */;
-			productName = RebirthAPI;
-		};
-		86C0BC3FE18502D842503A21 /* RebirthOutbox */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = B439AC3F8B2613F7E94B510D /* XCLocalSwiftPackageReference "RebirthShared" */;
-			productName = RebirthOutbox;
-		};
 		96AACD157BB724DDADD4FA76 /* RebirthWatchLog */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = B439AC3F8B2613F7E94B510D /* XCLocalSwiftPackageReference "RebirthShared" */;
 			productName = RebirthWatchLog;
-		};
-		9F09162EEE5586FDA870FE14 /* RebirthKeychain */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = B439AC3F8B2613F7E94B510D /* XCLocalSwiftPackageReference "RebirthShared" */;
-			productName = RebirthKeychain;
 		};
 		A68EF85EEC9AFFF977144D00 /* RebirthModels */ = {
 			isa = XCSwiftPackageProductDependency;

@@ -87,8 +87,6 @@ interface WatchConnectivityPlugin {
   pushActiveWorkout(options: { snapshot: WatchSnapshot }): Promise<{ delivered: boolean }>;
   pushSetMutation(options: { mutation: WatchSetMutation }): Promise<{ queued: boolean }>;
   getWatchPaired(): Promise<{ isPaired: boolean; isReachable: boolean; isWatchAppInstalled: boolean }>;
-  setApiKey(options: { key: string }): Promise<{ stored: boolean }>;
-  hasApiKey(): Promise<{ present: boolean }>;
 }
 
 const WatchConnectivity = registerPlugin<WatchConnectivityPlugin>('WatchConnectivity');
@@ -230,30 +228,6 @@ export async function getWatchPaired(): Promise<{ isPaired: boolean; isReachable
   }
 }
 
-/** Writes the Rebirth API key to the shared keychain access group so the
- *  watch app can read it. Single-user app — call this once after the user
- *  pastes their key in iOS settings. Subsequent calls overwrite. */
-export async function setWatchApiKey(key: string): Promise<boolean> {
-  if (!isNativeIOS()) return false;
-  try {
-    const r = await WatchConnectivity.setApiKey({ key });
-    return r.stored;
-  } catch (err) {
-    console.warn('[watch] setApiKey failed:', err);
-    return false;
-  }
-}
-
-export async function hasWatchApiKey(): Promise<boolean> {
-  if (!isNativeIOS()) return false;
-  try {
-    const r = await WatchConnectivity.hasApiKey();
-    return r.present;
-  } catch {
-    return false;
-  }
-}
-
 interface WatchInboundEvent {
   kind: string;
   payload?: Record<string, unknown>;
@@ -268,10 +242,11 @@ interface WatchConnectivityWithEvents extends WatchConnectivityPlugin {
 }
 
 /** Subscribe to inbound watch → phone messages. Returns an unsubscribe fn.
- *  Today only `watchWroteSet` is fired (after the watch successfully posts
- *  a CDC row to /api/sync/push). The phone reacts by pulling Dexie from
- *  the server so set updates land in the workout page within ~1s instead of
- *  waiting for the next foreground sync. */
+ *  Today only `watchWroteSet` is fired — the watch sends it the moment the
+ *  user confirms a set on the watch. Phone applies the row via Dexie
+ *  (`WatchInboundBridge` → `mutations.updateSet()`) and the existing sync
+ *  engine pushes it to the server. The phone is the single writer to
+ *  Postgres — the watch never hits `/api/sync/push` directly. */
 export function subscribeToWatchInbound(handler: (event: WatchInboundEvent) => void): () => void {
   if (!isNativeIOS()) return () => {};
   const wcWithEvents = WatchConnectivity as unknown as WatchConnectivityWithEvents;

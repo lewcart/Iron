@@ -40,9 +40,9 @@ COMPLICATIONS_SOURCES = [
 COMPLICATIONS_INFO_PLIST = 'ios/RebirthWatchComplications/Info.plist'
 COMPLICATIONS_ENTITLEMENTS = 'ios/RebirthWatchComplications/RebirthWatchComplications.entitlements'
 
-WATCH_LINKED_PRODUCTS = %w[RebirthAPI RebirthAppGroup RebirthKeychain RebirthModels RebirthOutbox RebirthWatchLog]
+WATCH_LINKED_PRODUCTS = %w[RebirthAppGroup RebirthModels RebirthWatchLog]
 COMPLICATIONS_LINKED_PRODUCTS = %w[RebirthModels]
-APP_LINKED_PRODUCTS = %w[RebirthAppGroup RebirthKeychain RebirthModels RebirthWatchLog]
+APP_LINKED_PRODUCTS = %w[RebirthAppGroup RebirthModels RebirthWatchLog]
 APP_PLUGIN_SOURCE = 'ios/App/App/WatchConnectivityPlugin.swift'
 
 project = Xcodeproj::Project.open(PROJECT_PATH)

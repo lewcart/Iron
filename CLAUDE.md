@@ -207,30 +207,28 @@ max 10 sets per exercise.
 unknown future fields. If a watch sees `schema_version > supported`, it
 shows "Watch needs update" instead of crashing.
 
-### Set logging (watch → server)
+### Set completion (watch → phone, no server hop)
 
-The watch hits `/api/sync/push` directly with a single-row CDC payload
-under `body.workout_sets[]`. NOT `update_sets` — that MCP tool is a
-routine-target editor and would clobber set state. Auth: API key from
-shared keychain (`group.app.rebirth` access group), validated by
-`rejectIfBadApiKey()` in the route. Phone Dexie sync calls the same route
-with no auth header (preserved for backwards compat).
+**Phone is the single writer to Postgres.** The watch makes no network
+calls. When the user confirms a set on the watch, the watch sends a
+`{ kind: "watchWroteSet", row: <full echoed CDC row> }` payload via
+`WCSession.transferUserInfo` (durable, FIFO, queues if phone unreachable).
 
-CDC row must include EVERY column the upsert touches — `tag`, `comment`,
-`is_pr`, `excluded_from_pb`, etc. The watch echoes them from the snapshot
-even though it doesn't render them. Otherwise the server-side
-`EXCLUDED.column` clause NULLs out fields the watch didn't touch.
+Phone-side: `WatchConnectivityPlugin.session(_:didReceiveUserInfo:)`
+forwards the payload to JS as a `watchInbound` event.
+`src/components/WatchInboundBridge.tsx` (mounted at root layout) calls
+`mutations.updateSet()` → Dexie write → existing sync engine pushes to
+`/api/sync/push`. The next debounced snapshot push reflects the new state
+back to the watch.
 
-### Outbox
+The watch echoes EVERY column in the payload — `tag`, `comment`, `is_pr`,
+`excluded_from_pb`, etc. Even though the watch doesn't render them, they
+must be present so the server-side `EXCLUDED.column` clause doesn't NULL
+out fields the watch didn't touch.
 
-SQLite file at `<App Group>/outbox.sqlite`. Atomic single-row writes
-survive watch process suspension. `mutation_id` is client-generated UUID
-for idempotency. `NWPathMonitor` flushes on connectivity restore.
-
-Retry policy: 200 → drop. 4xx → drop with toast. 401 → halt outbox + show
-re-auth banner; tap clears halt after Lou re-keys. 5xx/network → retry.
-Non-completion mutations dead-letter after 3 attempts; completions retry
-forever.
+There is no API key on the watch, no shared keychain bootstrap, no
+watch-side outbox. WC.transferUserInfo's queue + the phone's existing
+sync engine cover all the durability we need single-user.
 
 ### HealthKit (HKLiveWorkoutBuilder)
 
@@ -239,13 +237,6 @@ collects HR + active energy in real time. On finish, the workout is
 written with `HKMetadataKeyExternalUUID` = Rebirth workout UUID — phone-side
 `fetchWorkouts` (`HealthKitPlugin.swift workoutToFullDict`) reads that
 key for dedup. No explicit watch→phone WC round-trip needed for the UUID.
-
-### API key bootstrap (one-time)
-
-`WatchConnectivityPlugin.setApiKey(key)` writes to shared keychain;
-`hasApiKey()` returns presence. JS wrappers: `setWatchApiKey()`,
-`hasWatchApiKey()`. Same Apple Developer Team required across both
-targets — keychain access groups won't resolve cross-team.
 
 ### Mock snapshot dev flag
 
@@ -256,17 +247,31 @@ paired sims.
 
 ### Conflict policy (single-user)
 
-Server stamps `updated_at = NOW()` on every push. For a phone Dexie +
-watch direct write race within the same second, watch typically wins
-(direct write vs batched Dexie). This is acceptable single-user behavior
-— see `src/app/api/sync/push/route.ts:14` comment.
+Server stamps `updated_at = NOW()` on every push — never trusts client
+timestamps for ordering. With phone as single writer, the historical
+"phone Dexie + watch direct write race" no longer applies. See
+`src/app/api/sync/push/route.ts` comment.
+
+### Rest timer
+
+NOT YET IMPLEMENTED on the watch. Day 13's local-`Timer.publish` ring
+was removed because it didn't share state with the phone's
+`RestTimerPlugin` (Live Activity / Dynamic Island). The replacement plan
+mirrors set completion: phone owns timer state, watch sends WC start /
+stopRest / extendRest commands and reads timer state from the snapshot.
+See `docs/watch-replan.md`.
 
 ### What NOT to do
 
-- Don't have the watch call `update_sets` for set completion — it's the
-  wrong tool. Use `/api/sync/push`.
+- Don't have the watch make HTTP calls. Phone is the single writer.
+- Don't add a watch-side outbox or API client. WC.transferUserInfo has
+  its own delivery queue.
+- Don't have the watch call `update_sets` MCP tool for set completion —
+  it's a routine-target editor, will wipe set state. The phone applies
+  set completions via `mutations.updateSet`.
 - Don't try to generate the `HKWorkout.uuid` watch-side — it's HK-assigned
   at finish time. Stamp `HKMetadataKeyExternalUUID` instead.
+- Don't reintroduce a watch-owned timer state. Snapshot is truth.
 - Don't render an HRV recommendation on the pill ("consider RIR 4"). The
   pill is descriptive only — Week-page prescription engine has the monopoly
   per the prescription-engine note above.
