@@ -243,9 +243,173 @@ No schema migration in v1.
 
 ## Decision log
 
-(Populated by /autoplan auto-decisions.)
+(Populated by /autoplan auto-decisions. Final-gate items live in the
+"DECISIONS FOR LOU" section below.)
 
 | # | Phase | Decision | Classification | Principle | Rationale | Rejected |
 |---|-------|----------|----------------|-----------|-----------|----------|
+| 1 | CEO | Reshape plan: data model + shared core + simulation v0 (not parallel projection engine) | Mechanical | P5 explicit, P4 DRY | All 3 voices flagged parallel projection engine as duplication of prescription-engine.ts internals | Build new projection-engine.ts standalone |
+| 2 | CEO | Frequency-as-red-zone is required, not optional | Mechanical | P1 completeness | Schoenfeld 2019 ≥2x/wk floor; Lou's motivating example IS a frequency question; days_touched<2 on priority muscle = critical | Treat frequency as a soft warning |
+| 3 | CEO | Confidence degradation when RPE/frequency unknown — don't synthesize green ticks | Mechanical | P5 explicit | Plans without RIR target should produce `uncertain` zone, not optimistic raw count masquerading as effective | Charitable 1.0 default for null RIR in projection |
+| 4 | CEO | Adherence loop (planned vs logged) is in scope, not "boil-the-lake follow-up" | TASTE | P1 completeness | Codex: this is the actual strategic payoff. Claude: agrees as +1 expansion. Androgodess: agrees once data fixes land. But scope expansion is real (~1 extra day CC). | Defer to follow-up phase |
+| 5 | CEO | Vision-aware MAV overrides for build_emphasis muscles | Mechanical | P1 completeness | Default optimal_sets_max=20 will flag Lou's correct glute volume (24+) as "over"; tool would argue with the plan | Use unmodified per-muscle defaults |
+| 6 | CEO | Lateral-delt sub-muscle resolution — required v1 | USER CHALLENGE | — | Androgodess flagged this as the credibility-killer for Lou's #1 transformation target. Lou's plan does NOT mention sub-muscle taxonomy. This is a structural change Lou should weigh in on. | (For Lou to choose) |
+| 7 | CEO | Surface name change: "Planned weekly volume" not "Volume Fit" / "Weekly Projection" | Mechanical | P5 explicit | Honest framing — Week page handles dynamic prescription, builder handles static volume/frequency check. Avoids "two coaches disagreeing." | Keep Volume Fit framing |
 
 ---
+
+# /autoplan REVIEW REPORT
+
+## Phase 1 — CEO Review
+
+Three independent voices: **Codex** (adversarial strategy), **Claude subagent**
+(independent CEO read), **Androgodess PT subagent** (Lou's coach lens, grounded
+in androgodess SKILL.md science notes + body-comp targets).
+
+### CEO consensus table
+
+```
+═════════════════════════════════════════════════════════════════════════
+  Dimension                           Claude   Codex   Andro   Consensus
+  ─────────────────────────────────── ──────── ─────── ─────── ─────────
+  1. Right problem to solve?          NO       NO      NO      DISAGREE-w-plan
+  2. Premises valid?                  NO       NO      NO      DISAGREE-w-plan
+  3. Scope calibration correct?       NO       NO      NO      DISAGREE-w-plan
+  4. Alternatives explored?           NO       NO      —       CONFIRMED-gap
+  5. Competitive/differentiation?     MEDIUM   —       —       MEDIUM
+  6. 6-month trajectory sound?        NO       NO      NO      DISAGREE-w-plan
+═════════════════════════════════════════════════════════════════════════
+VERDICTS: Codex=RESHAPE, Claude=RESHAPE, Androgodess=RESHAPE.
+Zero voices said SHIP AS-IS.
+```
+
+### Convergent critical findings (≥2 voices)
+
+**[CRITICAL] Don't build parallel projection-engine.ts.** All 3 voices.
+Extract shared volume math (primary/secondary credit, RIR weighting, zone
+classification, priority-muscle ordering) into a single core consumed by BOTH
+the existing `prescriptionsFor()` and the new routine projection. Codebase
+already has the canonical math at `src/db/queries.ts:1481` (logged path) and
+`src/lib/training/prescription-engine.ts` (consumer). Drift between two
+implementations within a quarter is the predictable failure mode CLAUDE.md
+already warns about ("two coaches disagreeing"). Fix: extract `volume-math.ts`
+pure module before building projection.
+
+**[CRITICAL] Routine data model is unfit for honest projection.** All 3 voices,
+strongest from Codex and Androgodess. Without per-set RIR target, RIR weighting
+falls to the charitable default and "effective_set_count" silently equals raw
+`set_count` — a confident green tick from missing data. Without explicit
+`frequency_per_week` intent, day count is ambiguous (4-day-cycle-run-every-7-days
+vs 4-day-rotated-as-available). Lou's own line — "needs slightly more data for
+this to work" — IS this finding. Fix: data-model PR lands FIRST, projection
+PR lands SECOND. Specifically:
+  - Audit current `Androgod(ess) Q2 2026` routine: what % of sets have usable
+    `rpe_target`? If <50%, no projection will be honest until populated.
+  - Add `target_rir int` to `workout_routine_sets` (or rationalize `rpe_target`
+    so it's required for working sets).
+  - Add `frequency_per_week int` to `workout_routines` (default = day count,
+    overrideable for cycle/sparse plans).
+  - Confidence flags: `effective_set_count` returns `null` when RIR unknown.
+    UI shows "uncertain" zone, not optimistic green.
+
+**[CRITICAL] Frequency is a first-class red-zone driver, not a footnote.**
+Androgodess strongest, Codex agrees. Lou's literal motivating example
+(4-day vs 5-day LULUL for glutes) is a frequency question dressed as volume.
+Schoenfeld 2019: ≥2x/wk per muscle is the hypertrophy floor. Fix:
+`frequency_zone` field alongside `volume_zone`. `days_touched<2` on a
+`build_emphasis` muscle = red zone regardless of total set count. A routine
+with 18 glute sets in one Lower-A is *worse* than 12 sets across 2 days —
+the tile must say so.
+
+**[CRITICAL] Vision-aware MAV overrides — without them, the tool argues with
+the androgodess plan.** Androgodess unique critical finding, Codex echoes
+("priority constraints"). Default `optimal_sets_max=20` for glutes will flag
+Lou's correct 24-set glute volume as "over." Lateral delts spec is 12-16
+even though parent slug shows higher. Fix: `vision.build_emphasis` entries
+gain optional `override_sets_min`/`override_sets_max`, OR routine projection
+respects per-vision-muscle ranges. Without this, the projection on the 5-day
+LULUL example tells Lou NOT to do exactly what the plan tells them to do.
+
+**[CRITICAL] "Diagnostic only" is a fig leaf — design the boundary now.**
+Codex + Claude. Lou will immediately ask "so what should I change?" The fix
+is NOT to add prescription (that violates CLAUDE.md's "two coaches" ban).
+The fix is to be precise about boundaries:
+  - `/feed` = adaptive coach from logged reality (PUSH/REDUCE/DELOAD)
+  - Routine builder = design-time constraint check from planned intent
+  - Builder language: "glutes short by 6 effective sets," "hip abductors only
+    touched 1 day," "delts at MRV at 2-day frequency" — *design feedback*,
+    not weekly *prescription*.
+This is the same code, different framing — but the framing matters because
+"PUSH glutes +2" vs "glutes are 6 sets short" reads differently to Lou.
+
+### Critical finding from one voice (still flagged)
+
+**[CRITICAL — Androgodess] Lateral-delt sub-muscle resolution.** The 18-slug
+taxonomy treats "delts" as one muscle. Lou's #1 most-aggressive transformation
+target — shoulder width 40.6→50cm — is a *lateral-head specialization* problem
+that the monitoring log ALREADY flags ("total delts 22 sets/wk reads over,
+lateral-direct only 4 sets/wk"). A volume tile that says "delts: optimal/over"
+on a routine where lateral is undertrained is actively misleading. Two fix
+options:
+  - (a) Extend taxonomy with `delts_lateral` / `delts_anterior` / `delts_posterior`
+    (proper, ~1-2 days extra, requires migration + exercise re-tagging).
+  - (b) Exercise-tag layer: `lateral_emphasis: true` on lateral_raise / cable_y_raise,
+    derive virtual `delts_lateral` row in projection only (no schema change,
+    less precise, faster).
+
+This is a USER CHALLENGE — Lou should pick (a), (b), or "ship without and accept
+the blind spot." Same blind spot exists in miniature for glutes (gmax vs gmed)
+and core (rectus vs anti-rotation) but lateral delts is the one that breaks
+THIS feature for THIS user.
+
+**[CRITICAL — Codex] Adherence loop is the strategic payoff, not "boil-the-lake
+follow-up."** Codex argues the plan undersells the planned-vs-logged loop.
+"Routine plans 14 glute sets; you logged 8 this week" is the closed loop that
+makes routines a meaningful upstream contract for /feed. The plan defers this
+as a stretch. Codex says it should be in v1 scope. Marked as TASTE DECISION
+because it's a real scope expansion (~1 extra day CC) — Lou should weigh in
+even though both engineering and PT angles support including it.
+
+### Reshaped scope
+
+Based on the convergent findings, the v1 scope should be:
+
+**Sequence:**
+1. **PR1 — Routine data model fixes** (~1 day CC):
+   - Add `target_rir` to `workout_routine_sets` (or backfill from `rpe_target`).
+   - Add `frequency_per_week` to `workout_routines`.
+   - Audit Lou's active routine to populate where possible.
+   - Confidence-flag plumbing.
+
+2. **PR2 — Shared volume math extraction** (~half day CC):
+   - Pull primary/secondary credit + RIR weighting + zone classification
+     into `src/lib/training/volume-math.ts` (pure module).
+   - Refactor `getWeekSetsPerMuscle` SQL helper or post-processor to use it.
+   - Refactor `prescription-engine.ts` to consume from the same module.
+   - **No behavior change for /feed** — pure refactor with snapshot tests.
+
+3. **PR3 — Routine volume projection + tile** (~1 day CC):
+   - `projectRoutineVolume(routine, vision, muscleDefs)` consumes shared math.
+   - Frequency-as-red-zone semantics applied.
+   - Vision-aware MAV overrides honored.
+   - "Planned weekly volume" tile in routine builder.
+   - Confidence states surfaced (uncertain when RIR null).
+   - Lateral delt sub-muscle resolution per Lou's choice (a/b/skip).
+
+4. **PR4 — Adherence delta on /feed** (~1 day CC, conditional on user-challenge):
+   - Compare planned (from active routine) vs logged.
+   - Add as 4th category alongside PUSH/REDUCE/DELOAD: "ADHERENCE GAP".
+
+**v1 scope = PR1 + PR2 + PR3.** Total ~2.5 days CC.
+**v1.1 scope = +PR4.** Total ~3.5 days CC.
+
+### What's NOT in scope (deferred)
+
+- Auto-generation of routines (still Lou's call, tool diagnoses only).
+- Recovery prediction / fatigue cost modeling.
+- Sub-muscle taxonomy beyond delts (gmax vs gmed, rectus vs obliques) — flag
+  as future work.
+- Training-block sequencing decisions ("is this routine right for week 4 of
+  build phase?") — outside this layer.
+
+
