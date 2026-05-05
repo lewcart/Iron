@@ -52,11 +52,14 @@ npm run cap:sync >/dev/null
 
 # ── Build + sign ──────────────────────────────────────────────────────────────
 echo "▸ xcodebuild…"
+# No `-sdk iphoneos` — that flag globally overrides per-target SDKROOT, so the
+# embedded RebirthWatch (SDKROOT=watchos) target gets compiled against iOS and
+# fails to find WatchKit. -destination is enough to drive the iOS app target;
+# xcodebuild resolves the watch dep against watchOS automatically.
 xcodebuild \
   -project ios/App/App.xcodeproj \
   -scheme App \
   -configuration Debug \
-  -sdk iphoneos \
   -destination "platform=iOS,id=$DEVICE_ID" \
   -derivedDataPath build/ios-device \
   -allowProvisioningUpdates \
