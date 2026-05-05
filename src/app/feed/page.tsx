@@ -39,6 +39,7 @@ import {
 // v1.1 surfaces
 import { CardioComplianceTile, type CardioTileResponse } from '@/components/week/CardioComplianceTile';
 import { PrescriptionCard } from '@/components/week/PrescriptionCard';
+import { AdherenceGap } from '@/components/AdherenceGap';
 import { PhotoCadenceFooter } from '@/components/week/PhotoCadenceFooter';
 import { prescriptionsFor, type PrescriptionMuscleFact } from '@/lib/training/prescription-engine';
 import { deriveHrtContext, type HrtTimelinePeriodInput } from '@/lib/training/hrt-context';
@@ -1060,6 +1061,10 @@ export default function WeekPage() {
       <div className="px-4 space-y-4">
         {/* ── v1.1: Next-week prescription banner (top of Section A) ── */}
         <PrescriptionCard data={prescriptionResult} />
+
+        {/* ── Adherence gap (retrospective; renders only when 3+ priority
+         *  muscles have <80% adherence for 3+ weeks running) ── */}
+        <AdherenceGap />
 
         {/* ── v1.1: Photo cadence prompt — promoted to top when overdue/no-photo,
          *  otherwise renders at the bottom (after Section B) ── */}
