@@ -143,6 +143,32 @@ interface PushPayload {
 const PAGE_SIZE = 1000;
 const POLL_INTERVAL_MS = 15_000;
 
+// iOS WKWebView (and Safari) tear down the IndexedDB worker process when the
+// app is suspended in the background. On resume, every existing IDB connection
+// throws "UnknownError: Connection to Indexed Database server lost. Refresh
+// the page to try again" and stays broken until the page reloads — Dexie can't
+// reconnect on its own. We catch the error in push()/pull() and trigger a
+// reload so the user doesn't get parked behind a red sync-error pill.
+//
+// 30s session-storage cooldown guards against a reload loop: if a reload
+// happens and the same error fires again immediately, surface it normally
+// instead of hammering reload forever.
+function reloadIfIdbConnectionLost(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err);
+  if (!/Connection to Indexed Database server lost/i.test(msg)) return false;
+  if (typeof window === 'undefined') return false;
+  try {
+    const last = Number(window.sessionStorage.getItem('__rebirth_idb_reload_at') ?? 0);
+    if (Date.now() - last < 30_000) return false;
+    window.sessionStorage.setItem('__rebirth_idb_reload_at', String(Date.now()));
+  } catch {
+    // sessionStorage unavailable — still attempt the reload
+  }
+  console.warn('[sync] IDB connection lost — reloading to reconnect');
+  window.location.reload();
+  return true;
+}
+
 // ─── Sync Engine ───────────────────────────────────────────────────────────────
 //
 // Architecture:
@@ -289,6 +315,7 @@ class SyncEngine {
       this._lastErrorDetails = null;
       this.setStatus('idle');
     } catch (err) {
+      if (reloadIfIdbConnectionLost(err)) return;
       const msg = err instanceof Error ? err.message : String(err);
       this._lastError = `push: ${msg}`;
       const ctx = (err as Error & { _syncCtx?: { status: number; url: string; method: 'POST'; responseBody: string } })._syncCtx;
@@ -361,6 +388,7 @@ class SyncEngine {
       this._lastErrorDetails = null;
       this.setStatus('idle');
     } catch (err) {
+      if (reloadIfIdbConnectionLost(err)) return;
       const msg = err instanceof Error ? err.message : String(err);
       this._lastError = `pull: ${msg}`;
       const ctx = (err as Error & { _syncCtx?: { status: number; url: string; method: 'GET'; responseBody: string } })._syncCtx;

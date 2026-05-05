@@ -2,6 +2,12 @@
 
 All notable changes to Rebirth are documented here.
 
+## [0.9.4] - 2026-05-06
+
+### Fixed
+
+- **Auto-recover from iOS WKWebView IndexedDB eviction.** iOS suspends the WebView's IndexedDB worker when the app stays backgrounded long enough; on resume, every Dexie call throws `UnknownError: Connection to Indexed Database server lost. Refresh the page to try again` and stays broken until the page reloads. The sync engine's push/pull catch blocks now match that exact message and call `window.location.reload()` instead of parking behind a red sync-error pill — IDB reconnects on the fresh page and the next foreground sync clears the dirty queue. 30-second sessionStorage cooldown guards against a reload loop.
+
 ## [0.9.3] - 2026-05-05
 
 ### Added
