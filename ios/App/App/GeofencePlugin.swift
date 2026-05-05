@@ -19,6 +19,7 @@ import UserNotifications
 ///   GeofencePlugin.setAutoWalkEnabled({ enabled })
 ///   GeofencePlugin.startWalkNow()                // arms walk-2 from JS finish hook
 ///   GeofencePlugin.cancelActiveWalk()            // user-cancellation
+///   GeofencePlugin.finishActiveWalkNow()         // user-initiated finish (didn't reach gym/home)
 ///   GeofencePlugin.getActiveWalkState()          // pull on app foreground
 ///   GeofencePlugin.getStatus()                   // home + gym + flags
 ///   addListener('homeArrival', handler)          // fired after dwell threshold met
@@ -37,6 +38,7 @@ public class GeofencePlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "setAutoWalkEnabled",  returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "startWalkNow",        returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "cancelActiveWalk",    returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "finishActiveWalkNow", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "getActiveWalkState",  returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "getStatus",           returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "requestHKWriteAuth",  returnType: CAPPluginReturnPromise),
@@ -262,6 +264,53 @@ public class GeofencePlugin: CAPPlugin, CAPBridgedPlugin {
         walkTracker.cancel()
         notifyWalkStateChanged()
         call.resolve(["cancelled": true])
+    }
+
+    /// User-initiated finish for an active walk that didn't reach its
+    /// terminal geofence (e.g. went on a morning walk but didn't end at the
+    /// gym). Saves whatever route samples have been collected to HealthKit
+    /// and ends the morning flow regardless of leg — no walk-2 expected.
+    @objc func finishActiveWalkNow(_ call: CAPPluginCall) {
+        let s = walkTracker.loadState()
+        guard s.phase == .walkOutboundActive || s.phase == .walkInboundActive else {
+            call.resolve([
+                "finished": false,
+                "reason": "no active walk: phase=\(s.phase.rawValue)"
+            ])
+            return
+        }
+        let leg: WalkLeg = (s.phase == .walkOutboundActive) ? .outbound : .inbound
+        // Optimistic transition: manual finish always ends the morning flow.
+        walkTracker.transition(to: .completed)
+        endActiveWalkLocationUpdates()
+        walkTracker.finish(at: Date()) { [weak self] result in
+            guard let self else { return }
+            switch result {
+            case .success:
+                self.postWalkCompletedNotification()
+                self.notifyWalkStateChanged()
+                call.resolve([
+                    "finished": true,
+                    "leg": leg == .outbound ? "outbound" : "inbound"
+                ])
+            case .failure(let err):
+                // No samples flushed yet — fall back to cancel so the tracker
+                // doesn't sit in .completed with stale state.
+                if case .noSamples = err {
+                    self.walkTracker.cancel()
+                    self.notifyWalkStateChanged()
+                    call.resolve([
+                        "finished": false,
+                        "reason": "no samples — cancelled instead"
+                    ])
+                    return
+                }
+                self.walkTracker.transition(to: .failedSaveAwaitingRetry)
+                self.postWalkSaveFailedNotification(error: err)
+                self.notifyWalkStateChanged()
+                call.resolve(["finished": false, "reason": "save failed"])
+            }
+        }
     }
 
     @objc func getActiveWalkState(_ call: CAPPluginCall) {

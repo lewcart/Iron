@@ -23,6 +23,7 @@ import {
 } from '@/lib/native/rest-timer-activity';
 import { consumeScheduleTap } from '@/lib/workout-schedule';
 import { HealthSection } from '@/components/HealthSection';
+import { ActiveWalkBanner } from '@/components/ActiveWalkBanner';
 import Link from 'next/link';
 import { Check, ChevronDown, ChevronRight, ChevronsUp, ChevronUp, ClipboardList, Clock, Dumbbell, Equal, GripVertical, Info, Plus, Search, Timer, X } from 'lucide-react';
 import { ExerciseDetailModal } from '@/components/ExerciseDetailModal';
@@ -2061,7 +2062,10 @@ export default function WorkoutPage() {
     const routinesExist = plans.some(p => p.routines.length > 0);
     return (
       <main className="tab-content bg-background overflow-y-auto">
-        <div className="px-4 pt-safe pb-4 flex items-center justify-between">
+        <div className="pt-safe">
+          <ActiveWalkBanner />
+        </div>
+        <div className="px-4 pb-4 flex items-center justify-between">
           <h1 className="text-2xl font-bold">Workout</h1>
           <div className="flex items-center gap-1">
             <Link
@@ -2188,6 +2192,7 @@ export default function WorkoutPage() {
     <>
       {/* Fixed summary bar only */}
       <div ref={headerRef} className="fixed top-0 left-0 right-0 z-20 bg-background pt-safe">
+        <ActiveWalkBanner />
         <WorkoutSummaryBar
           elapsed={elapsed}
           exercises={workout.exercises}

@@ -95,6 +95,7 @@ interface GeofencePluginInterface {
   setAutoWalkEnabled(options: { enabled: boolean }): Promise<{ enabled: boolean }>;
   startWalkNow(): Promise<{ started: boolean; reason?: string }>;
   cancelActiveWalk(): Promise<{ cancelled: true }>;
+  finishActiveWalkNow(): Promise<{ finished: boolean; leg?: 'outbound' | 'inbound'; reason?: string }>;
   getActiveWalkState(): Promise<WalkSnapshot>;
   getStatus(): Promise<GeofenceStatus>;
   requestHKWriteAuth(): Promise<{ requested: true }>;
@@ -126,6 +127,7 @@ const GeofencePluginNative = registerPlugin<GeofencePluginInterface>('Geofence',
     setAutoWalkEnabled: async (opts: { enabled: boolean }) => ({ enabled: opts.enabled }),
     startWalkNow: async () => ({ started: false, reason: 'web' }),
     cancelActiveWalk: async () => ({ cancelled: true as const }),
+    finishActiveWalkNow: async () => ({ finished: false, reason: 'web' }),
     getActiveWalkState: async (): Promise<WalkSnapshot> => ({
       phase: 'idle',
       flowId: null,
@@ -186,6 +188,19 @@ export async function startWalkNow(): Promise<{ started: boolean; reason?: strin
 /** User-initiated cancel (settings button or notification action falls back to this). */
 export async function cancelActiveWalk(): Promise<{ cancelled: true }> {
   return GeofencePluginNative.cancelActiveWalk();
+}
+
+/**
+ * User-initiated finish — saves the active walk to HealthKit even though
+ * the gym/home geofence wasn't reached. Falls back to cancel if no GPS
+ * samples have been collected yet.
+ */
+export async function finishActiveWalkNow(): Promise<{
+  finished: boolean;
+  leg?: 'outbound' | 'inbound';
+  reason?: string;
+}> {
+  return GeofencePluginNative.finishActiveWalkNow();
 }
 
 /** Pull the current walk snapshot. Use on app foreground/resume to reconcile. */
