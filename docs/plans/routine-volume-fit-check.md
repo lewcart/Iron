@@ -994,23 +994,60 @@ existing monitoring-protocol flag triggers. Override any specific value if
 you have stronger conviction. (TASTE — these are inferences from PT-grade
 sources, not gospel.)
 
-## QUESTION FOR LOU (single AskUserQuestion in the morning)
+## GATE LOCKED — 2026-05-06
 
-I'm going to surface the 4 user challenges + 3 taste decisions as a single
-batched question when you're awake. Default answers if you don't override:
+Lou's answers (with my commentary):
 
 ```
-UC1 schema change:           ACCEPT
+UC1 schema change:           ACCEPT (was always going to be — misframed by /autoplan)
 UC2 lateral-delt option (b): ACCEPT
 UC3 framing refinement:      ACCEPT
-UC4 comparison mode:         (B) reserve the slot, ship absolute-only
-TD1 PR4 in v1:               DEFER to v1.1
-TD2 RIR 5-tier:              ADD the 0.25 tier
-TD3 vision MAV defaults:     ACCEPT Androgodess numbers
+UC4 comparison mode:         A — diff-as-default (every priority row shows
+                                 before → after Δ; baseline snapshot at-mount;
+                                 collapses to absolute on new routines)
+TD1 PR4 in v1:               INCLUDE — and add goal-timeline consequence layer
+                                 (date-shift framing: "hip 100cm slips Jan→Mar")
+TD2 RIR 5-tier:              ADD (RIR 5 = 0.25)
+TD3 vision MAV defaults:     ACCEPT (glutes 14-26 freq 3, lateral delts 8-16
+                                 freq 3, hip abductors 8-16 freq 2 evidence:low,
+                                 core/rectus 8-16 freq 3, obliques cap at 6)
 ```
 
-If you reply "approve" or "ship it" or "defaults" — I'll execute exactly the
-above. If you want to override any, just list which (e.g., "UC4=A, TD1=include").
+### PR4 expansion — goal-timeline consequence layer
+
+Lou's instinct: "make me feel the consequences. if this continues for 4 weeks
+goal timeline extended by x." Loss-aversion framing.
+
+**Math model (rough, by Lou's permission):**
+1. Adherence shortfall % → stimulus shortfall % (linear inside MEV-MAV band).
+2. Stimulus shortfall % × muscle's contribution-to-headline-target → SMM/circ
+   rate delta.
+3. Rate delta + active plan's quarterly checkpoints → recompute completion date.
+
+**Per-muscle weighting:**
+- Glutes adherence gap → hip-100cm + SMM-32kg targets
+- Lateral delts adherence gap → shoulder-50cm target
+- Hip abductors adherence gap → hip-width-illusion (compounds hip target)
+- Non-priority muscle adherence gap → no consequence panel (calves slipping
+  doesn't move the headline).
+
+**HRT compounding multiplier:** Lou's plan notes 0.20-0.35kg/mo SMM ceiling on
+HRT (vs ~0.5kg/mo cis-male trained). Multiply consequences by ~1.3-1.5x for
+Lou specifically. Honest, not generic.
+
+**Hard caps to prevent catastrophizing:**
+- Consequence panel renders ONLY when adherence <80% for ≥3 weeks AND missed
+  muscle is in `vision.build_emphasis`.
+- One bad week shows raw "8/14 this week" line, no consequence framing.
+- Always carry "low confidence — based on dose-response averages, your real
+  response varies" copy.
+
+**Don't double-prescribe.** Consequence panel is *retrospective* (4-week
+trailing); /feed prescription is *prospective* (next week). Copy must reflect:
+"you've been delivering 57% — here's what continues if it doesn't change" vs
+"PUSH glutes +2 next week."
+
+**Updated PR4 cost:** ~2 days CC (was 1) for the consequence layer.
 
 ## What happens after you answer
 
