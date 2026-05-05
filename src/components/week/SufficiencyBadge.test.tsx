@@ -31,9 +31,9 @@ describe('SufficiencyBadge', () => {
     expect(screen.getByText(/\[no data\]/)).toBeInTheDocument();
   });
 
-  it('renders [N wks] when 0 < weeks < 8', () => {
+  it('renders [N/8 wks] when 0 < weeks < 8 (denominator visible at-a-glance)', () => {
     render(<SufficiencyBadge weeks={3} muscleName="Glutes" />);
-    expect(screen.getByText(/\[3 wks\]/)).toBeInTheDocument();
+    expect(screen.getByText(/\[3\/8 wks\]/)).toBeInTheDocument();
   });
 
   it('aria-label expands the [N wks] meaning for screen readers', () => {

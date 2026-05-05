@@ -2,13 +2,25 @@
 
 import Link from 'next/link';
 import { useState } from 'react';
-import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Info, Pencil } from 'lucide-react';
+import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Info, Loader2, Pencil } from 'lucide-react';
 import type { PriorityMuscleRow, PriorityMusclesTileData } from '@/lib/api/resolveWeekTiles';
-import type { Zone } from '@/lib/training/volume-landmarks';
+import type { Frequency, Zone } from '@/lib/training/volume-landmarks';
 import { SufficiencyBadge } from './SufficiencyBadge';
 
 export interface PriorityMusclesTileProps {
-  data: PriorityMusclesTileData;
+  /** Set when state==='ok'. Omitted for loading / needs-data. */
+  data?: PriorityMusclesTileData;
+  /** Tile state. Defaults to 'ok' so the existing call sites work unchanged.
+   *  When 'loading' or 'needs-data' the body shows a spinner / empty message
+   *  but the header + week-picker still render — Lou flagged that going back
+   *  too far made the picker disappear, trapping the user. */
+  state?: 'ok' | 'loading' | 'needs-data';
+  /** Empty-state copy when state==='needs-data'. */
+  emptyMessage?: string;
+  /** Optional CTA href for the empty state. */
+  emptyFixHref?: string;
+  /** Optional CTA label paired with `emptyFixHref`. */
+  emptyFixLabel?: string;
   /** 0 = this week, -1 = last, etc. Used for the picker label + chevron gating. */
   weekOffset?: number;
   /** Selected week's Monday (YYYY-MM-DD, user-local TZ). Optional —
@@ -20,9 +32,19 @@ export interface PriorityMusclesTileProps {
   onChangeWeekOffset?: (next: number) => void;
 }
 
-/** Tile 1 — Priority Muscles vs MEV/MAV/MRV (the headline tile). */
+/** Tile 1 — Priority Muscles vs MEV/MAV/MRV (the headline tile).
+ *
+ *  Header / picker chrome renders for every state (ok / loading / needs-data)
+ *  so the user is never trapped on a week without navigation. The header used
+ *  to carry an inline frequency note + colored swatch legend + an RIR
+ *  weighting footnote — those moved into the [i] popover so the tile reads as
+ *  data-first. The InfoButton is the single place to learn vocabulary. */
 export function PriorityMusclesTile({
   data,
+  state = 'ok',
+  emptyMessage,
+  emptyFixHref,
+  emptyFixLabel,
   weekOffset = 0,
   weekStart,
   weekEnd,
@@ -33,10 +55,10 @@ export function PriorityMusclesTile({
   const canGoForward = weekOffset < 0;
   const weekLabel = formatWeekLabel(weekOffset, weekStart, weekEnd);
 
-  const priority = data.rows.filter(r => r.isPriority);
-  const inZoneOrUnder = data.rows.filter(r => !r.isPriority && !r.isDeemphasis && (r.zone === 'in-zone' || r.zone === 'under'));
-  const deemphasis = data.rows.filter(r => r.isDeemphasis);
-  const overOrRisk = data.rows.filter(r => !r.isPriority && !r.isDeemphasis && (r.zone === 'over' || r.zone === 'risk'));
+  const priority = data?.rows.filter(r => r.isPriority) ?? [];
+  const inZoneOrUnder = data?.rows.filter(r => !r.isPriority && !r.isDeemphasis && (r.zone === 'in-zone' || r.zone === 'under')) ?? [];
+  const deemphasis = data?.rows.filter(r => r.isDeemphasis) ?? [];
+  const overOrRisk = data?.rows.filter(r => !r.isPriority && !r.isDeemphasis && (r.zone === 'over' || r.zone === 'risk')) ?? [];
 
   return (
     <section
@@ -48,10 +70,7 @@ export function PriorityMusclesTile({
           Priority Muscles
         </span>
         <div className="flex items-center gap-2">
-          <span className="text-[10px] text-muted-foreground tabular-nums">
-            MEV / MAV / MRV ({data.frequencyThisWeek}× / wk)
-          </span>
-          <InfoButton />
+          <InfoButton frequency={data?.frequencyThisWeek} />
           {/* Tap to edit build/maintain/de-emphasize on the Strategy page —
            *  reuses the existing EditVisionButton sheet rather than
            *  duplicating it inline. */}
@@ -93,73 +112,94 @@ export function PriorityMusclesTile({
         </div>
       )}
 
-      <div className="mt-3 space-y-2">
-        {priority.map(row => (
-          <MuscleRow key={row.slug} row={row} priority />
-        ))}
-      </div>
-
-      {overOrRisk.length > 0 && (
-        <div className="mt-3 space-y-2 border-t border-border pt-3">
-          {overOrRisk.map(row => (
-            <MuscleRow key={row.slug} row={row} />
-          ))}
+      {state === 'loading' && (
+        <div
+          className="mt-6 flex items-center justify-center gap-2 py-8 text-xs text-muted-foreground"
+          role="status"
+          aria-live="polite"
+        >
+          <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+          <span>Loading {formatWeekLabel(weekOffset, weekStart, weekEnd)}…</span>
         </div>
       )}
 
-      {deemphasis.length > 0 && (
-        <>
-          <div className="mt-3 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-            De-emphasis
-          </div>
-          <div className="mt-2 space-y-2">
-            {deemphasis.map(row => (
-              <MuscleRow key={row.slug} row={row} />
-            ))}
-          </div>
-        </>
+      {state === 'needs-data' && (
+        <div className="mt-4 py-6 text-center space-y-3">
+          <p className="text-sm text-muted-foreground leading-relaxed">
+            {emptyMessage ?? 'No working sets logged for this week.'}
+          </p>
+          {emptyFixHref && (
+            <Link
+              href={emptyFixHref}
+              className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"
+            >
+              {emptyFixLabel ?? 'Fix this'}
+            </Link>
+          )}
+        </div>
       )}
 
-      {inZoneOrUnder.length > 0 && (
+      {state === 'ok' && (
         <>
-          <button
-            onClick={() => setExpanded(!expanded)}
-            className="mt-3 flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors min-h-[44px]"
-            aria-expanded={expanded}
-            aria-controls="other-muscles-list"
-          >
-            {expanded ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
-            Other muscles ({inZoneOrUnder.length})
-          </button>
-          {expanded && (
-            <div id="other-muscles-list" className="mt-2 space-y-2">
-              {inZoneOrUnder.map(row => (
+          <div className="mt-3 space-y-2">
+            {priority.map(row => (
+              <MuscleRow key={row.slug} row={row} priority />
+            ))}
+          </div>
+
+          {overOrRisk.length > 0 && (
+            <div className="mt-3 space-y-2 border-t border-border pt-3">
+              {overOrRisk.map(row => (
                 <MuscleRow key={row.slug} row={row} />
               ))}
             </div>
           )}
+
+          {deemphasis.length > 0 && (
+            <>
+              <div className="mt-3 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                De-emphasis
+              </div>
+              <div className="mt-2 space-y-2">
+                {deemphasis.map(row => (
+                  <MuscleRow key={row.slug} row={row} />
+                ))}
+              </div>
+            </>
+          )}
+
+          {inZoneOrUnder.length > 0 && (
+            <>
+              <button
+                onClick={() => setExpanded(!expanded)}
+                className="mt-3 flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors min-h-[44px]"
+                aria-expanded={expanded}
+                aria-controls="other-muscles-list"
+              >
+                {expanded ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+                Other muscles ({inZoneOrUnder.length})
+              </button>
+              {expanded && (
+                <div id="other-muscles-list" className="mt-2 space-y-2">
+                  {inZoneOrUnder.map(row => (
+                    <MuscleRow key={row.slug} row={row} />
+                  ))}
+                </div>
+              )}
+            </>
+          )}
         </>
       )}
-
-      <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] text-muted-foreground leading-snug">
-        <LegendSwatch className="bg-trans-pink" label="priority" />
-        <LegendSwatch className="bg-trans-blue" label="de-emphasis" />
-        <LegendSwatch className="bg-muted-foreground/40" label="other" />
-        <LegendSwatch className="bg-amber-500" label="over MAV" />
-        <LegendSwatch className="bg-red-500" label="at MRV" />
-      </div>
-      <p className="mt-2 text-[10px] text-muted-foreground leading-snug">
-        Sets weighted by RIR (RIR 0–3 = full credit, 4 = half, 5+ = none).
-      </p>
     </section>
   );
 }
 
-function LegendSwatch({ className, label }: { className: string; label: string }) {
+function LegendSwatch({ className, label, hint }: { className: string; label: string; hint?: string }) {
   return (
     <span className="inline-flex items-center gap-1">
       <span className={`inline-block h-2 w-3 rounded-sm ${className}`} aria-hidden />
       <span>{label}</span>
+      {hint && <span className="text-muted-foreground/70">— {hint}</span>}
     </span>
   );
 }
@@ -227,6 +267,11 @@ function MuscleRow({ row, priority = false }: { row: PriorityMuscleRow; priority
         <span>MAV {row.landmark.mavMin}–{row.landmark.mavMax}</span>
         <span>MRV {row.mrv}</span>
       </div>
+      {(row.zone === 'over' || row.zone === 'risk') && (
+        <p className={`mt-1 text-[10px] leading-snug ${zoneTextClass(row.zone)}`}>
+          {zoneInlineHint(row.zone)}
+        </p>
+      )}
     </div>
   );
 }
@@ -267,15 +312,29 @@ function zoneAriaText(zone: Zone): string {
   }
 }
 
-/** Glossary popover. Tap the [i] to learn what MEV/MAV/MRV/RIR mean. */
-function InfoButton() {
+/** Plain-English line shown beneath the bar when a muscle's volume has
+ *  crossed MAV. Lou flagged that a coloured bar alone doesn't tell them
+ *  what the over-shoot actually means. */
+function zoneInlineHint(zone: Zone): string {
+  switch (zone) {
+    case 'over': return 'Above MAV — recovery cost rising. Hold or trim 1–2 sets next session.';
+    case 'risk': return 'At or above MRV — overreaching risk. Pull back; deload if it persists.';
+    default: return '';
+  }
+}
+
+/** Single info popover for the entire tile. Consolidates the volume-landmarks
+ *  glossary, the colour legend (was a separate footer), the RIR weighting
+ *  footnote, the frequency-bound MRV note, and the sufficiency-badge meaning
+ *  that Lou kept forgetting. One tap, one place. */
+function InfoButton({ frequency }: { frequency?: Frequency }) {
   const [open, setOpen] = useState(false);
   return (
     <span className="relative">
       <button
         type="button"
         onClick={() => setOpen(o => !o)}
-        aria-label={open ? 'Hide volume-landmarks glossary' : 'Show volume-landmarks glossary'}
+        aria-label={open ? 'Hide priority muscles glossary' : 'Show priority muscles glossary'}
         aria-expanded={open}
         className="inline-flex h-9 w-9 -m-1 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
       >
@@ -293,25 +352,49 @@ function InfoButton() {
           />
           <div
             role="dialog"
-            aria-label="Volume landmarks glossary"
-            className="absolute right-0 top-full z-50 mt-2 w-72 rounded-lg border border-border bg-card p-3 text-xs text-foreground shadow-lg leading-snug space-y-1.5"
+            aria-label="Priority muscles glossary"
+            className="absolute right-0 top-full z-50 mt-2 w-80 max-w-[calc(100vw-2rem)] rounded-lg border border-border bg-card p-3 text-xs text-foreground shadow-lg leading-snug space-y-3"
           >
-            <p>
-              <span className="font-semibold">MEV</span> — Minimum Effective Volume. Sets/week below this don&apos;t grow muscle.
-            </p>
-            <p>
-              <span className="font-semibold">MAV</span> — Maximum Adaptive Volume. The productive zone where most growth happens (per session range).
-            </p>
-            <p>
-              <span className="font-semibold">MRV</span> — Maximum Recoverable Volume. Above this, fatigue outpaces recovery and you start losing progress. Frequency-dependent.
-            </p>
-            <p>
-              <span className="font-semibold">RIR</span> — Reps in Reserve. How many more reps you could&apos;ve done before failure. Sets at RIR 0–3 drive hypertrophy; RIR 4 = half stimulus; RIR 5+ = essentially warm-up.
-            </p>
-            <p>
-              <span className="font-semibold">eff sets</span> — Effective sets. RIR-weighted set count (your real hypertrophy stimulus).
-            </p>
-            <p className="text-muted-foreground pt-1 border-t border-border">
+            <section className="space-y-1.5">
+              <h3 className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Volume landmarks</h3>
+              <p><span className="font-semibold">MEV</span> — Minimum Effective Volume. Sets/week below this don&apos;t grow muscle.</p>
+              <p><span className="font-semibold">MAV</span> — Maximum Adaptive Volume. The productive zone where most growth happens.</p>
+              <p><span className="font-semibold">MRV</span> — Maximum Recoverable Volume. Above this, fatigue outpaces recovery. Frequency-dependent.</p>
+              {frequency != null && (
+                <p className="text-muted-foreground italic">
+                  MRV shown is bound to your current training frequency ({frequency}× / wk).
+                </p>
+              )}
+            </section>
+
+            <section className="space-y-1.5 pt-2 border-t border-border">
+              <h3 className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Effective sets &amp; RIR</h3>
+              <p><span className="font-semibold">RIR</span> — Reps in Reserve. How many more reps you could&apos;ve done before failure.</p>
+              <p><span className="font-semibold">eff sets</span> — RIR-weighted set count: 0–3 = full credit, 4 = half, 5+ = none. Your real hypertrophy stimulus.</p>
+            </section>
+
+            <section className="space-y-1.5 pt-2 border-t border-border">
+              <h3 className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Bar &amp; colour legend</h3>
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground leading-snug">
+                <LegendSwatch className="bg-trans-pink" label="priority" />
+                <LegendSwatch className="bg-trans-blue" label="de-emphasis" />
+                <LegendSwatch className="bg-muted-foreground/40" label="other" />
+                <LegendSwatch className="bg-amber-500" label="over MAV" />
+                <LegendSwatch className="bg-red-500" label="at MRV" />
+              </div>
+              <p className="text-muted-foreground">
+                Vertical ticks on each bar mark MEV (left) and MAV ceiling (right). The bar fills from 0 to your effective sets; bar&apos;s right edge is MRV.
+              </p>
+            </section>
+
+            <section className="space-y-1.5 pt-2 border-t border-border">
+              <h3 className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Sufficiency badge</h3>
+              <p>
+                <span className="font-semibold">[N/8 wks]</span> — N of the last 8 weeks have effective sets logged for this muscle. Personal landmark tuning unlocks at 8/8. Tap the badge for a per-muscle breakdown.
+              </p>
+            </section>
+
+            <p className="text-muted-foreground pt-2 border-t border-border">
               Source: Renaissance Periodization (RP-2025).
             </p>
           </div>

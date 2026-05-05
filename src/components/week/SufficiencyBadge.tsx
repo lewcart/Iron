@@ -35,7 +35,9 @@ export function SufficiencyBadge({ weeks, muscleName }: SufficiencyBadgeProps) {
   if (weeks == null) return null;
   if (weeks >= PERSONALIZATION_THRESHOLD_WEEKS) return null;
 
-  const label = weeks === 0 ? 'no data' : `${weeks} wks`;
+  const label = weeks === 0
+    ? 'no data'
+    : `${weeks}/${PERSONALIZATION_THRESHOLD_WEEKS} wks`;
   const aria = weeks === 0
     ? `No effective sets logged for ${muscleName} in the last 8 weeks`
     : `${weeks} of last 8 weeks have effective sets for ${muscleName}`;

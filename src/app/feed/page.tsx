@@ -1074,6 +1074,28 @@ export default function WeekPage() {
             ? <CardioComplianceTile key="cardio" data={cardioWeek ?? null} />
             : null;
 
+          // Priority-muscles tile owns its loading + needs-data rendering so
+          // the week-picker chevrons stay reachable on every state. (Lou
+          // flagged that going back to a quiet week trapped them with no
+          // controls to navigate forward again.)
+          if (tile.id === 'priority-muscles' && (tile.state === 'loading' || tile.state === 'needs-data' || tile.state === 'error')) {
+            return (
+              <>
+                {cardioInsert}
+                <PriorityMusclesTile
+                  key={tile.id}
+                  state={tile.state === 'loading' ? 'loading' : 'needs-data'}
+                  emptyMessage={tile.message}
+                  emptyFixHref={tile.fixHref}
+                  emptyFixLabel={tile.fixLabel}
+                  weekOffset={weekOffset}
+                  weekStart={priorityWeekSummary?.weekStart}
+                  weekEnd={priorityWeekSummary?.weekEnd}
+                  onChangeWeekOffset={setWeekOffset}
+                />
+              </>
+            );
+          }
           if (tile.state === 'loading') return <>{cardioInsert}<SkeletonTile key={tile.id} /></>;
           if (tile.state === 'needs-data' || tile.state === 'error') {
             return (
