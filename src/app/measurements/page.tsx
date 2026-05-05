@@ -24,6 +24,8 @@ import { AdjustOffsetDialog, type AdjustablePhotoKind } from './AdjustOffsetDial
 import { AlignedPhoto } from './AlignedPhoto';
 import { apiBase, fetchJsonAuthed } from '@/lib/api/client';
 import { ALL_POSES, POSE_LABELS, isComparablePose } from '@/lib/poses';
+import { METRICS, METRIC_LABEL, formatValue } from '@/lib/inbody';
+import { ChipGroup } from '@/components/ui/ChipGroup';
 
 const SITES = [
   { key: 'shoulder_width', label: 'Shoulder Width' },
@@ -34,6 +36,10 @@ const SITES = [
 ] as const;
 
 type SiteKey = typeof SITES[number]['key'];
+// 'weight' is a pseudo-key on the trend chart — bodyweight lives in
+// `bodyweight_logs`, not `measurement_logs`, so it bypasses the multi-site
+// overlay (different units) and renders as a single-series weight chart.
+type ChartKey = SiteKey | 'weight';
 type TabKey = 'log' | 'inbody';
 
 // `?tab=measurements` and `?tab=photos` are legacy deep-links from /feed,
@@ -91,9 +97,38 @@ function humanizeSite(rawSite: string): string {
     .join(' ');
 }
 
-// InBody metric key used for trend chart reference lines.
-// PBF% is the headline metric most users track; reference-line enrichment targets it.
-const INBODY_TREND_METRIC: keyof InbodyScan = 'pbf_pct';
+// Curated subset of InBody metrics offered as trend-chart options. The full
+// METRICS catalog is ~50 entries; this picks the ones aligned to the
+// androgodess plan's named targets — including the segmental-lean rows
+// (R/L arm, R/L leg) which are explicit headline metrics for the
+// shoulder-cap and glute-shelf goals. Ordered build → segmental → fat →
+// summary so the picker reads top-down by stimulus intent. Default is SMM:
+// plan is intentional muscle build, not a cut, so the headline trend
+// should be a "build" metric, not PBF (also unreliable on Lou per the
+// androgodess monitoring protocol).
+const INBODY_TREND_METRIC_KEYS = [
+  // Build
+  'smm_kg',
+  'fat_free_mass_kg',
+  'weight_kg',
+  // Segmental lean — named plan targets (R arm 2.70→3.30 kg, R leg 7.15→8.20 kg)
+  'seg_lean_right_arm_kg',
+  'seg_lean_left_arm_kg',
+  'seg_lean_right_leg_kg',
+  'seg_lean_left_leg_kg',
+  // Fat — direction signals; trunk-pct catches HRT redistribution
+  'body_fat_mass_kg',
+  'seg_fat_trunk_pct',
+  'visceral_fat_level',
+  'pbf_pct',
+  // Summary
+  'whr',
+  'inbody_score',
+] as const satisfies ReadonlyArray<keyof InbodyScan>;
+
+type InbodyTrendKey = typeof INBODY_TREND_METRIC_KEYS[number];
+
+const DEFAULT_INBODY_METRIC: InbodyTrendKey = 'smm_kg';
 
 // Always render in Lou's London time. Without timeZone the formatter falls
 // through to the device's tz, which on a non-London Mac would emit a different
@@ -132,7 +167,8 @@ function MeasurementsInner() {
   const logs = useMeasurements({ limit: 90 }) as unknown as MeasurementLog[];
   const photos = useProgressPhotos(50);
   const inbodyScans = useInbodyScans(50) as unknown as InbodyScan[];
-  const inbodyGoal = useBodyGoal(INBODY_TREND_METRIC);
+  const [inbodyMetric, setInbodyMetric] = useState<InbodyTrendKey>(DEFAULT_INBODY_METRIC);
+  const inbodyGoal = useBodyGoal(inbodyMetric);
   const bwLogs = useBodyweightLogs(30);
   const loading = false;
   const photosLoading = false;
@@ -143,7 +179,7 @@ function MeasurementsInner() {
   const [inputs, setInputs] = useState<Partial<Record<SiteKey, string>>>({});
   const [weightInput, setWeightInput] = useState('');
   const [saving, setSaving] = useState(false);
-  const [chartSite, setChartSite] = useState<SiteKey>('waist');
+  const [chartSite, setChartSite] = useState<ChartKey>('waist');
   const [logSheetOpen, setLogSheetOpen] = useState(false);
   const [inbodySheetOpen, setInbodySheetOpen] = useState(false);
 
@@ -340,8 +376,10 @@ function MeasurementsInner() {
   // Single-site chart data (mobile + iPad portrait). Group by calendar day
   // and average across aliases — left_bicep + right_bicep on the same InBody
   // scan day average to one upper-arm point. Single-entry days pass through
-  // unchanged (avg of one is the value).
+  // unchanged (avg of one is the value). Weight is a separate series
+  // (`weightChartData`) — short-circuit here so SITE_ALIASES lookup is safe.
   const chartData = (() => {
+    if (chartSite === 'weight') return [];
     const byDay = new Map<string, { measured_at: string; sum: number; count: number }>();
     for (const l of logs) {
       if (!SITE_ALIASES[chartSite].includes(l.site)) continue;
@@ -396,6 +434,19 @@ function MeasurementsInner() {
       });
   })();
 
+  // Bodyweight trend (chartSite === 'weight'). bwLogs is newest-first;
+  // chart wants oldest-first. Render in the user's display unit so the
+  // tooltip matches the bodyweight history rows below.
+  const weightChartData = (() => {
+    return [...bwLogs]
+      .sort((a, b) => a.logged_at.localeCompare(b.logged_at))
+      .slice(-30)
+      .map(log => ({
+        date: formatChartDate(log.logged_at),
+        value: Math.round(toDisplay(log.weight_kg) * 10) / 10,
+      }));
+  })();
+
   // Most recent value per site (for snapshot row). For each UI site, find the
   // most-recent calendar day with any aliased entry, then average all rows
   // from that day. `logs` is sorted desc by measured_at, so logs[0] within a
@@ -415,20 +466,22 @@ function MeasurementsInner() {
 
   const hasInput = SITES.some(s => inputs[s.key]) || !!weightInput || !!logPhotoBlob;
 
-  // InBody trend chart — uses PBF% by default, most recent scans oldest-first
+  // InBody trend chart — most recent scans oldest-first for the selected metric.
+  const inbodyMetricDef = METRICS.find(m => m.key === inbodyMetric);
+  const inbodyMetricLabel = inbodyMetricDef?.label ?? inbodyMetric;
   const inbodyTrendData = inbodyScans
-    .filter(s => s[INBODY_TREND_METRIC] != null)
+    .filter(s => s[inbodyMetric] != null)
     .slice(0, 30)
     .reverse()
     .map(s => ({
       date: formatChartDate(s.scanned_at),
-      value: typeof s[INBODY_TREND_METRIC] === 'number' ? (s[INBODY_TREND_METRIC] as number) : null,
+      value: typeof s[inbodyMetric] === 'number' ? (s[inbodyMetric] as number) : null,
     }))
     .filter(p => p.value != null);
 
   const previousScanValue = (() => {
     if (inbodyScans.length < 2) return null;
-    const v = inbodyScans[1]?.[INBODY_TREND_METRIC];
+    const v = inbodyScans[1]?.[inbodyMetric];
     return typeof v === 'number' ? v : null;
   })();
 
@@ -456,78 +509,92 @@ function MeasurementsInner() {
       )}
 
       {/* Trend chart */}
-      {!loading && logs.length > 1 && (
+      {!loading && (logs.length > 1 || bwLogs.length > 1) && (
         <div>
           <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1 px-1">Trend</p>
           <div className="ios-section">
-            {/* Single-site selector — hidden at lg:+ (multi-site overlay takes over) */}
-            <div className="ios-row flex-wrap gap-2 py-1 lg:hidden">
-              {SITES.map(s => (
-                <button
-                  key={s.key}
-                  onClick={() => setChartSite(s.key)}
-                  className={`px-3 py-1 text-xs font-medium rounded-full border transition-colors ${
-                    chartSite === s.key
-                      ? 'bg-primary text-white border-primary'
-                      : 'border-border text-muted-foreground'
-                  }`}
-                >
-                  {s.label}
-                </button>
-              ))}
-            </div>
+            {/* Selector — visible at all sizes. On lg:+ the cm sites switch
+                to the multi-site overlay; weight stays as a single-series
+                chart at every breakpoint (different units). */}
+            <ChipGroup<ChartKey>
+              variant="wrap"
+              options={[
+                ...SITES.map(s => ({ key: s.key as ChartKey, label: s.label })),
+                { key: 'weight', label: 'Weight' },
+              ]}
+              selected={chartSite}
+              onChange={setChartSite}
+            />
 
-            {/* Mobile + iPad portrait: single-site line chart */}
-            <div className="lg:hidden">
-              {chartData.length > 1 ? (
-                <div className="px-1 py-2">
-                  <div className="h-[200px] md:h-[320px]">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <LineChart data={chartData} margin={{ top: 4, right: 8, bottom: 0, left: -20 }}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                        <XAxis
-                          dataKey="date"
-                          tick={{ fontSize: 12, fill: 'hsl(var(--muted-foreground))' }}
-                          tickLine={false}
-                          axisLine={false}
-                          interval="preserveStartEnd"
-                        />
-                        <YAxis
-                          tick={{ fontSize: 12, fill: 'hsl(var(--muted-foreground))' }}
-                          tickLine={false}
-                          axisLine={false}
-                          domain={['auto', 'auto']}
-                        />
-                        <Tooltip
-                          contentStyle={{
-                            backgroundColor: 'hsl(var(--card))',
-                            border: '1px solid hsl(var(--border))',
-                            borderRadius: '8px',
-                            fontSize: 12,
-                          }}
-                          formatter={(v) => [`${v} cm`, SITES.find(s => s.key === chartSite)?.label ?? chartSite]}
-                        />
-                        <Line
-                          type="monotone"
-                          dataKey="value"
-                          stroke="hsl(var(--primary))"
-                          strokeWidth={2}
-                          dot={chartData.length <= 10}
-                          activeDot={{ r: 4 }}
-                        />
-                      </LineChart>
-                    </ResponsiveContainer>
-                  </div>
+            {(() => {
+              const isWeight = chartSite === 'weight';
+              const activeData = isWeight ? weightChartData : chartData;
+              const siteLabel = SITES.find(s => s.key === chartSite)?.label;
+              const seriesLabel = isWeight ? 'Weight' : (siteLabel ?? chartSite);
+              const unitSuffix = isWeight ? ` ${label}` : ' cm';
+              const emptyHint = isWeight
+                ? 'Log at least 2 bodyweight entries to see a trend.'
+                : `Log at least 2 entries for ${siteLabel?.toLowerCase()} to see a trend.`;
+
+              // Single-site chart: always shown on mobile/portrait; on lg:+
+              // shown only when 'weight' is selected (cm sites get the
+              // multi-site overlay below).
+              const singleVisibility = isWeight ? 'block' : 'lg:hidden';
+              return (
+                <div className={singleVisibility}>
+                  {activeData.length > 1 ? (
+                    <div className="px-1 py-2">
+                      <div className="h-[200px] md:h-[320px]">
+                        <ResponsiveContainer width="100%" height="100%">
+                          <LineChart data={activeData} margin={{ top: 4, right: 8, bottom: 0, left: -20 }}>
+                            <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                            <XAxis
+                              dataKey="date"
+                              tick={{ fontSize: 12, fill: 'hsl(var(--muted-foreground))' }}
+                              tickLine={false}
+                              axisLine={false}
+                              interval="preserveStartEnd"
+                            />
+                            <YAxis
+                              tick={{ fontSize: 12, fill: 'hsl(var(--muted-foreground))' }}
+                              tickLine={false}
+                              axisLine={false}
+                              domain={['auto', 'auto']}
+                            />
+                            <Tooltip
+                              contentStyle={{
+                                backgroundColor: 'hsl(var(--card))',
+                                border: '1px solid hsl(var(--border))',
+                                borderRadius: '8px',
+                                fontSize: 12,
+                              }}
+                              formatter={(v) => [`${v}${unitSuffix}`, seriesLabel]}
+                            />
+                            <Line
+                              type="monotone"
+                              dataKey="value"
+                              stroke="hsl(var(--primary))"
+                              strokeWidth={2}
+                              dot={activeData.length <= 10}
+                              activeDot={{ r: 4 }}
+                            />
+                          </LineChart>
+                        </ResponsiveContainer>
+                      </div>
+                    </div>
+                  ) : (
+                    <p className="text-xs text-muted-foreground px-2 pb-3">
+                      {emptyHint}
+                    </p>
+                  )}
                 </div>
-              ) : (
-                <p className="text-xs text-muted-foreground px-2 pb-3">
-                  Log at least 2 entries for {SITES.find(s => s.key === chartSite)?.label.toLowerCase()} to see a trend.
-                </p>
-              )}
-            </div>
+              );
+            })()}
 
-            {/* Desktop / iPad landscape (lg:+): 4-site overlay with legend */}
-            <div className="hidden lg:block">
+            {/* Desktop / iPad landscape (lg:+): cm-site overlay. Hidden when
+                'weight' is selected — weight has different units, so it gets
+                the single-series chart above at all breakpoints. */}
+            <div className={chartSite === 'weight' ? 'hidden' : 'hidden lg:block'}>
               {multiSiteChartData.length > 1 ? (
                 <div className="px-1 py-2">
                   <div className="h-[360px]">
@@ -868,68 +935,91 @@ function MeasurementsInner() {
         </div>
       )}
 
-      {/* Trend chart — PBF% with goal + previous-scan reference lines */}
-      {!inbodyLoading && inbodyTrendData.length > 1 && (
+      {/* Trend chart — selectable metric, with goal + previous-scan
+          reference lines for the chosen metric. Selector mirrors the Log
+          page's site-picker pattern; default is SMM (build-muscle bias). */}
+      {!inbodyLoading && inbodyScans.length >= 2 && (
         <div>
-          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1 px-1">PBF% Trend</p>
+          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1 px-1">{inbodyMetricLabel} Trend</p>
           <div className="ios-section">
-            <div className="px-1 py-2">
-              <div className="h-[200px] md:h-[320px] lg:h-[360px]">
-                <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={inbodyTrendData} margin={{ top: 4, right: 24, bottom: 0, left: -20 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                    <XAxis
-                      dataKey="date"
-                      tick={{ fontSize: 12, fill: 'hsl(var(--muted-foreground))' }}
-                      tickLine={false}
-                      axisLine={false}
-                      interval="preserveStartEnd"
-                    />
-                    <YAxis
-                      tick={{ fontSize: 12, fill: 'hsl(var(--muted-foreground))' }}
-                      tickLine={false}
-                      axisLine={false}
-                      domain={['auto', 'auto']}
-                    />
-                    <Tooltip
-                      contentStyle={{
-                        backgroundColor: 'hsl(var(--card))',
-                        border: '1px solid hsl(var(--border))',
-                        borderRadius: '8px',
-                        fontSize: 12,
-                      }}
-                      formatter={(v) => [`${v}%`, 'PBF']}
-                    />
-                    {goalValue != null && (
-                      <ReferenceLine
-                        y={goalValue}
-                        stroke="currentColor"
-                        strokeDasharray="4 4"
-                        opacity={0.5}
-                        label={{ value: 'Goal', position: 'right', fill: 'currentColor', fontSize: 10 }}
+            <ChipGroup<InbodyTrendKey>
+              variant="scroll"
+              options={INBODY_TREND_METRIC_KEYS.map(key => ({
+                key,
+                label: METRIC_LABEL[key] ?? key,
+              }))}
+              selected={inbodyMetric}
+              onChange={setInbodyMetric}
+            />
+            {inbodyTrendData.length > 1 ? (
+              <div className="px-1 py-2">
+                <div className="h-[200px] md:h-[320px] lg:h-[360px]">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart data={inbodyTrendData} margin={{ top: 4, right: 24, bottom: 0, left: -20 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                      <XAxis
+                        dataKey="date"
+                        tick={{ fontSize: 12, fill: 'hsl(var(--muted-foreground))' }}
+                        tickLine={false}
+                        axisLine={false}
+                        interval="preserveStartEnd"
                       />
-                    )}
-                    {previousScanValue != null && (
-                      <ReferenceLine
-                        y={previousScanValue}
-                        stroke="currentColor"
-                        strokeDasharray="2 6"
-                        opacity={0.4}
-                        label={{ value: 'Prev', position: 'right', fill: 'currentColor', fontSize: 10 }}
+                      <YAxis
+                        tick={{ fontSize: 12, fill: 'hsl(var(--muted-foreground))' }}
+                        tickLine={false}
+                        axisLine={false}
+                        domain={['auto', 'auto']}
                       />
-                    )}
-                    <Line
-                      type="monotone"
-                      dataKey="value"
-                      stroke="hsl(var(--primary))"
-                      strokeWidth={2}
-                      dot={inbodyTrendData.length <= 10}
-                      activeDot={{ r: 4 }}
-                    />
-                  </LineChart>
-                </ResponsiveContainer>
+                      <Tooltip
+                        contentStyle={{
+                          backgroundColor: 'hsl(var(--card))',
+                          border: '1px solid hsl(var(--border))',
+                          borderRadius: '8px',
+                          fontSize: 12,
+                        }}
+                        formatter={(v) => {
+                          const num = typeof v === 'number' ? v : Number(v);
+                          const formatted = inbodyMetricDef
+                            ? formatValue(Number.isFinite(num) ? num : null, inbodyMetricDef)
+                            : String(v);
+                          return [formatted, inbodyMetricLabel];
+                        }}
+                      />
+                      {goalValue != null && (
+                        <ReferenceLine
+                          y={goalValue}
+                          stroke="currentColor"
+                          strokeDasharray="4 4"
+                          opacity={0.5}
+                          label={{ value: 'Goal', position: 'right', fill: 'currentColor', fontSize: 10 }}
+                        />
+                      )}
+                      {previousScanValue != null && (
+                        <ReferenceLine
+                          y={previousScanValue}
+                          stroke="currentColor"
+                          strokeDasharray="2 6"
+                          opacity={0.4}
+                          label={{ value: 'Prev', position: 'right', fill: 'currentColor', fontSize: 10 }}
+                        />
+                      )}
+                      <Line
+                        type="monotone"
+                        dataKey="value"
+                        stroke="hsl(var(--primary))"
+                        strokeWidth={2}
+                        dot={inbodyTrendData.length <= 10}
+                        activeDot={{ r: 4 }}
+                      />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
               </div>
-            </div>
+            ) : (
+              <p className="text-xs text-muted-foreground px-2 pb-3">
+                Not enough {inbodyMetricLabel.toLowerCase()} data across recent scans.
+              </p>
+            )}
           </div>
         </div>
       )}
