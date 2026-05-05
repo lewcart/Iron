@@ -138,14 +138,14 @@ const DEFAULT_INBODY_METRIC: InbodyTrendKey = 'smm_kg';
 function formatDate(isoStr: string) {
   return new Date(isoStr).toLocaleDateString('en-GB', {
     day: '2-digit', month: 'short', year: 'numeric',
-    timeZone: 'Europe/London',
+    timeZone: 'Australia/Brisbane',
   });
 }
 
 function formatChartDate(isoStr: string) {
   return new Date(isoStr).toLocaleDateString('en-GB', {
     day: '2-digit', month: 'short',
-    timeZone: 'Europe/London',
+    timeZone: 'Australia/Brisbane',
   });
 }
 
@@ -760,7 +760,7 @@ function MeasurementsInner() {
     };
     const byDate = new Map<string, LocalProgressPhoto[]>();
     const LOCALE = 'en-CA';
-    const TZ = 'Europe/London';
+    const TZ = 'Australia/Brisbane';
     const partsFmt = new Intl.DateTimeFormat(LOCALE, {
       timeZone: TZ, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', hour12: false,
     });

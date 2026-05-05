@@ -15,7 +15,7 @@ final class WalkTrackerTimeWindowTests: XCTestCase {
                           weekday: (sh: Int, sm: Int, eh: Int, em: Int),
                           weekend: (sh: Int, sm: Int, eh: Int, em: Int)) -> Bool {
         var cal = Calendar(identifier: .gregorian)
-        cal.timeZone = TimeZone(identifier: "Europe/London")!
+        cal.timeZone = TimeZone(identifier: "Australia/Brisbane")!
         let weekday1to7 = cal.component(.weekday, from: now)  // 1=Sun
         let isWeekend = (weekday1to7 == 1 || weekday1to7 == 7)
         let w = isWeekend ? weekend : weekday
@@ -32,7 +32,7 @@ final class WalkTrackerTimeWindowTests: XCTestCase {
 
     private func london(_ y: Int, _ mo: Int, _ d: Int, _ h: Int, _ mi: Int) -> Date {
         var cal = Calendar(identifier: .gregorian)
-        cal.timeZone = TimeZone(identifier: "Europe/London")!
+        cal.timeZone = TimeZone(identifier: "Australia/Brisbane")!
         let comps = DateComponents(year: y, month: mo, day: d, hour: h, minute: mi)
         return cal.date(from: comps)!
     }

@@ -438,7 +438,7 @@ async function excludeExercisePbHistoryThroughTool(args: Record<string, unknown>
 
   const beforePb = await getExercisePRs(resolved.uuid);
 
-  // Inclusive end-of-day cutoff in user local timezone (Europe/London for
+  // Inclusive end-of-day cutoff in user local timezone (Australia/Brisbane for
   // this single-user app). Compare against w.start_time which is timestamptz.
   const cutoffEndOfDay = `${through_date}T23:59:59.999Z`;
 
@@ -3207,7 +3207,7 @@ export const tools: MCPTool[] = [
       type: 'object',
       properties: {
         week_offset: { type: 'number', description: '0 = current week, -1 = last week, etc. (default 0)' },
-        tz: { type: 'string', description: "IANA TZ name (e.g. 'Europe/London') used to anchor week boundaries. Defaults to the configured app TZ." },
+        tz: { type: 'string', description: "IANA TZ name (e.g. 'Australia/Brisbane') used to anchor week boundaries. Defaults to the configured app TZ." },
       },
     },
     execute: getWeeklySummary,
@@ -3241,7 +3241,7 @@ export const tools: MCPTool[] = [
           type: 'boolean',
           description: 'If false, omit muscles with set_count=0. Default true (returns all rows).',
         },
-        tz: { type: 'string', description: "IANA TZ name (e.g. 'Europe/London') used to anchor week boundaries. Defaults to the configured app TZ." },
+        tz: { type: 'string', description: "IANA TZ name (e.g. 'Australia/Brisbane') used to anchor week boundaries. Defaults to the configured app TZ." },
       },
     },
     execute: getSetsPerMuscle,
@@ -4141,11 +4141,11 @@ export const tools: MCPTool[] = [
   {
     name: 'get_health_sleep_summary',
     description:
-      'Returns a sleep + recovery rollup for a date range from Apple HealthKit: per-stage averages (deep/REM/core/awake + percentages), consistency score (circular stdev of bedtime/waketime in minutes; n>=5 main nights required), HRV trend (window avg, 30d baseline, delta %), and optional per-night detail. Naps are excluded (in_bed >= 4h AND wake >= 04:00 Europe/London). Use for "how was last week\'s sleep?" or "compare this week vs last." For a single night, use get_health_snapshot.sleep_last_night. For one metric trend (e.g. HRV alone), use get_health_series. Pass fields=["consistency"] for ~30 tokens vs ~250 full. include "nights" in fields to get the per-night array. Errors mirror get_health_snapshot: {status:"not_connected", reason, message} or {status:"invalid_range", message, hint}.',
+      'Returns a sleep + recovery rollup for a date range from Apple HealthKit: per-stage averages (deep/REM/core/awake + percentages), consistency score (circular stdev of bedtime/waketime in minutes; n>=5 main nights required), HRV trend (window avg, 30d baseline, delta %), and optional per-night detail. Naps are excluded (in_bed >= 4h AND wake >= 04:00 Australia/Brisbane). Use for "how was last week\'s sleep?" or "compare this week vs last." For a single night, use get_health_snapshot.sleep_last_night. For one metric trend (e.g. HRV alone), use get_health_series. Pass fields=["consistency"] for ~30 tokens vs ~250 full. include "nights" in fields to get the per-night array. Errors mirror get_health_snapshot: {status:"not_connected", reason, message} or {status:"invalid_range", message, hint}.',
     inputSchema: {
       type: 'object',
       properties: {
-        start_date:  { type: 'string', description: 'YYYY-MM-DD inclusive (Europe/London). Optional if window_days is set. Capped at 90 days before end_date.' },
+        start_date:  { type: 'string', description: 'YYYY-MM-DD inclusive (Australia/Brisbane). Optional if window_days is set. Capped at 90 days before end_date.' },
         end_date:    { type: 'string', description: 'YYYY-MM-DD inclusive; defaults to today.' },
         window_days: { type: 'number', description: 'Alternative to start_date. Default 7. Range 1..90.' },
         fields: {
@@ -4164,7 +4164,7 @@ export const tools: MCPTool[] = [
     inputSchema: {
       type: 'object',
       properties: {
-        start_date:  { type: 'string', description: 'YYYY-MM-DD inclusive (Europe/London). Optional if window_days is set.' },
+        start_date:  { type: 'string', description: 'YYYY-MM-DD inclusive (Australia/Brisbane). Optional if window_days is set.' },
         end_date:    { type: 'string', description: 'YYYY-MM-DD inclusive; defaults to today.' },
         window_days: { type: 'number', description: 'Alternative to start_date. Default 7. Range 1..90.' },
       },

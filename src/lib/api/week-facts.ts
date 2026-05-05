@@ -11,7 +11,7 @@
  *
  * Timezone convention: every "week start" / "today" / "day-of-week"
  * computation in this module and in feed/page.tsx uses the *local*
- * timezone (which for this single-user app is Europe/London — see
+ * timezone (which for this single-user app is Australia/Brisbane — see
  * CLAUDE.md "Sleep workflow"). This was inconsistent in earlier drafts:
  * `isoWeekStart` was computed in UTC while feed/page.tsx used local
  * `setHours(0,0,0,0)` for the same week-start. Near midnight that
@@ -123,7 +123,7 @@ export interface WeekFacts {
 }
 
 /** Returns the YYYY-MM-DD for the Monday of the ISO week containing `date`,
- *  computed in the LOCAL timezone (Europe/London for this single-user app).
+ *  computed in the LOCAL timezone (Australia/Brisbane for this single-user app).
  *  Uses local time to stay consistent with the rest of feed/page.tsx,
  *  which uses `setHours(0,0,0,0)` (local) for week boundaries. Using UTC
  *  here previously caused near-midnight disagreement with those sites. */

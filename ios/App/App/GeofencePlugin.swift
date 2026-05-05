@@ -462,7 +462,7 @@ public class GeofencePlugin: CAPPlugin, CAPBridgedPlugin {
     private func isWithinDepartWindow(_ now: Date = Date()) -> Bool {
         let windows = loadPersisted(DepartWindows.self, key: GeofencePlugin.prefsWindowsKey) ?? DepartWindows.defaults
         var cal = Calendar(identifier: .gregorian)
-        cal.timeZone = TimeZone(identifier: "Europe/London") ?? .current
+        cal.timeZone = TimeZone(identifier: "Australia/Brisbane") ?? .current
         let weekday = cal.component(.weekday, from: now)  // 1=Sun, 7=Sat
         let isWeekend = (weekday == 1 || weekday == 7)
         let window = isWeekend ? windows.weekend : windows.weekday

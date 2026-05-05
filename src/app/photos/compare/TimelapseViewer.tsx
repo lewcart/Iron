@@ -21,7 +21,7 @@ const SPEEDS = [
 function formatDate(iso: string) {
   return new Date(iso).toLocaleDateString('en-GB', {
     day: '2-digit', month: 'short', year: 'numeric',
-    timeZone: 'Europe/London',
+    timeZone: 'Australia/Brisbane',
   });
 }
 

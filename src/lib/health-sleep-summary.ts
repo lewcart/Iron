@@ -21,7 +21,7 @@ export type SleepSummaryError = {
 };
 
 export interface SleepSummaryResult {
-  range?: { start_date: string; end_date: string; n_nights: number; timezone: 'Europe/London' };
+  range?: { start_date: string; end_date: string; n_nights: number; timezone: 'Australia/Brisbane' };
   averages?: {
     asleep_min: number; in_bed_min: number;
     deep_min: number; deep_pct: number | null;
@@ -132,7 +132,7 @@ export async function computeSleepSummary(
       start_date: startDate,
       end_date: endDate,
       n_nights: nightRows.length,
-      timezone: 'Europe/London',
+      timezone: 'Australia/Brisbane',
     };
   }
 

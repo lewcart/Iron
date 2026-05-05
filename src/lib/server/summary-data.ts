@@ -101,7 +101,7 @@ export interface SummaryPayload {
 }
 
 export interface SummaryDataOpts {
-  /** IANA TZ name (e.g. `Europe/London`, `Australia/Sydney`). Used to
+  /** IANA TZ name (e.g. `Australia/Brisbane`, `Australia/Sydney`). Used to
    *  compute the "this week" Monday boundary. Defaults to APP_TZ. */
   tz?: string;
   /** 0=current local week, -1=last, etc. */

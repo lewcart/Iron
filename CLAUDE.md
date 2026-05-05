@@ -50,7 +50,7 @@ Updates:
 
 ## Sleep workflow (for MCP agents)
 
-Same date conventions as nutrition (`YYYY-MM-DD` in user's local timezone, which for this single-user app is Europe/London; ISO-8601 with offset for `*_at`).
+Same date conventions as nutrition (`YYYY-MM-DD` in user's local timezone, which for this single-user app is Australia/Brisbane (AEST, UTC+10, no DST); ISO-8601 with offset for `*_at`).
 
 Tool selection:
 - `get_health_snapshot` → current state, last night detail, point-in-time HRV/RHR
@@ -64,7 +64,7 @@ Common workflows:
 - **"HRV trend only"** → `get_health_series({ metric: 'hrv', from })`
 
 Notes:
-- Naps (in_bed < 4h OR wake < 04:00 London) are filtered out of summary aggregates and the consistency score.
+- Naps (in_bed < 4h OR wake < 04:00 Brisbane) are filtered out of summary aggregates and the consistency score.
 - Consistency score requires ≥5 main nights with bedtime/waketime envelopes; otherwise `consistency: null`.
 - Errors:
   - `{status:'not_connected', reason, message}` — same shape as snapshot's not_connected branch.

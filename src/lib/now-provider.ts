@@ -29,9 +29,9 @@ export function isPinned(): boolean {
 }
 
 // Returns a YYYY-MM-DD string in the given IANA timezone. Defaults to
-// Europe/London (Lou's local). Single-user app, single timezone — but
+// Australia/Brisbane (Lou's local). Single-user app, single timezone — but
 // keep the param so test fixtures can pin other zones if needed.
-export function today(tz = 'Europe/London'): string {
+export function today(tz = 'Australia/Brisbane'): string {
   const d = new Date(now());
   return new Intl.DateTimeFormat('en-CA', {
     timeZone: tz,

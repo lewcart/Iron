@@ -7,7 +7,7 @@
  * stays consistent.
  *
  * Query params (one of the date pairs is required):
- *   start_date   — YYYY-MM-DD inclusive (Europe/London, but stored UTC)
+ *   start_date   — YYYY-MM-DD inclusive (Australia/Brisbane, but stored UTC)
  *   end_date     — YYYY-MM-DD inclusive; defaults to today
  *   window_days  — alternative to start_date: last N days. Range 1..90.
  *

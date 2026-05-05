@@ -8,8 +8,11 @@ import { query } from '@/db/db';
  * template_applied_at IS NULL. Mirrors the client-side ensurePlannedLogsForDate
  * so the auto-fill happens even when Lou doesn't open the app.
  *
- * Triggered by Vercel Cron (vercel.json) at 01:00 UTC daily — past midnight in
- * Europe/London year-round (01:00 GMT in winter, 02:00 BST in summer).
+ * Triggered by Vercel Cron (vercel.json). Note: the schedule was originally
+ * tuned for Europe/London (01:00 UTC = past midnight London year-round).
+ * Brisbane is AEST UTC+10 year-round (no DST); midnight Brisbane = 14:00 UTC
+ * the previous day. Update vercel.json schedule if you want this to fire
+ * just after midnight Brisbane local.
  *
  * Idempotency: once template_applied_at is stamped on a date, the cron skips
  * it forever — same contract as the client. If the user later deletes a
@@ -27,9 +30,9 @@ import { query } from '@/db/db';
 
 const SWEEP_WINDOW_DAYS = 14;
 
-/** YYYY-MM-DD in Europe/London (single-user app — Lou's local calendar). */
-function todayLondon(): string {
-  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/London' }).format(new Date());
+/** YYYY-MM-DD in Australia/Brisbane (single-user app — Lou's local calendar). */
+function todayLocal(): string {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Australia/Brisbane' }).format(new Date());
 }
 
 function dateAddDays(dateStr: string, days: number): string {
@@ -75,7 +78,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const today = todayLondon();
+  const today = todayLocal();
   const result: SweepResult = {
     ok: true,
     swept_window_days: SWEEP_WINDOW_DAYS,

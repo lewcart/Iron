@@ -7,7 +7,7 @@
  * 00:00 Mon AEST = 14:00 Sun UTC; UTC's `date_trunc('week', NOW())` still
  * returns the previous Monday until 10:00 AEST).
  *
- * This is single-user. The canonical app TZ is `Europe/London` (matching
+ * This is single-user. The canonical app TZ is `Australia/Brisbane` (matching
  * `src/lib/sleep-stats.ts` and the rest of the codebase). It can be
  * overridden via the `USER_TZ` env var.
  *
@@ -16,9 +16,9 @@
  * to APP_TZ when no `tz` arg is supplied.
  */
 
-const FALLBACK_TZ = 'Europe/London';
+const FALLBACK_TZ = 'Australia/Brisbane';
 
-/** Resolved user timezone — `process.env.USER_TZ` if set, else `'Europe/London'`. */
+/** Resolved user timezone — `process.env.USER_TZ` if set, else `'Australia/Brisbane'`. */
 export const APP_TZ: string = process.env.USER_TZ || FALLBACK_TZ;
 
 const VALID_TZ_RE = /^[A-Za-z][A-Za-z0-9+_./-]*$/;
