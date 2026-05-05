@@ -61,12 +61,29 @@ export interface WatchExercise {
   history: WatchExerciseHistory | null;
 }
 
+export interface WatchRestTimer {
+  /** Phone-authored absolute epoch millisecond at which the timer expires.
+   *  Both surfaces compute remaining = end_at_ms - now-epoch-ms locally;
+   *  using a phone-authored absolute eliminates clock-skew arithmetic. */
+  end_at_ms: number;
+  /** Original duration in seconds. Used by the watch ring to render
+   *  progress (sweep = (end_at_ms - now) / (duration_sec * 1000)). */
+  duration_sec: number;
+  /** Phone stamps this when the timer crosses zero. Watch flips ring
+   *  colour and switches to count-up. */
+  overtime_start_ms: number | null;
+  /** Anchors idempotency on duplicate WC delivery and identifies which
+   *  set this rest follows. */
+  set_uuid: string;
+}
+
 export interface WatchSnapshot {
   workout_uuid: string;
   pushed_at: string;
   current_exercise_index: number;
   exercises: WatchExercise[];
   rest_timer_default_seconds: number;
+  rest_timer: WatchRestTimer | null;
 }
 
 export interface WatchSetMutation {
@@ -107,10 +124,14 @@ interface BuildSnapshotInput {
   historyByExercise?: Map<string, { date: string | null; sets: import('@/db/local').LocalWorkoutSet[] }>;
   /** Default rest timer seconds; defaults to 90 if not provided. */
   restTimerDefaultSeconds?: number;
+  /** Active rest timer projected from the phone-side store. Pass `null`
+   *  when no rest is active. The watch consumes this to drive its
+   *  CountdownRing — phone is the only writer. */
+  restTimer?: WatchRestTimer | null;
 }
 
 export function buildWatchSnapshot(input: BuildSnapshotInput): WatchSnapshot {
-  const { workout, goalWindowByExercise, historyByExercise, restTimerDefaultSeconds = 90 } = input;
+  const { workout, goalWindowByExercise, historyByExercise, restTimerDefaultSeconds = 90, restTimer = null } = input;
 
   // Sort exercises by order_index defensively (already sorted by useLocalDB
   // but watch decode is strict).
@@ -160,6 +181,7 @@ export function buildWatchSnapshot(input: BuildSnapshotInput): WatchSnapshot {
     current_exercise_index: currentExerciseIndex,
     exercises: watchExercises,
     rest_timer_default_seconds: restTimerDefaultSeconds,
+    rest_timer: restTimer,
   };
 }
 

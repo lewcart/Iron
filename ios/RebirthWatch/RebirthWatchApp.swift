@@ -29,7 +29,6 @@ struct RootView: View {
     @EnvironmentObject var workoutSession: WorkoutSessionManager
 
     @State private var pickerContext: PickerContext?
-    @State private var restCountdown: Int?    // total seconds for an active rest timer
     @State private var timeModeContext: TimeModeContext?
     @State private var showSessionEnd: Bool = false
     @State private var lastCompletedAt: Date?
@@ -94,34 +93,36 @@ struct RootView: View {
                 exercise: ctx.exercise,
                 set: ctx.workoutSet,
                 onConfirm: { rir in
+                    // Phone derives the rest auto-start from the
+                    // watchWroteSet event the coordinator sends — no
+                    // watch-side restCountdown trigger. Snapshot's
+                    // rest_timer drives the rest sheet below.
                     Task { await completion.completeSet(in: ctx.exercise, set: ctx.workoutSet, rir: rir) }
                     session.loadFromAppGroup()
                     pickerContext = nil
-                    if ctx.exercise.trackingMode == .reps,
-                       let s = session.snapshot {
-                        restCountdown = s.restTimerDefaultSeconds
-                    }
                 },
                 onCancel: {
                     Task { await completion.completeSet(in: ctx.exercise, set: ctx.workoutSet, rir: nil) }
                     session.loadFromAppGroup()
                     pickerContext = nil
-                    if ctx.exercise.trackingMode == .reps,
-                       let s = session.snapshot {
-                        restCountdown = s.restTimerDefaultSeconds
-                    }
                 }
             )
         }
+        // Rest timer sheet — phone is the only writer. The sheet's presence
+        // derives from snapshot.restTimer != nil; dismissal happens when the
+        // phone publishes a snapshot with rest_timer = null (Skip / Done /
+        // workout finished). The Binding's set is a no-op so SE 1st-gen's
+        // swipe-down doesn't tear the sheet from local state — the snapshot
+        // is truth.
         .sheet(isPresented: Binding(
-            get: { restCountdown != nil },
-            set: { if !$0 { restCountdown = nil } })
+            get: { session.snapshot?.restTimer != nil },
+            set: { _ in })
         ) {
-            if let total = restCountdown {
-                CountdownRing(
-                    totalSeconds: total,
-                    onFinish: { restCountdown = nil },
-                    onCancel: { restCountdown = nil }
+            if let hint = session.snapshot?.restTimer {
+                RestTimerView(
+                    hint: hint,
+                    onSkip: { completion.sendStopRest(setUuid: hint.setUuid) },
+                    onExtend30: { completion.sendExtendRest(seconds: 30, setUuid: hint.setUuid) }
                 )
             }
         }

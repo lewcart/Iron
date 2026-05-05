@@ -177,9 +177,15 @@ final class SetCompletionCoordinator: ObservableObject {
                 return
             }
             let cleaned = stripNulls(dict)
+            // completed_at_ms anchors the queued-stale guard on the phone
+            // bridge — if the watch is out of range, this transfer queues
+            // and may deliver minutes later. Phone skips rest auto-start
+            // when (now - completed_at_ms) > 30s.
+            let completedAtMs = Date().timeIntervalSince1970 * 1000.0
             session.transferUserInfo([
                 "kind": "watchWroteSet",
                 "row": cleaned,
+                "completed_at_ms": completedAtMs,
             ])
             refreshPendingCount()
             log.info("Sent setCompletion via WC: \(row.uuid)")
@@ -187,6 +193,38 @@ final class SetCompletionCoordinator: ObservableObject {
             log.error("Failed to encode/send set completion: \(error)")
             lastError = "send failed"
         }
+    }
+
+    // MARK: - Rest-timer remote control (separate user gestures)
+
+    /// Skip / Done — phone applies, snapshot pushes back with rest_timer = nil,
+    /// watch sheet auto-dismisses.
+    func sendStopRest(setUuid: String) {
+        guard WCSession.isSupported() else { return }
+        let session = WCSession.default
+        guard session.activationState == .activated else { return }
+        session.transferUserInfo([
+            "kind": "stopRest",
+            "set_uuid": setUuid,
+        ])
+        WKInterfaceDevice.current().play(.stop)
+        log.info("Sent stopRest via WC: \(setUuid)")
+        refreshPendingCount()
+    }
+
+    /// +30s — phone bumps end_at_ms, snapshot pushes back, watch ring redraws.
+    func sendExtendRest(seconds: Int, setUuid: String) {
+        guard WCSession.isSupported() else { return }
+        let session = WCSession.default
+        guard session.activationState == .activated else { return }
+        session.transferUserInfo([
+            "kind": "extendRest",
+            "seconds": seconds,
+            "set_uuid": setUuid,
+        ])
+        WKInterfaceDevice.current().play(.start)
+        log.info("Sent extendRest via WC: +\(seconds)s for \(setUuid)")
+        refreshPendingCount()
     }
 
     /// Recursively drop NSNull values so the result is property-list-safe for
@@ -262,7 +300,9 @@ final class SetCompletionCoordinator: ObservableObject {
             pushedAt: Date(),
             currentExerciseIndex: current.currentExerciseIndex,
             exercises: newExercises,
-            restTimerDefaultSeconds: current.restTimerDefaultSeconds
+            restTimerDefaultSeconds: current.restTimerDefaultSeconds,
+            hrvHint: current.hrvHint,
+            restTimer: current.restTimer
         )
         try? appGroup.writeSnapshot(current)
     }

@@ -85,4 +85,76 @@ struct SnapshotCodecTests {
         #expect(decoded.schemaVersion == 2)
         #expect(decoded.body.exercises.isEmpty)
     }
+
+    @Test("Decoder back-compat: snapshot without rest_timer field decodes with restTimer = nil")
+    func restTimerBackCompat() throws {
+        // A pre-rest_timer phone (or a phone with no active rest) emits a body
+        // that lacks the rest_timer key entirely. Watch must accept this.
+        let json = """
+        {
+            "schema_version": 1,
+            "body": {
+                "workout_uuid": "w1",
+                "pushed_at": "2026-05-05T08:00:00Z",
+                "current_exercise_index": 0,
+                "exercises": [],
+                "rest_timer_default_seconds": 90
+            }
+        }
+        """.data(using: .utf8)!
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let decoded = try decoder.decode(VersionedPayload<ActiveWorkoutSnapshot>.self, from: json)
+        #expect(decoded.body.restTimer == nil)
+    }
+
+    @Test("Decoder accepts rest_timer with overtime_start_ms")
+    func restTimerWithOvertime() throws {
+        let json = """
+        {
+            "schema_version": 1,
+            "body": {
+                "workout_uuid": "w1",
+                "pushed_at": "2026-05-05T08:00:00Z",
+                "current_exercise_index": 0,
+                "exercises": [],
+                "rest_timer_default_seconds": 90,
+                "rest_timer": {
+                    "end_at_ms": 1714896000000,
+                    "duration_sec": 90,
+                    "overtime_start_ms": 1714896090000,
+                    "set_uuid": "set-abc"
+                }
+            }
+        }
+        """.data(using: .utf8)!
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let decoded = try decoder.decode(VersionedPayload<ActiveWorkoutSnapshot>.self, from: json)
+        let hint = try #require(decoded.body.restTimer)
+        #expect(hint.endAtMs == 1714896000000)
+        #expect(hint.durationSec == 90)
+        #expect(hint.overtimeStartMs == 1714896090000)
+        #expect(hint.setUuid == "set-abc")
+    }
+
+    @Test("Round-trips a snapshot with active rest timer (no overtime)")
+    func restTimerRoundTrip() throws {
+        let snapshot = ActiveWorkoutSnapshot(
+            workoutUUID: "w1",
+            pushedAt: Date(timeIntervalSince1970: 1_700_000_000),
+            currentExerciseIndex: 0,
+            exercises: [],
+            restTimerDefaultSeconds: 90,
+            restTimer: RestTimerHint(endAtMs: 1_700_000_090_000, durationSec: 90, setUuid: "set-1")
+        )
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        let data = try encoder.encode(VersionedPayload(snapshot))
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let decoded = try decoder.decode(VersionedPayload<ActiveWorkoutSnapshot>.self, from: data)
+        #expect(decoded.body == snapshot)
+        #expect(decoded.body.restTimer?.overtimeStartMs == nil)
+    }
 }

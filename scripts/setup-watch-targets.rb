@@ -25,6 +25,7 @@ WATCH_SOURCES = [
   'ios/RebirthWatch/WeightDial.swift',
   'ios/RebirthWatch/RepsDial.swift',
   'ios/RebirthWatch/CountdownRing.swift',
+  'ios/RebirthWatch/RestTimerView.swift',
   'ios/RebirthWatch/WorkoutSessionManager.swift',
   'ios/RebirthWatch/SessionEndView.swift',
   'ios/RebirthWatch/PBDetector.swift',

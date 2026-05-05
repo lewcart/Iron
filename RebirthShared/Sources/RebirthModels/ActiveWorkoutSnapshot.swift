@@ -207,6 +207,40 @@ public struct HRVHint: Codable, Sendable, Equatable {
     }
 }
 
+/// Active rest timer projected from the phone-side store. The phone is the
+/// single writer; the watch reads remaining time as `endAtMs - Date()`. The
+/// `setUuid` anchors idempotency across duplicate WC delivery and acts as a
+/// natural identity for the rest period that follows that set.
+public struct RestTimerHint: Codable, Sendable, Equatable {
+    /// Phone-authored absolute epoch millisecond at which the timer expires.
+    /// Watch and phone compute remaining = endAtMs - now-epoch-ms locally;
+    /// using a phone-authored absolute eliminates clock-skew arithmetic.
+    public let endAtMs: Int64
+    /// Original duration in seconds. Used by the watch ring to render
+    /// progress (sweep = (endAtMs - now) / (durationSec * 1000)).
+    public let durationSec: Int
+    /// Phone stamps this when the timer crosses zero — watch uses it to
+    /// switch ring colour and stop decrementing.
+    public let overtimeStartMs: Int64?
+    /// Anchors idempotency on duplicate WC delivery and identifies which
+    /// set this rest follows.
+    public let setUuid: String
+
+    public init(endAtMs: Int64, durationSec: Int, overtimeStartMs: Int64? = nil, setUuid: String) {
+        self.endAtMs = endAtMs
+        self.durationSec = durationSec
+        self.overtimeStartMs = overtimeStartMs
+        self.setUuid = setUuid
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case endAtMs = "end_at_ms"
+        case durationSec = "duration_sec"
+        case overtimeStartMs = "overtime_start_ms"
+        case setUuid = "set_uuid"
+    }
+}
+
 public struct ActiveWorkoutSnapshot: Codable, Sendable, Equatable {
     public let workoutUUID: String
     public let pushedAt: Date
@@ -214,6 +248,7 @@ public struct ActiveWorkoutSnapshot: Codable, Sendable, Equatable {
     public let exercises: [ActiveExercise]
     public let restTimerDefaultSeconds: Int
     public let hrvHint: HRVHint?
+    public let restTimer: RestTimerHint?
 
     public init(
         workoutUUID: String,
@@ -221,7 +256,8 @@ public struct ActiveWorkoutSnapshot: Codable, Sendable, Equatable {
         currentExerciseIndex: Int,
         exercises: [ActiveExercise],
         restTimerDefaultSeconds: Int,
-        hrvHint: HRVHint? = nil
+        hrvHint: HRVHint? = nil,
+        restTimer: RestTimerHint? = nil
     ) {
         self.workoutUUID = workoutUUID
         self.pushedAt = pushedAt
@@ -229,6 +265,7 @@ public struct ActiveWorkoutSnapshot: Codable, Sendable, Equatable {
         self.exercises = exercises
         self.restTimerDefaultSeconds = restTimerDefaultSeconds
         self.hrvHint = hrvHint
+        self.restTimer = restTimer
     }
 
     enum CodingKeys: String, CodingKey {
@@ -238,6 +275,7 @@ public struct ActiveWorkoutSnapshot: Codable, Sendable, Equatable {
         case exercises
         case restTimerDefaultSeconds = "rest_timer_default_seconds"
         case hrvHint = "hrv_hint"
+        case restTimer = "rest_timer"
     }
 
     public init(from decoder: Decoder) throws {
@@ -248,5 +286,6 @@ public struct ActiveWorkoutSnapshot: Codable, Sendable, Equatable {
         exercises = try c.decode([ActiveExercise].self, forKey: .exercises)
         restTimerDefaultSeconds = try c.decode(Int.self, forKey: .restTimerDefaultSeconds)
         hrvHint = try c.decodeIfPresent(HRVHint.self, forKey: .hrvHint)
+        restTimer = try c.decodeIfPresent(RestTimerHint.self, forKey: .restTimer)
     }
 }

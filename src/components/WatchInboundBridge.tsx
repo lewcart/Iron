@@ -3,9 +3,18 @@
 import { useEffect } from 'react';
 import { subscribeToWatchInbound } from '@/lib/watch';
 import { updateSet } from '@/lib/mutations';
+import { db } from '@/db/local';
+import {
+  startRestTimer,
+  endRestTimer,
+  extendRestTimer,
+  resolveRestSec,
+  isAutoRestEnabled,
+} from '@/lib/rest-timer-state';
 
-interface WatchSetRow {
+export interface WatchSetRow {
   uuid?: string;
+  workout_exercise_uuid?: string | null;
   weight?: number | null;
   repetitions?: number | null;
   duration_seconds?: number | null;
@@ -21,33 +30,134 @@ interface WatchSetRow {
   order_index?: number;
 }
 
-/** Mounted at the root layout. The watch sends every set-completion as a
- *  WC.transferUserInfo with kind="watchWroteSet" and a `row` payload. We
- *  apply the row to Dexie via `updateSet`, which automatically schedules
- *  a server push through the existing sync engine. The watch sees the new
- *  state on the next snapshot push that the workout-page useEffect fires
- *  in response to its Dexie live query updating. */
+interface WatchInboundEvent {
+  kind: string;
+  payload?: Record<string, unknown>;
+}
+
+export interface WatchInboundDeps {
+  applySet: (uuid: string, fields: Record<string, unknown>) => Promise<unknown>;
+  startRest: (args: { setUuid: string; restSec: number; exerciseName?: string; setNumber?: number }) => unknown;
+  endRest: (opts?: { setUuid?: string }) => void;
+  extendRest: (args: { setUuid?: string; seconds: number }) => void;
+  /** Looks up the workout_exercise + exercise + set-position metadata that
+   *  the bridge needs for a fresh set-completion auto-rest. */
+  lookupExerciseContext: (workoutExerciseUuid: string, setUuid: string) => Promise<{
+    exerciseUuid: string;
+    exerciseName?: string;
+    setNumber?: number;
+  } | null>;
+  resolveRestSec: (opts: { exerciseUuid?: string | null }) => number;
+  autoRestEnabled: () => boolean;
+  /** Used for the queued-stale guard. Defaults to Date.now in production. */
+  now: () => number;
+}
+
+const QUEUED_STALE_THRESHOLD_MS = 30_000;
+
+interface WatchInboundPayload extends Record<string, unknown> {
+  row?: WatchSetRow;
+  /** Watch-stamped epoch ms. The bridge skips rest auto-start if the
+   *  message is more than QUEUED_STALE_THRESHOLD_MS old (out-of-range
+   *  scenario where startRest would otherwise begin minutes late). */
+  completed_at_ms?: number;
+  set_uuid?: string;
+  seconds?: number;
+}
+
+/** Pure inbound-event handler. Exposed so it can be unit-tested against
+ *  injected dependencies without React or Dexie. */
+export async function handleWatchInboundEvent(event: WatchInboundEvent, deps: WatchInboundDeps): Promise<void> {
+  const payload = (event.payload as WatchInboundPayload | undefined) ?? {};
+
+  if (event.kind === 'watchWroteSet') {
+    const row = payload.row;
+    if (!row || typeof row.uuid !== 'string') return;
+
+    await deps.applySet(row.uuid, {
+      weight: row.weight ?? null,
+      repetitions: row.repetitions ?? null,
+      duration_seconds: row.duration_seconds ?? null,
+      rir: row.rir ?? null,
+      is_completed: row.is_completed ?? false,
+      is_pr: row.is_pr ?? false,
+      excluded_from_pb: row.excluded_from_pb ?? false,
+      rpe: row.rpe ?? null,
+      tag: (row.tag === 'dropSet' || row.tag === 'failure') ? row.tag : null,
+      comment: row.comment ?? null,
+      min_target_reps: row.min_target_reps ?? null,
+      max_target_reps: row.max_target_reps ?? null,
+      ...(typeof row.order_index === 'number' ? { order_index: row.order_index } : {}),
+    });
+
+    // Auto-rest derivation. Only when the set transitioned to completed
+    // AND the watch event isn't a queued-stale (out-of-range) message —
+    // starting a rest timer for a set Lou completed 5 minutes ago is
+    // worse than not starting one at all.
+    if (!row.is_completed) return;
+    if (!deps.autoRestEnabled()) return;
+    const completedAtMs = typeof payload.completed_at_ms === 'number' ? payload.completed_at_ms : null;
+    if (completedAtMs != null && deps.now() - completedAtMs > QUEUED_STALE_THRESHOLD_MS) return;
+
+    if (typeof row.workout_exercise_uuid !== 'string') return;
+    const ctx = await deps.lookupExerciseContext(row.workout_exercise_uuid, row.uuid);
+    if (!ctx) return;
+    const restSec = deps.resolveRestSec({ exerciseUuid: ctx.exerciseUuid });
+    deps.startRest({
+      setUuid: row.uuid,
+      restSec,
+      exerciseName: ctx.exerciseName,
+      setNumber: ctx.setNumber,
+    });
+    return;
+  }
+
+  if (event.kind === 'stopRest') {
+    const setUuid = typeof payload.set_uuid === 'string' ? payload.set_uuid : undefined;
+    deps.endRest({ setUuid });
+    return;
+  }
+
+  if (event.kind === 'extendRest') {
+    const setUuid = typeof payload.set_uuid === 'string' ? payload.set_uuid : undefined;
+    const seconds = typeof payload.seconds === 'number' ? payload.seconds : 30;
+    deps.extendRest({ setUuid, seconds });
+    return;
+  }
+}
+
+/** Mounted at the root layout. Phone is the single writer; the watch never
+ *  makes its own network calls. The watch sends three kinds of inbound
+ *  message via WC.transferUserInfo (`watchWroteSet`, `stopRest`,
+ *  `extendRest`); this component subscribes and applies them.
+ *
+ *  See docs/watch-architecture.md and docs/watch-replan.md. */
 export function WatchInboundBridge() {
   useEffect(() => {
+    const deps: WatchInboundDeps = {
+      applySet: (uuid, fields) => updateSet(uuid, fields as Parameters<typeof updateSet>[1]),
+      startRest: (args) => startRestTimer(args),
+      endRest: (opts) => endRestTimer(opts),
+      extendRest: (args) => extendRestTimer(args),
+      lookupExerciseContext: async (workoutExerciseUuid, setUuid) => {
+        const we = await db.workout_exercises.get(workoutExerciseUuid);
+        if (!we) return null;
+        const ex = await db.exercises.get(we.exercise_uuid);
+        const sets = await db.workout_sets.where({ workout_exercise_uuid: workoutExerciseUuid }).toArray();
+        const live = sets.filter((s) => !s._deleted).sort((a, b) => a.order_index - b.order_index);
+        const idx = live.findIndex((s) => s.uuid === setUuid);
+        return {
+          exerciseUuid: we.exercise_uuid,
+          exerciseName: ex?.title ?? undefined,
+          setNumber: idx >= 0 ? idx + 1 : undefined,
+        };
+      },
+      resolveRestSec: (opts) => resolveRestSec(opts),
+      autoRestEnabled: () => isAutoRestEnabled(),
+      now: () => Date.now(),
+    };
     const unsubscribe = subscribeToWatchInbound((event) => {
-      if (event.kind !== 'watchWroteSet') return;
-      const row = (event.payload as { row?: WatchSetRow } | undefined)?.row;
-      if (!row || typeof row.uuid !== 'string') return;
-      void updateSet(row.uuid, {
-        weight: row.weight ?? null,
-        repetitions: row.repetitions ?? null,
-        duration_seconds: row.duration_seconds ?? null,
-        rir: row.rir ?? null,
-        is_completed: row.is_completed ?? false,
-        is_pr: row.is_pr ?? false,
-        excluded_from_pb: row.excluded_from_pb ?? false,
-        rpe: row.rpe ?? null,
-        tag: (row.tag === 'dropSet' || row.tag === 'failure') ? row.tag : null,
-        comment: row.comment ?? null,
-        min_target_reps: row.min_target_reps ?? null,
-        max_target_reps: row.max_target_reps ?? null,
-        ...(typeof row.order_index === 'number' ? { order_index: row.order_index } : {}),
-      });
+      void handleWatchInboundEvent(event, deps);
     });
     return () => unsubscribe();
   }, []);

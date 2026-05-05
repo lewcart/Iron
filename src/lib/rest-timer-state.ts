@@ -1,0 +1,419 @@
+// Phone-side rest-timer store. Single source of truth for the active rest
+// across the workout page UI, the iOS Live Activity / Dynamic Island, and the
+// watch (via buildWatchSnapshot). Designed for single-user (Lou); a
+// module-level singleton is fine.
+//
+// Architectural decisions (validated by /autoplan, see docs/watch-replan.md):
+// - Phone is the only writer. The watch sends `watchWroteSet` and the bridge
+//   calls startRestTimer({ setUuid, restSec, ... }) from the SAME handler
+//   that applies the set update — derived from the set transition, not a
+//   separate startRest WC command.
+// - `setUuid` is the idempotency key. Duplicate WC delivery within
+//   `DEDUP_WINDOW_MS` is rejected (returns `{ started: false }`).
+// - Snapshot uses phone-authored `end_at_ms` (absolute epoch ms) so the
+//   watch never has to do clock-skew arithmetic.
+// - Live Activity (Dynamic Island) is decoration. The store is
+//   authoritative; if ActivityKit refuses, the store still publishes state.
+
+import {
+  startRestActivity,
+  updateRestActivity,
+  endRestActivity,
+} from './native/rest-timer-activity';
+import {
+  TIMER_END_KEY,
+  TIMER_DURATION_KEY,
+  type TimerStorage,
+} from '@/app/workout/rest-timer-utils';
+import type { WatchRestTimer } from './watch';
+
+export const TIMER_SET_UUID_KEY = 'rebirth-rest-set-uuid';
+export const TIMER_OVERTIME_START_KEY = 'rebirth-rest-overtime-start';
+export const REST_BY_EXERCISE_KEY = 'rebirth-rest-by-exercise';
+const REST_DEFAULT_KEY = 'rebirth-rest-default';
+const REST_AUTO_START_KEY = 'rebirth-rest-auto-start';
+const DEDUP_WINDOW_MS = 5_000;
+const TICK_INTERVAL_MS = 500;
+const FALLBACK_REST_SEC = 90;
+
+/** Per-exercise last-used rest in seconds. Persists Lou's adjustments per
+ *  exercise so the next time he hits the same exercise, the timer prefills
+ *  to what worked last time. (TODO: when the schema gains
+ *  `routine_exercise.rest_seconds`, prefer that over last-used.) */
+export function readRestByExercise(): Record<string, number> {
+  if (typeof localStorage === 'undefined') return {};
+  try {
+    const raw = localStorage.getItem(REST_BY_EXERCISE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    return typeof parsed === 'object' && parsed != null ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+export function writeRestByExercise(exerciseUuid: string, restSec: number): void {
+  if (typeof localStorage === 'undefined') return;
+  const map = readRestByExercise();
+  map[exerciseUuid] = restSec;
+  localStorage.setItem(REST_BY_EXERCISE_KEY, JSON.stringify(map));
+}
+
+/** Resolves the rest duration for a given exercise. Chain:
+ *    1. Per-exercise last-used (writeRestByExercise)
+ *    2. Global setting (`rebirth-rest-default`)
+ *    3. FALLBACK_REST_SEC (90s)
+ *  Lou's /autoplan pick was "per-exercise routine target → last-used → 90s";
+ *  the routine_exercise.rest_seconds column is a TODO follow-up — until then,
+ *  per-exercise last-used handles the same job. */
+export function resolveRestSec(opts: { exerciseUuid?: string | null }): number {
+  if (opts.exerciseUuid) {
+    const map = readRestByExercise();
+    const lastUsed = map[opts.exerciseUuid];
+    if (typeof lastUsed === 'number' && lastUsed > 0) return lastUsed;
+  }
+  if (typeof localStorage !== 'undefined') {
+    const raw = localStorage.getItem(REST_DEFAULT_KEY);
+    const n = raw == null ? NaN : parseInt(raw, 10);
+    if (Number.isFinite(n) && n > 0) return n;
+  }
+  return FALLBACK_REST_SEC;
+}
+
+/** Whether auto-rest-start is enabled (settings toggle). Defaults to true. */
+export function isAutoRestEnabled(): boolean {
+  if (typeof localStorage === 'undefined') return true;
+  return localStorage.getItem(REST_AUTO_START_KEY) !== 'false';
+}
+
+export interface RestTimerStartArgs {
+  setUuid: string;
+  restSec: number;
+  exerciseName?: string;
+  setNumber?: number;
+  /** Fires once when the timer crosses zero. Hook layer wires audio /
+   *  vibrate / OS notification here so the store stays free of platform
+   *  side effects beyond ActivityKit. */
+  onZeroCross?: () => void;
+}
+
+interface InternalState {
+  endAtMs: number;
+  durationSec: number;
+  setUuid: string;
+  overtimeStartMs: number | null;
+}
+
+export interface DerivedState {
+  selected: number | null;
+  remaining: number;
+  overtime: number;
+  isOvertime: boolean;
+  running: boolean;
+  progress: number;
+}
+
+export interface RestTimerStoreOptions {
+  storage?: TimerStorage;
+  liveActivity?: {
+    start: typeof startRestActivity;
+    update: typeof updateRestActivity;
+    end: typeof endRestActivity;
+  };
+  /** Whether to roll into overtime at zero (vs auto-stop). Defaults to
+   *  reading `rebirth-rest-keep-running` from localStorage. */
+  getKeepRunning?: () => boolean;
+  /** Allows tests to inject a manual scheduler. */
+  scheduler?: {
+    setInterval: (cb: () => void, ms: number) => unknown;
+    clearInterval: (handle: unknown) => void;
+    now: () => number;
+  };
+}
+
+export type Listener = (snap: WatchRestTimer | null) => void;
+
+const noopStorage: TimerStorage = {
+  getItem: () => null,
+  setItem: () => {},
+  removeItem: () => {},
+};
+
+function defaultStorage(): TimerStorage {
+  return typeof localStorage !== 'undefined' ? localStorage : noopStorage;
+}
+
+function defaultKeepRunning(): boolean {
+  if (typeof localStorage === 'undefined') return false;
+  return localStorage.getItem('rebirth-rest-keep-running') === 'true';
+}
+
+export class RestTimerStore {
+  private state: InternalState | null = null;
+  private listeners = new Set<Listener>();
+  private storage: TimerStorage;
+  private liveActivity: NonNullable<RestTimerStoreOptions['liveActivity']>;
+  private getKeepRunning: () => boolean;
+  private scheduler: NonNullable<RestTimerStoreOptions['scheduler']>;
+  private intervalHandle: unknown = null;
+  private lastStartedAt = 0;
+  private zeroCrossCb: (() => void) | null = null;
+
+  constructor(opts: RestTimerStoreOptions = {}) {
+    this.storage = opts.storage ?? defaultStorage();
+    this.liveActivity = opts.liveActivity ?? {
+      start: startRestActivity,
+      update: updateRestActivity,
+      end: endRestActivity,
+    };
+    this.getKeepRunning = opts.getKeepRunning ?? defaultKeepRunning;
+    this.scheduler = opts.scheduler ?? {
+      setInterval: (cb, ms) => setInterval(cb, ms),
+      clearInterval: (h) => clearInterval(h as ReturnType<typeof setInterval>),
+      now: () => Date.now(),
+    };
+    this.hydrate();
+  }
+
+  private hydrate(): void {
+    const endRaw = this.storage.getItem(TIMER_END_KEY);
+    const durRaw = this.storage.getItem(TIMER_DURATION_KEY);
+    if (!endRaw || !durRaw) return;
+    const endAtMs = Number(endRaw);
+    const durationSec = Number(durRaw);
+    if (!Number.isFinite(endAtMs) || !Number.isFinite(durationSec)) {
+      this.persist();
+      return;
+    }
+    const setUuid = this.storage.getItem(TIMER_SET_UUID_KEY) ?? '__legacy__';
+    const overRaw = this.storage.getItem(TIMER_OVERTIME_START_KEY);
+    const overtimeStartMs = overRaw && Number.isFinite(Number(overRaw)) ? Number(overRaw) : null;
+    this.state = { endAtMs, durationSec, setUuid, overtimeStartMs };
+    this.startTicking();
+  }
+
+  private persist(): void {
+    if (this.state == null) {
+      this.storage.removeItem(TIMER_END_KEY);
+      this.storage.removeItem(TIMER_DURATION_KEY);
+      this.storage.removeItem(TIMER_SET_UUID_KEY);
+      this.storage.removeItem(TIMER_OVERTIME_START_KEY);
+      return;
+    }
+    this.storage.setItem(TIMER_END_KEY, String(this.state.endAtMs));
+    this.storage.setItem(TIMER_DURATION_KEY, String(this.state.durationSec));
+    this.storage.setItem(TIMER_SET_UUID_KEY, this.state.setUuid);
+    if (this.state.overtimeStartMs != null) {
+      this.storage.setItem(TIMER_OVERTIME_START_KEY, String(this.state.overtimeStartMs));
+    } else {
+      this.storage.removeItem(TIMER_OVERTIME_START_KEY);
+    }
+  }
+
+  private notify(): void {
+    const snap = this.getSnapshot();
+    for (const cb of this.listeners) cb(snap);
+  }
+
+  private startTicking(): void {
+    if (this.intervalHandle != null) return;
+    this.intervalHandle = this.scheduler.setInterval(() => this.tick(), TICK_INTERVAL_MS);
+  }
+
+  private stopTicking(): void {
+    if (this.intervalHandle == null) return;
+    this.scheduler.clearInterval(this.intervalHandle);
+    this.intervalHandle = null;
+  }
+
+  private tick(): void {
+    if (this.state == null) {
+      this.stopTicking();
+      return;
+    }
+    const now = this.scheduler.now();
+    const remainingMs = this.state.endAtMs - now;
+    if (remainingMs > 0) {
+      this.notify();
+      return;
+    }
+    if (this.state.overtimeStartMs == null) {
+      const cb = this.zeroCrossCb;
+      this.zeroCrossCb = null;
+      cb?.();
+      if (this.getKeepRunning()) {
+        this.markOvertime(now);
+      } else {
+        this.end();
+        return;
+      }
+    }
+    this.notify();
+  }
+
+  start(args: RestTimerStartArgs, now?: number): { started: boolean } {
+    const t = now ?? this.scheduler.now();
+    if (this.state?.setUuid === args.setUuid && t - this.lastStartedAt < DEDUP_WINDOW_MS) {
+      return { started: false };
+    }
+    this.lastStartedAt = t;
+    const endAtMs = t + args.restSec * 1000;
+    this.state = {
+      endAtMs,
+      durationSec: args.restSec,
+      setUuid: args.setUuid,
+      overtimeStartMs: null,
+    };
+    this.zeroCrossCb = args.onZeroCross ?? null;
+    this.persist();
+    void this.liveActivity.start({
+      endTime: endAtMs,
+      duration: args.restSec,
+      exerciseName: args.exerciseName,
+      setNumber: args.setNumber,
+    });
+    this.startTicking();
+    this.notify();
+    return { started: true };
+  }
+
+  extend(seconds: number): void {
+    if (this.state == null) return;
+    this.state = {
+      ...this.state,
+      endAtMs: this.state.endAtMs + seconds * 1000,
+      overtimeStartMs: null,
+    };
+    this.persist();
+    void this.liveActivity.update({
+      endTime: this.state.endAtMs,
+      overtimeStartNull: true,
+    });
+    this.startTicking();
+    this.notify();
+  }
+
+  end(opts?: { setUuid?: string }): void {
+    if (this.state == null) return;
+    if (opts?.setUuid && opts.setUuid !== this.state.setUuid) return;
+    this.state = null;
+    this.zeroCrossCb = null;
+    this.persist();
+    void this.liveActivity.end();
+    this.stopTicking();
+    this.notify();
+  }
+
+  markOvertime(now?: number): void {
+    if (this.state == null || this.state.overtimeStartMs != null) return;
+    const t = now ?? this.scheduler.now();
+    this.state = { ...this.state, overtimeStartMs: t };
+    this.persist();
+    void this.liveActivity.update({ overtimeStart: t });
+    this.notify();
+  }
+
+  /** Foreground re-sync (Capacitor appStateChange). Cheap to call repeatedly. */
+  resync(): void {
+    if (this.state == null) return;
+    const now = this.scheduler.now();
+    if (now >= this.state.endAtMs && this.state.overtimeStartMs == null) {
+      const cb = this.zeroCrossCb;
+      this.zeroCrossCb = null;
+      cb?.();
+      if (this.getKeepRunning()) {
+        this.markOvertime(now);
+      } else {
+        this.end();
+        return;
+      }
+    }
+    this.notify();
+  }
+
+  getSnapshot(): WatchRestTimer | null {
+    if (this.state == null) return null;
+    return {
+      end_at_ms: this.state.endAtMs,
+      duration_sec: this.state.durationSec,
+      overtime_start_ms: this.state.overtimeStartMs,
+      set_uuid: this.state.setUuid,
+    };
+  }
+
+  getDerived(): DerivedState {
+    const now = this.scheduler.now();
+    if (this.state == null) {
+      return { selected: null, remaining: 0, overtime: 0, isOvertime: false, running: false, progress: 0 };
+    }
+    const isOvertime = this.state.overtimeStartMs != null;
+    if (isOvertime) {
+      const overSec = Math.floor((now - (this.state.overtimeStartMs ?? this.state.endAtMs)) / 1000);
+      return {
+        selected: this.state.durationSec,
+        remaining: 0,
+        overtime: Math.max(0, overSec),
+        isOvertime: true,
+        running: true,
+        progress: 0,
+      };
+    }
+    const remainingMs = this.state.endAtMs - now;
+    const remainingSec = Math.max(0, Math.ceil(remainingMs / 1000));
+    return {
+      selected: this.state.durationSec,
+      remaining: remainingSec,
+      overtime: 0,
+      isOvertime: false,
+      running: true,
+      progress: this.state.durationSec > 0 ? remainingSec / this.state.durationSec : 0,
+    };
+  }
+
+  subscribe(cb: Listener): () => void {
+    this.listeners.add(cb);
+    return () => {
+      this.listeners.delete(cb);
+    };
+  }
+}
+
+let _singleton: RestTimerStore | null = null;
+
+function store(): RestTimerStore {
+  if (_singleton == null) _singleton = new RestTimerStore();
+  return _singleton;
+}
+
+export function startRestTimer(args: RestTimerStartArgs): { started: boolean } {
+  return store().start(args);
+}
+
+export function extendRestTimer(args: { setUuid?: string; seconds: number }): void {
+  store().extend(args.seconds);
+}
+
+export function endRestTimer(opts?: { setUuid?: string }): void {
+  store().end(opts);
+}
+
+export function resyncRestTimer(): void {
+  store().resync();
+}
+
+export function getRestTimer(): WatchRestTimer | null {
+  return store().getSnapshot();
+}
+
+export function getRestTimerDerived(): DerivedState {
+  return store().getDerived();
+}
+
+export function subscribeRestTimer(cb: Listener): () => void {
+  return store().subscribe(cb);
+}
+
+/** Test-only: replace the singleton with a fresh store. */
+export function __setRestTimerStoreForTest(s: RestTimerStore | null): void {
+  _singleton = s;
+}

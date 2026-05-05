@@ -45,10 +45,31 @@ export interface UpdateRestActivityOptions {
   overtimeStartNull?: boolean;
 }
 
+/** Result of a `start` call. `started: false` covers three real failure modes
+ *  on iOS — Live Activities globally disabled, ActivityKit request rejected,
+ *  or the OS predates iOS 16.2. The JS rest-timer store treats Live Activity
+ *  as decoration: state stays authoritative even when started is false, so
+ *  the watch ring + phone in-app UI still render the timer. */
+export interface StartRestActivityResult {
+  started: boolean;
+  reason?: 'disabled' | 'request_failed' | 'unsupported';
+}
+
+/** Returned by `currentActivity()`. Used by the rest-timer-state store on
+ *  app revive to detect orphaned ActivityKit Activities and reconcile. */
+export interface CurrentRestActivity {
+  active: boolean;
+  end_at_ms?: number;
+  duration_sec?: number;
+  paused?: boolean;
+  overtime_start_ms?: number;
+}
+
 interface RestTimerPluginInterface {
-  start(options: StartRestActivityOptions): Promise<void>;
+  start(options: StartRestActivityOptions): Promise<StartRestActivityResult>;
   update(options: UpdateRestActivityOptions): Promise<void>;
   end(): Promise<void>;
+  currentActivity(): Promise<CurrentRestActivity>;
 }
 
 const RestTimerPlugin = registerPlugin<RestTimerPluginInterface>(
@@ -56,9 +77,10 @@ const RestTimerPlugin = registerPlugin<RestTimerPluginInterface>(
   {
     // Web stub — Live Activities are iOS-only.
     web: {
-      start: async () => {},
+      start: async () => ({ started: false, reason: 'unsupported' as const }),
       update: async () => {},
       end: async () => {},
+      currentActivity: async () => ({ active: false }),
     },
   }
 );
@@ -73,14 +95,19 @@ function isLiveActivityEnabled(): boolean {
   return localStorage.getItem(REST_LIVE_ACTIVITY_LS_KEY) !== 'false';
 }
 
-/** Start a Live Activity for the current rest timer. Silent no-op on web or when disabled. */
-export async function startRestActivity(options: StartRestActivityOptions): Promise<void> {
-  if (!Capacitor.isNativePlatform()) return;
-  if (!isLiveActivityEnabled()) return;
+/** Start a Live Activity for the current rest timer. Returns whether
+ *  ActivityKit actually took the request — the rest-timer-state store
+ *  inspects the result to log when the Live Activity didn't take, but
+ *  always keeps the snapshot rest_timer authoritative regardless. Silent
+ *  no-op on web or when the user toggle is off. */
+export async function startRestActivity(options: StartRestActivityOptions): Promise<StartRestActivityResult> {
+  if (!Capacitor.isNativePlatform()) return { started: false, reason: 'unsupported' };
+  if (!isLiveActivityEnabled()) return { started: false, reason: 'disabled' };
   try {
-    await RestTimerPlugin.start(options);
+    return await RestTimerPlugin.start(options);
   } catch (err) {
     console.warn('[rest-timer-activity] start failed:', err);
+    return { started: false, reason: 'request_failed' };
   }
 }
 
@@ -104,5 +131,20 @@ export async function endRestActivity(): Promise<void> {
     await RestTimerPlugin.end();
   } catch (err) {
     console.warn('[rest-timer-activity] end failed:', err);
+  }
+}
+
+/** Query the running Activity (if any) for hydration on JS revive. The
+ *  rest-timer-state store calls this once on init to detect orphaned
+ *  Activities the persisted state doesn't know about — usually after a
+ *  Capacitor process kill mid-rest. If active=true and the store has no
+ *  matching state, the store calls endRestActivity() to clear the orphan. */
+export async function getCurrentRestActivity(): Promise<CurrentRestActivity> {
+  if (!Capacitor.isNativePlatform()) return { active: false };
+  try {
+    return await RestTimerPlugin.currentActivity();
+  } catch (err) {
+    console.warn('[rest-timer-activity] currentActivity failed:', err);
+    return { active: false };
   }
 }
