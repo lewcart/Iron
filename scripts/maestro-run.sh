@@ -86,11 +86,14 @@ build_and_install_if_stale() {
   npm run cap:sync >/dev/null
 
   note "xcodebuild for sim ($SIM_NAME)…"
+  # Don't pass `-sdk iphonesimulator` — that forces ALL targets to compile
+  # against the iOS SDK, including embedded RebirthWatch (SDKROOT=watchos).
+  # With only `-destination`, each target uses its own SDKROOT and Xcode
+  # builds the watch app for watchsimulator + iOS app for iphonesimulator.
   xcodebuild \
     -project ios/App/App.xcodeproj \
     -scheme App \
     -configuration Debug \
-    -sdk iphonesimulator \
     -destination "platform=iOS Simulator,name=$SIM_NAME" \
     -derivedDataPath "$DERIVED_DATA" \
     build \
