@@ -38,14 +38,24 @@ const DEDUP_WINDOW_MS = 5_000;
 const TICK_INTERVAL_MS = 500;
 const FALLBACK_REST_SEC = 90;
 
+function safeLocalStorage(): Storage | null {
+  if (typeof window === 'undefined') return null;
+  const ls = (window as Window).localStorage;
+  if (!ls || typeof ls.getItem !== 'function' || typeof ls.setItem !== 'function') {
+    return null;
+  }
+  return ls;
+}
+
 /** Per-exercise last-used rest in seconds. Persists Lou's adjustments per
  *  exercise so the next time he hits the same exercise, the timer prefills
  *  to what worked last time. (TODO: when the schema gains
  *  `routine_exercise.rest_seconds`, prefer that over last-used.) */
 export function readRestByExercise(): Record<string, number> {
-  if (typeof localStorage === 'undefined') return {};
+  const ls = safeLocalStorage();
+  if (!ls) return {};
   try {
-    const raw = localStorage.getItem(REST_BY_EXERCISE_KEY);
+    const raw = ls.getItem(REST_BY_EXERCISE_KEY);
     if (!raw) return {};
     const parsed = JSON.parse(raw);
     return typeof parsed === 'object' && parsed != null ? parsed : {};
@@ -55,10 +65,11 @@ export function readRestByExercise(): Record<string, number> {
 }
 
 export function writeRestByExercise(exerciseUuid: string, restSec: number): void {
-  if (typeof localStorage === 'undefined') return;
+  const ls = safeLocalStorage();
+  if (!ls) return;
   const map = readRestByExercise();
   map[exerciseUuid] = restSec;
-  localStorage.setItem(REST_BY_EXERCISE_KEY, JSON.stringify(map));
+  ls.setItem(REST_BY_EXERCISE_KEY, JSON.stringify(map));
 }
 
 /** Resolves the rest duration for a given exercise. Chain:
@@ -74,8 +85,9 @@ export function resolveRestSec(opts: { exerciseUuid?: string | null }): number {
     const lastUsed = map[opts.exerciseUuid];
     if (typeof lastUsed === 'number' && lastUsed > 0) return lastUsed;
   }
-  if (typeof localStorage !== 'undefined') {
-    const raw = localStorage.getItem(REST_DEFAULT_KEY);
+  const ls = safeLocalStorage();
+  if (ls) {
+    const raw = ls.getItem(REST_DEFAULT_KEY);
     const n = raw == null ? NaN : parseInt(raw, 10);
     if (Number.isFinite(n) && n > 0) return n;
   }
@@ -84,8 +96,9 @@ export function resolveRestSec(opts: { exerciseUuid?: string | null }): number {
 
 /** Whether auto-rest-start is enabled (settings toggle). Defaults to true. */
 export function isAutoRestEnabled(): boolean {
-  if (typeof localStorage === 'undefined') return true;
-  return localStorage.getItem(REST_AUTO_START_KEY) !== 'false';
+  const ls = safeLocalStorage();
+  if (!ls) return true;
+  return ls.getItem(REST_AUTO_START_KEY) !== 'false';
 }
 
 export interface RestTimerStartArgs {
@@ -153,12 +166,17 @@ const noopStorage: TimerStorage = {
 };
 
 function defaultStorage(): TimerStorage {
-  return typeof localStorage !== 'undefined' ? localStorage : noopStorage;
+  // Server-side rendering and partial polyfills (some Next.js prerender
+  // environments expose `localStorage` as an object whose getItem isn't a
+  // function) both need to fall through to the noop. safeLocalStorage()
+  // gates on `window` and verifies the methods.
+  return safeLocalStorage() ?? noopStorage;
 }
 
 function defaultKeepRunning(): boolean {
-  if (typeof localStorage === 'undefined') return false;
-  return localStorage.getItem('rebirth-rest-keep-running') === 'true';
+  const ls = safeLocalStorage();
+  if (!ls) return false;
+  return ls.getItem('rebirth-rest-keep-running') === 'true';
 }
 
 export class RestTimerStore {
