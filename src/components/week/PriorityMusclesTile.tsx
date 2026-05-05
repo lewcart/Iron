@@ -313,12 +313,14 @@ function zoneAriaText(zone: Zone): string {
 }
 
 /** Plain-English line shown beneath the bar when a muscle's volume has
- *  crossed MAV. Lou flagged that a coloured bar alone doesn't tell them
- *  what the over-shoot actually means. */
+ *  crossed MAV. Volume is a weekly mental model, so the actions are framed
+ *  per-week. The deload action is tied to the plan's actual deload trigger
+ *  (HRV / e1RM stall) rather than to one week of high volume — those are
+ *  separate signals. */
 function zoneInlineHint(zone: Zone): string {
   switch (zone) {
-    case 'over': return 'Above MAV — recovery cost rising. Hold or trim 1–2 sets next session.';
-    case 'risk': return 'At or above MRV — overreaching risk. Pull back; deload if it persists.';
+    case 'over': return 'Above MAV — recovery cost rising. Trim 2–3 sets across the week (≈1 per session) to settle back inside the band.';
+    case 'risk': return 'At or above MRV — recovery debt accumulating. Trim 2–3 sets/wk; if HRV stays low or e1RM stalls 2+ weeks, take a deload week.';
     default: return '';
   }
 }
@@ -390,7 +392,7 @@ function InfoButton({ frequency }: { frequency?: Frequency }) {
             <section className="space-y-1.5 pt-2 border-t border-border">
               <h3 className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Sufficiency badge</h3>
               <p>
-                <span className="font-semibold">[N/8 wks]</span> — N of the last 8 weeks have effective sets logged for this muscle. Personal landmark tuning unlocks at 8/8. Tap the badge for a per-muscle breakdown.
+                <span className="font-semibold">[N/8 wks]</span> — N of the last 8 weeks have effective sets logged for this muscle. At 8/8 we&apos;ll have enough history to start personalizing your landmarks; until then RP-2025 defaults are your best guide. Tap the badge for a per-muscle breakdown.
               </p>
             </section>
 
