@@ -35,7 +35,7 @@ if (swiftPkg.includes('swift-tools-version: 5.9')) {
 // --- (2) packageClassList ---
 const configPath = 'ios/App/App/capacitor.config.json';
 const config = JSON.parse(readFileSync(configPath, 'utf8'));
-const LOCAL_PLUGINS = ['RestTimerPlugin', 'InspoBurstPlugin', 'HealthKitPlugin', 'GeofencePlugin', 'PersonSegmentationPlugin'];
+const LOCAL_PLUGINS = ['RestTimerPlugin', 'InspoBurstPlugin', 'HealthKitPlugin', 'GeofencePlugin', 'PersonSegmentationPlugin', 'WatchConnectivityPlugin'];
 config.packageClassList = Array.isArray(config.packageClassList) ? config.packageClassList : [];
 let added = 0;
 for (const name of LOCAL_PLUGINS) {
@@ -47,4 +47,36 @@ for (const name of LOCAL_PLUGINS) {
 if (added > 0) {
   writeFileSync(configPath, JSON.stringify(config, null, '\t') + '\n');
   console.log(`  patched capacitor.config.json — added ${added} local plugin(s) to packageClassList`);
+}
+
+// --- (3) Verify watchOS target survival ---
+// Capacitor regenerates project.pbxproj on every sync. The watch app and
+// complications targets are added once via Xcode UI; this check fails loudly
+// if they get stripped. Sentinel strings come from the target names in the
+// pbxproj — verify with `grep "RebirthWatch" ios/App/App.xcodeproj/project.pbxproj`.
+const pbxprojPath = 'ios/App/App.xcodeproj/project.pbxproj';
+let watchOSWarnings = 0;
+try {
+  const pbx = readFileSync(pbxprojPath, 'utf8');
+  const watchTargetMissing = !pbx.includes('RebirthWatch');
+  const complicationsTargetMissing = !pbx.includes('RebirthWatchComplications');
+  const sharedPackageMissing = !pbx.includes('RebirthShared');
+  if (watchTargetMissing) {
+    console.warn('  [warn] cap-post-sync: RebirthWatch target not found in project.pbxproj');
+    watchOSWarnings += 1;
+  }
+  if (complicationsTargetMissing) {
+    console.warn('  [warn] cap-post-sync: RebirthWatchComplications target not found in project.pbxproj');
+    watchOSWarnings += 1;
+  }
+  if (sharedPackageMissing) {
+    console.warn('  [warn] cap-post-sync: RebirthShared package reference not found in project.pbxproj');
+    watchOSWarnings += 1;
+  }
+  if (watchOSWarnings > 0) {
+    console.warn('  [warn] Re-add via Xcode (see docs/watch-day1-xcode-setup.md) and commit the pbxproj diff.');
+  }
+} catch (err) {
+  // pbxproj might not exist yet on first sync of a fresh checkout.
+  if (err.code !== 'ENOENT') throw err;
 }

@@ -24,6 +24,7 @@ public class RestTimerPlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "start", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "update", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "end", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "currentActivity", returnType: CAPPluginReturnPromise),
     ]
 
     // Type-erased holder so we don't need to gate the property itself on
@@ -46,8 +47,11 @@ public class RestTimerPlugin: CAPPlugin, CAPBridgedPlugin {
 
         if #available(iOS 16.2, *) {
             guard ActivityAuthorizationInfo().areActivitiesEnabled else {
-                // User disabled Live Activities for this app or globally → silent success.
-                call.resolve()
+                // User disabled Live Activities for this app or globally. The phone
+                // in-app rest UI + watch snapshot remain authoritative — Live
+                // Activity is decoration only. Surface the disabled state so the
+                // JS layer knows ActivityKit didn't take.
+                call.resolve(["started": false, "reason": "disabled"])
                 return
             }
 
@@ -83,15 +87,46 @@ public class RestTimerPlugin: CAPPlugin, CAPBridgedPlugin {
                         pushType: nil
                     )
                     RestTimerPlugin.currentActivityAny = activity
-                    call.resolve()
+                    call.resolve(["started": true])
                 } catch {
                     CAPLog.print("[RestTimerPlugin] start failed:", error.localizedDescription)
-                    call.resolve()
+                    call.resolve(["started": false, "reason": "request_failed"])
                 }
             }
         } else {
-            // Live Activities unsupported on this OS → silent success.
-            call.resolve()
+            // Live Activities unsupported on this OS — JS state remains authoritative.
+            call.resolve(["started": false, "reason": "unsupported"])
+        }
+    }
+
+    // MARK: - currentActivity
+    //
+    // Hydration helper for the JS rest-timer-state store. On Capacitor JS
+    // revive (e.g. after a process kill mid-rest), the store reads
+    // localStorage AND queries this method to detect orphaned ActivityKit
+    // Activities the JS layer didn't know about. If the persisted store
+    // doesn't reference an active Activity, the JS layer calls end() to clear.
+
+    @objc func currentActivity(_ call: CAPPluginCall) {
+        if #available(iOS 16.2, *) {
+            guard let activity = RestTimerPlugin.currentActivityAny as? Activity<RestTimerAttributes> else {
+                call.resolve(["active": false])
+                return
+            }
+            let state = activity.content.state
+            let endAtMs = state.endDate.timeIntervalSince1970 * 1000.0
+            var result: [String: Any] = [
+                "active": true,
+                "end_at_ms": endAtMs,
+                "duration_sec": state.duration,
+                "paused": state.paused,
+            ]
+            if let overtimeStart = state.overtimeStart {
+                result["overtime_start_ms"] = overtimeStart.timeIntervalSince1970 * 1000.0
+            }
+            call.resolve(result)
+        } else {
+            call.resolve(["active": false])
         }
     }
 

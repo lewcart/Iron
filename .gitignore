@@ -58,3 +58,9 @@ next-env.d.ts
 
 # bun lockfile (project uses npm)
 bun.lock
+
+# Swift Package Manager (RebirthShared)
+RebirthShared/.build/
+RebirthShared/.swiftpm/
+*.xcodeproj/xcuserdata/
+*.xcworkspace/xcuserdata/

@@ -175,3 +175,105 @@ Notes:
 - Optional `source_progress_photo_uuid` links the projection to the photo it was generated from — the compare viewer prefers that pairing if set.
 - `target_horizon` is a label (`'3mo'|'6mo'|'12mo'` or freeform), not a date.
 - Generation happens outside this app. Lou uploads pre-generated images; there is no in-app image generation.
+
+## Watch workflow (for any code touching the watch companion)
+
+The Apple Watch companion lives in `ios/RebirthWatch/`. It's a native SwiftUI
+watchOS 10+ app with a sibling complications widget extension at
+`ios/RebirthWatchComplications/`. Both targets depend on the local Swift
+package at `RebirthShared/` (Models, API, Keychain, AppGroup, Outbox,
+WatchLog).
+
+The watchOS targets are added to `ios/App/App.xcodeproj` programmatically
+via `scripts/setup-watch-targets.rb` (idempotent — safe to re-run if
+`cap:sync` ever strips them).
+
+### Snapshot push (phone → watch)
+
+`src/lib/watch.ts:buildWatchSnapshot()` converts `LocalWorkoutWithExercises`
+into the WC envelope. `src/app/workout/page.tsx` calls
+`pushSnapshotToWatch(snapshot)` from a `useEffect` whenever the Dexie live
+query changes — every set mutation, exercise add/remove, completion. The
+iOS plugin (`WatchConnectivityPlugin.swift`) wraps the snapshot as
+`{ schema_version, body }` and calls
+`WCSession.updateApplicationContext`. The watch's `WatchSessionStore`
+writes the inbound envelope to its own App Group UserDefaults so
+cold-launches render instantly.
+
+Snapshot byte budget: hard cap 50KB. History hint = last 1 session only,
+max 10 sets per exercise.
+
+`schema_version` is on every payload. Decoders use `decodeIfPresent` for
+unknown future fields. If a watch sees `schema_version > supported`, it
+shows "Watch needs update" instead of crashing.
+
+### Set completion (watch → phone, no server hop)
+
+**Phone is the single writer to Postgres.** The watch makes no network
+calls. When the user confirms a set on the watch, the watch sends a
+`{ kind: "watchWroteSet", row: <full echoed CDC row> }` payload via
+`WCSession.transferUserInfo` (durable, FIFO, queues if phone unreachable).
+
+Phone-side: `WatchConnectivityPlugin.session(_:didReceiveUserInfo:)`
+forwards the payload to JS as a `watchInbound` event.
+`src/components/WatchInboundBridge.tsx` (mounted at root layout) calls
+`mutations.updateSet()` → Dexie write → existing sync engine pushes to
+`/api/sync/push`. The next debounced snapshot push reflects the new state
+back to the watch.
+
+The watch echoes EVERY column in the payload — `tag`, `comment`, `is_pr`,
+`excluded_from_pb`, etc. Even though the watch doesn't render them, they
+must be present so the server-side `EXCLUDED.column` clause doesn't NULL
+out fields the watch didn't touch.
+
+There is no API key on the watch, no shared keychain bootstrap, no
+watch-side outbox. WC.transferUserInfo's queue + the phone's existing
+sync engine cover all the durability we need single-user.
+
+### HealthKit (HKLiveWorkoutBuilder)
+
+Watch starts an `HKWorkoutSession` on first set approval. `HKLiveWorkoutBuilder`
+collects HR + active energy in real time. On finish, the workout is
+written with `HKMetadataKeyExternalUUID` = Rebirth workout UUID — phone-side
+`fetchWorkouts` (`HealthKitPlugin.swift workoutToFullDict`) reads that
+key for dedup. No explicit watch→phone WC round-trip needed for the UUID.
+
+### Mock snapshot dev flag
+
+Set `WATCH_MOCK_SNAPSHOT` in the watch target's Other Swift Flags. The
+watch bypasses WC and loads `MockSnapshot.midStrengthSession` (3
+exercises across reps + time modes). Useful for fast UI iteration without
+paired sims.
+
+### Conflict policy (single-user)
+
+Server stamps `updated_at = NOW()` on every push — never trusts client
+timestamps for ordering. With phone as single writer, the historical
+"phone Dexie + watch direct write race" no longer applies. See
+`src/app/api/sync/push/route.ts` comment.
+
+### Rest timer
+
+NOT YET IMPLEMENTED on the watch. Day 13's local-`Timer.publish` ring
+was removed because it didn't share state with the phone's
+`RestTimerPlugin` (Live Activity / Dynamic Island). The replacement plan
+mirrors set completion: phone owns timer state, watch sends WC start /
+stopRest / extendRest commands and reads timer state from the snapshot.
+See `docs/watch-replan.md`.
+
+### What NOT to do
+
+- Don't have the watch make HTTP calls. Phone is the single writer.
+- Don't add a watch-side outbox or API client. WC.transferUserInfo has
+  its own delivery queue.
+- Don't have the watch call `update_sets` MCP tool for set completion —
+  it's a routine-target editor, will wipe set state. The phone applies
+  set completions via `mutations.updateSet`.
+- Don't try to generate the `HKWorkout.uuid` watch-side — it's HK-assigned
+  at finish time. Stamp `HKMetadataKeyExternalUUID` instead.
+- Don't reintroduce a watch-owned timer state. Snapshot is truth.
+- Don't render an HRV recommendation on the pill ("consider RIR 4"). The
+  pill is descriptive only — Week-page prescription engine has the monopoly
+  per the prescription-engine note above.
+- Don't put new RebirthShared modules at iOS 17+ deployment target — the
+  iOS App target is iOS 15. Match it.

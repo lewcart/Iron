@@ -7,6 +7,7 @@ import { NetworkProvider } from "@/context/NetworkContext";
 import { SyncStatus } from "@/components/SyncStatus";
 import { InstallPrompt } from "@/components/InstallPrompt";
 import { InspoCaptureButton } from "@/components/InspoCaptureButton";
+import { WatchInboundBridge } from "@/components/WatchInboundBridge";
 
 export const metadata: Metadata = {
   title: "Rebirth",
@@ -48,6 +49,7 @@ export default function RootLayout({
         <NetworkProvider>
           <AppProviders>
             <UnitProvider>
+              <WatchInboundBridge />
               {children}
               <TabBar />
               <InspoCaptureButton />

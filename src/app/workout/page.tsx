@@ -3,12 +3,6 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { App } from '@capacitor/app';
 import { SwipeToDelete } from '@/components/SwipeToDelete';
-import {
-  persistTimer as _persistTimer,
-  clearPersistedTimer as _clearPersistedTimer,
-  readPersistedTimer as _readPersistedTimer,
-  computeRemaining,
-} from './rest-timer-utils';
 import { useStopwatch } from './useStopwatch';
 import { StopwatchSheet } from './StopwatchSheet';
 import {
@@ -17,10 +11,17 @@ import {
   cancelRestNotification,
 } from '@/lib/rest-notifications';
 import {
-  startRestActivity,
-  updateRestActivity,
-  endRestActivity,
-} from '@/lib/native/rest-timer-activity';
+  startRestTimer,
+  extendRestTimer,
+  endRestTimer,
+  resyncRestTimer,
+  reconcileRestTimerNative,
+  getRestTimer,
+  getRestTimerDerived,
+  subscribeRestTimer,
+  resolveRestSec,
+  writeRestByExercise,
+} from '@/lib/rest-timer-state';
 import { consumeScheduleTap } from '@/lib/workout-schedule';
 import { HealthSection } from '@/components/HealthSection';
 import { ActiveWalkBanner } from '@/components/ActiveWalkBanner';
@@ -32,6 +33,7 @@ import { formatTime, calcCompletedSets, calcTotalVolume } from './workout-utils'
 import { uuid as genUUID } from '@/lib/uuid';
 import { useUnit } from '@/context/UnitContext';
 import { useCurrentWorkoutFull, useExercises, getAutoFillValues, getAllTimeBest1RM, getLastSessionSetsForExercise, getGoalWindowForWorkoutExercise } from '@/lib/useLocalDB';
+import { buildWatchSnapshot, pushSnapshotToWatch } from '@/lib/watch';
 import { recommendForExercise, type ExerciseRecommendation } from '@/lib/progression';
 import { REP_WINDOWS, type RepWindow } from '@/lib/rep-windows';
 import { usePlansFull } from '@/lib/useLocalDB-plans';
@@ -77,241 +79,147 @@ function getRestSettings() {
   };
 }
 
-function getKeepRestRunning(): boolean {
-  if (typeof window === 'undefined') return false;
-  return localStorage.getItem('rebirth-rest-keep-running') === 'true';
-}
-
-// ─── Rest timer hook (background-safe) ───────────────────────────────────────
-// Uses absolute endTime rather than elapsed ticks so the countdown stays
-// accurate when the app is backgrounded or suspended by iOS.
-// State is persisted to localStorage so it survives JS suspension.
-
-const persistTimer = (endTime: number, duration: number) =>
-  _persistTimer(localStorage, endTime, duration);
-const clearPersistedTimer = () => _clearPersistedTimer(localStorage);
-const readPersistedTimer = () => _readPersistedTimer(localStorage);
+// ─── useRestTimer — thin React wrapper around the central rest-timer store ──
+// Store is in `src/lib/rest-timer-state.ts`. The store owns persistence,
+// ticking, idempotency, and the single source of truth read by
+// buildWatchSnapshot. The hook subscribes for re-renders and fires the
+// audio/vibrate/notification side effects on zero-cross.
 
 function useRestTimer() {
-  const [selected, setSelected] = useState<number | null>(null);
-  const [remaining, setRemaining] = useState(0);
-  const [overtime, setOvertime] = useState(0); // seconds past endTime (0 when still counting down)
-  const [running, setRunning] = useState(false);
-  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  // Absolute epoch ms when the timer expires — the source of truth
-  const endTimeRef = useRef<number | null>(null);
-  // Whether we've already crossed zero and are counting up.
-  const overtimeStartedRef = useRef(false);
-  // Guard so `notify()` fires exactly once per rest period (even if we stay
-  // running in overtime for a while).
-  const notifiedRef = useRef(false);
+  const [, force] = useState(0);
+  const rerender = useCallback(() => force(n => n + 1), []);
 
-  const notify = useCallback(() => {
-    // Vibrate (Android / Chrome — not supported on iOS)
-    if (typeof navigator !== 'undefined' && navigator.vibrate) {
-      navigator.vibrate([200, 100, 200]);
-    }
-    // Audio beep — works on iOS PWA when the page is active
-    try {
-      const ctx = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
-      const playBeep = (startTime: number, freq: number) => {
-        const osc = ctx.createOscillator();
-        const gain = ctx.createGain();
-        osc.connect(gain);
-        gain.connect(ctx.destination);
-        osc.frequency.value = freq;
-        osc.type = 'sine';
-        gain.gain.setValueAtTime(0.3, startTime);
-        gain.gain.exponentialRampToValueAtTime(0.01, startTime + 0.15);
-        osc.start(startTime);
-        osc.stop(startTime + 0.15);
-      };
-      playBeep(ctx.currentTime, 880);
-      playBeep(ctx.currentTime + 0.2, 880);
-      playBeep(ctx.currentTime + 0.4, 1100);
-    } catch { /* AudioContext unavailable */ }
-    // System notification (iOS 16.4+ PWA, Android, desktop)
-    if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
-      new Notification('Rest complete!', { body: 'Time to get back to work!' });
-    }
-  }, []);
-
-  const stopInterval = useCallback(() => {
-    if (intervalRef.current !== null) {
-      clearInterval(intervalRef.current);
-      intervalRef.current = null;
-    }
-  }, []);
-
-  const startInterval = useCallback(() => {
-    stopInterval();
-    intervalRef.current = setInterval(() => {
-      if (endTimeRef.current === null) return;
-      const now = Date.now();
-      const rem = computeRemaining(endTimeRef.current, now);
-      if (rem <= 0) {
-        // Fire notification once as we cross zero.
-        if (!notifiedRef.current) {
-          notifiedRef.current = true;
-          setTimeout(notify, 0);
-        }
-        const keepRunning = getKeepRestRunning();
-        if (keepRunning) {
-          // Enter / stay in overtime mode — count UP past endTime.
-          if (!overtimeStartedRef.current) {
-            overtimeStartedRef.current = true;
-            // Tell the Live Activity to switch to red count-up. Widget
-            // renders autonomously from here; no per-tick updates needed.
-            void updateRestActivity({ overtimeStart: endTimeRef.current });
-          }
-          const over = Math.floor((now - endTimeRef.current) / 1000);
-          setRemaining(0);
-          setOvertime(over);
-        } else {
-          stopInterval();
-          endTimeRef.current = null;
-          overtimeStartedRef.current = false;
-          clearPersistedTimer();
-          // Live Activity auto-dismisses at endDate, but call end() anyway in
-          // case ActivityKit hasn't cleared it yet — belt & braces.
-          void endRestActivity();
-          setRunning(false);
-          setRemaining(0);
-          setOvertime(0);
-        }
-      } else {
-        setRemaining(rem);
-        setOvertime(0);
-      }
-    }, 500); // 500ms poll so display never lags more than half a second
-  }, [notify, stopInterval]);
-
-  const start = useCallback((seconds: number, context?: { exerciseName?: string; setNumber?: number }) => {
-    const endTime = Date.now() + seconds * 1000;
-    endTimeRef.current = endTime;
-    overtimeStartedRef.current = false;
-    notifiedRef.current = false;
-    persistTimer(endTime, seconds);
-    scheduleRestNotification(endTime);
-    setSelected(seconds);
-    setRemaining(seconds);
-    setOvertime(0);
-    setRunning(true);
-    // Fire-and-forget native Live Activity — silent no-op on web / unsupported.
-    void startRestActivity({
-      endTime,
-      duration: seconds,
-      exerciseName: context?.exerciseName,
-      setNumber: context?.setNumber,
-    });
-  }, []);
-
-  const cancel = useCallback(() => {
-    stopInterval();
-    endTimeRef.current = null;
-    overtimeStartedRef.current = false;
-    notifiedRef.current = false;
-    clearPersistedTimer();
-    cancelRestNotification();
-    void endRestActivity();
-    setRunning(false);
-    setSelected(null);
-    setRemaining(0);
-    setOvertime(0);
-  }, [stopInterval]);
-
-  const adjust = useCallback((delta: number) => {
-    if (endTimeRef.current === null) return;
-    endTimeRef.current = endTimeRef.current + delta * 1000;
-    setSelected(prev => (prev !== null ? prev + delta : prev));
-    const rem = computeRemaining(endTimeRef.current, Date.now());
-    if (rem <= 0) {
-      cancel();
-    } else {
-      setRemaining(rem);
-      // Re-persist with updated endTime (keep original duration as reference)
-      const saved = readPersistedTimer();
-      persistTimer(endTimeRef.current, saved?.duration ?? rem);
-      scheduleRestNotification(endTimeRef.current);
-      void updateRestActivity({ endTime: endTimeRef.current });
-    }
-  }, [cancel]);
-
-  // Start/stop the interval whenever `running` changes
+  // Subscribe once: any state change in the store triggers a re-render so the
+  // derived values below reflect current state.
   useEffect(() => {
-    if (running) {
-      startInterval();
-    } else {
-      stopInterval();
-    }
-    return stopInterval;
-  }, [running, startInterval, stopInterval]);
+    rerender();
+    const unsub = subscribeRestTimer(() => rerender());
+    return unsub;
+  }, [rerender]);
 
-  // Request OS notification permission on first mount
+  // Re-render every 500ms WHILE a timer is active so the UI ticks down. The
+  // store's internal interval drives state changes; this hook drives the
+  // React subscription cadence. Gated on rest_timer != null so we don't burn
+  // battery / cause double-renders for every consumer of `useRestTimer`
+  // when no rest is running (review I1).
+  useEffect(() => {
+    let id: ReturnType<typeof setInterval> | null = null;
+    const arm = () => {
+      if (id != null || getRestTimer() == null) return;
+      id = setInterval(rerender, 500);
+    };
+    const disarm = () => {
+      if (id == null) return;
+      clearInterval(id);
+      id = null;
+    };
+    arm();
+    const unsub = subscribeRestTimer(() => {
+      if (getRestTimer() == null) disarm();
+      else arm();
+    });
+    return () => {
+      disarm();
+      unsub();
+    };
+  }, [rerender]);
+
+  // Request OS notification permission once.
   useEffect(() => { requestNotificationPermission(); }, []);
 
-  // Restore timer state on mount (in case page reloaded mid-timer)
-  useEffect(() => {
-    const saved = readPersistedTimer();
-    if (!saved) return;
-    const rem = Math.ceil((saved.endTime - Date.now()) / 1000);
-    if (rem > 0) {
-      endTimeRef.current = saved.endTime;
-      setSelected(saved.duration);
-      setRemaining(rem);
-      setRunning(true);
-    } else {
-      clearPersistedTimer();
-    }
-  }, []);
-
-  // Re-sync timer when the app returns to the foreground (Capacitor native)
+  // Foreground re-sync — when the app returns from background, ask the store
+  // to fire any deferred zero-cross / overtime transitions, cancel any
+  // pending native notification (the OS already fired it if appropriate),
+  // and reconcile in-memory state with the iOS Live Activity (catches
+  // JS-killed-mid-rest where ActivityKit Activity persists past JS death).
   useEffect(() => {
     let cleanup: (() => void) | undefined;
+    void reconcileRestTimerNative();
     App.addListener('appStateChange', ({ isActive }) => {
-      if (!isActive || endTimeRef.current === null) return;
-      const now = Date.now();
-      const rem = computeRemaining(endTimeRef.current, now);
-      if (rem <= 0) {
-        // Timer expired while backgrounded — native notification already fired;
-        // cancel it in case it's still pending.
-        cancelRestNotification();
-        if (!notifiedRef.current) {
-          notifiedRef.current = true;
-          notify();
-        }
-        const keepRunning = getKeepRestRunning();
-        if (keepRunning) {
-          // Re-enter overtime mode. Widget already switched via the tick
-          // that ran before backgrounding, OR we need to switch now.
-          if (!overtimeStartedRef.current) {
-            overtimeStartedRef.current = true;
-            void updateRestActivity({ overtimeStart: endTimeRef.current });
-          }
-          setRemaining(0);
-          setOvertime(Math.floor((now - endTimeRef.current) / 1000));
-        } else {
-          endTimeRef.current = null;
-          overtimeStartedRef.current = false;
-          clearPersistedTimer();
-          void endRestActivity();
-          setRunning(false);
-          setRemaining(0);
-          setOvertime(0);
-        }
-      } else {
-        setRemaining(rem);
-        setOvertime(0);
-      }
+      if (!isActive) return;
+      cancelRestNotification();
+      resyncRestTimer();
+      void reconcileRestTimerNative();
     }).then(handle => {
       cleanup = () => handle.remove();
     });
     return () => cleanup?.();
-  }, [notify]);
+  }, []);
 
-  const progress = selected ? remaining / selected : 0;
-  const isOvertime = overtime > 0;
-  return { selected, remaining, overtime, isOvertime, running, progress, start, cancel, adjust };
+  const start = useCallback((seconds: number, context?: {
+    setUuid?: string;
+    exerciseUuid?: string | null;
+    exerciseName?: string;
+    setNumber?: number;
+  }) => {
+    const restSec = seconds;
+    scheduleRestNotification(Date.now() + restSec * 1000);
+    if (context?.exerciseUuid) writeRestByExercise(context.exerciseUuid, restSec);
+    startRestTimer({
+      // setUuid anchors idempotency. Auto-start (after set completion) passes
+      // the set's UUID; manual starts (from RestTimerSheet preset buttons)
+      // don't have one, so synthesize a unique key.
+      setUuid: context?.setUuid ?? `manual-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      restSec,
+      // completedAtMs distinguishes accidental re-starts (same setUuid, same
+      // completedAtMs) from intentional un-complete + recomplete (same
+      // setUuid, different completedAtMs). For phone-side auto-rest, the set
+      // was just completed → `now`. For manual starts, omit (no associated set).
+      completedAtMs: context?.setUuid ? Date.now() : undefined,
+      exerciseName: context?.exerciseName,
+      setNumber: context?.setNumber,
+      onZeroCross: () => {
+        // Vibrate (Android / Chrome — not supported on iOS)
+        if (typeof navigator !== 'undefined' && navigator.vibrate) {
+          navigator.vibrate([200, 100, 200]);
+        }
+        // Audio beep — works on iOS PWA when the page is active
+        try {
+          const ctx = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
+          const playBeep = (startTime: number, freq: number) => {
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+            osc.connect(gain);
+            gain.connect(ctx.destination);
+            osc.frequency.value = freq;
+            osc.type = 'sine';
+            gain.gain.setValueAtTime(0.3, startTime);
+            gain.gain.exponentialRampToValueAtTime(0.01, startTime + 0.15);
+            osc.start(startTime);
+            osc.stop(startTime + 0.15);
+          };
+          playBeep(ctx.currentTime, 880);
+          playBeep(ctx.currentTime + 0.2, 880);
+          playBeep(ctx.currentTime + 0.4, 1100);
+        } catch { /* AudioContext unavailable */ }
+        if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+          new Notification('Rest complete!', { body: 'Time to get back to work!' });
+        }
+      },
+    });
+  }, []);
+
+  const cancel = useCallback(() => {
+    cancelRestNotification();
+    endRestTimer();
+  }, []);
+
+  const adjust = useCallback((delta: number) => {
+    if (getRestTimer() == null) return;
+    extendRestTimer({ seconds: delta });
+    // Read the new end time AFTER extend — store clamps to `now` when
+    // extending out of overtime, so computing the end here would diverge
+    // from the store's truth (review C3).
+    const updated = getRestTimer();
+    if (updated != null) scheduleRestNotification(updated.end_at_ms);
+  }, []);
+
+  return {
+    ...getRestTimerDerived(),
+    start,
+    cancel,
+    adjust,
+  };
 }
 
 // ─── Elapsed timer ───────────────────────────────────────────────────────────
@@ -1729,6 +1637,46 @@ export default function WorkoutPage() {
     });
   }, []);
 
+  // ─── Watch snapshot push ───────────────────────────────────────────────
+  // Cache goal_window per exercise (mirrors WorkoutFinishModal:418).
+  const [pageGoalWindowByExercise, setPageGoalWindowByExercise] = useState<Map<string, RepWindow | null>>(new Map());
+  useEffect(() => {
+    if (!workout) return;
+    let cancelled = false;
+    Promise.all(
+      workout.exercises.map(we =>
+        getGoalWindowForWorkoutExercise(we.workout_uuid, we.exercise_uuid).then(w => [we.exercise_uuid, w] as const),
+      ),
+    ).then(pairs => {
+      if (!cancelled) setPageGoalWindowByExercise(new Map(pairs));
+    });
+    return () => { cancelled = true; };
+  }, [workout?.uuid, workout?.exercises.length]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Push snapshot whenever the live workout changes (any set update, exercise
+  // add/remove, completion). Trailing-edge debounce so three rapid mutations
+  // (e.g. dial weight → dial reps → tap complete) collapse into one IPC push
+  // instead of three. WC's updateApplicationContext is overwrite-only anyway;
+  // last-write-wins semantics make the debounce a free win.
+  // Re-render this effect whenever the rest-timer store changes so the
+  // snapshot push includes a freshly-resolved `rest_timer`. Subscribing here
+  // avoids running the effect every 500ms via the hook's tick.
+  const [restTimerVersion, setRestTimerVersion] = useState(0);
+  useEffect(() => subscribeRestTimer(() => setRestTimerVersion(v => v + 1)), []);
+
+  useEffect(() => {
+    if (!workout) return;
+    const handle = setTimeout(() => {
+      const snapshot = buildWatchSnapshot({
+        workout,
+        goalWindowByExercise: pageGoalWindowByExercise,
+        restTimer: getRestTimer(),
+      });
+      void pushSnapshotToWatch(snapshot);
+    }, 200);
+    return () => clearTimeout(handle);
+  }, [workout, pageGoalWindowByExercise, restTimerVersion]);
+
   // Collapse all plans except the first one once the local data has loaded.
   // useLiveQuery returns synchronously after first render, so this effect
   // runs once with the full plan list — no network round-trip needed.
@@ -1983,17 +1931,18 @@ export default function WorkoutPage() {
   const updateSet = async (workoutExerciseUuid: string, setUuid: string, weight: number, reps: number) => {
     await mutUpdateSet(setUuid, { weight, repetitions: reps, is_completed: true });
 
-    // Auto-start rest timer if enabled in settings
-    const { defaultRest, autoStart } = getRestSettings();
+    // Auto-start rest timer if enabled in settings. Per-exercise resolved
+    // duration (last-used → settings default → 90s).
+    const { autoStart } = getRestSettings();
     if (autoStart) {
-      // Pass exercise name + set number so the Live Activity can show context
-      // on the Lock Screen and in the Dynamic Island.
       const we = workout?.exercises.find(e => e.uuid === workoutExerciseUuid);
+      const exerciseUuid = we?.exercise_uuid ?? null;
       const exerciseName = we?.exercise?.title;
       const setNumber = we
         ? we.sets.filter(s => !s._deleted).findIndex(s => s.uuid === setUuid) + 1
         : undefined;
-      restTimer.start(defaultRest, { exerciseName, setNumber });
+      const restSec = resolveRestSec({ exerciseUuid });
+      restTimer.start(restSec, { setUuid, exerciseUuid, exerciseName, setNumber });
     }
     // Note: PR detection happens server-side after sync; is_pr updates via pull
   };
@@ -2011,14 +1960,16 @@ export default function WorkoutPage() {
   const updateSetDuration = async (workoutExerciseUuid: string, setUuid: string, weight: number, durationSeconds: number) => {
     await mutUpdateSet(setUuid, { weight, duration_seconds: durationSeconds, is_completed: true });
 
-    const { defaultRest, autoStart } = getRestSettings();
+    const { autoStart } = getRestSettings();
     if (autoStart) {
       const we = workout?.exercises.find(e => e.uuid === workoutExerciseUuid);
+      const exerciseUuid = we?.exercise_uuid ?? null;
       const exerciseName = we?.exercise?.title;
       const setNumber = we
         ? we.sets.filter(s => !s._deleted).findIndex(s => s.uuid === setUuid) + 1
         : undefined;
-      restTimer.start(defaultRest, { exerciseName, setNumber });
+      const restSec = resolveRestSec({ exerciseUuid });
+      restTimer.start(restSec, { setUuid, exerciseUuid, exerciseName, setNumber });
     }
   };
 
