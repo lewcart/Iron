@@ -2,6 +2,23 @@
 
 All notable changes to Rebirth are documented here.
 
+## [0.9.3] - 2026-05-05
+
+### Added
+
+- **Cardio · weekly minutes row in the 12-Week Trends section.** TwelveWeekTrendsSection grew a 6th row (between HRV and the compliance note) plotting total cardio minutes per ISO Mon→Sun week from HealthKit, with a direction chip vs the umbrella weekly target from the active body plan. Tappable like the other rows — opens TrendDetailModal with the full series. The /autoplan dual-voice review surfaced this as the genuine signal gap (Section B already plots priority muscles, anchor lifts, bodyweight, HRV — cardio was missing); the broader page-wide week-scrubber + new W-o-W section idea was deferred for 4 weeks of v1.1 usage data first.
+- **`GET /api/health/cardio-trend?weeks=12` endpoint.** Loops the existing `computeCardioWeek` helper per ISO Monday and returns weekly totals oldest→newest, plus the umbrella target. Mirrors the cardio-week envelope: same 401/503/400/no_targets/ok status shapes. Default 12 weeks, max 12 (so the trailing window stays inside `computeCardioWeek`'s 90-day budget).
+
+### Notes
+
+- No schema change. No new aggregation logic — pure composition over the v1.1 cardio-week aggregator.
+- The row collapses cleanly to its empty state when fewer than 4 weeks are available, when no cardio targets are set on the active plan, or when HealthKit isn't connected.
+
+### Tests
+
+- 11 new tests on `cardio-trend/route.test.ts` — auth, not_connected, invalid weeks, default=12 count, weekly array shape, oldest→newest order, 7-day window inclusivity, no_targets envelope passthrough, totals aggregation.
+- 3 new tests on `TwelveWeekTrendsSection.test.tsx` — row renders with target suffix, row renders without target suffix, falls back to empty state under 4 weeks. Existing label/empty-state tests updated for the new 6-row layout.
+
 ## [0.9.2] - 2026-05-05
 
 ### Added
