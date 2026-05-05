@@ -81,6 +81,7 @@ describe('handleWatchInboundEvent', () => {
         restSec: 90,
         exerciseName: 'Bench Press',
         setNumber: 3,
+        completedAtMs: 1_700_000_099_000,
       });
     });
 
@@ -108,20 +109,54 @@ describe('handleWatchInboundEvent', () => {
       expect(deps.startRest).not.toHaveBeenCalled();
     });
 
-    it('queued-stale guard: skips rest when message is older than 30s', async () => {
+    it('queued-stale guard: skips rest when message is older than the threshold (>90s)', async () => {
       const deps = makeDeps();
       await handleWatchInboundEvent(
         {
           kind: 'watchWroteSet',
           payload: {
             row: { uuid: 'set-1', workout_exercise_uuid: 'we-1', is_completed: true },
-            completed_at_ms: 1_700_000_065_000, // 35s ago vs now=1_700_000_100_000
+            // 100s ago vs now=1_700_000_100_000 — past the 90s threshold
+            completed_at_ms: 1_700_000_000_000,
           },
         },
         deps,
       );
       expect(deps.applySet).toHaveBeenCalledOnce();
       expect(deps.startRest).not.toHaveBeenCalled();
+    });
+
+    it('queued-stale guard: tolerates BLE clock drift up to ~60s (does NOT skip)', async () => {
+      const deps = makeDeps();
+      await handleWatchInboundEvent(
+        {
+          kind: 'watchWroteSet',
+          payload: {
+            row: { uuid: 'set-1', workout_exercise_uuid: 'we-1', is_completed: true },
+            // 60s ago — within the widened threshold
+            completed_at_ms: 1_700_000_040_000,
+          },
+        },
+        deps,
+      );
+      expect(deps.startRest).toHaveBeenCalled();
+    });
+
+    it('receipt-time fallback: implausibly-future watch stamp is treated as fresh', async () => {
+      const deps = makeDeps();
+      await handleWatchInboundEvent(
+        {
+          kind: 'watchWroteSet',
+          payload: {
+            row: { uuid: 'set-1', workout_exercise_uuid: 'we-1', is_completed: true },
+            // 5 minutes in the future relative to bridge — clock skew bug
+            completed_at_ms: 1_700_000_400_000,
+          },
+        },
+        deps,
+      );
+      // Should NOT skip — bridge falls back to its own receipt time as the anchor.
+      expect(deps.startRest).toHaveBeenCalled();
     });
 
     it('starts rest when completed_at_ms is missing (charitable default)', async () => {

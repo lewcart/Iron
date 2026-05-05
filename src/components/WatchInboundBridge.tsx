@@ -37,7 +37,7 @@ interface WatchInboundEvent {
 
 export interface WatchInboundDeps {
   applySet: (uuid: string, fields: Record<string, unknown>) => Promise<unknown>;
-  startRest: (args: { setUuid: string; restSec: number; exerciseName?: string; setNumber?: number }) => unknown;
+  startRest: (args: { setUuid: string; restSec: number; exerciseName?: string; setNumber?: number; completedAtMs?: number }) => unknown;
   endRest: (opts?: { setUuid?: string }) => void;
   extendRest: (args: { setUuid?: string; seconds: number }) => void;
   /** Looks up the workout_exercise + exercise + set-position metadata that
@@ -53,7 +53,15 @@ export interface WatchInboundDeps {
   now: () => number;
 }
 
-const QUEUED_STALE_THRESHOLD_MS = 30_000;
+// Watch-stamp can drift 30-60s vs phone clock over BLE pairing — at 30s,
+// every fresh completion looked stale and rest auto-start was silently
+// suppressed. 90s tolerates typical drift while still rejecting genuinely
+// queued-stale messages from a watch that was out of range for minutes.
+const QUEUED_STALE_THRESHOLD_MS = 90_000;
+/** If watch-stamp is missing or implausibly far in the future relative to
+ *  phone receipt time (clock drift can also push it forward), treat the
+ *  message as fresh by using the bridge's own receipt time as the anchor. */
+const FUTURE_DRIFT_TOLERANCE_MS = 60_000;
 
 interface WatchInboundPayload extends Record<string, unknown> {
   row?: WatchSetRow;
@@ -96,8 +104,17 @@ export async function handleWatchInboundEvent(event: WatchInboundEvent, deps: Wa
     // worse than not starting one at all.
     if (!row.is_completed) return;
     if (!deps.autoRestEnabled()) return;
-    const completedAtMs = typeof payload.completed_at_ms === 'number' ? payload.completed_at_ms : null;
-    if (completedAtMs != null && deps.now() - completedAtMs > QUEUED_STALE_THRESHOLD_MS) return;
+
+    // Queued-stale guard with receipt-time fallback for clock skew. The watch
+    // stamps `completed_at_ms` from its own clock, which can drift relative to
+    // phone clock. If the stamp is missing or implausibly far in the future
+    // (skew can push it either direction), use the bridge's receipt time.
+    const watchCompletedAtMs = typeof payload.completed_at_ms === 'number' ? payload.completed_at_ms : null;
+    const receivedAtMs = deps.now();
+    const effectiveCompletedAtMs = watchCompletedAtMs == null || watchCompletedAtMs > receivedAtMs + FUTURE_DRIFT_TOLERANCE_MS
+      ? receivedAtMs
+      : watchCompletedAtMs;
+    if (receivedAtMs - effectiveCompletedAtMs > QUEUED_STALE_THRESHOLD_MS) return;
 
     if (typeof row.workout_exercise_uuid !== 'string') return;
     const ctx = await deps.lookupExerciseContext(row.workout_exercise_uuid, row.uuid);
@@ -108,6 +125,7 @@ export async function handleWatchInboundEvent(event: WatchInboundEvent, deps: Wa
       restSec,
       exerciseName: ctx.exerciseName,
       setNumber: ctx.setNumber,
+      completedAtMs: effectiveCompletedAtMs,
     });
     return;
   }

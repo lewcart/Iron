@@ -15,6 +15,7 @@ import {
   extendRestTimer,
   endRestTimer,
   resyncRestTimer,
+  reconcileRestTimerNative,
   getRestTimer,
   getRestTimerDerived,
   subscribeRestTimer,
@@ -95,26 +96,49 @@ function useRestTimer() {
     return unsub;
   }, [rerender]);
 
-  // Re-render every 500ms while a timer is active so the UI ticks down. The
-  // store's internal interval drives state changes; this drives the React
-  // subscription cadence.
+  // Re-render every 500ms WHILE a timer is active so the UI ticks down. The
+  // store's internal interval drives state changes; this hook drives the
+  // React subscription cadence. Gated on rest_timer != null so we don't burn
+  // battery / cause double-renders for every consumer of `useRestTimer`
+  // when no rest is running (review I1).
   useEffect(() => {
-    const id = setInterval(rerender, 500);
-    return () => clearInterval(id);
+    let id: ReturnType<typeof setInterval> | null = null;
+    const arm = () => {
+      if (id != null || getRestTimer() == null) return;
+      id = setInterval(rerender, 500);
+    };
+    const disarm = () => {
+      if (id == null) return;
+      clearInterval(id);
+      id = null;
+    };
+    arm();
+    const unsub = subscribeRestTimer(() => {
+      if (getRestTimer() == null) disarm();
+      else arm();
+    });
+    return () => {
+      disarm();
+      unsub();
+    };
   }, [rerender]);
 
   // Request OS notification permission once.
   useEffect(() => { requestNotificationPermission(); }, []);
 
   // Foreground re-sync — when the app returns from background, ask the store
-  // to fire any deferred zero-cross / overtime transitions, and cancel any
-  // pending native notification (the OS already fired it if appropriate).
+  // to fire any deferred zero-cross / overtime transitions, cancel any
+  // pending native notification (the OS already fired it if appropriate),
+  // and reconcile in-memory state with the iOS Live Activity (catches
+  // JS-killed-mid-rest where ActivityKit Activity persists past JS death).
   useEffect(() => {
     let cleanup: (() => void) | undefined;
+    void reconcileRestTimerNative();
     App.addListener('appStateChange', ({ isActive }) => {
       if (!isActive) return;
       cancelRestNotification();
       resyncRestTimer();
+      void reconcileRestTimerNative();
     }).then(handle => {
       cleanup = () => handle.remove();
     });
@@ -136,6 +160,11 @@ function useRestTimer() {
       // don't have one, so synthesize a unique key.
       setUuid: context?.setUuid ?? `manual-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       restSec,
+      // completedAtMs distinguishes accidental re-starts (same setUuid, same
+      // completedAtMs) from intentional un-complete + recomplete (same
+      // setUuid, different completedAtMs). For phone-side auto-rest, the set
+      // was just completed → `now`. For manual starts, omit (no associated set).
+      completedAtMs: context?.setUuid ? Date.now() : undefined,
       exerciseName: context?.exerciseName,
       setNumber: context?.setNumber,
       onZeroCross: () => {
@@ -175,11 +204,13 @@ function useRestTimer() {
   }, []);
 
   const adjust = useCallback((delta: number) => {
-    const snap = getRestTimer();
-    if (!snap) return;
+    if (getRestTimer() == null) return;
     extendRestTimer({ seconds: delta });
-    const newEnd = Date.now() + Math.max(0, (snap.end_at_ms - Date.now())) + delta * 1000;
-    scheduleRestNotification(newEnd);
+    // Read the new end time AFTER extend — store clamps to `now` when
+    // extending out of overtime, so computing the end here would diverge
+    // from the store's truth (review C3).
+    const updated = getRestTimer();
+    if (updated != null) scheduleRestNotification(updated.end_at_ms);
   }, []);
 
   return {

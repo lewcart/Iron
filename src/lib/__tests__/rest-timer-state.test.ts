@@ -118,6 +118,36 @@ describe('RestTimerStore', () => {
       expect(r.started).toBe(true);
       expect(s.getSnapshot()?.set_uuid).toBe('set-2');
     });
+
+    it('dedup with completedAtMs: same setUuid + same completedAtMs is a duplicate', () => {
+      const sched = fakeScheduler();
+      const s = new RestTimerStore({ storage: memStorage(), liveActivity: fakeLiveActivity(), scheduler: sched.scheduler, getKeepRunning: () => false });
+      const a = s.start({ setUuid: 'set-1', restSec: 90, completedAtMs: 1_700_000_000_000 });
+      const b = s.start({ setUuid: 'set-1', restSec: 90, completedAtMs: 1_700_000_000_000 });
+      expect(a.started).toBe(true);
+      expect(b.started).toBe(false);
+    });
+
+    it('dedup with completedAtMs: same setUuid + DIFFERENT completedAtMs starts a new timer (review C4)', () => {
+      const sched = fakeScheduler();
+      const s = new RestTimerStore({ storage: memStorage(), liveActivity: fakeLiveActivity(), scheduler: sched.scheduler, getKeepRunning: () => false });
+      const a = s.start({ setUuid: 'set-1', restSec: 90, completedAtMs: 1_700_000_000_000 });
+      // Lou un-completed and recomplete — same setUuid, different completedAtMs.
+      // Within the 5s time window, but the completedAtMs identity disambiguates.
+      const b = s.start({ setUuid: 'set-1', restSec: 60, completedAtMs: 1_700_000_002_500 });
+      expect(a.started).toBe(true);
+      expect(b.started).toBe(true);
+      expect(s.getSnapshot()?.duration_sec).toBe(60);
+    });
+
+    it('dedup fallback (no completedAtMs on either side): time-window heuristic still applies', () => {
+      const sched = fakeScheduler();
+      const s = new RestTimerStore({ storage: memStorage(), liveActivity: fakeLiveActivity(), scheduler: sched.scheduler, getKeepRunning: () => false });
+      const a = s.start({ setUuid: 'set-1', restSec: 90 });
+      const b = s.start({ setUuid: 'set-1', restSec: 90 });
+      expect(a.started).toBe(true);
+      expect(b.started).toBe(false);
+    });
   });
 
   describe('extend', () => {
@@ -177,6 +207,59 @@ describe('RestTimerStore', () => {
       expect(onZero).toHaveBeenCalledOnce();
       sched.advance(2_000);
       expect(onZero).toHaveBeenCalledOnce();
+    });
+
+    it('survives a thrown onZeroCross (still ends timer when keep-running off)', () => {
+      const sched = fakeScheduler();
+      const onZero = vi.fn(() => {
+        throw new Error('audio context unavailable');
+      });
+      const consoleSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const s = new RestTimerStore({ storage: memStorage(), liveActivity: fakeLiveActivity(), scheduler: sched.scheduler, getKeepRunning: () => false });
+      s.start({ setUuid: 'set-1', restSec: 1, onZeroCross: onZero });
+      sched.advance(2_000);
+      expect(onZero).toHaveBeenCalledOnce();
+      // State machine should still progress: keep-running=false → end → state=null
+      expect(s.getSnapshot()).toBeNull();
+      consoleSpy.mockRestore();
+    });
+
+    it('re-arms onZeroCross after extend out of overtime (review C2)', () => {
+      const sched = fakeScheduler();
+      const onZero = vi.fn();
+      const s = new RestTimerStore({ storage: memStorage(), liveActivity: fakeLiveActivity(), scheduler: sched.scheduler, getKeepRunning: () => true });
+      s.start({ setUuid: 'set-1', restSec: 1, onZeroCross: onZero });
+      sched.advance(2_000); // crosses zero, fires once
+      expect(onZero).toHaveBeenCalledOnce();
+      s.extend(1); // bumps to "now + 1s"
+      sched.advance(2_000); // crosses zero again
+      expect(onZero).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  describe('extend during overtime (review C3)', () => {
+    it('clamps endAtMs to now + delta when extending while in overtime', () => {
+      const sched = fakeScheduler();
+      const s = new RestTimerStore({ storage: memStorage(), liveActivity: fakeLiveActivity(), scheduler: sched.scheduler, getKeepRunning: () => true });
+      s.start({ setUuid: 'set-1', restSec: 1 });
+      const startedAt = sched.now();
+      sched.advance(10_000); // we're 9s deep in overtime
+      const beforeExtendNow = sched.now();
+      s.extend(30);
+      const after = s.getSnapshot();
+      expect(after?.end_at_ms).toBe(beforeExtendNow + 30_000);
+      // sanity: must NOT be the naive (originalEnd + 30s) which would still be in the past
+      expect(after?.end_at_ms).toBeGreaterThan(startedAt + 1_000);
+    });
+
+    it('extending during countdown adds delta to existing endAtMs (no clamp needed)', () => {
+      const sched = fakeScheduler();
+      const s = new RestTimerStore({ storage: memStorage(), liveActivity: fakeLiveActivity(), scheduler: sched.scheduler });
+      s.start({ setUuid: 'set-1', restSec: 90 });
+      const beforeExtend = s.getSnapshot();
+      s.extend(30);
+      const after = s.getSnapshot();
+      expect(after?.end_at_ms).toBe((beforeExtend?.end_at_ms ?? 0) + 30_000);
     });
 
     it('with keep-running: enters overtime', () => {

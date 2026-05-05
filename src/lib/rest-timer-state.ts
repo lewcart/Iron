@@ -19,6 +19,7 @@ import {
   startRestActivity,
   updateRestActivity,
   endRestActivity,
+  getCurrentRestActivity,
 } from './native/rest-timer-activity';
 import {
   TIMER_END_KEY,
@@ -29,6 +30,7 @@ import type { WatchRestTimer } from './watch';
 
 export const TIMER_SET_UUID_KEY = 'rebirth-rest-set-uuid';
 export const TIMER_OVERTIME_START_KEY = 'rebirth-rest-overtime-start';
+export const TIMER_COMPLETED_AT_KEY = 'rebirth-rest-completed-at';
 export const REST_BY_EXERCISE_KEY = 'rebirth-rest-by-exercise';
 const REST_DEFAULT_KEY = 'rebirth-rest-default';
 const REST_AUTO_START_KEY = 'rebirth-rest-auto-start';
@@ -91,6 +93,13 @@ export interface RestTimerStartArgs {
   restSec: number;
   exerciseName?: string;
   setNumber?: number;
+  /** When the originating set completed, epoch ms. Used as the dedup
+   *  identity when present — distinguishes accidental duplicate WC delivery
+   *  (same setUuid, same completedAtMs → reject) from intentional
+   *  un-complete + recomplete on the same set within the dedup window
+   *  (same setUuid, different completedAtMs → accept). When omitted (e.g.
+   *  manual rest-timer presets), falls back to a time-window heuristic. */
+  completedAtMs?: number;
   /** Fires once when the timer crosses zero. Hook layer wires audio /
    *  vibrate / OS notification here so the store stays free of platform
    *  side effects beyond ActivityKit. */
@@ -102,6 +111,10 @@ interface InternalState {
   durationSec: number;
   setUuid: string;
   overtimeStartMs: number | null;
+  /** completedAtMs of the originating set transition, when known. Used by
+   *  start()'s dedup to distinguish duplicate WC delivery from intentional
+   *  un-complete + recomplete. */
+  completedAtMs: number | null;
 }
 
 export interface DerivedState {
@@ -157,7 +170,12 @@ export class RestTimerStore {
   private scheduler: NonNullable<RestTimerStoreOptions['scheduler']>;
   private intervalHandle: unknown = null;
   private lastStartedAt = 0;
+  /** The latest onZeroCross callback registered via start(). Survives
+   *  zero-cross firing so that extend() — which resets the timer back
+   *  into countdown from overtime — re-arms the same callback for the
+   *  next zero-cross (review C2). */
   private zeroCrossCb: (() => void) | null = null;
+  private zeroCrossFired = false;
 
   constructor(opts: RestTimerStoreOptions = {}) {
     this.storage = opts.storage ?? defaultStorage();
@@ -188,7 +206,9 @@ export class RestTimerStore {
     const setUuid = this.storage.getItem(TIMER_SET_UUID_KEY) ?? '__legacy__';
     const overRaw = this.storage.getItem(TIMER_OVERTIME_START_KEY);
     const overtimeStartMs = overRaw && Number.isFinite(Number(overRaw)) ? Number(overRaw) : null;
-    this.state = { endAtMs, durationSec, setUuid, overtimeStartMs };
+    const completedRaw = this.storage.getItem(TIMER_COMPLETED_AT_KEY);
+    const completedAtMs = completedRaw && Number.isFinite(Number(completedRaw)) ? Number(completedRaw) : null;
+    this.state = { endAtMs, durationSec, setUuid, overtimeStartMs, completedAtMs };
     this.startTicking();
   }
 
@@ -198,6 +218,7 @@ export class RestTimerStore {
       this.storage.removeItem(TIMER_DURATION_KEY);
       this.storage.removeItem(TIMER_SET_UUID_KEY);
       this.storage.removeItem(TIMER_OVERTIME_START_KEY);
+      this.storage.removeItem(TIMER_COMPLETED_AT_KEY);
       return;
     }
     this.storage.setItem(TIMER_END_KEY, String(this.state.endAtMs));
@@ -207,6 +228,11 @@ export class RestTimerStore {
       this.storage.setItem(TIMER_OVERTIME_START_KEY, String(this.state.overtimeStartMs));
     } else {
       this.storage.removeItem(TIMER_OVERTIME_START_KEY);
+    }
+    if (this.state.completedAtMs != null) {
+      this.storage.setItem(TIMER_COMPLETED_AT_KEY, String(this.state.completedAtMs));
+    } else {
+      this.storage.removeItem(TIMER_COMPLETED_AT_KEY);
     }
   }
 
@@ -238,9 +264,7 @@ export class RestTimerStore {
       return;
     }
     if (this.state.overtimeStartMs == null) {
-      const cb = this.zeroCrossCb;
-      this.zeroCrossCb = null;
-      cb?.();
+      this.fireZeroCross();
       if (this.getKeepRunning()) {
         this.markOvertime(now);
       } else {
@@ -251,10 +275,33 @@ export class RestTimerStore {
     this.notify();
   }
 
+  /** Fires the zero-cross callback at most once per timer-period. Wraps the
+   *  callback so a thrown hook (audio/vibrate failures, etc.) doesn't wedge
+   *  the store's state machine — the user-visible UI keeps advancing. */
+  private fireZeroCross(): void {
+    if (this.zeroCrossFired) return;
+    this.zeroCrossFired = true;
+    try {
+      this.zeroCrossCb?.();
+    } catch (err) {
+      console.warn('[rest-timer-state] zero-cross callback threw:', err);
+    }
+  }
+
   start(args: RestTimerStartArgs, now?: number): { started: boolean } {
     const t = now ?? this.scheduler.now();
-    if (this.state?.setUuid === args.setUuid && t - this.lastStartedAt < DEDUP_WINDOW_MS) {
-      return { started: false };
+    // Dedup: same setUuid AND same completedAtMs (when both sides have it) is
+    // a true duplicate WC delivery — drop it. If completedAtMs differs, it's
+    // an intentional un-complete + recomplete and a new timer should fire.
+    // When either side lacks completedAtMs (e.g. manual presets), fall back
+    // to the time-window heuristic.
+    if (this.state?.setUuid === args.setUuid) {
+      const haveBoth = args.completedAtMs != null && this.state.completedAtMs != null;
+      const sameCompletion = haveBoth && this.state.completedAtMs === args.completedAtMs;
+      const withinTimeWindow = t - this.lastStartedAt < DEDUP_WINDOW_MS;
+      if (sameCompletion || (!haveBoth && withinTimeWindow)) {
+        return { started: false };
+      }
     }
     this.lastStartedAt = t;
     const endAtMs = t + args.restSec * 1000;
@@ -263,8 +310,10 @@ export class RestTimerStore {
       durationSec: args.restSec,
       setUuid: args.setUuid,
       overtimeStartMs: null,
+      completedAtMs: args.completedAtMs ?? null,
     };
     this.zeroCrossCb = args.onZeroCross ?? null;
+    this.zeroCrossFired = false;
     this.persist();
     void this.liveActivity.start({
       endTime: endAtMs,
@@ -279,11 +328,20 @@ export class RestTimerStore {
 
   extend(seconds: number): void {
     if (this.state == null) return;
+    // Clamp to "now" when extending out of overtime so the new end-time is
+    // genuinely `seconds` from this moment — not still in the past (review C3).
+    const now = this.scheduler.now();
+    const baseEndAt = Math.max(this.state.endAtMs, now);
     this.state = {
-      ...this.state,
-      endAtMs: this.state.endAtMs + seconds * 1000,
+      endAtMs: baseEndAt + seconds * 1000,
+      durationSec: this.state.durationSec,
+      setUuid: this.state.setUuid,
+      completedAtMs: this.state.completedAtMs,
       overtimeStartMs: null,
     };
+    // Re-arm zero-cross — extending out of overtime begins a fresh countdown
+    // and the next zero-cross deserves the same audio/vibrate cue (review C2).
+    this.zeroCrossFired = false;
     this.persist();
     void this.liveActivity.update({
       endTime: this.state.endAtMs,
@@ -298,6 +356,7 @@ export class RestTimerStore {
     if (opts?.setUuid && opts.setUuid !== this.state.setUuid) return;
     this.state = null;
     this.zeroCrossCb = null;
+    this.zeroCrossFired = false;
     this.persist();
     void this.liveActivity.end();
     this.stopTicking();
@@ -307,10 +366,52 @@ export class RestTimerStore {
   markOvertime(now?: number): void {
     if (this.state == null || this.state.overtimeStartMs != null) return;
     const t = now ?? this.scheduler.now();
-    this.state = { ...this.state, overtimeStartMs: t };
+    this.state = {
+      endAtMs: this.state.endAtMs,
+      durationSec: this.state.durationSec,
+      setUuid: this.state.setUuid,
+      completedAtMs: this.state.completedAtMs,
+      overtimeStartMs: t,
+    };
     this.persist();
     void this.liveActivity.update({ overtimeStart: t });
     this.notify();
+  }
+
+  /** Reconciles in-memory state against the iOS Live Activity. Call once on
+   *  app foreground / hydration so a process-killed-mid-rest can clean up
+   *  orphan Activities (or pick up a Live Activity Lou's about to see).
+   *  Best-effort — failures are silent. */
+  async reconcileWithNative(): Promise<void> {
+    let native;
+    try {
+      native = await getCurrentRestActivity();
+    } catch {
+      return;
+    }
+    if (this.state == null && native.active) {
+      // Orphan Activity (JS state died, Activity persists). Clean up.
+      try { await endRestActivity(); } catch { /* best-effort */ }
+      return;
+    }
+    if (this.state != null && !native.active) {
+      // Orphan in-memory state (Activity dismissed externally — user killed
+      // it from Lock Screen, or Live Activities globally disabled mid-rest).
+      // The store is authoritative for the watch snapshot, but keeping a
+      // ghost here is misleading; sync down to match.
+      this.end();
+      return;
+    }
+    if (this.state != null && native.active && native.end_at_ms != null) {
+      // Both present. If they disagree on end-time by > 5s, the Live
+      // Activity is the source of truth for the OS-level countdown — sync
+      // localStorage to match so the watch snapshot tracks reality.
+      if (Math.abs(this.state.endAtMs - native.end_at_ms) > 5_000) {
+        this.state = { ...this.state, endAtMs: native.end_at_ms };
+        this.persist();
+        this.notify();
+      }
+    }
   }
 
   /** Foreground re-sync (Capacitor appStateChange). Cheap to call repeatedly. */
@@ -318,9 +419,7 @@ export class RestTimerStore {
     if (this.state == null) return;
     const now = this.scheduler.now();
     if (now >= this.state.endAtMs && this.state.overtimeStartMs == null) {
-      const cb = this.zeroCrossCb;
-      this.zeroCrossCb = null;
-      cb?.();
+      this.fireZeroCross();
       if (this.getKeepRunning()) {
         this.markOvertime(now);
       } else {
@@ -387,6 +486,12 @@ function store(): RestTimerStore {
 
 export function startRestTimer(args: RestTimerStartArgs): { started: boolean } {
   return store().start(args);
+}
+
+/** Reconciles in-memory state with iOS Live Activity. Call on app foreground
+ *  to detect process-kill orphans. Best-effort, async. */
+export async function reconcileRestTimerNative(): Promise<void> {
+  await store().reconcileWithNative();
 }
 
 export function extendRestTimer(args: { setUuid?: string; seconds: number }): void {

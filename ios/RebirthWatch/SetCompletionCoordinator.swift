@@ -245,6 +245,13 @@ final class SetCompletionCoordinator: ObservableObject {
         return value
     }
 
+    /// How stale the loaded snapshot can be before we drop its `restTimer`
+    /// field on optimistic write (review C6). If the loaded snapshot is
+    /// older than this, the phone has likely already published a fresher
+    /// one we haven't received yet — preserving the stale rest hint would
+    /// make the watch UI flicker between sets.
+    private static let staleSnapshotThreshold: TimeInterval = 2.0
+
     private func applyOptimistic(
         setUUID: String,
         rir: Int?,
@@ -295,6 +302,13 @@ final class SetCompletionCoordinator: ObservableObject {
                 history: ex.history
             ))
         }
+        // If the loaded snapshot is stale, drop the rest_timer hint —
+        // preserving it could overwrite a fresher phone-published rest hint
+        // for the next set, causing a visible flicker on the watch (C6).
+        let snapshotAge = Date().timeIntervalSince(current.pushedAt)
+        let preservedRestTimer: RestTimerHint? = snapshotAge > Self.staleSnapshotThreshold
+            ? nil
+            : current.restTimer
         current = ActiveWorkoutSnapshot(
             workoutUUID: current.workoutUUID,
             pushedAt: Date(),
@@ -302,7 +316,7 @@ final class SetCompletionCoordinator: ObservableObject {
             exercises: newExercises,
             restTimerDefaultSeconds: current.restTimerDefaultSeconds,
             hrvHint: current.hrvHint,
-            restTimer: current.restTimer
+            restTimer: preservedRestTimer
         )
         try? appGroup.writeSnapshot(current)
     }

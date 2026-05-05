@@ -124,6 +124,10 @@ struct RootView: View {
                     onSkip: { completion.sendStopRest(setUuid: hint.setUuid) },
                     onExtend30: { completion.sendExtendRest(seconds: 30, setUuid: hint.setUuid) }
                 )
+                // Force fresh SwiftUI identity per timer so haptic @State
+                // resets cleanly between back-to-back rest sheets — old view
+                // identity could carry zero-cross flags (review C7).
+                .id(hint.setUuid)
             }
         }
         .sheet(item: $timeModeContext) { ctx in
