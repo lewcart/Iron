@@ -204,7 +204,17 @@ class SyncEngine {
         }
       }
 
-      if (total === 0) return;
+      if (total === 0) {
+        // Nothing dirty — if a previous push errored and the dirty rows have
+        // since been resolved elsewhere (e.g. soft-deleted, or pulled fresh
+        // from server), clear the stale error so the UI doesn't show a red
+        // pill forever.
+        if (this._status === 'error') {
+          this._lastError = null;
+          this.setStatus('idle');
+        }
+        return;
+      }
 
       this.setStatus('syncing');
 
@@ -405,8 +415,14 @@ class SyncEngine {
     // Poll every 15s, but only when document is visible — backgrounded tabs
     // shouldn't burn cellular data. visibilitychange listener picks up the
     // catch-up sync when the user returns to the app.
+    //
+    // Calls full sync() (push + pull) rather than pull() alone so a stuck
+    // 'error' state self-heals on the next poll once the underlying cause
+    // (e.g. a missing migration column the server has since gained) is fixed.
+    // push() early-returns when nothing is dirty, so the cost is one Dexie
+    // dirty-row scan per tick when push is a no-op — sub-millisecond.
     this._periodicTimer = setInterval(() => {
-      if (navigator.onLine && !document.hidden) this.pull();
+      if (navigator.onLine && !document.hidden) this.sync();
     }, POLL_INTERVAL_MS);
 
     window.addEventListener('online', this._onOnline);

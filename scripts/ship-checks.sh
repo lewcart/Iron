@@ -23,6 +23,22 @@ cd "$(dirname "$0")/.."
 note() { echo "▸ $*"; }
 done_() { echo "✓ $*"; }
 
+# ── 0. db migration gate ──────────────────────────────────────────────────────
+# Refuses to ship when src/db/migrations/ has SQL files that haven't been
+# applied to the configured DB (i.e. prod, when .env.local points at prod).
+# Catches the failure mode that broke workout-set sync on 2026-05-04: code
+# referenced a column whose CREATE migration was never run on prod.
+#
+# SKIP_DB_MIGRATE_CHECK=1 escape hatch when shipping a non-DB-touching change
+# while a migration is intentionally pending (rare).
+if [ "${SKIP_DB_MIGRATE_CHECK:-0}" = "1" ]; then
+  note "SKIP_DB_MIGRATE_CHECK=1 — skipping db migration gate"
+else
+  note "db migration check…"
+  npm run db:migrate:check
+  done_ "no pending migrations"
+fi
+
 # ── 1. vitest ─────────────────────────────────────────────────────────────────
 if [ "${SKIP_VITEST:-0}" = "1" ]; then
   note "SKIP_VITEST=1 — skipping vitest"

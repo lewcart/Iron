@@ -29,6 +29,7 @@
     "check:no-test-bridge": "bash scripts/check-no-test-bridge.sh",
     "ship:checks": "bash scripts/ship-checks.sh",
     "db:migrate": "tsx src/db/migrate.ts",
+    "db:migrate:check": "tsx src/db/migrate.ts check",
     "db:rollback": "tsx src/db/migrate.ts rollback",
     "db:seed": "tsx src/db/seed.ts",
     "db:seed-routines": "tsx src/db/seed-routines.ts",

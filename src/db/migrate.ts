@@ -259,14 +259,45 @@ async function rollback(): Promise<void> {
   await closePool();
 }
 
+/**
+ * Read-only ship-gate: list pending migrations against the configured DB and
+ * exit non-zero if any exist. Used by scripts/ship-checks.sh to refuse a deploy
+ * when prod is missing a migration that's already in the codebase — the exact
+ * failure mode that took down workout-sets sync on 2026-05-04 (column
+ * `excluded_from_pb` referenced by deployed code, migration 042 not yet
+ * applied to prod).
+ */
+async function check(): Promise<void> {
+  await ensureMigrationsTable();
+  const applied = await listAppliedMigrations();
+  await seedBaselineIfNeeded(applied);
+  const files = listMigrationFiles();
+  const pending = files.filter(f => !applied.has(f));
+
+  if (pending.length === 0) {
+    console.log('✓ No pending migrations — database is up to date.');
+    await closePool();
+    return;
+  }
+
+  console.error(`✗ ${pending.length} pending migration(s) on the configured database:`);
+  for (const f of pending) console.error(`  - ${f}`);
+  console.error('  Run `npm run db:migrate` against the target environment before shipping.');
+  await closePool();
+  process.exit(1);
+}
+
 // Run if called directly
 if (import.meta.url === `file://${process.argv[1]}`) {
   const cmd = process.argv[2] ?? 'up';
-  const run = cmd === 'rollback' || cmd === 'down' ? rollback : migrate;
+  const run =
+    cmd === 'rollback' || cmd === 'down' ? rollback :
+    cmd === 'check' || cmd === 'pending' ? check :
+    migrate;
   run().catch((err) => {
     console.error('Migration failed:', err);
     process.exit(1);
   });
 }
 
-export { migrate, rollback };
+export { migrate, rollback, check };

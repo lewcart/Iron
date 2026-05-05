@@ -22,14 +22,30 @@ export async function startWorkout(opts: {
   title?: string;
   workout_routine_uuid?: string;
 } = {}): Promise<string> {
-  // End any currently active workout first
+  // End any currently active workout first. If the previous workout is empty
+  // (no exercises added — i.e. the user tapped Start, changed their mind, then
+  // tapped Start again), soft-delete it instead of leaving a 0-exercise corpse
+  // in history. The same shape that an explicit "Cancel Workout" produces.
   const current = await db.workouts.filter(w => w.is_current === true).first();
   if (current) {
-    await db.workouts.update(current.uuid, {
-      is_current: false,
-      end_time: new Date().toISOString(),
-      ...syncMeta(),
-    });
+    const exerciseCount = await db.workout_exercises
+      .where('workout_uuid')
+      .equals(current.uuid)
+      .filter(e => !e._deleted)
+      .count();
+    if (exerciseCount === 0) {
+      await db.workouts.update(current.uuid, {
+        _deleted: true,
+        _synced: false,
+        _updated_at: now(),
+      });
+    } else {
+      await db.workouts.update(current.uuid, {
+        is_current: false,
+        end_time: new Date().toISOString(),
+        ...syncMeta(),
+      });
+    }
   }
 
   const id = genUUID();
