@@ -30,6 +30,7 @@ import type {
   LocalBodyVision,
   LocalBodyPlan,
   LocalPlanCheckpoint,
+  LocalVisionMuscleOverride,
 } from '@/db/local';
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
@@ -93,6 +94,9 @@ const SYNCED_TABLES = [
   // AI-generated exercise demo image candidates (read-only client side;
   // server is sole writer, so push() naturally finds nothing dirty).
   'exercise_image_candidates',
+  // Vision-aware MAV / frequency overrides (per-vision per-muscle).
+  // Pushed after body_vision (FK).
+  'vision_muscle_overrides',
 ] as const;
 type SyncedTable = typeof SYNCED_TABLES[number];
 
@@ -138,6 +142,7 @@ interface PushPayload {
   dysphoria_logs?: LocalDysphoriaLog[];
   clothes_test_logs?: LocalClothesTestLog[];
   progress_photos?: LocalProgressPhoto[];
+  vision_muscle_overrides?: LocalVisionMuscleOverride[];
 }
 
 const PAGE_SIZE = 1000;

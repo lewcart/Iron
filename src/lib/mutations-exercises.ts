@@ -72,6 +72,7 @@ export async function createCustomExercise(opts: {
     youtube_url: opts.youtube_url ?? null,
     image_urls: null,
     has_sides: opts.has_sides ?? false,
+    lateral_emphasis: false,
   };
   // Push needs the dirty flag. exercises rows technically don't extend
   // SyncMeta on the type but the sync engine reads _synced/_updated_at
