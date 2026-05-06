@@ -2,6 +2,39 @@
 
 All notable changes to Rebirth are documented here.
 
+## [0.10.0] - 2026-05-06
+
+### Added
+
+- **Volume Fit tile on `/plans`.** Routine builder now answers "is this routine good enough?" before you follow it. Per-priority-muscle weekly projection with single-glyph-per-row verdict (worst-of volume × frequency × confidence), vision-aware MAV overrides surfaced via `★`, diff-as-default — when you edit a routine, every priority row shows `before → after (Δ)` so adding a 5th lower day visibly moves glutes from `⚠ red` to `✓ green` if it does. State coverage: loading skeleton, empty-routine suppression, no-vision fallback, single-day frequency-warning footer, all-priority-optimal celebrate, MEV-undefined fallback, draft-vs-active pill, sub-muscle drilldown.
+- **Adherence Gap card on `/feed`.** Retrospective closed-loop verdict — when delivered routine volume falls short of planned for 3+ priority muscle weeks, surface the gap with date-shift framing of what continues if the pattern persists ("hip 100cm: Dec 2027 → Mar 2028 +82d"). HRT 1.4× compounding multiplier, capped at 0.95 stimulus shortfall to prevent catastrophizing. Per-muscle target elasticity table — glutes hit hip + SMM, lateral_delts hit shoulder targets, hip_abductors hit hip + WHR. One bad week breaks the streak (no panel after recovery). Silent by default — renders nothing when adherence is fine.
+- **`vision_muscle_overrides` table** — per-vision per-muscle MAV + frequency overrides. Lets glutes accept 14-26 sets without the projection flagging the correct volume as "over" against the default 10-20. Seeded with the androgodess science-grounded numbers (glutes 14-26 freq≥3, lateral_delts 8-16 freq≥3, hip_abductors 8-16 freq≥2 evidence:'low', core 8-16 freq≥3). Composite-key change_log emits `vision_uuid|muscle_slug` row identifiers; locally synthesized as a single string PK so generic Dexie bulkDelete works through the sync engine.
+- **Lateral-delt sub-muscle resolution (option b).** New `exercises.lateral_emphasis` tag flagged on lateral-raise variants. Routine projection derives a virtual `delts_lateral` row from sets touching tagged exercises so Lou's #1 transformation goal (shoulder cap specialization) gets verdict-level visibility instead of being hidden inside an aggregate "delts: optimal" reading.
+- **`workout_routines.cycle_length_days` + `frequency_per_week`.** Disambiguate weekly-cycle routines from cycle-rotated ones. A 4-day routine on a 9-day cycle delivers ~3.1×/wk effective frequency, not 4×/wk — the projection now reflects that honestly.
+- **`workout_routine_sets.target_rir`.** Routine template target proximity-to-failure. Without populated `target_rir`, the projection's RIR weighting collapses to charitable-default 1.0 and effective_set_count silently equals raw `set_count` — surfaced as `⌀ uncertain` zone with a footer rollup pointing to the fix instead of a confident green tick from missing data.
+
+### Changed
+
+- **RIR weighting moves from 4-tier to 5-tier** (TD2 ACCEPTED). `RIR 5 = 0.25` (was `0.0`). Pump finishers at RIR 5 aren't worthless; the new tier preserves that signal. RIR 0 (failure) stays at 1.0 — same hypertrophy stimulus as RIR 1-3, extra fatigue cost, no bonus. Mirrors `src/lib/training/volume-math.ts`. Both the SQL aggregation in `getWeekSetsPerMuscle` AND the new TS projection use identical math; conformance test guarantees no drift.
+- **`/feed` PrescriptionCard unchanged in behavior** — Volume Fit is design-time guidance, not adaptive prescription. AdherenceGap copy is retrospective ("you've been delivering 57%") not prospective ("PUSH glutes +2"). The two surfaces stay deliberately complementary per the "no two coaches" rule in CLAUDE.md.
+
+### Notes
+
+- This shipped via `/autoplan` with seven independent voices (Codex × CEO/Design/Eng, Claude subagent × CEO/Design/Eng, Androgodess PT × CEO/Eng-math). All seven returned RESHAPE on the original draft. The locked plan + decision log live in `docs/plans/routine-volume-fit-check.md`.
+- Migration 044 is fully idempotent (`IF NOT EXISTS` on every ALTER/CREATE; `ON CONFLICT DO NOTHING` on the seed). The androgodess vision overrides only seed against the active vision row; if `vision-androgodess-001` wasn't `status='active'` at migration time, the seed silently inserts nothing — re-run manually via SQL.
+- `lateral_emphasis` tag was applied to ~5 catalog exercises (lateral raise variants, cable Y raise) by the migration via title-prefix LOWER LIKE matching. New variants added later won't auto-tag — flag for catalog hygiene.
+
+### Tests
+
+- `volume-math.test.ts` (48 tests) — RIR tier behavior, primary/secondary credit, in-both-arrays, kg_volume aggregation, vision override resolution, range-driven volumeZone classifier. Property assertions: effective ≤ raw, primary wins, no double-count.
+- `routine-projection.test.ts` (19 tests) — 8 fixture scenarios including the load-bearing 5-day LULUL motivating case (proves glutes lands `optimal + freq=3 green` with overrides applied; current 4-day correctly reads `under + freq red`).
+- `adherence-engine.test.ts` (15 tests) — catastrophizing caps (1 bad week / 2 bad weeks both produce no panel), 3-week threshold fires, one good week breaks the streak, ratio clamping, HRT compounding amplifies slip, slip bounded at 28d max per metric, two-zone model never multiplies into single number.
+- 1617 / 1617 total green on main after merge.
+
+### Fixed
+
+- **Bundled exercise hydration missing `lateral_emphasis`** — caught at `next build` time by TypeScript, fixed during /qa pass. Vitest didn't exercise the bundled-hydration code path; build did. One-line charitable default added to match the v22 Dexie upgrade hook.
+
 ## [0.9.4] - 2026-05-06
 
 ### Fixed
