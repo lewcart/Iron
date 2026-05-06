@@ -311,8 +311,14 @@ class SyncEngine {
         }
       });
 
-      this._lastError = null;
-      this._lastErrorDetails = null;
+      // Only clear push-origin errors. A prior pull error is still active and
+      // its details must survive — otherwise sync() (push→pull) wipes the
+      // pull's report and the SyncStatus pill ends up in error state with no
+      // details to copy.
+      if (this._lastError?.startsWith('push:')) {
+        this._lastError = null;
+        this._lastErrorDetails = null;
+      }
       this.setStatus('idle');
     } catch (err) {
       if (reloadIfIdbConnectionLost(err)) return;
@@ -384,8 +390,13 @@ class SyncEngine {
         pages++;
       }
 
-      this._lastError = null;
-      this._lastErrorDetails = null;
+      // Symmetric with push(): only clear pull-origin errors so a prior push
+      // failure's details survive. sync() runs push then pull; without this
+      // guard a successful pull would wipe the push report.
+      if (this._lastError?.startsWith('pull:')) {
+        this._lastError = null;
+        this._lastErrorDetails = null;
+      }
       this.setStatus('idle');
     } catch (err) {
       if (reloadIfIdbConnectionLost(err)) return;

@@ -88,15 +88,19 @@ export function SyncStatus() {
 
   const details = syncEngine.lastErrorDetails;
   const fallbackMsg = syncEngine.lastError;
-  const report = details ? formatErrorReport(details) : (fallbackMsg ?? '');
+  // Always render *something* in the expanded panel. If the engine left no
+  // captured details (regression path: push errored, pull cleared its state,
+  // sync() re-set status='error'), show a placeholder so the pill's
+  // "long-press text below" instruction is never a lie.
+  const report = details
+    ? formatErrorReport(details)
+    : fallbackMsg
+      ? fallbackMsg
+      : 'Sync error — no details captured. Check the JS console for [sync] logs.';
 
   const handleClick = async () => {
     if (status !== 'error') return;
     setShowError(v => !v);
-    if (!report) {
-      setCopied('fail');
-      return;
-    }
     const ok = await copyText(report);
     setCopied(ok ? 'ok' : 'fail');
     setTimeout(() => setCopied('idle'), 2500);
@@ -136,7 +140,7 @@ export function SyncStatus() {
         )}
       </button>
 
-      {status === 'error' && showError && report && (
+      {status === 'error' && showError && (
         <div className="mt-2 max-w-[92vw] max-h-[40vh] overflow-auto rounded-lg bg-zinc-900/95 backdrop-blur-sm border border-zinc-800 shadow-lg pointer-events-auto">
           <pre className="text-[10px] leading-snug text-zinc-300 whitespace-pre-wrap break-words p-3 select-text">
             {report}
