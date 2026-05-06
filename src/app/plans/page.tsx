@@ -31,6 +31,7 @@ import {
 } from '@/lib/mutations-plans';
 import type { LocalWorkoutRoutineSet } from '@/db/local';
 import { REP_WINDOWS, REP_WINDOW_ORDER, type RepWindow } from '@/lib/rep-windows';
+import { RoutineVolumeFit } from '@/components/RoutineVolumeFit';
 
 // Trans-mapped colors for active window pills in the picker. Mirrors the
 // visual language on the workout exercise card so the editor and the in-
@@ -639,6 +640,12 @@ function PlanCard({
         <div className="border-t border-border px-4 py-3 space-y-3">
           {plan.routines.length === 0 && !addingRoutine && (
             <p className="text-sm text-muted-foreground text-center py-2">No routines yet</p>
+          )}
+
+          {/* Volume Fit tile — at top of plan card so Lou sees the verdict
+              before scrolling exercise lists. */}
+          {plan.routines.length > 0 && (
+            <RoutineVolumeFit plan={plan} isActive={plan.is_active} />
           )}
 
           {plan.routines.map((routine, i) => (

@@ -37,6 +37,7 @@ const SYNCED_TABLES = [
   'wellbeing_logs', 'dysphoria_logs', 'clothes_test_logs',
   'progress_photos',
   'exercise_image_candidates',
+  'vision_muscle_overrides',
 ] as const;
 
 type SyncedTable = typeof SYNCED_TABLES[number];
@@ -169,15 +170,43 @@ async function fetchRows(table: SyncedTable, uuids: string[]): Promise<Array<Rec
         'SELECT uuid, title, COALESCE(order_index, 0) AS order_index, COALESCE(is_active, false) AS is_active FROM workout_plans WHERE uuid = ANY($1::text[])', [uuids]))
         .map(r => ({ ...r, is_active: Boolean(r.is_active) }));
     case 'workout_routines':
-      return query<Record<string, unknown>>(
-        'SELECT uuid, workout_plan_uuid, title, comment, order_index FROM workout_routines WHERE uuid = ANY($1::text[])', [uuids]);
+      return (await query<Record<string, unknown>>(
+        'SELECT uuid, workout_plan_uuid, title, comment, order_index, cycle_length_days, frequency_per_week FROM workout_routines WHERE uuid = ANY($1::text[])', [uuids]))
+        .map(r => ({
+          ...r,
+          cycle_length_days: r.cycle_length_days != null ? Number(r.cycle_length_days) : null,
+          frequency_per_week: r.frequency_per_week != null ? Number(r.frequency_per_week) : null,
+        }));
     case 'workout_routine_exercises':
       return (await query<Record<string, unknown>>(
         'SELECT uuid, workout_routine_uuid, exercise_uuid, comment, order_index, goal_window FROM workout_routine_exercises WHERE uuid = ANY($1::text[])', [uuids]))
         .map(r => ({ ...r, exercise_uuid: String(r.exercise_uuid).toLowerCase() }));
     case 'workout_routine_sets':
-      return query<Record<string, unknown>>(
-        'SELECT uuid, workout_routine_exercise_uuid, min_repetitions, max_repetitions, tag, comment, order_index, target_duration_seconds FROM workout_routine_sets WHERE uuid = ANY($1::text[])', [uuids]);
+      return (await query<Record<string, unknown>>(
+        'SELECT uuid, workout_routine_exercise_uuid, min_repetitions, max_repetitions, tag, comment, order_index, target_duration_seconds, target_rir FROM workout_routine_sets WHERE uuid = ANY($1::text[])', [uuids]))
+        .map(r => ({
+          ...r,
+          target_rir: r.target_rir != null ? Number(r.target_rir) : null,
+        }));
+    case 'vision_muscle_overrides':
+      // Postgres composite PK (vision_uuid, muscle_slug). change_log emits
+      // row_uuid as 'vision_uuid|muscle_slug'. Local Dexie uses synthetic
+      // single-string `id` PK with the same format — emit it here so
+      // bulkPut keys align.
+      return (await query<Record<string, unknown>>(
+        `SELECT vision_uuid, muscle_slug, override_sets_min, override_sets_max, override_freq_min, evidence, notes
+         FROM vision_muscle_overrides
+         WHERE (vision_uuid || '|' || muscle_slug) = ANY($1::text[])`, [uuids]))
+        .map(r => ({
+          id: `${r.vision_uuid}|${r.muscle_slug}`,
+          vision_uuid: r.vision_uuid,
+          muscle_slug: r.muscle_slug,
+          override_sets_min: r.override_sets_min != null ? Number(r.override_sets_min) : null,
+          override_sets_max: r.override_sets_max != null ? Number(r.override_sets_max) : null,
+          override_freq_min: r.override_freq_min != null ? Number(r.override_freq_min) : null,
+          evidence: r.evidence ?? null,
+          notes: r.notes ?? null,
+        }));
     case 'bodyweight_logs':
       return (await query<Record<string, unknown>>(
         'SELECT * FROM bodyweight_logs WHERE uuid = ANY($1::text[])', [uuids]))
@@ -434,6 +463,7 @@ function mapExercise(r: Record<string, unknown>) {
     youtube_url: (r.youtube_url as string | null) ?? null,
     image_urls: Array.isArray(r.image_urls) ? r.image_urls as string[] : null,
     has_sides: Boolean(r.has_sides),
+    lateral_emphasis: Boolean(r.lateral_emphasis),
   };
 }
 

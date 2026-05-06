@@ -28,6 +28,11 @@ async function seedTimeModeExercise() {
     is_hidden: false,
     movement_pattern: null,
     tracking_mode: 'time',
+    image_count: 0,
+    youtube_url: null,
+    image_urls: null,
+    has_sides: false,
+    lateral_emphasis: false,
   });
 }
 

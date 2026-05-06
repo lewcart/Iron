@@ -134,6 +134,8 @@ export async function createRoutine(opts: {
     title: opts.title?.trim() || null,
     comment: opts.comment?.trim() || null,
     order_index: max,
+    cycle_length_days: null,
+    frequency_per_week: null,
     ...syncMeta(),
   };
   await db.workout_routines.add(routine);
@@ -295,6 +297,7 @@ export async function addRoutineSet(opts: {
     comment: opts.comment ?? null,
     order_index: max,
     target_duration_seconds: null,
+    target_rir: null,
     ...syncMeta(),
   };
   await db.workout_routine_sets.add(set);

@@ -81,6 +81,7 @@ interface PushPayload {
   dysphoria_logs?: Array<Record<string, unknown>>;
   clothes_test_logs?: Array<Record<string, unknown>>;
   progress_photos?: Array<Record<string, unknown>>;
+  vision_muscle_overrides?: Array<Record<string, unknown>>;
 }
 
 export async function POST(req: Request) {
@@ -122,6 +123,8 @@ export async function POST(req: Request) {
     for (const r of body.body_vision ?? []) await pushBodyVision(r);
     for (const r of body.body_plan ?? []) await pushBodyPlan(r);
     for (const r of body.plan_checkpoint ?? []) await pushPlanCheckpoint(r);
+    // Vision overrides depend on body_vision (FK). Push after.
+    for (const r of body.vision_muscle_overrides ?? []) await pushVisionMuscleOverride(r);
 
     for (const r of body.nutrition_logs ?? []) await pushNutritionLog(r);
     for (const r of body.nutrition_week_meals ?? []) await pushNutritionWeekMeal(r);
@@ -300,8 +303,8 @@ async function pushExercise(r: Record<string, unknown>): Promise<void> {
   const imageCountParam = clientSentImageCount ? r.image_count : 0;
 
   await query(
-    `INSERT INTO exercises (uuid, everkinetic_id, title, alias, description, primary_muscles, secondary_muscles, equipment, steps, tips, is_custom, is_hidden, movement_pattern, tracking_mode, image_count, youtube_url, image_urls, has_sides, updated_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, NOW())
+    `INSERT INTO exercises (uuid, everkinetic_id, title, alias, description, primary_muscles, secondary_muscles, equipment, steps, tips, is_custom, is_hidden, movement_pattern, tracking_mode, image_count, youtube_url, image_urls, has_sides, lateral_emphasis, updated_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, NOW())
      ON CONFLICT (uuid) DO UPDATE SET
        title = EXCLUDED.title, alias = EXCLUDED.alias, description = EXCLUDED.description,
        primary_muscles = EXCLUDED.primary_muscles, secondary_muscles = EXCLUDED.secondary_muscles,
@@ -313,6 +316,7 @@ async function pushExercise(r: Record<string, unknown>): Promise<void> {
        youtube_url = EXCLUDED.youtube_url,
        image_urls = ${clientSentImageUrls ? 'EXCLUDED.image_urls' : 'exercises.image_urls'},
        has_sides = EXCLUDED.has_sides,
+       lateral_emphasis = EXCLUDED.lateral_emphasis,
        updated_at = NOW()`,
     [
       String(r.uuid).toLowerCase(), r.everkinetic_id, r.title,
@@ -325,6 +329,7 @@ async function pushExercise(r: Record<string, unknown>): Promise<void> {
       ytClean,
       imageUrlsParam,
       Boolean(r.has_sides),
+      Boolean(r.lateral_emphasis),
     ],
   );
 }
@@ -358,12 +363,15 @@ async function pushWorkoutRoutine(r: Record<string, unknown>): Promise<void> {
     return;
   }
   await query(
-    `INSERT INTO workout_routines (uuid, workout_plan_uuid, title, comment, order_index, updated_at)
-     VALUES ($1, $2, $3, $4, $5, NOW())
+    `INSERT INTO workout_routines (uuid, workout_plan_uuid, title, comment, order_index, cycle_length_days, frequency_per_week, updated_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
      ON CONFLICT (uuid) DO UPDATE SET
        title = EXCLUDED.title, comment = EXCLUDED.comment,
-       order_index = EXCLUDED.order_index, updated_at = NOW()`,
-    [r.uuid, r.workout_plan_uuid, r.title, r.comment, r.order_index],
+       order_index = EXCLUDED.order_index,
+       cycle_length_days = EXCLUDED.cycle_length_days,
+       frequency_per_week = EXCLUDED.frequency_per_week,
+       updated_at = NOW()`,
+    [r.uuid, r.workout_plan_uuid, r.title, r.comment, r.order_index, r.cycle_length_days ?? null, r.frequency_per_week ?? null],
   );
 }
 
@@ -388,14 +396,16 @@ async function pushWorkoutRoutineSet(r: Record<string, unknown>): Promise<void> 
     return;
   }
   await query(
-    `INSERT INTO workout_routine_sets (uuid, workout_routine_exercise_uuid, min_repetitions, max_repetitions, tag, comment, order_index, target_duration_seconds, updated_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
+    `INSERT INTO workout_routine_sets (uuid, workout_routine_exercise_uuid, min_repetitions, max_repetitions, tag, comment, order_index, target_duration_seconds, target_rir, updated_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
      ON CONFLICT (uuid) DO UPDATE SET
        min_repetitions = EXCLUDED.min_repetitions, max_repetitions = EXCLUDED.max_repetitions,
        tag = EXCLUDED.tag, comment = EXCLUDED.comment,
        order_index = EXCLUDED.order_index,
-       target_duration_seconds = EXCLUDED.target_duration_seconds, updated_at = NOW()`,
-    [r.uuid, r.workout_routine_exercise_uuid, r.min_repetitions, r.max_repetitions, r.tag, r.comment, r.order_index, r.target_duration_seconds ?? null],
+       target_duration_seconds = EXCLUDED.target_duration_seconds,
+       target_rir = EXCLUDED.target_rir,
+       updated_at = NOW()`,
+    [r.uuid, r.workout_routine_exercise_uuid, r.min_repetitions, r.max_repetitions, r.tag, r.comment, r.order_index, r.target_duration_seconds ?? null, r.target_rir ?? null],
   );
 }
 
@@ -643,6 +653,47 @@ async function pushPlanCheckpoint(r: Record<string, unknown>): Promise<void> {
       r.metrics_snapshot == null ? null : JSON.stringify(r.metrics_snapshot),
       sanitizeCheckpointAssessment(r.assessment),
       r.notes ?? null, asStringArray(r.adjustments_made),
+    ],
+  );
+}
+
+async function pushVisionMuscleOverride(r: Record<string, unknown>): Promise<void> {
+  // Composite PK (vision_uuid, muscle_slug). Soft-delete: we DELETE on
+  // _deleted=true so the row stops applying overrides.
+  const visionUuid = r.vision_uuid as string;
+  const muscleSlug = r.muscle_slug as string;
+  if (!visionUuid || !muscleSlug) return; // defensive: malformed payload
+  if (r._deleted) {
+    await query(
+      'DELETE FROM vision_muscle_overrides WHERE vision_uuid = $1 AND muscle_slug = $2',
+      [visionUuid, muscleSlug],
+    );
+    return;
+  }
+  // Sanitize evidence enum.
+  const evidence =
+    r.evidence === 'low' || r.evidence === 'medium' || r.evidence === 'high'
+      ? r.evidence
+      : null;
+  await query(
+    `INSERT INTO vision_muscle_overrides
+       (vision_uuid, muscle_slug, override_sets_min, override_sets_max,
+        override_freq_min, evidence, notes, updated_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
+     ON CONFLICT (vision_uuid, muscle_slug) DO UPDATE SET
+       override_sets_min = EXCLUDED.override_sets_min,
+       override_sets_max = EXCLUDED.override_sets_max,
+       override_freq_min = EXCLUDED.override_freq_min,
+       evidence          = EXCLUDED.evidence,
+       notes             = EXCLUDED.notes,
+       updated_at        = NOW()`,
+    [
+      visionUuid, muscleSlug,
+      r.override_sets_min ?? null,
+      r.override_sets_max ?? null,
+      r.override_freq_min ?? null,
+      evidence,
+      r.notes ?? null,
     ],
   );
 }

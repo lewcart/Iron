@@ -48,6 +48,11 @@ export interface LocalExercise {
    *  the second side. Default false; coerce undefined → false on read for
    *  rows that arrived from a Dexie v19 store before the v20 schema bump. */
   has_sides: boolean;
+  /** Marks shoulder lateral-head emphasis. Routine projection (PR3)
+   *  derives a virtual delts_lateral row from sets touching exercises
+   *  with lateral_emphasis=true. Default false; coerce undefined → false
+   *  on read for pre-v22 rows. */
+  lateral_emphasis: boolean;
 }
 
 export interface LocalWorkout extends SyncMeta {
@@ -115,6 +120,12 @@ export interface LocalWorkoutRoutine extends SyncMeta {
   title: string | null;
   comment: string | null;
   order_index: number;
+  /** Days in one cycle (default null = weekly). A 4-day routine with
+   *  cycle_length_days=9 delivers ~3.1 days/wk effective frequency. */
+  cycle_length_days: number | null;
+  /** Explicit ×/wk override. Null = derive from cycle_length_days (or
+   *  assume weekly). Use for routines run on irregular cadence. */
+  frequency_per_week: number | null;
 }
 
 export interface LocalWorkoutRoutineExercise extends SyncMeta {
@@ -139,6 +150,38 @@ export interface LocalWorkoutRoutineSet extends SyncMeta {
   /** Routine template target hold in seconds. Populated only for time-mode
    *  exercises. Mirrors min_repetitions/max_repetitions for the rep case. */
   target_duration_seconds: number | null;
+  /** Routine template target RIR (0-10). Null = unspecified; projection
+   *  treats as low-confidence (no charitable green tick). Mirrors live
+   *  workout_sets.rir convention. */
+  target_rir: number | null;
+}
+
+/**
+ * Per-vision per-muscle range and frequency override. Mirrors Postgres
+ * vision_muscle_overrides table (migration 044). Postgres uses composite
+ * PK (vision_uuid, muscle_slug); locally we derive a single string
+ * primary key `id = "${vision_uuid}|${muscle_slug}"` so Dexie bulkDelete
+ * works through the generic sync engine. The two underlying fields are
+ * denormalized for indexed queries.
+ *
+ * muscle_slug is text — virtual sub-muscles like 'delts_lateral' have
+ * overrides without a taxonomy change.
+ */
+export interface LocalVisionMuscleOverride extends SyncMeta {
+  /** Synthetic primary key: `${vision_uuid}|${muscle_slug}`. */
+  id: string;
+  vision_uuid: string;
+  muscle_slug: string;
+  override_sets_min: number | null;
+  override_sets_max: number | null;
+  override_freq_min: number | null;
+  evidence: 'low' | 'medium' | 'high' | null;
+  notes: string | null;
+}
+
+/** Compose the synthetic primary key for vision_muscle_overrides. */
+export function visionOverrideKey(vision_uuid: string, muscle_slug: string): string {
+  return `${vision_uuid}|${muscle_slug}`;
 }
 
 // ─── Body spec / measurements / inbody / goals ───────────────────────────────
@@ -580,6 +623,9 @@ export class IronDB extends Dexie {
   // ── v15 additions ──
   exercise_image_candidates!: Table<LocalExerciseImageCandidate, string>;
 
+  // ── v22 additions ──
+  vision_muscle_overrides!: Table<LocalVisionMuscleOverride, string>;
+
   constructor() {
     super('iron-db');
 
@@ -852,6 +898,38 @@ export class IronDB extends Dexie {
       });
     });
 
+    // v22: routine volume fit check (mirrors Postgres migration 044).
+    //
+    //   - workout_routine_sets.target_rir (additive nullable column,
+    //     not indexed)
+    //   - workout_routines.cycle_length_days + frequency_per_week
+    //     (additive nullable, not indexed)
+    //   - exercises.lateral_emphasis (additive boolean default false)
+    //   - vision_muscle_overrides (NEW table — composite key on
+    //     [vision_uuid+muscle_slug])
+    //
+    // Backfill defaults so reads on pre-v22 rows return defined values
+    // rather than undefined.
+    const v22Stores = {
+      ...v16Stores,
+      // Synthetic single-string PK = `${vision_uuid}|${muscle_slug}` so the
+      // generic sync bulkDelete path works (it operates on string row_uuids
+      // from change_log). vision_uuid + muscle_slug indexed for query.
+      vision_muscle_overrides: 'id, vision_uuid, muscle_slug, _synced, _updated_at',
+    };
+    this.version(22).stores(v22Stores).upgrade(async tx => {
+      await tx.table('workout_routine_sets').toCollection().modify(row => {
+        if (row.target_rir === undefined) row.target_rir = null;
+      });
+      await tx.table('workout_routines').toCollection().modify(row => {
+        if (row.cycle_length_days === undefined) row.cycle_length_days = null;
+        if (row.frequency_per_week === undefined) row.frequency_per_week = null;
+      });
+      await tx.table('exercises').toCollection().modify(row => {
+        if (row.lateral_emphasis === undefined) row.lateral_emphasis = false;
+      });
+    });
+
     // versionchange handler — when a new SW activates and the next page
     // load opens the DB at v22+, Dexie fires versionchange on existing
     // open connections. Without handling, those connections deadlock the
@@ -947,6 +1025,7 @@ export async function hydrateExercises(): Promise<void> {
           youtube_url: ex.youtube_url ?? null,
           image_urls: ex.image_urls ?? null,
           has_sides: ex.has_sides ?? false,
+          lateral_emphasis: ex.lateral_emphasis ?? false,
         });
       }
     });
