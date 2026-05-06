@@ -100,10 +100,24 @@ export interface WatchSetMutation {
 // Capacitor plugin handle
 // ─────────────────────────────────────────────────────────────────────────
 
+/** Result of reading the iPhone App Group snapshot. The native plugin
+ *  exposes only the slice JS needs for rest-timer hydration — full
+ *  snapshot reconstruction stays in JS via the existing build path. */
+export interface AppGroupSnapshotSummary {
+  present: boolean;
+  /** When the snapshot was last written to App Group (ms epoch). */
+  pushed_at_ms?: number;
+  /** The rest_timer slice if a timer is active in the App Group state.
+   *  Native code (WatchConnectivityPlugin's processInboundNatively) writes
+   *  this when JS isn't alive, so JS can hydrate on next launch. */
+  rest_timer?: WatchRestTimer;
+}
+
 interface WatchConnectivityPlugin {
   pushActiveWorkout(options: { snapshot: WatchSnapshot }): Promise<{ delivered: boolean }>;
   pushSetMutation(options: { mutation: WatchSetMutation }): Promise<{ queued: boolean }>;
   getWatchPaired(): Promise<{ isPaired: boolean; isReachable: boolean; isWatchAppInstalled: boolean }>;
+  readAppGroupSnapshot(): Promise<AppGroupSnapshotSummary>;
 }
 
 const WatchConnectivity = registerPlugin<WatchConnectivityPlugin>('WatchConnectivity');
@@ -247,6 +261,20 @@ export async function getWatchPaired(): Promise<{ isPaired: boolean; isReachable
     return await WatchConnectivity.getWatchPaired();
   } catch {
     return { isPaired: false, isReachable: false, isWatchAppInstalled: false };
+  }
+}
+
+/** Read the iPhone App Group snapshot summary. Returns `{present: false}`
+ *  on web or when no snapshot has been persisted. Used by the rest-timer
+ *  state store to hydrate from native-applied state when JS comes up after
+ *  the iOS plugin processed a watchWroteSet message in the background. */
+export async function readAppGroupSnapshot(): Promise<AppGroupSnapshotSummary> {
+  if (!isNativeIOS()) return { present: false };
+  try {
+    return await WatchConnectivity.readAppGroupSnapshot();
+  } catch (err) {
+    console.warn('[watch] readAppGroupSnapshot failed:', err);
+    return { present: false };
   }
 }
 

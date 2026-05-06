@@ -21,6 +21,7 @@ import {
   endRestActivity,
   getCurrentRestActivity,
 } from './native/rest-timer-activity';
+import { readAppGroupSnapshot } from './watch';
 import {
   TIMER_END_KEY,
   TIMER_DURATION_KEY,
@@ -322,7 +323,13 @@ export class RestTimerStore {
       }
     }
     this.lastStartedAt = t;
-    const endAtMs = t + args.restSec * 1000;
+    // Anchor endAtMs to completedAtMs (the moment the user actually finished
+    // the set) rather than `now`. When the iOS native handler processes the
+    // watchWroteSet message before JS comes up, both surfaces compute the
+    // same end-time. Falls back to `now` for manual presets that have no
+    // associated completion timestamp.
+    const anchor = args.completedAtMs ?? t;
+    const endAtMs = anchor + args.restSec * 1000;
     this.state = {
       endAtMs,
       durationSec: args.restSec,
@@ -394,6 +401,51 @@ export class RestTimerStore {
     this.persist();
     void this.liveActivity.update({ overtimeStart: t });
     this.notify();
+  }
+
+  /** Reconciles in-memory state against the iPhone App Group snapshot.
+   *  When iPhone Rebirth was closed and the user completed a set on the
+   *  watch, the WatchConnectivityPlugin's native handler wrote a
+   *  rest_timer hint to App Group + pushed it to the watch. JS missed the
+   *  whole flow. On next foreground, we adopt the App Group rest_timer so
+   *  the workout page UI + Live Activity reflect what the watch is
+   *  already showing. Best-effort — failures are silent. */
+  async reconcileFromAppGroup(): Promise<void> {
+    let summary;
+    try {
+      summary = await readAppGroupSnapshot();
+    } catch {
+      return;
+    }
+    if (!summary.present) return;
+    const incoming = summary.rest_timer;
+    if (!incoming) {
+      // App Group says no active rest. If we have a stale in-memory state
+      // for the same setUuid the App Group last knew about, defer to it —
+      // but conservatively only when our state was hydrated from
+      // localStorage (no recent local activity). For now: trust App Group
+      // when we have nothing. If we have something the user might have
+      // started, leave it alone.
+      return;
+    }
+    // Adopt the App Group rest_timer when our local state is empty OR
+    // describes a different setUuid (App Group is canonical when native
+    // applied something we don't know about). Don't override our own
+    // newer state for the SAME setUuid — JS may have extended past
+    // what App Group has.
+    if (this.state == null || this.state.setUuid !== incoming.set_uuid) {
+      this.state = {
+        endAtMs: incoming.end_at_ms,
+        durationSec: incoming.duration_sec,
+        setUuid: incoming.set_uuid,
+        overtimeStartMs: incoming.overtime_start_ms ?? null,
+        completedAtMs: null,
+      };
+      this.zeroCrossFired = (incoming.overtime_start_ms ?? null) != null;
+      this.persist();
+      this.startTicking();
+      this.notify();
+    }
   }
 
   /** Reconciles in-memory state against the iOS Live Activity. Call once on
@@ -510,6 +562,14 @@ export function startRestTimer(args: RestTimerStartArgs): { started: boolean } {
  *  to detect process-kill orphans. Best-effort, async. */
 export async function reconcileRestTimerNative(): Promise<void> {
   await store().reconcileWithNative();
+}
+
+/** Reconciles in-memory state with the iPhone App Group snapshot. Call on
+ *  app foreground to pick up rest timers that the native iOS plugin
+ *  applied while JS was asleep (e.g., user completed a set on the watch
+ *  while iPhone Rebirth was closed). Best-effort, async. */
+export async function reconcileRestTimerFromAppGroup(): Promise<void> {
+  await store().reconcileFromAppGroup();
 }
 
 export function extendRestTimer(args: { setUuid?: string; seconds: number }): void {

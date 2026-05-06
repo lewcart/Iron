@@ -16,6 +16,7 @@ import {
   endRestTimer,
   resyncRestTimer,
   reconcileRestTimerNative,
+  reconcileRestTimerFromAppGroup,
   getRestTimer,
   getRestTimerDerived,
   subscribeRestTimer,
@@ -130,15 +131,21 @@ function useRestTimer() {
   // Foreground re-sync — when the app returns from background, ask the store
   // to fire any deferred zero-cross / overtime transitions, cancel any
   // pending native notification (the OS already fired it if appropriate),
-  // and reconcile in-memory state with the iOS Live Activity (catches
-  // JS-killed-mid-rest where ActivityKit Activity persists past JS death).
+  // and reconcile in-memory state with both:
+  //   1. iOS Live Activity (catches JS-killed-mid-rest where ActivityKit
+  //      Activity persists past JS death).
+  //   2. iPhone App Group snapshot (catches the case where iPhone Rebirth
+  //      was closed and the WC plugin's native handler started a rest
+  //      timer in response to a watchWroteSet message — JS missed it).
   useEffect(() => {
     let cleanup: (() => void) | undefined;
+    void reconcileRestTimerFromAppGroup();
     void reconcileRestTimerNative();
     App.addListener('appStateChange', ({ isActive }) => {
       if (!isActive) return;
       cancelRestNotification();
       resyncRestTimer();
+      void reconcileRestTimerFromAppGroup();
       void reconcileRestTimerNative();
     }).then(handle => {
       cleanup = () => handle.remove();
