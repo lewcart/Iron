@@ -267,9 +267,11 @@ public class GeofencePlugin: CAPPlugin, CAPBridgedPlugin {
     }
 
     /// User-initiated finish for an active walk that didn't reach its
-    /// terminal geofence (e.g. went on a morning walk but didn't end at the
-    /// gym). Saves whatever route samples have been collected to HealthKit
-    /// and ends the morning flow regardless of leg — no walk-2 expected.
+    /// terminal geofence (e.g. arrived at the gym before the geofence fired).
+    /// Saves whatever route samples have been collected to HealthKit. Leg-aware:
+    /// finishing the outbound leg leaves the flow in .atGymWalkSaved so walk-2
+    /// can still auto-start when the user finishes their workout. Finishing the
+    /// inbound leg ends the flow.
     @objc func finishActiveWalkNow(_ call: CAPPluginCall) {
         let s = walkTracker.loadState()
         guard s.phase == .walkOutboundActive || s.phase == .walkInboundActive else {
@@ -280,14 +282,20 @@ public class GeofencePlugin: CAPPlugin, CAPBridgedPlugin {
             return
         }
         let leg: WalkLeg = (s.phase == .walkOutboundActive) ? .outbound : .inbound
-        // Optimistic transition: manual finish always ends the morning flow.
-        walkTracker.transition(to: .completed)
+        // Optimistic transition mirrors the geofence path: outbound → atGymWalkSaved
+        // (walk-2 still expected), inbound → completed (flow done).
+        let optimisticDest: WalkPhase = (leg == .outbound) ? .atGymWalkSaved : .completed
+        walkTracker.transition(to: optimisticDest)
         endActiveWalkLocationUpdates()
         walkTracker.finish(at: Date()) { [weak self] result in
             guard let self else { return }
             switch result {
             case .success:
-                self.postWalkCompletedNotification()
+                // Outbound success is silent (Lou is unlocking phone to lift);
+                // inbound success surfaces the "both walks saved" notification.
+                if leg == .inbound {
+                    self.postWalkCompletedNotification()
+                }
                 self.notifyWalkStateChanged()
                 call.resolve([
                     "finished": true,
@@ -295,7 +303,7 @@ public class GeofencePlugin: CAPPlugin, CAPBridgedPlugin {
                 ])
             case .failure(let err):
                 // No samples flushed yet — fall back to cancel so the tracker
-                // doesn't sit in .completed with stale state.
+                // doesn't sit in a terminal phase with stale state.
                 if case .noSamples = err {
                     self.walkTracker.cancel()
                     self.notifyWalkStateChanged()

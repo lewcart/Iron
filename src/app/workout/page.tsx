@@ -26,6 +26,12 @@ import {
 import { consumeScheduleTap } from '@/lib/workout-schedule';
 import { HealthSection } from '@/components/HealthSection';
 import { ActiveWalkBanner } from '@/components/ActiveWalkBanner';
+import {
+  finishActiveWalkNow,
+  getActiveWalkState,
+  isGeofenceAvailable,
+  onWalkStateChanged,
+} from '@/lib/geofence';
 import Link from 'next/link';
 import { Check, ChevronDown, ChevronRight, ChevronsUp, ChevronUp, ClipboardList, Clock, Dumbbell, Equal, GripVertical, Info, Plus, Search, Timer, X } from 'lucide-react';
 import { ExerciseDetailModal } from '@/components/ExerciseDetailModal';
@@ -794,7 +800,11 @@ function RecommendationBadge({ rec }: { rec: ExerciseRecommendation }) {
 // RIR fallback when no prior session exists. RIR 2 (≈ 2 reps in reserve) is a
 // reasonable mid-difficulty assumption that the slider lets the user adjust.
 const RIR_DEFAULT_FALLBACK = 2;
-const RIR_PX_PER_STEP = 16;
+// Drag distance per tick. The thumb covers the value during a press-and-hold
+// drag, so each detent needs to be a deliberate movement — paired with a short
+// haptic tick on every step change so the user can feel the value increment
+// without seeing it.
+const RIR_PX_PER_STEP = 36;
 
 // Press-and-hold slider for capturing Reps in Reserve (0–5). Vertical drag:
 // up = +1, down = -1, clamped 0–5. The pointer is captured on press so the
@@ -834,7 +844,12 @@ function RirSlider({
     const dy = startY.current - e.clientY;
     const steps = Math.round(dy / RIR_PX_PER_STEP);
     const next = Math.max(0, Math.min(5, startVal.current + steps));
-    setDragValue(next);
+    setDragValue((prev) => {
+      if (prev !== next && typeof navigator !== 'undefined' && navigator.vibrate) {
+        navigator.vibrate(8);
+      }
+      return next;
+    });
   };
 
   const finish = async (e: React.PointerEvent<HTMLButtonElement>) => {
@@ -1687,6 +1702,41 @@ export default function WorkoutPage() {
     }, 200);
     return () => clearTimeout(handle);
   }, [workout, pageGoalWindowByExercise, restTimerVersion]);
+
+  // If a strength workout is active while the morning outbound walk is still
+  // marked active (geofence didn't fire — gym entry missed), auto-finish the
+  // outbound leg so the banner dismisses and the flow advances to
+  // .atGymWalkSaved. Walk-2 still kicks off when the user taps Finish Workout.
+  // 3s grace lets the geofence fire on its own if it's about to.
+  useEffect(() => {
+    if (!workout?.uuid) return;
+    if (!isGeofenceAvailable()) return;
+    let cancelled = false;
+    let pending: ReturnType<typeof setTimeout> | null = null;
+    const tryFinish = (phase: string) => {
+      if (cancelled) return;
+      if (phase !== 'walkOutboundActive') return;
+      if (pending) return;
+      pending = setTimeout(() => {
+        pending = null;
+        if (cancelled) return;
+        getActiveWalkState().then((s) => {
+          if (cancelled) return;
+          if (s.phase !== 'walkOutboundActive') return;
+          finishActiveWalkNow().catch((err) => {
+            console.warn('[workout] auto finishActiveWalkNow failed', err);
+          });
+        });
+      }, 3000);
+    };
+    getActiveWalkState().then((s) => tryFinish(s.phase));
+    const unsub = onWalkStateChanged((evt) => tryFinish(evt.phase));
+    return () => {
+      cancelled = true;
+      if (pending) clearTimeout(pending);
+      unsub();
+    };
+  }, [workout?.uuid]);
 
   // Collapse all plans except the first one once the local data has loaded.
   // useLiveQuery returns synchronously after first render, so this effect
