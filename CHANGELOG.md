@@ -2,6 +2,12 @@
 
 All notable changes to Rebirth are documented here.
 
+## [0.10.3] - 2026-05-07
+
+### Changed
+
+- **Progression rule: load only goes up when reps spill OUTSIDE the goal range.** Hitting the top of the range cleanly with RIR room (e.g. 12 reps RIR 2 on Build 8–12) now returns `more reps` — push for 13 next session, then earn the bump. Brings the legacy path (set-level min/max, no `goal_window`) into agreement with the window-aware path that all 27 active routine exercises already use. Conservative on purpose: HRT-aug recomp benefits from earning every load increase rather than burning stimulus density on premature bumps. Net behavior change for live routines: zero (all goal_window-equipped). Future-proofs custom set-level ranges. Verbs are now consistent — when the recommendation says "more reps", it actually means same weight + push for one more.
+
 ## [0.10.2] - 2026-05-07
 
 ### Fixed

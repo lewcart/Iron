@@ -22,9 +22,15 @@
 // 2. Legacy (fallback when goal_window is null — uses set-level min/max):
 //    - majority of sets below min_target_reps → back off
 //    - majority above max_target_reps OR avg RIR ≥ 4 → go heavier (high)
-//    - majority at/over max_target_reps with avg RIR ≥ 2 → go heavier
+//    - majority above max_target_reps → go heavier (medium)
 //    - in range with avg RIR ≥ 2 → more reps
 //    - nailed target with RIR 0–1 → hold
+//
+// Both paths share the same trigger: load only goes up when reps spill OUTSIDE
+// the goal range, never just for hitting the top with RIR room. At the top with
+// RIR room the cue is "more reps" — push for max+1 next session, then earn the
+// bump. Conservative on purpose for HRT-aug recomp where stimulus density beats
+// premature load increases.
 //
 // Rule (time mode): same RIR thresholds, but the verb is "go longer".
 //
@@ -152,7 +158,6 @@ export function recommendForExercise(
   // Legacy path — set-level min/max comparison. Kept for routines that haven't
   // been assigned a goal_window yet.
   let aboveMax = 0;
-  let atMax = 0;
   let belowMin = 0;
   let unknownTarget = 0;
 
@@ -162,7 +167,6 @@ export function recommendForExercise(
     const max = s.max_target_reps;
     if (min == null && max == null) { unknownTarget++; continue; }
     if (max != null && reps > max) aboveMax++;
-    else if (max != null && reps === max) atMax++;
     else if (min != null && reps < min) belowMin++;
   }
 
@@ -174,17 +178,27 @@ export function recommendForExercise(
     return null;
   }
 
+  // "Way above" — at least 4 reps past max — escalates to high intensity. This
+  // approximates the window-aware path's two-windows-up trigger for the common
+  // 8–12 range (max+4 = 16 = endurance, two windows above build). Custom ranges
+  // are approximate but defensible; the legacy path is unused for routines that
+  // have goal_window assigned.
+  const wayAbove = working.filter(s => {
+    const max = s.max_target_reps;
+    const reps = s.repetitions ?? 0;
+    return max != null && reps >= max + 4;
+  }).length;
   const majorityAboveMax = aboveMax / total >= 0.5;
+  const majorityWayAboveMax = wayAbove / total >= 0.5;
   const majorityBelowMin = belowMin / total >= 0.5;
-  const majorityAtOrAboveMax = (aboveMax + atMax) / total >= 0.5;
 
   if (majorityBelowMin) {
     return { kind: 'back-off', intensity: 'medium', label: 'back off' };
   }
-  if (majorityAboveMax || rir >= 4) {
+  if (majorityWayAboveMax || rir >= 4) {
     return { kind: 'go-heavier', intensity: 'high', label: 'go heavier' };
   }
-  if (majorityAtOrAboveMax && rir >= 2) {
+  if (majorityAboveMax) {
     return { kind: 'go-heavier', intensity: 'medium', label: 'go heavier' };
   }
   if (rir >= 2) {

@@ -49,10 +49,22 @@ describe('recommendForExercise — reps mode', () => {
     expect(r?.intensity).toBe('high');
   });
 
-  it('go heavier (medium) when at top of range with RIR room', () => {
+  it('more reps when at top of range with RIR room (must exceed max to bump)', () => {
+    // Hitting the top of the range cleanly with RIR room earns the next push,
+    // not the load increase. Legacy path mirrors window-aware: load only goes
+    // up when reps spill OUTSIDE the goal range (max+1).
     const sets = [
       set({ repetitions: 12, min_target_reps: 8, max_target_reps: 12, rir: 2 }),
       set({ repetitions: 12, min_target_reps: 8, max_target_reps: 12, rir: 2 }),
+    ];
+    const r = recommendForExercise(sets, 'reps');
+    expect(r?.kind).toBe('more-reps');
+  });
+
+  it('go heavier (medium) when majority spilled one rep above max', () => {
+    const sets = [
+      set({ repetitions: 13, min_target_reps: 8, max_target_reps: 12, rir: 1 }),
+      set({ repetitions: 13, min_target_reps: 8, max_target_reps: 12, rir: 1 }),
     ];
     const r = recommendForExercise(sets, 'reps');
     expect(r?.kind).toBe('go-heavier');
@@ -213,10 +225,11 @@ describe('recommendForExercise — window-aware path', () => {
   });
 
   it('falls back to legacy path when goalWindow is null', () => {
-    // Same input as a legacy test to confirm the fallback path is wired.
+    // Sets one rep over max should trigger go-heavier on both paths — confirms
+    // the legacy fallback wiring agrees with the window-aware rule.
     const sets = [
-      set({ repetitions: 12, min_target_reps: 8, max_target_reps: 12, rir: 2 }),
-      set({ repetitions: 12, min_target_reps: 8, max_target_reps: 12, rir: 2 }),
+      set({ repetitions: 13, min_target_reps: 8, max_target_reps: 12, rir: 1 }),
+      set({ repetitions: 13, min_target_reps: 8, max_target_reps: 12, rir: 1 }),
     ];
     expect(recommendForExercise(sets, 'reps', null)?.kind).toBe('go-heavier');
   });
