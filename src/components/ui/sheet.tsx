@@ -28,6 +28,7 @@ export function Sheet({ open, onClose, title, children, height = 'auto', footer,
   const [mounted, setMounted] = useState(open);
   const [visible, setVisible] = useState(false);
   const [dragOffset, setDragOffset] = useState(0);
+  const [kbInset, setKbInset] = useState(0);
   const dragStartY = useRef(0);
   const dragging = useRef(false);
   const sheetRef = useRef<HTMLDivElement>(null);
@@ -59,11 +60,39 @@ export function Sheet({ open, onClose, title, children, height = 'auto', footer,
 
   useEffect(() => {
     if (!visible || !sheetRef.current) return;
-    const focusable = sheetRef.current.querySelector<HTMLElement>(
-      'input, button, [tabindex]:not([tabindex="-1"])'
+    // Respect any child that already self-focused (e.g. SearchInput autoFocus
+    // in AddFoodSheet wants the keyboard up immediately). Otherwise focus a
+    // non-input element so opening the sheet doesn't summon the keyboard and
+    // bury the footer (Delete / Save). Container is tabindex=-1 so it can
+    // hold focus for screen readers without grabbing the text caret.
+    if (sheetRef.current.contains(document.activeElement)) return;
+    const nonInput = sheetRef.current.querySelector<HTMLElement>(
+      'button:not([disabled]), [tabindex]:not([tabindex="-1"])'
     );
-    focusable?.focus();
+    (nonInput ?? sheetRef.current).focus();
   }, [visible]);
+
+  // Track on-screen keyboard via VisualViewport so the footer stays tappable
+  // above the keyboard. Capacitor's iOS config uses `resize: 'body'`, which
+  // shrinks <body> but leaves position:fixed elements anchored to the full
+  // layout viewport — without this, the footer hides under the keyboard.
+  useEffect(() => {
+    if (!open) return;
+    if (typeof window === 'undefined' || !window.visualViewport) return;
+    const vv = window.visualViewport;
+    const update = () => {
+      const inset = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
+      setKbInset(inset);
+    };
+    update();
+    vv.addEventListener('resize', update);
+    vv.addEventListener('scroll', update);
+    return () => {
+      vv.removeEventListener('resize', update);
+      vv.removeEventListener('scroll', update);
+      setKbInset(0);
+    };
+  }, [open]);
 
   if (!mounted) return null;
 
@@ -107,15 +136,18 @@ export function Sheet({ open, onClose, title, children, height = 'auto', footer,
       />
       <div
         ref={sheetRef}
+        tabIndex={-1}
         className={cn(
-          'absolute inset-x-0 bottom-0 bg-background rounded-t-2xl shadow-2xl flex flex-col',
+          'absolute inset-x-0 bottom-0 bg-background rounded-t-2xl shadow-2xl flex flex-col outline-none',
           'transition-transform duration-200 ease-out',
           className
         )}
         style={{
           height,
           maxHeight: '95vh',
-          paddingBottom: 'env(safe-area-inset-bottom, 0px)',
+          paddingBottom: kbInset > 0
+            ? `${kbInset}px`
+            : 'env(safe-area-inset-bottom, 0px)',
           transform: visible
             ? `translateY(${dragOffset}px)`
             : 'translateY(100%)',
