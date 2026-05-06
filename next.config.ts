@@ -15,7 +15,18 @@ const nextConfig: NextConfig = {
 
 export default withPWA({
   dest: "public",
-  disable: process.env.NODE_ENV === "development",
+  // Disable the service worker for Capacitor (iOS) builds. The whole bundle
+  // is already on local disk inside the .ipa, so an extra Workbox cache
+  // layer adds no offline benefit — it just creates a stale-asset trap.
+  // After a new install, the old SW (still registered in WKWebView) would
+  // intercept fetches for `index.html` / `_next/static/*` and serve last
+  // build's HTML pointing to last build's chunk hashes, so newly shipped
+  // features (MuscleMap on the exercise page, ✨ Steps/Tips/About generator,
+  // etc.) wouldn't render until the user force-quit twice. PWA stays on
+  // for the web/Vercel deploy where the SW does real work.
+  disable:
+    process.env.NODE_ENV === "development" ||
+    process.env.CAPACITOR_BUILD === "1",
   fallbacks: {
     document: "/offline",
   },

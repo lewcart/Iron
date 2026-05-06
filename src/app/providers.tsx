@@ -68,6 +68,30 @@ function AppBootstrap() {
   const lastHealthkitSyncAt = useRef(0);
 
   useEffect(() => {
+    // One-shot service-worker unregister + cache purge for Capacitor.
+    // Older builds shipped a Workbox SW that intercepted /_next/static/*
+    // with CacheFirst, which masked freshly installed builds (old chunks
+    // served forever). The SW is no longer generated for Capacitor builds,
+    // but devices upgrading from an older install still have the old SW
+    // registered. Tear it down on boot.
+    if (
+      Capacitor.isNativePlatform() &&
+      typeof navigator !== 'undefined' &&
+      'serviceWorker' in navigator
+    ) {
+      navigator.serviceWorker
+        .getRegistrations()
+        .then(regs => Promise.all(regs.map(r => r.unregister())))
+        .then(() => {
+          if (typeof caches !== 'undefined') {
+            return caches
+              .keys()
+              .then(keys => Promise.all(keys.map(k => caches.delete(k))));
+          }
+        })
+        .catch(() => undefined);
+    }
+
     // Hydrate the exercise catalog so the workout view never shows
     // "Unknown Exercise" on cold start. Idempotent.
     hydrateExercises();

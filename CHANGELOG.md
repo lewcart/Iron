@@ -2,6 +2,12 @@
 
 All notable changes to Rebirth are documented here.
 
+## [0.10.1] - 2026-05-07
+
+### Fixed
+
+- **iOS builds were silently shipping stale features.** The Capacitor build was generating a `next-pwa` Workbox service worker that precached `index.html` + `_next/static/*` with `CacheFirst`. After a new install, the previously registered SW kept intercepting fetches and serving last build's HTML — which pointed at last build's chunk hashes — so newly shipped UI (e.g. `MuscleMap` on the exercise page, the ✨ Steps/Tips/About generator) didn't render until the user force-quit and reopened, sometimes twice. Capacitor doesn't need a service worker — the bundle is already on local disk in the .ipa — so it's now disabled for `CAPACITOR_BUILD=1`. PWA caching stays enabled for the web/Vercel deploy. Existing devices clean up the old SW + Workbox caches on boot via a one-shot `serviceWorker.getRegistrations().unregister()` + `caches.delete()` pass in `AppBootstrap`, so this build also self-heals last build's stale cache.
+
 ## [0.10.0] - 2026-05-06
 
 ### Added
