@@ -29,7 +29,22 @@ public class RestTimerPlugin: CAPPlugin, CAPBridgedPlugin {
 
     // Type-erased holder so we don't need to gate the property itself on
     // availability. ActivityKit APIs are gated on iOS 16.2+.
-    private static var currentActivityAny: Any?
+    fileprivate static var currentActivityAny: Any?
+
+    /// End the running Live Activity from native code paths. Used by the
+    /// WatchConnectivityPlugin's NativeInboundProcessor when a watch
+    /// stopRest message arrives — without this, the iOS Dynamic Island
+    /// lingers until JS wakes up and processes the same event (~10s).
+    @available(iOS 16.2, *)
+    static func endCurrentActivityNatively() {
+        guard let activity = currentActivityAny as? Activity<RestTimerAttributes> else {
+            return
+        }
+        Task {
+            await activity.end(nil, dismissalPolicy: .immediate)
+            currentActivityAny = nil
+        }
+    }
 
     // MARK: - start
 

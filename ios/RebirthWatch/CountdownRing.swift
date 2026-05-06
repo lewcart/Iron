@@ -85,7 +85,10 @@ struct CountdownRing: View {
         .onReceive(timer) { _ in tick() }
         .toolbar {
             ToolbarItem(placement: .cancellationAction) {
-                Button("Skip", action: onCancel)
+                // Relabels to "Done" once the countdown crosses into
+                // overtime — Lou's hold target is met and the natural
+                // verb is "I'm done", not "skip the rest of the hold".
+                Button(inOvertime ? "Done" : "Skip", action: onCancel)
             }
         }
     }

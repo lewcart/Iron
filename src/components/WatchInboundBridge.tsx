@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect } from 'react';
-import { subscribeToWatchInbound } from '@/lib/watch';
+import { subscribeToWatchInbound, drainInboundQueue } from '@/lib/watch';
 import { updateSet } from '@/lib/mutations';
 import { db } from '@/db/local';
 import {
@@ -176,6 +176,17 @@ export function WatchInboundBridge() {
     };
     const unsubscribe = subscribeToWatchInbound((event) => {
       void handleWatchInboundEvent(event, deps);
+    });
+    // Drain any events the native iOS handler processed while JS was
+    // asleep (typically: phone Rebirth was closed when Lou completed a
+    // set on the watch). Each drained event is replayed through the same
+    // handler. The Dexie write + rest-timer-state's idempotency guards
+    // prevent double-apply for any events JS also receives via the live
+    // listener. Best-effort.
+    void drainInboundQueue().then((events) => {
+      for (const event of events) {
+        void handleWatchInboundEvent(event, deps);
+      }
     });
     return () => unsubscribe();
   }, []);

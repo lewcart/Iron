@@ -113,11 +113,21 @@ export interface AppGroupSnapshotSummary {
   rest_timer?: WatchRestTimer;
 }
 
+/** A single watch -> phone event that the native iOS handler processed
+ *  while JS was asleep. JS drains these on app launch and replays each
+ *  through the same handler the live `watchInbound` listener uses. */
+export interface QueuedInboundEvent {
+  kind: string;
+  payload?: Record<string, unknown>;
+  received_at_ms?: number;
+}
+
 interface WatchConnectivityPlugin {
   pushActiveWorkout(options: { snapshot: WatchSnapshot }): Promise<{ delivered: boolean }>;
   pushSetMutation(options: { mutation: WatchSetMutation }): Promise<{ queued: boolean }>;
   getWatchPaired(): Promise<{ isPaired: boolean; isReachable: boolean; isWatchAppInstalled: boolean }>;
   readAppGroupSnapshot(): Promise<AppGroupSnapshotSummary>;
+  drainInboundQueue(): Promise<{ events: QueuedInboundEvent[] }>;
 }
 
 const WatchConnectivity = registerPlugin<WatchConnectivityPlugin>('WatchConnectivity');
@@ -275,6 +285,21 @@ export async function readAppGroupSnapshot(): Promise<AppGroupSnapshotSummary> {
   } catch (err) {
     console.warn('[watch] readAppGroupSnapshot failed:', err);
     return { present: false };
+  }
+}
+
+/** Drain the inbound watch -> phone event queue that the native iOS handler
+ *  populated while JS was asleep. The queue file is cleared as part of
+ *  this call (each event drains exactly once). Returns [] on web or when
+ *  there are no queued events. */
+export async function drainInboundQueue(): Promise<QueuedInboundEvent[]> {
+  if (!isNativeIOS()) return [];
+  try {
+    const r = await WatchConnectivity.drainInboundQueue();
+    return r.events ?? [];
+  } catch (err) {
+    console.warn('[watch] drainInboundQueue failed:', err);
+    return [];
   }
 }
 

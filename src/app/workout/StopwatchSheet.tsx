@@ -28,6 +28,11 @@ export interface StopwatchSheetProps {
    *  set (existing duration > 0). The replacement note + undo affordance
    *  surface in this mode. */
   replacingSeconds?: number | null;
+  /** Time-mode target hold (e.g., 60s plank). When present + > 0, the
+   *  counter renders as a countdown toward zero (matching the watch
+   *  CountdownRing) with overtime past zero in pink. Without a target,
+   *  falls back to count-up free-form stopwatch behaviour. */
+  targetDurationSeconds?: number | null;
   /** Exercise title for the header. */
   exerciseName?: string;
 }
@@ -37,6 +42,7 @@ export function StopwatchSheet({
   onCommit,
   onClose,
   replacingSeconds,
+  targetDurationSeconds,
   exerciseName,
 }: StopwatchSheetProps) {
   const { state, elapsed, switchRemaining, isOwner, isOrphan } = api;
@@ -50,6 +56,53 @@ export function StopwatchSheet({
     : null;
   const isStale = elapsed >= 600; // soft warning at 10 minutes
   const isVeryStale = elapsed >= 3600;
+
+  // Time-mode target hold — render as count-DOWN toward zero, then
+  // count-UP in overtime (matching the watch's CountdownRing). Without a
+  // target, fall back to vanilla count-up stopwatch.
+  const hasTarget = typeof targetDurationSeconds === 'number' && targetDurationSeconds > 0;
+  const remaining = hasTarget ? Math.max(0, targetDurationSeconds! - elapsed) : 0;
+  const inOvertime = hasTarget && elapsed > targetDurationSeconds!;
+  const displayLabel = hasTarget
+    ? (inOvertime ? `+${formatStopwatch(elapsed - targetDurationSeconds!)}` : formatStopwatch(remaining))
+    : formatStopwatch(elapsed);
+  const displayClass = inOvertime ? 'text-pink-500' : '';
+
+  // ─── Phase: idle ─── timer is open but not yet started. User taps Start.
+  if (state.phase === 'idle') {
+    return (
+      <div className="fixed inset-0 z-50 flex flex-col bg-background">
+        <Header onClose={onClose} title={exerciseName ?? 'Stopwatch'} />
+        <div className="flex-1 flex flex-col items-center justify-center gap-6 p-8 text-center">
+          {sideLabel && (
+            <p className="text-xs uppercase tracking-widest text-primary" role="status">
+              {sideLabel}
+            </p>
+          )}
+          <p className="text-5xl font-light tabular-nums text-muted-foreground">0:00</p>
+          {replacingSeconds != null && replacingSeconds > 0 && (
+            <p className="text-xs text-muted-foreground">
+              Will replace {formatStopwatch(replacingSeconds)}
+            </p>
+          )}
+          <button
+            onClick={api.start}
+            className="w-32 h-32 rounded-full bg-primary active:scale-95 transition text-primary-foreground font-semibold text-lg"
+            aria-label="Start stopwatch"
+          >
+            Start
+          </button>
+          <button
+            onClick={() => api.cancel()}
+            className="text-sm text-muted-foreground underline px-4 py-3"
+            aria-label="Cancel stopwatch"
+          >
+            Cancel
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   // ─── Phase: done ─── auto-commit + close after the consumer writes
   if (state.phase === 'done') {
@@ -65,7 +118,7 @@ export function StopwatchSheet({
           <p className="text-xs uppercase tracking-widest text-muted-foreground">Logged</p>
           <p className="text-5xl font-light tabular-nums">
             {formatStopwatch(finalDurationSeconds(state))}
-            {state.hasSides && state.side2Elapsed != null && ' (longer)'}
+            {state.hasSides && state.side2Elapsed != null && ' (avg)'}
           </p>
           {state.hasSides && (
             <div className="text-sm text-muted-foreground tabular-nums space-y-1 text-center">
@@ -205,12 +258,17 @@ export function StopwatchSheet({
           </p>
         )}
         <p
-          className="text-5xl font-light tabular-nums"
+          className={`text-5xl font-light tabular-nums ${displayClass}`}
           aria-live="polite"
           aria-atomic="true"
         >
-          {formatStopwatch(elapsed)}
+          {displayLabel}
         </p>
+        {hasTarget && (
+          <p className="text-xs text-muted-foreground -mt-3">
+            target {formatStopwatch(targetDurationSeconds!)}
+          </p>
+        )}
         {replacingSeconds != null && replacingSeconds > 0 && (
           <p className="text-xs text-muted-foreground">
             Replacing {formatStopwatch(replacingSeconds)}

@@ -51,6 +51,7 @@ public class WatchConnectivityPlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "pushSetMutation", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "getWatchPaired", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "readAppGroupSnapshot", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "drainInboundQueue", returnType: CAPPluginReturnPromise),
     ]
 
     private let coordinator = WCSessionCoordinator()
@@ -161,6 +162,16 @@ public class WatchConnectivityPlugin: CAPPlugin, CAPBridgedPlugin {
             "isReachable": info.isReachable,
             "isWatchAppInstalled": info.isWatchAppInstalled,
         ])
+    }
+
+    /// Returns the inbound watch → phone events that the native handler
+    /// processed while JS was asleep. Clears the queue file as part of the
+    /// read so each event drains exactly once. JS replays each event
+    /// through the same `handleWatchInboundEvent` path the live listener
+    /// uses, ensuring Dexie + sync engine eventually catch up.
+    @objc func drainInboundQueue(_ call: CAPPluginCall) {
+        let events = NativeInboundProcessor.drainQueue()
+        call.resolve(["events": events])
     }
 
     /// Returns the iPhone App Group snapshot's `rest_timer` if present, plus
@@ -306,22 +317,83 @@ private final class WCSessionCoordinator: NSObject, WCSessionDelegate {
 ///   2. Apply the mutation (set complete + rest_timer / null / extended)
 ///   3. Write back to App Group
 ///   4. Push the updated snapshot to the watch via WCSession
+///   5. Append the full event to the inbound queue file in App Group so
+///      JS can replay it on next launch (drain via drainInboundQueue
+///      Capacitor method) — without this, set-completion data never
+///      reaches Dexie when JS is asleep at delivery time, and Lou's set
+///      silently un-ticks when he later opens the iPhone app.
 ///
-/// JS will eventually receive the same message via notifyListeners and apply
-/// it to Dexie. The rest-timer-state store's idempotency guard prevents
-/// double-applying.
+/// JS will eventually receive the same message via notifyListeners (when
+/// alive) AND replay it from the queue (on launch). The rest-timer-state
+/// store's idempotency guard + Dexie's upsert-on-uuid prevent double-apply.
 private enum NativeInboundProcessor {
+    /// File inside the App Group container holding watch → phone events
+    /// that ran natively while JS was asleep. JS drains this on app launch.
+    private static let queueFileName = "inbound-queue.json"
+
+    /// Cap on queued events to prevent unbounded growth if JS never drains
+    /// (user never opens the app). Older entries are evicted FIFO.
+    private static let queueMaxSize = 200
+
     static func handle(kind: String, userInfo: [String: Any]) {
         switch kind {
         case "watchWroteSet":
             handleWatchWroteSet(userInfo)
+            enqueue(kind: kind, payload: userInfo)
         case "stopRest":
             handleStopRest(userInfo)
+            enqueue(kind: kind, payload: userInfo)
         case "extendRest":
             handleExtendRest(userInfo)
+            enqueue(kind: kind, payload: userInfo)
         default:
             break
         }
+    }
+
+    /// Appends an event to the inbound queue file. Best-effort — failures
+    /// are silent so the live native processing isn't blocked on disk I/O.
+    private static func enqueue(kind: String, payload: [String: Any]) {
+        guard let url = RebirthAppGroup().containerURL?.appendingPathComponent(queueFileName) else {
+            return
+        }
+        // The payload at this point includes the original `kind` key. Strip
+        // and re-add so the on-disk format is consistent regardless of
+        // how the caller framed it.
+        var cleanedPayload = payload
+        cleanedPayload.removeValue(forKey: "kind")
+        let entry: [String: Any] = [
+            "kind": kind,
+            "payload": cleanedPayload,
+            "received_at_ms": Date().timeIntervalSince1970 * 1000.0,
+        ]
+        var queue: [[String: Any]] = []
+        if let data = try? Data(contentsOf: url),
+           let parsed = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] {
+            queue = parsed
+        }
+        queue.append(entry)
+        if queue.count > queueMaxSize {
+            queue = Array(queue.suffix(queueMaxSize))
+        }
+        if let serialized = try? JSONSerialization.data(withJSONObject: queue) {
+            try? serialized.write(to: url, options: .atomic)
+        }
+    }
+
+    /// Reads + clears the inbound queue. Called by the
+    /// `drainInboundQueue` Capacitor plugin method — JS replays each event
+    /// through the same handler the live `watchInbound` listener uses.
+    static func drainQueue() -> [[String: Any]] {
+        guard let url = RebirthAppGroup().containerURL?.appendingPathComponent(queueFileName) else {
+            return []
+        }
+        guard let data = try? Data(contentsOf: url),
+              let parsed = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
+            return []
+        }
+        try? FileManager.default.removeItem(at: url)
+        return parsed
     }
 
     private static func handleWatchWroteSet(_ payload: [String: Any]) {
@@ -419,6 +491,13 @@ private enum NativeInboundProcessor {
         )
         try? RebirthAppGroup().writeSnapshot(snapshot)
         pushSnapshotToWatch(snapshot)
+        // Also end the iOS Live Activity / Dynamic Island directly. Without
+        // this, the Activity lingers until JS-side endRestTimer eventually
+        // runs (which can be ~10s when JS is asleep). Live Activity is
+        // decoration; ending it natively removes the visible lag.
+        if #available(iOS 16.2, *) {
+            RestTimerPlugin.endCurrentActivityNatively()
+        }
     }
 
     private static func handleExtendRest(_ payload: [String: Any]) {

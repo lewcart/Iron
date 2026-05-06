@@ -1001,7 +1001,7 @@ function SetRow({
   onEditDuration: (weUuid: string, setUuid: string, weight: number, durationSeconds: number) => Promise<void>;
   onUpdateRir: (setUuid: string, rir: number | null) => Promise<void>;
   onUpdateRpe: (setUuid: string, rpe: number | null) => Promise<void>;
-  onOpenStopwatch: (setRowKey: string, hasSides: boolean, replacingSeconds: number | null, currentWeightKg: number) => void;
+  onOpenStopwatch: (setRowKey: string, hasSides: boolean, replacingSeconds: number | null, currentWeightKg: number, targetDurationSeconds: number | null) => void;
   onDelete: (setUuid: string) => Promise<void>;
   allTimeBest1RM?: number | null;
   previousRir?: number | null;
@@ -1152,14 +1152,16 @@ function SetRow({
                 const replacing = set.duration_seconds && set.duration_seconds > 0
                   ? set.duration_seconds : null;
                 const weightKg = fromInput(parseFloat(weight) || 0);
-                onOpenStopwatch(setRowKey, hasSides, replacing, weightKg);
+                // For incomplete time-mode sets, set.duration_seconds is the
+                // target (carried from the routine spec at workout start).
+                // For already-complete sets being re-edited, treat the stored
+                // value as the target so the stopwatch counts down toward it.
+                const targetDuration = set.duration_seconds && set.duration_seconds > 0
+                  ? set.duration_seconds
+                  : null;
+                onOpenStopwatch(setRowKey, hasSides, replacing, weightKg, targetDuration);
               }}
-              className={
-                'flex-shrink-0 w-9 h-9 min-w-[44px] min-h-[44px] -mx-1 rounded-full flex items-center justify-center ' +
-                (stopwatchActive
-                  ? 'text-primary'
-                  : 'text-muted-foreground bg-zinc-800/40 ring-1 ring-zinc-700/60 active:bg-zinc-700/60')
-              }
+              className="flex-shrink-0 w-7 h-7 -mx-1 rounded-full flex items-center justify-center text-primary active:bg-primary/15"
               aria-label={stopwatchActive ? 'Stopwatch running — tap to open' : 'Open stopwatch'}
             >
               <Timer className={'h-4 w-4 ' + (stopwatchActive ? 'animate-pulse motion-reduce:animate-none' : '')} />
@@ -1293,7 +1295,7 @@ function SortableExerciseCard({
   onUpdateSetRpe: (setUuid: string, rpe: number | null) => Promise<void>;
   onDeleteSet: (uuid: string) => Promise<void>;
   onShowInfo: () => void;
-  onOpenStopwatch: (setRowKey: string, hasSides: boolean, replacingSeconds: number | null, currentWeightKg: number) => void;
+  onOpenStopwatch: (setRowKey: string, hasSides: boolean, replacingSeconds: number | null, currentWeightKg: number, targetDurationSeconds: number | null) => void;
   stopwatchSetKey: string | null;
   stopwatchElapsed: number;
 }) {
@@ -1529,9 +1531,10 @@ export default function WorkoutPage() {
   const stopwatch = useStopwatch({ isSetAttached });
   const [stopwatchOpen, setStopwatchOpen] = useState(false);
   const [stopwatchReplacing, setStopwatchReplacing] = useState<number | null>(null);
+  const [stopwatchTargetDuration, setStopwatchTargetDuration] = useState<number | null>(null);
 
   const handleOpenStopwatch = useCallback(
-    async (setRowKey: string, hasSides: boolean, replacingSeconds: number | null, currentWeightKg: number) => {
+    async (setRowKey: string, hasSides: boolean, replacingSeconds: number | null, currentWeightKg: number, targetDurationSeconds: number | null) => {
       // Persist the user's typed weight before opening the stopwatch. The
       // SetRow's weight input is local state until handleTimeBlur fires, but
       // blur is gated on `completed` and the stopwatch commits weight from
@@ -1543,6 +1546,7 @@ export default function WorkoutPage() {
         await mutUpdateSet(setUuid, { weight: currentWeightKg });
       }
       setStopwatchReplacing(replacingSeconds);
+      setStopwatchTargetDuration(targetDurationSeconds);
       stopwatch.open({ setRowKey, hasSides });
       setStopwatchOpen(true);
     },
@@ -2271,6 +2275,7 @@ export default function WorkoutPage() {
           onCommit={handleStopwatchCommit}
           onClose={() => setStopwatchOpen(false)}
           replacingSeconds={stopwatchReplacing}
+          targetDurationSeconds={stopwatchTargetDuration}
           exerciseName={(() => {
             const [weUuid] = stopwatch.state.setRowKey.split(':');
             return workout.exercises.find(e => e.uuid === weUuid)?.exercise?.title ?? undefined;
