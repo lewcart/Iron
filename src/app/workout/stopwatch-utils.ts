@@ -136,6 +136,20 @@ export function restoreState(state: StopwatchState, now: number): StopwatchState
   };
 }
 
+/** Transition: user taps Start from the idle (just-opened) phase. Sets
+ *  startedAt = now so elapsed accrues from this moment, not from open()
+ *  time. The sheet now opens in `idle` so the user sees the timer ready
+ *  but not running — Stop happens via the Stop button in `counting`. */
+export function onStart(state: StopwatchState, now: number): StopwatchState {
+  if (state.phase !== 'idle') return state;
+  return {
+    ...state,
+    phase: 'counting',
+    startedAt: now,
+    updatedAt: now,
+  };
+}
+
 /** Transition: user taps Stop. Returns the next state. For !hasSides or
  *  side=2, transitions to `done` and writes final elapsed values. For
  *  hasSides + side=1, transitions to `switching` with a fresh switchEndTime. */
@@ -212,16 +226,16 @@ export function onLogFirstOnly(state: StopwatchState, now: number): StopwatchSta
   };
 }
 
-/** Final logged duration. For unilateral exercises, log the LONGER of
- *  the two sides — each side is its own work bout, summing would double-
- *  count and compare unfavorably against historical bilateral holds.
- *  Per Phase 2 design auto-decision #19. */
+/** Final logged duration. For unilateral exercises, log the AVERAGE of
+ *  the two sides — Lou's preference: a single per-set seconds value that
+ *  represents how long the hold was on average. Log-first-only still
+ *  returns side 1 only (no second side to average against). */
 export function finalDurationSeconds(state: StopwatchState): number {
   const s1 = state.side1Elapsed ?? 0;
   const s2 = state.side2Elapsed ?? 0;
   if (!state.hasSides) return s1;
   if (state.side2Elapsed == null) return s1; // log-first-only path
-  return Math.max(s1, s2);
+  return Math.round((s1 + s2) / 2);
 }
 
 /** Two-tab arbitration: only the tab whose ownerTabId matches the

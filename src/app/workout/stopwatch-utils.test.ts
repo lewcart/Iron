@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   restoreState,
+  onStart,
   onStop,
   onSwitchComplete,
   onResumeFromPause,
@@ -170,25 +171,41 @@ describe('onLogFirstOnly', () => {
   });
 });
 
-describe('finalDurationSeconds — longer-of-two for unilateral', () => {
+describe('finalDurationSeconds — average-of-two for unilateral', () => {
   it('non-unilateral returns side1Elapsed', () => {
     const s = makeState({ hasSides: false, side1Elapsed: 42 });
     expect(finalDurationSeconds(s)).toBe(42);
   });
 
-  it('unilateral with both sides logged returns the longer', () => {
+  it('unilateral with both sides logged returns the average', () => {
     const s = makeState({ hasSides: true, side1Elapsed: 42, side2Elapsed: 38 });
-    expect(finalDurationSeconds(s)).toBe(42);
+    expect(finalDurationSeconds(s)).toBe(40);
   });
 
-  it('unilateral with side 2 longer returns side 2', () => {
-    const s = makeState({ hasSides: true, side1Elapsed: 30, side2Elapsed: 50 });
-    expect(finalDurationSeconds(s)).toBe(50);
+  it('unilateral with side 2 longer returns the average (rounded)', () => {
+    const s = makeState({ hasSides: true, side1Elapsed: 30, side2Elapsed: 51 });
+    expect(finalDurationSeconds(s)).toBe(41);
   });
 
   it('log-first-only path returns side1Elapsed', () => {
     const s = makeState({ hasSides: true, side1Elapsed: 42, side2Elapsed: null });
     expect(finalDurationSeconds(s)).toBe(42);
+  });
+});
+
+describe('onStart', () => {
+  it('idle → counting with startedAt = now', () => {
+    const s = makeState({ phase: 'idle', startedAt: 0 });
+    const next = onStart(s, 5_000);
+    expect(next.phase).toBe('counting');
+    expect(next.startedAt).toBe(5_000);
+    expect(next.updatedAt).toBe(5_000);
+  });
+
+  it('no-op outside idle (already counting)', () => {
+    const s = makeState({ phase: 'counting', startedAt: 1_000 });
+    const next = onStart(s, 5_000);
+    expect(next).toBe(s);
   });
 });
 

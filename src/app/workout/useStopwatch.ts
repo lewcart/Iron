@@ -9,6 +9,7 @@ import {
   newTabId,
   onLogFirstOnly,
   onResumeFromPause,
+  onStart,
   onStop,
   onSwitchComplete,
   persistStopwatch,
@@ -70,9 +71,13 @@ export interface UseStopwatchApi {
   isOwner: boolean;
   /** True if the persisted state's setRowKey doesn't match a known set. */
   isOrphan: boolean;
-  /** Open the sheet for a specific set. Idempotent — re-opening on a
-   *  set that's already running just re-attaches. */
+  /** Open the sheet for a specific set. Lands in `idle` so the user sees
+   *  the timer ready but not running — they tap Start to begin counting.
+   *  Idempotent — re-opening on a set that's already running just
+   *  re-attaches. */
   open: (opts: { setRowKey: string; hasSides: boolean }) => void;
+  /** User taps Start from the idle phase to begin counting. */
+  start: () => void;
   /** User taps Stop. */
   stop: () => void;
   /** User taps Skip during switching. */
@@ -238,7 +243,7 @@ export function useStopwatch(opts?: { isSetAttached?: (setRowKey: string) => boo
       setRowKey,
       ownerTabId: tabIdRef.current,
       hasSides,
-      phase: 'counting',
+      phase: 'idle',
       side: 1,
       startedAt: now,
       side1Elapsed: null,
@@ -251,6 +256,15 @@ export function useStopwatch(opts?: { isSetAttached?: (setRowKey: string) => boo
     setElapsed(0);
     setSwitchRemaining(0);
   }, [writeState]);
+
+  const start: UseStopwatchApi['start'] = useCallback(() => {
+    setState(prev => {
+      if (!prev) return prev;
+      const next = onStart(prev, Date.now());
+      if (next !== prev) persistStopwatch(localStorage, next);
+      return next;
+    });
+  }, []);
 
   const stop: UseStopwatchApi['stop'] = useCallback(() => {
     setState(prev => {
@@ -331,6 +345,7 @@ export function useStopwatch(opts?: { isSetAttached?: (setRowKey: string) => boo
     isOwner,
     isOrphan,
     open,
+    start,
     stop,
     skipSwitch,
     resumeFromPause,
