@@ -85,4 +85,13 @@ else
   done_ "grep guard clean"
 fi
 
+# ── 6. service-worker leak guard ──────────────────────────────────────────────
+# Capacitor builds must NEVER ship a service worker (see v0.10.1 fix). The
+# bundle is already on local disk inside the .ipa; a Workbox CacheFirst layer
+# would just serve stale HTML/chunks after each install. next.config.ts
+# disables next-pwa for CAPACITOR_BUILD=1; this gate enforces it at ship time.
+note "service-worker guard…"
+npm run check:no-sw
+done_ "no service worker in out/"
+
 done_ "ship:checks all green"

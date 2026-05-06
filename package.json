@@ -27,6 +27,7 @@
     "test:maestro:doctor": "bash scripts/maestro-run.sh doctor",
     "test:maestro:lint": "node scripts/maestro-selector-lint.mjs",
     "check:no-test-bridge": "bash scripts/check-no-test-bridge.sh",
+    "check:no-sw": "bash scripts/check-no-sw-in-capacitor-build.sh",
     "ship:checks": "bash scripts/ship-checks.sh",
     "db:migrate": "tsx src/db/migrate.ts",
     "db:migrate:check": "tsx src/db/migrate.ts check",
