@@ -161,7 +161,21 @@ export async function POST(req: Request) {
 
     return NextResponse.json({ ok: true });
   } catch (err) {
-    console.error('sync/push error:', err);
+    // Surface as much PG diagnostic info as the driver gives us. The default
+    // `console.error('…', err)` rendering truncates to "Error [NeonDb…" in
+    // Vercel's log viewer, which makes diagnosing prod sync failures impossible
+    // without re-deploying. NeonDbError carries `code` (SQLSTATE), `severity`,
+    // `detail`, `hint`, `where`, and `message` — all worth emitting on a single
+    // line so the log search can find them.
+    const e = err as { message?: string; code?: string; detail?: string; hint?: string; where?: string; severity?: string };
+    console.error('sync/push error:', JSON.stringify({
+      message: e?.message ?? String(err),
+      code: e?.code,
+      severity: e?.severity,
+      detail: e?.detail,
+      hint: e?.hint,
+      where: e?.where,
+    }));
     return NextResponse.json({ error: 'Push failed' }, { status: 500 });
   }
 }

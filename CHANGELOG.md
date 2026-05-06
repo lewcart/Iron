@@ -2,6 +2,12 @@
 
 All notable changes to Rebirth are documented here.
 
+## [0.10.2] - 2026-05-07
+
+### Fixed
+
+- **`/api/sync/push` was logging truncated errors** so prod sync failures were unreviewable from the Vercel log viewer (`Error [Neo…` and nothing else). The catch block now serializes `message` + SQLSTATE `code` + `severity` + `detail` + `hint` + `where` to a single JSON line. Diagnostic-only — no behavior change. Reaches for the NeonDbError fields the driver populates on Postgres errors.
+
 ## [0.10.1] - 2026-05-07
 
 ### Fixed
