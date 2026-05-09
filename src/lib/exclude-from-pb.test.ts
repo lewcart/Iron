@@ -46,6 +46,8 @@ async function seedBenchPair() {
       image_urls: [],
       has_sides: false,
       lateral_emphasis: false,
+      secondary_weights: null,
+      weight_source: null,
     });
   }
 }
@@ -71,6 +73,8 @@ async function seedPlank() {
     image_urls: [],
     has_sides: false,
     lateral_emphasis: false,
+    secondary_weights: null,
+    weight_source: null,
   });
 }
 

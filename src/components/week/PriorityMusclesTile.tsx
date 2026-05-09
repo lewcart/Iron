@@ -1,11 +1,13 @@
 'use client';
 
 import Link from 'next/link';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Info, Loader2, Pencil } from 'lucide-react';
 import type { PriorityMuscleRow, PriorityMusclesTileData } from '@/lib/api/resolveWeekTiles';
 import type { Frequency, Zone } from '@/lib/training/volume-landmarks';
 import { SufficiencyBadge } from './SufficiencyBadge';
+import { VolumeContributorsSheet, type VolumeContributor } from '@/components/VolumeContributorsSheet';
+import { useLoggedMuscleContributors } from '@/lib/useLocalDB-volume-contributors';
 
 export interface PriorityMusclesTileProps {
   /** Set when state==='ok'. Omitted for loading / needs-data. */
@@ -51,6 +53,14 @@ export function PriorityMusclesTile({
   onChangeWeekOffset,
 }: PriorityMusclesTileProps) {
   const [expanded, setExpanded] = useState(false);
+  const [drilldownSlug, setDrilldownSlug] = useState<string | null>(null);
+
+  // Reset drill-down when the week changes — otherwise the sheet would
+  // reopen against the new week's data with a slug from the prior view.
+  useEffect(() => {
+    setDrilldownSlug(null);
+  }, [weekOffset]);
+
   const showPicker = onChangeWeekOffset != null;
   const canGoForward = weekOffset < 0;
   const weekLabel = formatWeekLabel(weekOffset, weekStart, weekEnd);
@@ -59,6 +69,15 @@ export function PriorityMusclesTile({
   const inZoneOrUnder = data?.rows.filter(r => !r.isPriority && !r.isDeemphasis && (r.zone === 'in-zone' || r.zone === 'under')) ?? [];
   const deemphasis = data?.rows.filter(r => r.isDeemphasis) ?? [];
   const overOrRisk = data?.rows.filter(r => !r.isPriority && !r.isDeemphasis && (r.zone === 'over' || r.zone === 'risk')) ?? [];
+
+  const drilldownRow = drilldownSlug != null
+    ? data?.rows.find(r => r.slug === drilldownSlug) ?? null
+    : null;
+  // Compute contributors for the open muscle from logged-set Dexie data.
+  const contributors = useLoggedMuscleContributors(
+    drilldownRow != null ? weekOffset : null,
+    drilldownRow != null ? drilldownSlug : null,
+  );
 
   return (
     <section
@@ -143,14 +162,14 @@ export function PriorityMusclesTile({
         <>
           <div className="mt-3 space-y-2">
             {priority.map(row => (
-              <MuscleRow key={row.slug} row={row} priority />
+              <MuscleRow key={row.slug} row={row} priority onTap={() => setDrilldownSlug(row.slug)} />
             ))}
           </div>
 
           {overOrRisk.length > 0 && (
             <div className="mt-3 space-y-2 border-t border-border pt-3">
               {overOrRisk.map(row => (
-                <MuscleRow key={row.slug} row={row} />
+                <MuscleRow key={row.slug} row={row} onTap={() => setDrilldownSlug(row.slug)} />
               ))}
             </div>
           )}
@@ -162,7 +181,7 @@ export function PriorityMusclesTile({
               </div>
               <div className="mt-2 space-y-2">
                 {deemphasis.map(row => (
-                  <MuscleRow key={row.slug} row={row} />
+                  <MuscleRow key={row.slug} row={row} onTap={() => setDrilldownSlug(row.slug)} />
                 ))}
               </div>
             </>
@@ -182,13 +201,42 @@ export function PriorityMusclesTile({
               {expanded && (
                 <div id="other-muscles-list" className="mt-2 space-y-2">
                   {inZoneOrUnder.map(row => (
-                    <MuscleRow key={row.slug} row={row} />
+                    <MuscleRow key={row.slug} row={row} onTap={() => setDrilldownSlug(row.slug)} />
                   ))}
                 </div>
               )}
             </>
           )}
         </>
+      )}
+
+      {drilldownRow && (
+        <VolumeContributorsSheet
+          open={drilldownSlug != null}
+          onClose={() => setDrilldownSlug(null)}
+          muscleDisplayName={drilldownRow.display_name}
+          totalSetCount={drilldownRow.set_count ?? Math.round(drilldownRow.effective_set_count)}
+          totalEffectiveSetCount={drilldownRow.effective_set_count}
+          range={{ min: drilldownRow.landmark.mev, max: drilldownRow.landmark.mavMax }}
+          zone={
+            drilldownRow.zone === 'risk' ? 'red'
+            : drilldownRow.zone === 'over' ? 'yellow'
+            : drilldownRow.zone === 'in-zone' ? 'green'
+            : drilldownRow.zone === 'under' ? 'red'
+            : null
+          }
+          view="actual"
+          contributors={(contributors ?? []).map<VolumeContributor>((c) => ({
+            key: c.key,
+            exercise_title: c.exercise_title,
+            day_label: c.day_label,
+            role: c.role,
+            secondary_weight: c.secondary_weight,
+            set_count: c.set_count,
+            effective_set_count: c.effective_set_count,
+            weight_source: c.weight_source,
+          }))}
+        />
       )}
     </section>
   );
@@ -204,7 +252,7 @@ function LegendSwatch({ className, label, hint }: { className: string; label: st
   );
 }
 
-function MuscleRow({ row, priority = false }: { row: PriorityMuscleRow; priority?: boolean }) {
+function MuscleRow({ row, priority = false, onTap }: { row: PriorityMuscleRow; priority?: boolean; onTap?: () => void }) {
   const fill = priority ? 'bg-trans-pink' : row.isDeemphasis ? 'bg-trans-blue' : 'bg-muted-foreground/40';
   const overFill = row.zone === 'over' ? 'bg-amber-500' : row.zone === 'risk' ? 'bg-red-500' : fill;
 
@@ -233,11 +281,22 @@ function MuscleRow({ row, priority = false }: { row: PriorityMuscleRow; priority
     );
   }
 
+  const Wrapper: React.ElementType = onTap ? 'button' : 'div';
+  const wrapperProps = onTap
+    ? {
+        type: 'button' as const,
+        onClick: onTap,
+        className:
+          'text-xs w-full text-left rounded px-1 -mx-1 py-1 -my-1 hover:bg-secondary/40 transition-colors',
+        'aria-label': `${row.display_name}: ${row.effective_set_count} effective sets, ${zoneAriaText(row.zone)}, MEV ${row.landmark.mev}, MAV ${row.landmark.mavMin}–${row.landmark.mavMax}, MRV ${row.mrv} — tap to drill down`,
+      }
+    : {
+        className: 'text-xs',
+        'aria-label': `${row.display_name}: ${row.effective_set_count} effective sets, ${zoneAriaText(row.zone)}, MEV ${row.landmark.mev}, MAV ${row.landmark.mavMin}–${row.landmark.mavMax}, MRV ${row.mrv}`,
+      };
+
   return (
-    <div
-      className="text-xs"
-      aria-label={`${row.display_name}: ${row.effective_set_count} effective sets, ${zoneAriaText(row.zone)}, MEV ${row.landmark.mev}, MAV ${row.landmark.mavMin}–${row.landmark.mavMax}, MRV ${row.mrv}`}
-    >
+    <Wrapper {...wrapperProps}>
       <div className="flex items-baseline justify-between mb-1">
         <span className="font-medium text-foreground">
           {row.display_name}{sourceMark}
@@ -272,7 +331,7 @@ function MuscleRow({ row, priority = false }: { row: PriorityMuscleRow; priority
           {zoneInlineHint(row.zone)}
         </p>
       )}
-    </div>
+    </Wrapper>
   );
 }
 

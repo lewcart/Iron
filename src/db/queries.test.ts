@@ -1713,16 +1713,19 @@ describe('week-boundary TZ propagation', () => {
 describe('getWeekSetsPerMuscle', () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it('emits SQL that gives primary credit 1.0 and secondary credit 0.5', async () => {
+  it('emits SQL that gives primary credit 1.0 and secondary credit per-(exercise, muscle) weight w/ 0.5 fallback', async () => {
     const db = await import('./db.js');
     vi.mocked(db.query).mockResolvedValueOnce([]);
     await getWeekSetsPerMuscle(0);
     const [sql] = vi.mocked(db.query).mock.calls[0];
 
     // Two-arm UNION ALL — one arm picks primary_muscles with credit 1.0,
-    // the other picks secondary_muscles with credit 0.5.
+    // the other picks secondary_muscles with credit looked up from
+    // exercises.secondary_weights (jsonb), falling back to 0.5 (v1.1).
     expect(sql).toContain('1.0::numeric AS credit');
-    expect(sql).toContain('0.5::numeric AS credit');
+    // Secondary credit: COALESCE(secondary_weights[muscle_slug], 0.5)
+    expect(sql).toMatch(/secondary_weights\s*->>\s*v\.muscle_slug/);
+    expect(sql).toMatch(/COALESCE\([\s\S]*0\.5[\s\S]*\)/);
     expect(sql).toContain('primary_muscles');
     expect(sql).toContain('secondary_muscles');
     expect(sql).toContain('UNION ALL');

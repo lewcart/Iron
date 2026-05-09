@@ -30,6 +30,7 @@
 import type { LocalBodyVision } from '@/db/local';
 import {
   aggregateMuscleHits,
+  effectiveSetContribution,
   resolveVolumeRange,
   resolveFrequencyFloor,
   volumeZone,
@@ -95,7 +96,14 @@ export interface ProjectionInputs {
     frequency_per_week: number | null;
     exercises: ReadonlyArray<{
       uuid: string;
-      exercise: { uuid: string; primary_muscles: string[]; secondary_muscles: string[]; lateral_emphasis: boolean } | undefined;
+      exercise: {
+        uuid: string;
+        primary_muscles: string[];
+        secondary_muscles: string[];
+        lateral_emphasis: boolean;
+        /** Per-(secondary muscle) credit weight 0.0-1.0. Null = use 0.5 default. */
+        secondary_weights?: Record<string, number> | null;
+      } | undefined;
       sets: ReadonlyArray<{
         uuid: string;
         target_rir: number | null;
@@ -172,6 +180,7 @@ export function projectWeeklyVolume(
           repetitions: null, // not used for projection's effective_set computation
           primary_muscles: ex.primary_muscles ?? [],
           secondary_muscles: ex.secondary_muscles ?? [],
+          secondary_weights: ex.secondary_weights ?? null,
         };
         dayStandard.push(aggSet);
 
@@ -328,7 +337,8 @@ export function projectWeeklyVolume(
     return aOrder - bOrder;
   });
 
-  // 7. Sub-group uncertainty: if delts is in the rows AND delts_lateral is
+  // 7. (skipped — see contributors function below)
+  // Sub-group uncertainty: if delts is in the rows AND delts_lateral is
   //    a priority but delts overall reads green/yellow while delts_lateral
   //    reads red, mark delts as uncertain_subgroup.
   const deltsRow = rows.find((r) => r.slug === 'delts');
@@ -346,4 +356,137 @@ export function projectWeeklyVolume(
   }
 
   return rows;
+}
+
+// ─── Per-muscle contributor breakdown (drill-down support) ─────────────
+
+export interface MuscleContributor {
+  /** Stable React key — composite of routine_uuid + exercise_uuid. */
+  key: string;
+  /** Routine ("day") title or null if untitled. */
+  day_label: string | null;
+  exercise_uuid: string;
+  exercise_title: string;
+  /** Whether this exercise credits the muscle as primary or secondary. */
+  role: 'primary' | 'secondary';
+  /** Per-(exercise, muscle) secondary weight from secondary_weights, or
+   *  null when role==='primary'. Falls back to 0.5 (the legacy default)
+   *  when secondary_weights is missing/null. */
+  secondary_weight: number | null;
+  /** Distinct sets crediting this muscle from this exercise on this day. */
+  set_count: number;
+  /** RIR-weighted × credit-weighted contribution. */
+  effective_set_count: number;
+  weight_source?: 'audited' | 'inferred' | 'default' | 'manual-override' | null;
+}
+
+/**
+ * Per-(routine day, exercise) contribution to ONE specific muscle. Used
+ * by the drill-down sheet on the routine page to answer "which exercises
+ * fed this muscle's count and how much."
+ *
+ * Special handling for the virtual delts_lateral slug: only exercises with
+ * lateral_emphasis=true contribute, and they're treated as primary.
+ */
+export function computeMuscleContributors(
+  inputs: ProjectionInputs & {
+    /** Pass through weight_source per exercise so the UI can show provenance.
+     *  Optional — when omitted, contributors render without a source badge. */
+    exerciseWeightSources?: ReadonlyMap<string, 'audited' | 'inferred' | 'default' | 'manual-override' | null>;
+    /** Exercise titles keyed by exercise_uuid. Used as the contributor
+     *  row label. Falls back to uuid prefix when not provided. */
+    exerciseTitles?: ReadonlyMap<string, string>;
+    /** Routine titles keyed by routine_uuid. Drill-down shows day_label
+     *  per contributor row when provided. */
+    dayLabels?: ReadonlyMap<string, string | null>;
+  },
+  muscleSlug: string,
+): MuscleContributor[] {
+  const { routines, exerciseWeightSources, exerciseTitles, dayLabels } = inputs;
+  const isLateralVirtual = muscleSlug === DELTS_LATERAL;
+  const out: MuscleContributor[] = [];
+
+  for (const routine of routines) {
+    const dayLabel = dayLabels?.get(routine.uuid) ?? null;
+    // Aggregate per-exercise within the routine — multiple sets of the
+    // same exercise on the same day collapse into one row.
+    const byExercise = new Map<string, { setCount: number; effective: number; role: 'primary' | 'secondary' | null; weight: number | null; title: string }>();
+
+    for (const exercise of routine.exercises) {
+      const ex = exercise.exercise;
+      if (!ex) continue;
+
+      // Determine this exercise's contribution role for the muscle.
+      let role: 'primary' | 'secondary' | null = null;
+      let weight: number | null = null;
+      if (isLateralVirtual) {
+        if (ex.lateral_emphasis) {
+          role = 'primary';
+        } else {
+          continue;
+        }
+      } else {
+        const inPrimary = ex.primary_muscles?.includes(muscleSlug);
+        const inSecondary = ex.secondary_muscles?.includes(muscleSlug);
+        if (inPrimary) {
+          role = 'primary';
+        } else if (inSecondary) {
+          role = 'secondary';
+          weight = ex.secondary_weights?.[muscleSlug] ?? null;
+        } else {
+          continue;
+        }
+      }
+
+      // Sum effective contribution across this exercise's sets. Delegate
+      // to the canonical effectiveSetContribution so the rirCredit ladder
+      // and primary/secondary rules can never drift out of sync with
+      // volume-math.ts (the SQL parity test guards against the SQL side
+      // drifting separately).
+      let setCount = 0;
+      let effective = 0;
+      for (const set of exercise.sets) {
+        const isWorking =
+          (set.max_repetitions != null && set.max_repetitions > 0) ||
+          (set.target_duration_seconds != null && set.target_duration_seconds > 0);
+        if (!isWorking) continue;
+        setCount += 1;
+        effective += effectiveSetContribution(role, set.target_rir, weight);
+      }
+
+      if (setCount === 0) continue;
+
+      const existing = byExercise.get(ex.uuid);
+      if (existing) {
+        existing.setCount += setCount;
+        existing.effective += effective;
+      } else {
+        byExercise.set(ex.uuid, {
+          setCount,
+          effective,
+          role,
+          weight,
+          title: exerciseTitles?.get(ex.uuid) ?? ex.uuid.slice(0, 8),
+        });
+      }
+    }
+
+    for (const [exUuid, agg] of byExercise) {
+      const role = agg.role;
+      if (role == null) continue;
+      out.push({
+        key: `${routine.uuid}-${exUuid}`,
+        day_label: dayLabel,
+        exercise_uuid: exUuid,
+        exercise_title: agg.title,
+        role,
+        secondary_weight: role === 'secondary' ? agg.weight : null,
+        set_count: agg.setCount,
+        effective_set_count: agg.effective,
+        weight_source: exerciseWeightSources?.get(exUuid) ?? null,
+      });
+    }
+  }
+
+  return out;
 }

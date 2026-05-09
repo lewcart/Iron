@@ -50,19 +50,41 @@ export function rirCredit(rir: number | null | undefined): number {
 
 export type MuscleRole = 'primary' | 'secondary' | 'both';
 
-export function primarySecondaryCredit(role: MuscleRole): number {
-  return role === 'secondary' ? 0.5 : 1.0;
+/** Default secondary credit when no per-exercise weight is specified.
+ *  Matches the original RP/Helms convention. v1.1 audited compounds replace
+ *  this with per-(exercise, muscle) values via `exercises.secondary_weights`. */
+export const DEFAULT_SECONDARY_WEIGHT = 0.5;
+
+/**
+ * Primary/secondary credit. When `secondaryWeight` is provided (per-exercise
+ * audited value), it overrides the 0.5 default for the secondary case.
+ * Primary credit is always 1.0 — the v1.1 catalog audit governs only
+ * secondary credit, since primary muscles are by definition the prime mover.
+ */
+export function primarySecondaryCredit(role: MuscleRole, secondaryWeight?: number | null): number {
+  if (role === 'secondary') {
+    if (secondaryWeight != null && Number.isFinite(secondaryWeight) && secondaryWeight >= 0 && secondaryWeight <= 1) {
+      return secondaryWeight;
+    }
+    return DEFAULT_SECONDARY_WEIGHT;
+  }
+  return 1.0;
 }
 
 // ── Per-set per-muscle contribution ─────────────────────────────────────
 
 /**
  * Effective contribution from one (set, muscle) pair = primary/secondary
- * credit × RIR credit. Example: RDL @ RIR 4 contributes 0.5 to glutes
- * (secondary 0.5 × RIR 0.5) and 0.5 to hamstrings (primary 1.0 × RIR 0.5).
+ * credit × RIR credit. Example: RDL @ RIR 4 with audited `secondary_weights`
+ * = `{ glutes: 0.6 }` contributes 0.3 to glutes (secondary 0.6 × RIR 0.5)
+ * and 0.5 to hamstrings (primary 1.0 × RIR 0.5).
  */
-export function effectiveSetContribution(role: MuscleRole, rir: number | null | undefined): number {
-  return primarySecondaryCredit(role) * rirCredit(rir);
+export function effectiveSetContribution(
+  role: MuscleRole,
+  rir: number | null | undefined,
+  secondaryWeight?: number | null,
+): number {
+  return primarySecondaryCredit(role, secondaryWeight) * rirCredit(rir);
 }
 
 // ── Aggregation ─────────────────────────────────────────────────────────
@@ -78,6 +100,12 @@ export interface SetForAggregation {
   primary_muscles: readonly string[];
   /** Canonical muscle slugs. */
   secondary_muscles: readonly string[];
+  /** Per-(secondary muscle) credit weight 0.0-1.0 from
+   *  `exercises.secondary_weights` (v1.1). When provided, overrides the
+   *  flat 0.5 default for secondary muscles in this set's exercise. Null /
+   *  undefined preserves the legacy 0.5 default. Primary muscles always
+   *  count as 1.0 regardless. */
+  secondary_weights?: Readonly<Record<string, number>> | null;
 }
 
 export interface MuscleAggregate {
@@ -136,7 +164,10 @@ export function aggregateMuscleHits(sets: readonly SetForAggregation[]): MuscleA
         bucket.setUuids.add(set.set_uuid);
         bucket.kg += kgPerSet;
       }
-      bucket.effective += effectiveSetContribution(role, set.rir);
+      // Per-exercise secondary weight (v1.1) overrides the flat 0.5 default
+      // for secondary muscles. Primary credit ignores this value.
+      const secondaryWeight = role === 'secondary' ? (set.secondary_weights?.[muscle] ?? null) : null;
+      bucket.effective += effectiveSetContribution(role, set.rir, secondaryWeight);
     }
   }
 

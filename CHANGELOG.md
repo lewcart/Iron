@@ -2,6 +2,32 @@
 
 All notable changes to Rebirth are documented here.
 
+## [0.11.0] - 2026-05-09
+
+### Added
+
+- **Volume contributors drill-down sheet.** Tap any priority-muscle row on `/feed` (Muscles This Week) or any row on the routine page Volume Fit tile to open a per-(exercise, day) breakdown of where the muscle's count came from. Sorted by `effective_set_count DESC` so the surprise contributor surfaces first ("OHP credits 0.9 to lateral via secondary" before the lateral raise rows). Single component, two entry points — `view='projected'` for routine page, `view='actual'` for `/feed`. Spillover detection annotates same-exercise-on-multiple-days as a neutral fact ("scheduled on Upper B and Lower A — cross-day spillover"); never prescribes ("move it") to preserve the CLAUDE.md "two coaches" boundary.
+- **Per-exercise secondary muscle weights.** Replaces the flat 0.5 RP/Helms convention with audited values 0.0–1.0 per (exercise, secondary muscle). Bench press → lateral delts now correctly credits 0.1 (catalogs that say 0.5 are wrong); Bulgarian split squat → glutes 0.7 (deep stretch under load); leg press → glutes 0.3; lying leg curl → glutes 0.0 (drop, knee-flexion isolation). 25+ high-impact compounds audited from EMG / Schoenfeld / RP convention / biomechanics inference. Custom exercises and unaudited rows fall back to 0.5 default. `weight_source` column tracks provenance (`audited` / `inferred` / `default` / `manual-override`).
+- **Exercise page Muscle Credit section.** Read-only badges showing primary (1.0) and secondary muscles with per-exercise weights and source provenance. v1.2 will add a per-muscle UI editor for custom exercises.
+- **MCP `update_exercise(secondary_weights)`.** Lets a chat agent set per-(exercise, muscle) weights with merge semantics — only the keys in the patch update; other audited weights stay. Validates against canonical muscle slugs (rejects typos like `glute`), enforces 0.0–1.0 range, max 18 keys. Setting flips `weight_source` to `manual-override` so the exercise page distinguishes chat tweaks from the audited catalog.
+
+### Changed
+
+- **`volume-math.ts` reads per-exercise weight when available.** `effectiveSetContribution(role, rir, secondaryWeight)` falls back to 0.5 if the weight is missing or out of range. SQL parity in `getWeekSetsPerMuscle` mirrors the lookup with a `jsonb_typeof = 'number'` guard so a poisoned row can't crash the entire weekly rollup query.
+- **`getWeekSetsPerMuscle` SQL clamps secondary credit to [0, 1].** Defense in depth — the application layer rejects out-of-range values, but the SQL also clamps with `GREATEST(LEAST(..., 1.0), 0.0)` so a stray value can't break the math.
+- **Empty `{}` secondary_weights preserved on sync round-trip.** Audited "no secondary credit" exercises (leg extension, calf raise, tricep pushdown) ship with `secondary_weights = '{}'` to mean "audited zero" rather than "no audit." Both `pushExercise` and `parseSecondaryWeights` preserve the empty object so the audit's intent survives client-server round trips.
+- **Sync push only echoes `secondary_weights` when client sent non-null.** Pre-v1.1 clients (post Dexie v23 upgrade) leave the field at `null`; the previous push semantics would have wiped the audited weights server-side on the first unrelated edit (rename, hide, YouTube URL). Now `null` means "preserve existing" and only an explicit non-null object overwrites.
+- **Cable Hip Abduction removed from Upper B routine.** Was scheduled on both Lower A AND Upper B, inflating glute set counts on the wrong day. The drill-down view will surface this kind of spillover going forward as a neutral annotation.
+
+### Fixed
+
+- **`USER_TZ` env var is trimmed and validated at module load.** A trailing newline on `Australia/Sydney\n` was crashing every MCP query that used week-bounds aggregation (`get_sets_per_muscle`, `get_weekly_summary`) unless the caller passed an explicit `tz` arg. Now `loadAppTz()` trims surrounding whitespace, length-checks ≤64 chars, regex-validates the IANA shape, and round-trips through `Intl.DateTimeFormat` before adopting; falls back to `Australia/Brisbane` on anything garbage.
+- **Migration 046 SQL precedence.** Multi-OR title-LIKE clauses with trailing `AND is_custom = false` would have clobbered custom-exercise rows because SQL `AND` binds tighter than `OR`. Wrapped every OR group in parens; migration 047 repairs any custom rows damaged by the original 046 in production.
+- **`computeMuscleContributors` no longer re-implements the RIR ladder.** Switched to the canonical `effectiveSetContribution` so the inline math can never drift from `volume-math.ts` if RIR weighting tiers ever change.
+- **`parseExercise` in `queries.ts`** now includes `lateral_emphasis`, `secondary_weights`, and `weight_source` so non-sync API reads (e.g., `/api/exercises`) return the full shape instead of the pre-v0.10 stub.
+- **`useLoggedMuscleContributors`** wraps its 4 Dexie reads in a `db.transaction` so the sync engine writing in the background can't produce torn snapshots (sets referencing workout_exercises that already disappeared from the loaded array).
+- **Drill-down state resets on plan / week change.** Without this, swapping the active plan or scrubbing the week picker could leave a stale slug in component state and reopen the sheet against new data.
+
 ## [0.10.3] - 2026-05-07
 
 ### Changed

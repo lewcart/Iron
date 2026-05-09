@@ -53,6 +53,20 @@ export interface LocalExercise {
    *  with lateral_emphasis=true. Default false; coerce undefined → false
    *  on read for pre-v22 rows. */
   lateral_emphasis: boolean;
+  /** Per-(secondary muscle) credit weight 0.0-1.0 keyed by canonical muscle
+   *  slug. Replaces the flat 0.5 secondary credit when populated; falls back
+   *  to 0.5 for muscles in `secondary_muscles` but not in this map (and for
+   *  custom exercises until manually set). Primary muscles always count as
+   *  1.0 — this map only governs secondary credit. v1.1 added with audit
+   *  pass for ~25 high-impact compounds; everything else stays at 0.5. */
+  secondary_weights: Record<string, number> | null;
+  /** Provenance for `secondary_weights`. `audited` = SME-grounded values from
+   *  the v1.1 catalog audit (EMG / Schoenfeld / RP-convention / biomechanics).
+   *  `inferred` = rule-based fill from biomechanics tags. `default` = no
+   *  weights set, falls back to 0.5. `manual-override` = MCP write or future
+   *  UI edit replaced the audited value. Surface this in the exercise page
+   *  so Lou can see which weights are reliable. */
+  weight_source: 'audited' | 'inferred' | 'default' | 'manual-override' | null;
 }
 
 export interface LocalWorkout extends SyncMeta {
@@ -930,6 +944,20 @@ export class IronDB extends Dexie {
       });
     });
 
+    // v23: per-exercise secondary muscle weights (mirrors Postgres migration
+    // 045). Replaces the flat 0.5 secondary credit for audited compounds.
+    //   - exercises.secondary_weights (jsonb-style Record<slug, number> | null)
+    //   - exercises.weight_source ('audited' | 'inferred' | 'default' |
+    //     'manual-override' | null)
+    // Both nullable additive columns, not indexed. Backfill null on pre-v23
+    // rows; the audit script + sync pull will populate them.
+    this.version(23).stores(v22Stores).upgrade(async tx => {
+      await tx.table('exercises').toCollection().modify(row => {
+        if (row.secondary_weights === undefined) row.secondary_weights = null;
+        if (row.weight_source === undefined) row.weight_source = null;
+      });
+    });
+
     // versionchange handler — when a new SW activates and the next page
     // load opens the DB at v22+, Dexie fires versionchange on existing
     // open connections. Without handling, those connections deadlock the
@@ -1026,6 +1054,8 @@ export async function hydrateExercises(): Promise<void> {
           image_urls: ex.image_urls ?? null,
           has_sides: ex.has_sides ?? false,
           lateral_emphasis: ex.lateral_emphasis ?? false,
+          secondary_weights: ex.secondary_weights ?? null,
+          weight_source: ex.weight_source ?? null,
         });
       }
     });

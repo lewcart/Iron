@@ -29,6 +29,15 @@ export interface Exercise {
    *  after the user stops the first side, then resumes counting up for
    *  the second side. Default false. */
   has_sides: boolean;
+  /** Marks shoulder lateral-head emphasis. Routine projection (PR3) derives
+   *  a virtual delts_lateral row from sets touching exercises with
+   *  lateral_emphasis=true. Default false. */
+  lateral_emphasis?: boolean;
+  /** Per-(secondary muscle) credit weight 0.0-1.0 (v1.1). Replaces the
+   *  flat 0.5 default when populated. Null = no audit, falls back to 0.5. */
+  secondary_weights?: Record<string, number> | null;
+  /** Provenance for `secondary_weights`. */
+  weight_source?: 'audited' | 'inferred' | 'default' | 'manual-override' | null;
 }
 
 export interface Workout {

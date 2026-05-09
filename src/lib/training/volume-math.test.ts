@@ -402,6 +402,92 @@ describe('resolveFrequencyFloor', () => {
   });
 });
 
+// ── Per-exercise secondary weights (v1.1) ──────────────────────────────
+
+describe('primarySecondaryCredit — per-exercise secondary weight', () => {
+  it('falls back to 0.5 when no weight provided', () => {
+    expect(primarySecondaryCredit('secondary')).toBe(0.5);
+    expect(primarySecondaryCredit('secondary', null)).toBe(0.5);
+    expect(primarySecondaryCredit('secondary', undefined)).toBe(0.5);
+  });
+  it('uses provided weight 0.0-1.0', () => {
+    expect(primarySecondaryCredit('secondary', 0.7)).toBe(0.7);
+    expect(primarySecondaryCredit('secondary', 0.0)).toBe(0.0);
+    expect(primarySecondaryCredit('secondary', 1.0)).toBe(1.0);
+  });
+  it('rejects out-of-range weights, falls back to 0.5', () => {
+    expect(primarySecondaryCredit('secondary', -0.1)).toBe(0.5);
+    expect(primarySecondaryCredit('secondary', 1.5)).toBe(0.5);
+    expect(primarySecondaryCredit('secondary', NaN)).toBe(0.5);
+    expect(primarySecondaryCredit('secondary', Infinity)).toBe(0.5);
+  });
+  it('primary credit is unaffected by secondaryWeight (always 1.0)', () => {
+    expect(primarySecondaryCredit('primary', 0.7)).toBe(1.0);
+    expect(primarySecondaryCredit('both', 0.3)).toBe(1.0);
+  });
+});
+
+describe('effectiveSetContribution — per-exercise weight × RIR stacking', () => {
+  it('Bulgarian split squat → glutes (0.7 secondary) @ RIR 4 = 0.35', () => {
+    expect(effectiveSetContribution('secondary', 4, 0.7)).toBeCloseTo(0.35);
+  });
+  it('Bench press → lateral delts (0.1 secondary) @ RIR 0 = 0.1', () => {
+    expect(effectiveSetContribution('secondary', 0, 0.1)).toBeCloseTo(0.1);
+  });
+  it('null weight uses 0.5 default (legacy behavior preserved)', () => {
+    expect(effectiveSetContribution('secondary', null, null)).toBe(0.5);
+    expect(effectiveSetContribution('secondary', null)).toBe(0.5);
+  });
+});
+
+describe('aggregateMuscleHits — per-exercise secondary weights', () => {
+  it('Bulgarian split squat (glutes secondary 0.7) RIR-null sets credit at 0.7 each', () => {
+    const rows = aggregateMuscleHits([
+      {
+        set_uuid: 'bss-1', rir: null, weight: null, repetitions: null,
+        primary_muscles: ['quads'], secondary_muscles: ['glutes'],
+        secondary_weights: { glutes: 0.7 },
+      },
+      {
+        set_uuid: 'bss-2', rir: null, weight: null, repetitions: null,
+        primary_muscles: ['quads'], secondary_muscles: ['glutes'],
+        secondary_weights: { glutes: 0.7 },
+      },
+    ]);
+    const glutes = rows.find(r => r.muscle_slug === 'glutes')!;
+    expect(glutes.set_count).toBe(2);
+    expect(glutes.effective_set_count).toBeCloseTo(1.4);
+  });
+
+  it('mixed weights across muscles in same set', () => {
+    const rows = aggregateMuscleHits([
+      {
+        set_uuid: 'rdl-1', rir: 2, weight: null, repetitions: null,
+        primary_muscles: ['hamstrings'],
+        secondary_muscles: ['glutes', 'erectors', 'adductors'],
+        secondary_weights: { glutes: 0.6, erectors: 0.7, adductors: 0.4 },
+      },
+    ]);
+    expect(rows.find(r => r.muscle_slug === 'glutes')!.effective_set_count).toBeCloseTo(0.6);
+    expect(rows.find(r => r.muscle_slug === 'erectors')!.effective_set_count).toBeCloseTo(0.7);
+    expect(rows.find(r => r.muscle_slug === 'adductors')!.effective_set_count).toBeCloseTo(0.4);
+    expect(rows.find(r => r.muscle_slug === 'hamstrings')!.effective_set_count).toBeCloseTo(1.0);
+  });
+
+  it('missing weight for tagged muscle falls back to 0.5', () => {
+    const rows = aggregateMuscleHits([
+      {
+        set_uuid: 'mixed-1', rir: null, weight: null, repetitions: null,
+        primary_muscles: ['quads'],
+        secondary_muscles: ['glutes', 'hamstrings'],
+        secondary_weights: { glutes: 0.7 },
+      },
+    ]);
+    expect(rows.find(r => r.muscle_slug === 'glutes')!.effective_set_count).toBeCloseTo(0.7);
+    expect(rows.find(r => r.muscle_slug === 'hamstrings')!.effective_set_count).toBeCloseTo(0.5);
+  });
+});
+
 // ── volumeZone (range-driven, distinct from volume-landmarks zoneFor) ───
 
 describe('volumeZone — range-driven classifier', () => {

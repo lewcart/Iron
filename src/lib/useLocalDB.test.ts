@@ -33,6 +33,8 @@ async function seedTimeModeExercise() {
     image_urls: null,
     has_sides: false,
     lateral_emphasis: false,
+    secondary_weights: null,
+    weight_source: null,
   });
 }
 

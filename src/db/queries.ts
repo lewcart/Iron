@@ -796,7 +796,7 @@ export async function recomputePRFlagsForExercise(exerciseUuid: string): Promise
     {
       text: `UPDATE workout_sets
              SET is_pr = false
-             WHERE workout_exercise_uuid = ANY($1::uuid[])
+             WHERE workout_exercise_uuid = ANY($1::text[])
                AND is_completed = true
                AND excluded_from_pb = false
                AND weight IS NOT NULL
@@ -806,7 +806,7 @@ export async function recomputePRFlagsForExercise(exerciseUuid: string): Promise
   ];
   if (winners.size > 0) {
     statements.push({
-      text: `UPDATE workout_sets SET is_pr = true WHERE uuid = ANY($1::uuid[])`,
+      text: `UPDATE workout_sets SET is_pr = true WHERE uuid = ANY($1::text[])`,
       params: [Array.from(winners)],
     });
   }
@@ -1532,7 +1532,8 @@ export async function getWeekSetsPerMuscle(weekOffset: number = 0, tz: string = 
         ws.repetitions,
         ws.rir,
         e.primary_muscles,
-        e.secondary_muscles
+        e.secondary_muscles,
+        e.secondary_weights
       FROM workout_sets ws
       JOIN workout_exercises we ON we.uuid = ws.workout_exercise_uuid
       JOIN exercises e          ON e.uuid = we.exercise_uuid
@@ -1547,9 +1548,11 @@ export async function getWeekSetsPerMuscle(weekOffset: number = 0, tz: string = 
     ),
     muscle_hits_raw AS (
       -- Explode each set into one row per (set, muscle, credit) — primary
-      -- contributes credit=1.0, secondary contributes credit=0.5. A muscle
-      -- appearing in both arrays produces two rows here; we collapse them in
-      -- muscle_hits below by taking MAX(credit) so primary wins.
+      -- contributes credit=1.0, secondary contributes the per-(exercise,
+      -- muscle) weight from exercises.secondary_weights (v1.1) when
+      -- populated, falling back to 0.5 (RP/Helms convention). A muscle
+      -- appearing in both arrays produces two rows here; muscle_hits below
+      -- takes MAX(credit) so primary wins.
       SELECT ws.set_uuid, v.muscle_slug, 1.0::numeric AS credit,
              ws.weight, ws.repetitions, ws.rir
       FROM week_sets ws,
@@ -1557,7 +1560,22 @@ export async function getWeekSetsPerMuscle(weekOffset: number = 0, tz: string = 
              SELECT jsonb_array_elements_text(COALESCE(ws.primary_muscles, '[]'::jsonb)) AS muscle_slug
            ) v
       UNION ALL
-      SELECT ws.set_uuid, v.muscle_slug, 0.5::numeric AS credit,
+      SELECT ws.set_uuid, v.muscle_slug,
+             COALESCE(
+               -- Lookup secondary_weights[muscle_slug]; clamp to [0, 1] defensively.
+               -- Guard with jsonb_typeof = 'number' so a poisoned row (string,
+               -- nested object, etc) falls back to 0.5 rather than crashing
+               -- the entire weekly rollup query with "invalid input syntax for
+               -- type numeric." App-layer validation in pushExercise +
+               -- update_exercise should keep this from happening, but defense
+               -- in depth: a single bad row should not take /feed offline.
+               CASE
+                 WHEN jsonb_typeof(ws.secondary_weights -> v.muscle_slug) = 'number'
+                 THEN GREATEST(LEAST((ws.secondary_weights->>v.muscle_slug)::numeric, 1.0), 0.0)
+                 ELSE NULL
+               END,
+               0.5
+             )::numeric AS credit,
              ws.weight, ws.repetitions, ws.rir
       FROM week_sets ws,
            LATERAL (
@@ -1714,7 +1732,33 @@ export function parseExercise(row: DbRow): Exercise {
     youtube_url: (row.youtube_url as string | null) ?? null,
     image_urls: Array.isArray(row.image_urls) ? row.image_urls as string[] : null,
     has_sides: Boolean(row.has_sides),
+    lateral_emphasis: Boolean(row.lateral_emphasis),
+    secondary_weights: parseSecondaryWeightsJsonb(row.secondary_weights),
+    weight_source: parseWeightSourceLiteral(row.weight_source),
   };
+}
+
+/** Coerce JSONB secondary_weights from a Postgres row to a typed Record.
+ *  Empty {} preserved (audited-zero signal); null preserved (no audit). */
+function parseSecondaryWeightsJsonb(v: unknown): Record<string, number> | null {
+  if (v == null) return null;
+  let obj: unknown = v;
+  if (typeof v === 'string') {
+    try { obj = JSON.parse(v); } catch { return null; }
+  }
+  if (typeof obj !== 'object' || obj === null || Array.isArray(obj)) return null;
+  const out: Record<string, number> = {};
+  for (const [k, val] of Object.entries(obj as Record<string, unknown>)) {
+    if (typeof val === 'number' && Number.isFinite(val) && val >= 0 && val <= 1) {
+      out[k] = val;
+    }
+  }
+  return out;
+}
+
+function parseWeightSourceLiteral(v: unknown): 'audited' | 'inferred' | 'default' | 'manual-override' | null {
+  if (v === 'audited' || v === 'inferred' || v === 'default' || v === 'manual-override') return v;
+  return null;
 }
 
 export function parseWorkout(row: DbRow): Workout {

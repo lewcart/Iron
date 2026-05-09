@@ -148,7 +148,7 @@ export async function POST(req: Request) {
     // and direct API hits use the same correctness path.
     if (touchedWeUuids.size > 0) {
       const weRows = await query<{ exercise_uuid: string }>(
-        `SELECT DISTINCT exercise_uuid FROM workout_exercises WHERE uuid = ANY($1::uuid[])`,
+        `SELECT DISTINCT exercise_uuid FROM workout_exercises WHERE uuid = ANY($1::text[])`,
         [Array.from(touchedWeUuids)],
       );
       const seen = new Set<string>();
@@ -225,12 +225,26 @@ async function pushWorkoutSet(r: Record<string, unknown>): Promise<void> {
   // effective_set_count weighting (queries.ts:1367-1372) keeps crediting
   // time-mode sets without a SQL change. Client-pushed `rir` is ignored
   // for time-mode rows. See PLAN-exercise-timer.md.
+  //
+  // The same JOIN doubles as a parent existence check: if the workout_exercise
+  // (or its exercise) is missing, we skip this set rather than letting the FK
+  // insert fail. Orphans happen when a workout_exercise was deleted server-
+  // side (CASCADE-removing its sets) while the client's Dexie still holds
+  // the now-orphan workout_set as dirty. Failing the whole batch on this
+  // wedges sync indefinitely; skipping unblocks the rest of the payload and
+  // lets the client mark the orphan _synced=true so it stops being re-pushed.
   const trackingModeRows = await query<{ tracking_mode: 'reps' | 'time' }>(
     `SELECT e.tracking_mode FROM exercises e
      JOIN workout_exercises we ON we.exercise_uuid = e.uuid
      WHERE we.uuid = $1`,
     [r.workout_exercise_uuid],
   );
+  if (trackingModeRows.length === 0) {
+    console.warn(
+      `sync/push: skipping orphan workout_set ${r.uuid} — parent workout_exercise ${r.workout_exercise_uuid} not found`,
+    );
+    return;
+  }
   const trackingMode = trackingModeRows[0]?.tracking_mode ?? 'reps';
 
   const rpeRaw = r.rpe;
@@ -316,9 +330,43 @@ async function pushExercise(r: Record<string, unknown>): Promise<void> {
     : null; // sentinel: the SQL branch on clientSentImageUrls preserves existing value
   const imageCountParam = clientSentImageCount ? r.image_count : 0;
 
+  // secondary_weights: only overwrite the server-side value when the client
+  // explicitly sent NON-NULL weights. The pre-v1.1 sync flow + v23 Dexie
+  // upgrade leaves all rows at secondary_weights=null; if we treated null as
+  // "client sent null" we'd wipe migration 046's audited weights on the
+  // first unrelated edit (rename, hide, YouTube URL). Clients edit weights
+  // through a dedicated path that explicitly sets a non-null value;
+  // everything else preserves what's on the server.
+  // Empty `{}` is a meaningful audited value ("no secondary credit")
+  // distinct from null fallback — preserved as-is, not collapsed.
+  // Validate values are 0.0-1.0 numbers keyed by canonical slug; anything
+  // else gets dropped silently rather than poisoning the catalog.
+  const swRaw = r.secondary_weights;
+  const clientSentSecondaryWeights =
+    swRaw !== undefined && swRaw !== null &&
+    typeof swRaw === 'object' && !Array.isArray(swRaw);
+  let swClean: Record<string, number> | null = null;
+  if (clientSentSecondaryWeights) {
+    const cleaned: Record<string, number> = {};
+    for (const [k, v] of Object.entries(swRaw as Record<string, unknown>)) {
+      if (typeof v === 'number' && Number.isFinite(v) && v >= 0 && v <= 1) {
+        cleaned[k] = v;
+      }
+    }
+    // Preserve empty object — '{}' is the audited-zero-secondary-credit
+    // signal (e.g. leg extension, calf raise). Collapsing to null would
+    // silently fall back to 0.5 default and re-credit muscles the audit
+    // explicitly zeroed.
+    swClean = cleaned;
+  }
+  // weight_source: validate against the closed set; null otherwise.
+  const wsRaw = r.weight_source;
+  const validSources = ['audited', 'inferred', 'default', 'manual-override'];
+  const wsClean: string | null = (typeof wsRaw === 'string' && validSources.includes(wsRaw)) ? wsRaw : null;
+
   await query(
-    `INSERT INTO exercises (uuid, everkinetic_id, title, alias, description, primary_muscles, secondary_muscles, equipment, steps, tips, is_custom, is_hidden, movement_pattern, tracking_mode, image_count, youtube_url, image_urls, has_sides, lateral_emphasis, updated_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, NOW())
+    `INSERT INTO exercises (uuid, everkinetic_id, title, alias, description, primary_muscles, secondary_muscles, equipment, steps, tips, is_custom, is_hidden, movement_pattern, tracking_mode, image_count, youtube_url, image_urls, has_sides, lateral_emphasis, secondary_weights, weight_source, updated_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, NOW())
      ON CONFLICT (uuid) DO UPDATE SET
        title = EXCLUDED.title, alias = EXCLUDED.alias, description = EXCLUDED.description,
        primary_muscles = EXCLUDED.primary_muscles, secondary_muscles = EXCLUDED.secondary_muscles,
@@ -331,6 +379,8 @@ async function pushExercise(r: Record<string, unknown>): Promise<void> {
        image_urls = ${clientSentImageUrls ? 'EXCLUDED.image_urls' : 'exercises.image_urls'},
        has_sides = EXCLUDED.has_sides,
        lateral_emphasis = EXCLUDED.lateral_emphasis,
+       secondary_weights = ${clientSentSecondaryWeights ? 'EXCLUDED.secondary_weights' : 'exercises.secondary_weights'},
+       weight_source = ${clientSentSecondaryWeights && wsClean !== null ? 'EXCLUDED.weight_source' : 'exercises.weight_source'},
        updated_at = NOW()`,
     [
       String(r.uuid).toLowerCase(), r.everkinetic_id, r.title,
@@ -344,6 +394,8 @@ async function pushExercise(r: Record<string, unknown>): Promise<void> {
       imageUrlsParam,
       Boolean(r.has_sides),
       Boolean(r.lateral_emphasis),
+      swClean === null ? null : JSON.stringify(swClean),
+      wsClean,
     ],
   );
 }

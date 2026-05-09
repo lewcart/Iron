@@ -999,15 +999,58 @@ export default function ExerciseDetail({
           );
           if (primary.length === 0 && secondary.length === 0) return null;
 
-          // Page mode: anatomical diagram + pills.
+          // Page mode: anatomical diagram + per-muscle weight ledger.
           if (chrome === 'page') {
             return (
               <div>
                 <p className="text-xs font-semibold text-primary uppercase tracking-wide mb-1 px-1">
                   Target muscles
                 </p>
-                <div className="ios-section p-3">
+                <div className="ios-section p-3 space-y-3">
                   <MuscleMap primary={primary} secondary={secondary} />
+                  {/* Per-muscle credit ledger (v1.1). Read-only in v1.1
+                      — UI editor lands in v1.2 per gate-locked plan.
+                      MCP `update_exercise(secondary_weights)` is the
+                      v1.1 write path. */}
+                  <div className="border-t border-border pt-3 space-y-1">
+                    <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide">
+                      Muscle credit
+                      {exercise.weight_source && exercise.weight_source !== 'default' && (
+                        <span className={`ml-2 normal-case font-normal ${
+                          exercise.weight_source === 'audited' ? 'text-emerald-400/80'
+                          : exercise.weight_source === 'manual-override' ? 'text-amber-400/80'
+                          : 'text-muted-foreground/70'
+                        }`}>
+                          {exercise.weight_source === 'audited' ? 'audited'
+                            : exercise.weight_source === 'manual-override' ? 'manual override'
+                            : 'inferred'}
+                        </span>
+                      )}
+                    </p>
+                    {primary.map((m) => (
+                      <div key={`p-${m}`} className="flex items-center justify-between text-xs">
+                        <span className="text-foreground">{MUSCLE_DEFS[m].display_name}</span>
+                        <span className="text-emerald-400/80 font-mono tabular-nums">primary · 1.0</span>
+                      </div>
+                    ))}
+                    {secondary.map((m) => {
+                      const w = exercise.secondary_weights?.[m];
+                      const usingDefault = w == null;
+                      return (
+                        <div key={`s-${m}`} className="flex items-center justify-between text-xs">
+                          <span className="text-foreground">{MUSCLE_DEFS[m].display_name}</span>
+                          <span className={`font-mono tabular-nums ${
+                            usingDefault ? 'text-muted-foreground/70' : 'text-foreground/80'
+                          }`}>
+                            secondary · {(w ?? 0.5).toFixed(2)}
+                            {usingDefault && (
+                              <span className="ml-1 text-[9px] text-muted-foreground/60">default</span>
+                            )}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
               </div>
             );
@@ -1021,16 +1064,57 @@ export default function ExerciseDetail({
                 {primary.map((m) => (
                   <div key={m} className="ios-row">
                     <span className="flex-1 text-sm">{MUSCLE_DEFS[m].display_name}</span>
-                    <span className="text-xs text-muted-foreground">Primary</span>
+                    <span className="text-xs text-muted-foreground">Primary · 1.0</span>
                   </div>
                 ))}
-                {secondary.map((m) => (
-                  <div key={m} className="ios-row">
-                    <span className="flex-1 text-sm">{MUSCLE_DEFS[m].display_name}</span>
-                    <span className="text-xs text-muted-foreground">Secondary</span>
-                  </div>
-                ))}
+                {secondary.map((m) => {
+                  const w = exercise.secondary_weights?.[m];
+                  const weightLabel = w != null ? w.toFixed(2) : '0.50';
+                  return (
+                    <div key={m} className="ios-row">
+                      <span className="flex-1 text-sm">{MUSCLE_DEFS[m].display_name}</span>
+                      <span className="text-xs text-muted-foreground">
+                        Secondary · {weightLabel}
+                        {w == null && (
+                          <span className="ml-1 opacity-60" title="Default fallback (no audited weight)">·</span>
+                        )}
+                      </span>
+                    </div>
+                  );
+                })}
               </div>
+              {/* Page-mode-equivalent weight provenance footnote. Tells Lou
+                  whether weights are SME-audited or fallback defaults. */}
+              {(() => {
+                const src = exercise.weight_source;
+                if (src == null || src === 'default') {
+                  return (
+                    <p className="mt-1 px-1 text-[10px] text-muted-foreground/70 leading-snug">
+                      Secondary weights default to 0.5. Tap an exercise on the routine
+                      page volume tile to see how each contribution feeds the muscle.
+                    </p>
+                  );
+                }
+                if (src === 'audited') {
+                  return (
+                    <p className="mt-1 px-1 text-[10px] text-emerald-400/70 leading-snug">
+                      Audited weights — sourced from EMG / hypertrophy literature.
+                    </p>
+                  );
+                }
+                if (src === 'manual-override') {
+                  return (
+                    <p className="mt-1 px-1 text-[10px] text-amber-400/70 leading-snug">
+                      Manual override — weights set via chat, not the audit pass.
+                    </p>
+                  );
+                }
+                return (
+                  <p className="mt-1 px-1 text-[10px] text-muted-foreground/70 leading-snug">
+                    Inferred weights — based on biomechanics, not direct measurement.
+                  </p>
+                );
+              })()}
             </div>
           );
         })()}

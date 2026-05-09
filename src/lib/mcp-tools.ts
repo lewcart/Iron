@@ -17,7 +17,7 @@ import {
 } from '@/lib/health-sleep-summary';
 import { computeCardioWeek } from '@/lib/server/health-data';
 import { getWeekSetsPerMuscle, getExercisePRs, recomputePRFlagsForExercise } from '@/db/queries';
-import { resolveMuscleSlug } from '@/lib/muscles';
+import { resolveMuscleSlug, MUSCLE_SLUGS } from '@/lib/muscles';
 import { APP_TZ, resolveTz } from '@/lib/app-tz';
 
 // ── Result helpers ────────────────────────────────────────────────────────────
@@ -1200,6 +1200,7 @@ async function updateExercise(args: Record<string, unknown>) {
     movement_pattern?: string | null;
     tracking_mode?: 'reps' | 'time';
     youtube_url?: string | null;
+    secondary_weights?: Partial<Record<string, number>> | null;
   };
 
   if (!uuid) return toolError('uuid is required');
@@ -1236,6 +1237,57 @@ async function updateExercise(args: Record<string, unknown>) {
       push('youtube_url', patch.youtube_url);
     } else {
       return toolError('youtube_url must be a youtube.com or youtu.be URL');
+    }
+  }
+  // Per-(exercise, secondary muscle) credit weight 0.0-1.0 (v1.1).
+  // Pass `null` to clear ALL weights and revert this exercise to the legacy
+  // 0.5 fallback (weight_source becomes null too).
+  // Pass an object to MERGE weights into the existing record — only the
+  // keys present in the patch are updated; other audited weights stay.
+  // Pass `{}` to set "audited zero secondary credit" (no muscles credited).
+  // To remove a single muscle's weight while keeping others, pass that
+  // muscle's slug with a value of 0 (which means "credits the muscle but
+  // contribution is zero"). True removal of a single key is not supported
+  // via MCP — clear all and re-set the keys you want.
+  // Validation:
+  //   - Object size cap: max 18 keys (one per canonical muscle slug)
+  //   - Keys: must be canonical muscle slugs (rejects typos like 'glute')
+  //   - Values: numbers in [0, 1]
+  // weight_source flips to 'manual-override' on any non-null update so the
+  // exercise page UI distinguishes chat tweaks from the audited catalog.
+  if (patch.secondary_weights !== undefined) {
+    if (patch.secondary_weights === null) {
+      push('secondary_weights', null);
+      push('weight_source', null);
+    } else if (typeof patch.secondary_weights === 'object' && !Array.isArray(patch.secondary_weights)) {
+      const entries = Object.entries(patch.secondary_weights);
+      if (entries.length > 18) {
+        return toolError(`secondary_weights has ${entries.length} keys; max 18 (one per canonical muscle).`);
+      }
+      const cleaned: Record<string, number> = {};
+      for (const [k, v] of entries) {
+        if (!(MUSCLE_SLUGS as readonly string[]).includes(k)) {
+          return toolError(`secondary_weights["${k}"] is not a canonical muscle slug. Call list_muscles for the taxonomy.`);
+        }
+        if (typeof v !== 'number' || !Number.isFinite(v) || v < 0 || v > 1) {
+          return toolError(`secondary_weights["${k}"] must be a number in [0, 1] (got ${v})`);
+        }
+        cleaned[k] = v;
+      }
+      // Merge with existing (per documented contract). Read existing first;
+      // patch overwrites matching keys, leaves others intact. Pass {} to
+      // set an explicit audited-zero (no muscles credited at all).
+      const existing = await queryOne<{ secondary_weights: Record<string, number> | null }>(
+        'SELECT secondary_weights FROM exercises WHERE uuid = $1',
+        [uuid.toLowerCase()],
+      );
+      const merged: Record<string, number> = entries.length === 0
+        ? {}  // explicit empty — set to audited-zero
+        : { ...(existing?.secondary_weights ?? {}), ...cleaned };
+      push('secondary_weights', JSON.stringify(merged));
+      push('weight_source', 'manual-override');
+    } else {
+      return toolError('secondary_weights must be an object keyed by canonical muscle slug, or null');
     }
   }
 
@@ -3370,6 +3422,20 @@ export const tools: MCPTool[] = [
         youtube_url: {
           type: 'string',
           description: 'YouTube URL with optional ?t=N start. Pass null or empty string to clear.',
+        },
+        secondary_weights: {
+          type: ['object', 'null'],
+          description:
+            'Per-(secondary muscle) credit weight 0.0-1.0 keyed by CANONICAL muscle slug ' +
+            '(call list_muscles for the taxonomy — typos like "glute" are rejected). ' +
+            'MERGE semantics: only the keys in this patch are updated; other audited weights stay. ' +
+            'Pass {"glutes": 0.7} to update glutes only and leave all other audited weights intact. ' +
+            'Pass null to clear ALL weights and revert this exercise to the legacy 0.5 fallback. ' +
+            'Pass an empty object {} to set "audited zero secondary credit" (no muscles credited at all — used for true isolation exercises). ' +
+            'Setting via this tool flips weight_source to "manual-override" so the exercise page can distinguish chat-driven tweaks from audited values. ' +
+            'Max 18 keys (one per canonical muscle). Use ONLY when Lou explicitly asks to adjust a specific exercise\'s secondary credit — do not auto-tune weights.',
+          additionalProperties: { type: 'number', minimum: 0, maximum: 1 },
+          maxProperties: 18,
         },
       },
       required: ['uuid'],

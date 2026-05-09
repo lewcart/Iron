@@ -24,9 +24,12 @@ import { useActiveVision } from '@/lib/useLocalDB-strategy';
 import { MUSCLE_DEFS, MUSCLE_SLUGS } from '@/lib/muscles';
 import {
   projectWeeklyVolume,
+  computeMuscleContributors,
   type ProjectedSetsByMuscleRow,
   type ProjectionInputs,
+  type MuscleContributor,
 } from '@/lib/training/routine-projection';
+import { VolumeContributorsSheet, type VolumeContributor } from './VolumeContributorsSheet';
 
 // ─── Types ──────────────────────────────────────────────────────────────
 
@@ -104,11 +107,20 @@ interface RoutineVolumeFitProps {
 export function RoutineVolumeFit({ plan, isActive }: RoutineVolumeFitProps) {
   const vision = useActiveVision();
   const overrides = useVisionOverrides(vision?.uuid);
+  const [drilldownSlug, setDrilldownSlug] = useState<string | null>(null);
 
-  const projection = useMemo<ProjectedSetsByMuscleRow[] | undefined>(() => {
-    if (overrides == null) return undefined;
-    if (vision === undefined) return undefined;
-    const inputs: ProjectionInputs = {
+  // Reset drill-down when plan changes — otherwise the sheet would re-open
+  // against the new plan's data with a slug that may not exist anymore.
+  useEffect(() => {
+    setDrilldownSlug(null);
+  }, [plan.uuid]);
+
+  // Build the projection inputs once — reused for both the headline rows
+  // (projectWeeklyVolume) and the per-muscle drill-down contributors
+  // (computeMuscleContributors). Memoized on plan + vision + overrides.
+  const projectionInputs = useMemo<ProjectionInputs | null>(() => {
+    if (overrides == null || vision === undefined) return null;
+    return {
       routines: plan.routines.map((r) => ({
         uuid: r.uuid,
         cycle_length_days: r.cycle_length_days,
@@ -121,6 +133,7 @@ export function RoutineVolumeFit({ plan, isActive }: RoutineVolumeFitProps) {
                 primary_muscles: e.exercise.primary_muscles,
                 secondary_muscles: e.exercise.secondary_muscles,
                 lateral_emphasis: e.exercise.lateral_emphasis ?? false,
+                secondary_weights: e.exercise.secondary_weights ?? null,
               }
             : undefined,
           sets: e.sets.map((s) => ({
@@ -147,10 +160,55 @@ export function RoutineVolumeFit({ plan, isActive }: RoutineVolumeFitProps) {
         display_order: MUSCLE_DEFS[slug].display_order,
       })),
     };
-    return projectWeeklyVolume(inputs);
   }, [plan, vision, overrides]);
 
+  // Title + weight-source maps for the drill-down. Built once per plan.
+  const exerciseTitles = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const r of plan.routines) {
+      for (const e of r.exercises) {
+        if (e.exercise) m.set(e.exercise.uuid, e.exercise.title);
+      }
+    }
+    return m;
+  }, [plan]);
+
+  const exerciseWeightSources = useMemo(() => {
+    const m = new Map<string, 'audited' | 'inferred' | 'default' | 'manual-override' | null>();
+    for (const r of plan.routines) {
+      for (const e of r.exercises) {
+        if (e.exercise) m.set(e.exercise.uuid, e.exercise.weight_source ?? null);
+      }
+    }
+    return m;
+  }, [plan]);
+
+  const dayLabels = useMemo(() => {
+    const m = new Map<string, string | null>();
+    for (const r of plan.routines) m.set(r.uuid, r.title ?? null);
+    return m;
+  }, [plan]);
+
+  const projection = useMemo<ProjectedSetsByMuscleRow[] | undefined>(() => {
+    if (projectionInputs == null) return undefined;
+    return projectWeeklyVolume(projectionInputs);
+  }, [projectionInputs]);
+
   const baseline = useBaselineRows(projection, plan.uuid);
+
+  // Drill-down contributors for the currently-open muscle (recomputed live
+  // as the user edits the routine).
+  const drilldownContributors = useMemo<MuscleContributor[]>(() => {
+    if (drilldownSlug == null || projectionInputs == null) return [];
+    return computeMuscleContributors(
+      { ...projectionInputs, exerciseTitles, exerciseWeightSources, dayLabels },
+      drilldownSlug,
+    );
+  }, [drilldownSlug, projectionInputs, exerciseTitles, exerciseWeightSources, dayLabels]);
+
+  const drilldownRow = drilldownSlug != null
+    ? projection?.find((r) => r.slug === drilldownSlug) ?? null
+    : null;
 
   // Loading state — initial render before live queries return
   if (projection === undefined) {
@@ -223,6 +281,7 @@ export function RoutineVolumeFit({ plan, isActive }: RoutineVolumeFitProps) {
                 key={row.slug}
                 row={row}
                 baseline={baseline.get(row.slug)}
+                onTap={() => setDrilldownSlug(row.slug)}
               />
             ))
           )}
@@ -245,7 +304,12 @@ export function RoutineVolumeFit({ plan, isActive }: RoutineVolumeFitProps) {
           </summary>
           <div className="space-y-1 mt-1.5 pl-2 border-l border-border">
             {otherRows.map((row) => (
-              <ProjectionRow key={row.slug} row={row} baseline={baseline.get(row.slug)} />
+              <ProjectionRow
+                key={row.slug}
+                row={row}
+                baseline={baseline.get(row.slug)}
+                onTap={() => setDrilldownSlug(row.slug)}
+              />
             ))}
           </div>
         </details>
@@ -265,6 +329,40 @@ export function RoutineVolumeFit({ plan, isActive }: RoutineVolumeFitProps) {
           )}
         </div>
       )}
+
+      {/* Drill-down sheet — opens when a row is tapped */}
+      {drilldownRow && (
+        <VolumeContributorsSheet
+          open={drilldownSlug != null}
+          onClose={() => setDrilldownSlug(null)}
+          muscleDisplayName={drilldownRow.display_name}
+          totalSetCount={drilldownRow.set_count}
+          totalEffectiveSetCount={drilldownRow.effective_set_count}
+          weeklyFrequency={drilldownRow.weekly_frequency}
+          range={{
+            min: drilldownRow.range_min,
+            max: drilldownRow.range_max,
+            overridden: drilldownRow.range_overridden,
+          }}
+          zone={
+            drilldownRow.verdict === 'red' ? 'red'
+            : drilldownRow.verdict === 'yellow' ? 'yellow'
+            : drilldownRow.verdict === 'green' ? 'green'
+            : 'uncertain'
+          }
+          view="projected"
+          contributors={drilldownContributors.map<VolumeContributor>((c) => ({
+            key: c.key,
+            exercise_title: c.exercise_title,
+            day_label: c.day_label,
+            role: c.role,
+            secondary_weight: c.secondary_weight,
+            set_count: c.set_count,
+            effective_set_count: c.effective_set_count,
+            weight_source: c.weight_source,
+          }))}
+        />
+      )}
     </div>
   );
 }
@@ -274,9 +372,13 @@ export function RoutineVolumeFit({ plan, isActive }: RoutineVolumeFitProps) {
 function ProjectionRow({
   row,
   baseline,
+  onTap,
 }: {
   row: ProjectedSetsByMuscleRow;
   baseline: ProjectedSetsByMuscleRow | undefined;
+  /** Tap handler — opens the drill-down sheet for this muscle. Optional so
+   *  this component remains usable in contexts without a drill-down. */
+  onTap?: () => void;
 }) {
   const v = verdictDisplay(row);
   const beforeSets = baseline?.effective_set_count ?? 0;
@@ -301,8 +403,19 @@ function ProjectionRow({
     else if (row.confidence === 'uncertain_subgroup') detail = 'lateral undertrained';
   }
 
+  const Wrapper: React.ElementType = onTap ? 'button' : 'div';
+  const wrapperProps = onTap
+    ? {
+        type: 'button' as const,
+        onClick: onTap,
+        className:
+          'w-full flex items-center gap-2 py-0.5 text-sm text-left hover:bg-secondary/40 rounded px-1 -mx-1 transition-colors',
+        'aria-label': `${row.display_name} — drill down to contributors`,
+      }
+    : { className: 'flex items-center gap-2 py-0.5 text-sm' };
+
   return (
-    <div className="flex items-center gap-2 py-0.5 text-sm">
+    <Wrapper {...wrapperProps}>
       <span className={`shrink-0 ${v.color} font-mono w-3`} aria-label={v.ariaLabel}>
         {v.glyph}
       </span>
@@ -331,6 +444,9 @@ function ProjectionRow({
           {detail}
         </span>
       )}
-    </div>
+      {onTap && (
+        <span className="shrink-0 text-muted-foreground/50 text-xs" aria-hidden>›</span>
+      )}
+    </Wrapper>
   );
 }

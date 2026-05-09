@@ -464,7 +464,38 @@ function mapExercise(r: Record<string, unknown>) {
     image_urls: Array.isArray(r.image_urls) ? r.image_urls as string[] : null,
     has_sides: Boolean(r.has_sides),
     lateral_emphasis: Boolean(r.lateral_emphasis),
+    secondary_weights: parseSecondaryWeights(r.secondary_weights),
+    weight_source: parseWeightSource(r.weight_source),
   };
+}
+
+/** Coerce JSONB secondary_weights to a Record<string, number> or null.
+ *  Preserves empty `{}` as the audited-zero-secondary-credit signal — the
+ *  legacy exercises (leg extension, calf raise, tricep pushdown) use it to
+ *  mean "no secondary muscles credit at all." Collapsing to null would let
+ *  the math fall back to 0.5 default and re-credit muscles the audit
+ *  explicitly zeroed.
+ *  Returns null only when the server value is genuinely null/missing OR
+ *  the payload is not a flat number-valued object. */
+function parseSecondaryWeights(v: unknown): Record<string, number> | null {
+  if (v == null) return null;
+  let obj: unknown = v;
+  if (typeof v === 'string') {
+    try { obj = JSON.parse(v); } catch { return null; }
+  }
+  if (typeof obj !== 'object' || obj === null || Array.isArray(obj)) return null;
+  const out: Record<string, number> = {};
+  for (const [k, val] of Object.entries(obj as Record<string, unknown>)) {
+    if (typeof val === 'number' && Number.isFinite(val) && val >= 0 && val <= 1) {
+      out[k] = val;
+    }
+  }
+  return out; // preserve empty object; only return null when source was null
+}
+
+function parseWeightSource(v: unknown): 'audited' | 'inferred' | 'default' | 'manual-override' | null {
+  if (v === 'audited' || v === 'inferred' || v === 'default' || v === 'manual-override') return v;
+  return null;
 }
 
 function mapInbodyScan(r: Record<string, unknown>) {
