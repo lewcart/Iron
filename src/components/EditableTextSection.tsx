@@ -9,9 +9,7 @@ import { Pencil, Check, X, Sparkles, Loader2 } from 'lucide-react';
 // list-of-textareas with add/remove (list). On save, calls onSave with the
 // new value; the parent's mutation pushes through Dexie + sync.
 //
-// The pencil icon is only rendered when `editable` is true. Modal mode
-// (`chrome='modal'`) passes editable=false so the in-workout reference
-// surface stays read-only.
+// The pencil icon is only rendered when `editable` is true.
 //
 // Optional `onMagicGenerate` adds a Sparkles button next to the Pencil that
 // AI-generates new content for this section. The handler returns the new

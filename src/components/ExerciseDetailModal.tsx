@@ -1,7 +1,6 @@
 'use client';
 
 import { memo, useEffect } from 'react';
-import { X } from 'lucide-react';
 import type { Exercise } from '@/types';
 import ExerciseDetail from '@/app/exercises/ExerciseDetail';
 
@@ -10,8 +9,10 @@ import ExerciseDetail from '@/app/exercises/ExerciseDetail';
  *
  * Renders as a `fixed inset-0` sibling overlay so the underlying workout page
  * stays mounted (rest timer keeps ticking, scroll position preserved, expanded
- * exercise rows survive). Modal supplies its own chrome — title bar + close
- * button — and tells <ExerciseDetail/> to skip its page-mode nav bar.
+ * exercise rows survive). The modal renders <ExerciseDetail/> in its native
+ * page layout — same content and edit affordances as the /exercises route.
+ * <ExerciseDetail/>'s own back-button bar acts as the close affordance via
+ * `onBack={onClose}`.
  *
  * Memoized: the workout page re-renders every 500ms while the rest timer is
  * active. With stable props (exerciseUuid is a string, onClose is wrapped by
@@ -46,25 +47,12 @@ function ExerciseDetailModalImpl({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex flex-col bg-background"
+      className="fixed inset-0 z-50 overflow-y-auto bg-background"
       role="dialog"
       aria-modal="true"
       aria-label={`${exercise.title} details`}
     >
-      {/* Modal chrome — title bar with close button */}
-      <div className="flex items-center gap-2 px-4 pt-safe pb-3 border-b border-border bg-background">
-        <button
-          onClick={onClose}
-          className="p-1 -ml-1 text-muted-foreground hover:text-foreground"
-          aria-label="Close"
-        >
-          <X className="h-5 w-5" />
-        </button>
-        <h2 className="flex-1 text-base font-semibold truncate">{exercise.title}</h2>
-      </div>
-      <div className="flex-1 overflow-y-auto">
-        <ExerciseDetail exercise={exercise} onBack={onClose} chrome="modal" />
-      </div>
+      <ExerciseDetail exercise={exercise} onBack={onClose} />
     </div>
   );
 }

@@ -2,6 +2,12 @@
 
 All notable changes to Rebirth are documented here.
 
+## [0.11.1] - 2026-05-15
+
+### Changed
+
+- **Unified exercise detail render path.** Removed the `chrome='page'|'modal'` prop split on `ExerciseDetail`. The in-workout `ExerciseDetailModal` now mounts the same page-mode UI (anatomical muscle map, editable About/Steps/Tips, tracking-mode + has-sides toggles, AI image manager) instead of a stripped read-only variant. `ExerciseDetail`'s own back-button bar acts as the close affordance via `onBack`, so the modal sheds its custom title-bar chrome.
+
 ## [0.11.0] - 2026-05-09
 
 ### Added

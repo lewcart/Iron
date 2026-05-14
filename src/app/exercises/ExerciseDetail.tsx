@@ -353,13 +353,9 @@ async function generateContent(
 export default function ExerciseDetail({
   exercise,
   onBack,
-  chrome = 'page',
 }: {
   exercise: Exercise;
   onBack: () => void;
-  /** Render mode: 'page' shows the back-button nav bar; 'modal' assumes
-   *  the parent already supplies its own chrome (header bar + close button). */
-  chrome?: 'page' | 'modal';
 }) {
   const { toDisplay, label } = useUnit();
   const [progressData, setProgressData] = useState<ProgressData | null>(null);
@@ -520,7 +516,7 @@ export default function ExerciseDetail({
   const stripFrameCount = (exercise.image_urls && exercise.image_urls.length > 0)
     ? exercise.image_urls.length
     : Math.min(Math.max(exercise.image_count, 0), 3);
-  const stripWillUseLeadingSlot = chrome === 'page' && stripFrameCount > 0 && stripFrameCount < 3;
+  const stripWillUseLeadingSlot = stripFrameCount > 0 && stripFrameCount < 3;
   const pbStripCell: React.ReactNode = stripWillUseLeadingSlot ? (
     isTimeMode ? (
       <PbStripCell
@@ -602,25 +598,21 @@ export default function ExerciseDetail({
 
   return (
     <main ref={rootRef} className="tab-content bg-background">
-      {chrome === 'page' && (
-        <div className="flex items-center gap-2 px-4 pt-safe pb-3 border-b border-border">
-          <button onClick={onBack} className="flex items-center gap-1 text-primary font-medium text-base">
-            <ChevronLeft className="h-5 w-5" />
-            Back
-          </button>
-        </div>
-      )}
+      <div className="flex items-center gap-2 px-4 pt-safe pb-3 border-b border-border">
+        <button onClick={onBack} className="flex items-center gap-1 text-primary font-medium text-base">
+          <ChevronLeft className="h-5 w-5" />
+          Back
+        </button>
+      </div>
 
       <div className="px-4 py-4 space-y-5">
-        {chrome === 'page' && (
-          <h1 className="text-xl font-bold">{exercise.title}</h1>
-        )}
+        <h1 className="text-xl font-bold">{exercise.title}</h1>
 
         {/* Demo strip — renders only when image_count > 0 OR image_urls set.
             Tap → openYouTube when youtube_url present. Always visible at top
             of detail (before stats/chart) so it's the first thing the user
-            sees mid-workout. In page chrome, an edit-pencil overlay opens
-            the AI image manager (regenerate / pick a previous pair).
+            sees mid-workout. An edit-pencil overlay opens the AI image
+            manager (regenerate / pick a previous pair).
             When the strip has fewer than 3 frames (typical for the AI-
             generated pair flow), the leading cell shows a compact PB
             readout — denser than the full-width hero card and avoids the
@@ -633,19 +625,14 @@ export default function ExerciseDetail({
               imageCount={exercise.image_count}
               imageUrls={exercise.image_urls ?? null}
               youtubeUrl={exercise.youtube_url}
-              compact={chrome === 'modal'}
-              leadingSlot={chrome === 'page' ? pbStripCell : null}
+              leadingSlot={pbStripCell}
             />
-            {chrome === 'page' && (
-              <ExerciseImageManager variant="overlay" exerciseUuid={exercise.uuid} />
-            )}
+            <ExerciseImageManager variant="overlay" exerciseUuid={exercise.uuid} />
           </div>
         )}
 
-        {/* No demo images yet — offer to generate them. Page mode only;
-            modal stays read-only (in-workout reference, not authoring). */}
-        {chrome === 'page'
-          && exercise.image_count === 0
+        {/* No demo images yet — offer to generate them. */}
+        {exercise.image_count === 0
           && (!exercise.image_urls || exercise.image_urls.length === 0) && (
           <ExerciseImageManager variant="empty" exerciseUuid={exercise.uuid} />
         )}
@@ -982,7 +969,7 @@ export default function ExerciseDetail({
           label="About"
           value={exercise.description}
           emptyPlaceholder="Describe what this exercise does and what to focus on…"
-          editable={chrome === 'page'}
+          editable
           onSave={async (next) => {
             await updateExercise(exercise.uuid, { description: next });
           }}
@@ -999,174 +986,103 @@ export default function ExerciseDetail({
           );
           if (primary.length === 0 && secondary.length === 0) return null;
 
-          // Page mode: anatomical diagram + per-muscle weight ledger.
-          if (chrome === 'page') {
-            return (
-              <div>
-                <p className="text-xs font-semibold text-primary uppercase tracking-wide mb-1 px-1">
-                  Target muscles
-                </p>
-                <div className="ios-section p-3 space-y-3">
-                  <MuscleMap primary={primary} secondary={secondary} />
-                  {/* Per-muscle credit ledger (v1.1). Read-only in v1.1
-                      — UI editor lands in v1.2 per gate-locked plan.
-                      MCP `update_exercise(secondary_weights)` is the
-                      v1.1 write path. */}
-                  <div className="border-t border-border pt-3 space-y-1">
-                    <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide">
-                      Muscle credit
-                      {exercise.weight_source && exercise.weight_source !== 'default' && (
-                        <span className={`ml-2 normal-case font-normal ${
-                          exercise.weight_source === 'audited' ? 'text-emerald-400/80'
-                          : exercise.weight_source === 'manual-override' ? 'text-amber-400/80'
-                          : 'text-muted-foreground/70'
-                        }`}>
-                          {exercise.weight_source === 'audited' ? 'audited'
-                            : exercise.weight_source === 'manual-override' ? 'manual override'
-                            : 'inferred'}
-                        </span>
-                      )}
-                    </p>
-                    {primary.map((m) => (
-                      <div key={`p-${m}`} className="flex items-center justify-between text-xs">
-                        <span className="text-foreground">{MUSCLE_DEFS[m].display_name}</span>
-                        <span className="text-emerald-400/80 font-mono tabular-nums">primary · 1.0</span>
-                      </div>
-                    ))}
-                    {secondary.map((m) => {
-                      const w = exercise.secondary_weights?.[m];
-                      const usingDefault = w == null;
-                      return (
-                        <div key={`s-${m}`} className="flex items-center justify-between text-xs">
-                          <span className="text-foreground">{MUSCLE_DEFS[m].display_name}</span>
-                          <span className={`font-mono tabular-nums ${
-                            usingDefault ? 'text-muted-foreground/70' : 'text-foreground/80'
-                          }`}>
-                            secondary · {(w ?? 0.5).toFixed(2)}
-                            {usingDefault && (
-                              <span className="ml-1 text-[9px] text-muted-foreground/60">default</span>
-                            )}
-                          </span>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              </div>
-            );
-          }
-
-          // Modal mode: keep dense text-row UI (mid-set context, eyes-on-bar).
           return (
             <div>
-              <p className="text-xs font-semibold text-primary uppercase tracking-wide mb-1 px-1">Muscles</p>
-              <div className="ios-section">
-                {primary.map((m) => (
-                  <div key={m} className="ios-row">
-                    <span className="flex-1 text-sm">{MUSCLE_DEFS[m].display_name}</span>
-                    <span className="text-xs text-muted-foreground">Primary · 1.0</span>
-                  </div>
-                ))}
-                {secondary.map((m) => {
-                  const w = exercise.secondary_weights?.[m];
-                  const weightLabel = w != null ? w.toFixed(2) : '0.50';
-                  return (
-                    <div key={m} className="ios-row">
-                      <span className="flex-1 text-sm">{MUSCLE_DEFS[m].display_name}</span>
-                      <span className="text-xs text-muted-foreground">
-                        Secondary · {weightLabel}
-                        {w == null && (
-                          <span className="ml-1 opacity-60" title="Default fallback (no audited weight)">·</span>
-                        )}
+              <p className="text-xs font-semibold text-primary uppercase tracking-wide mb-1 px-1">
+                Target muscles
+              </p>
+              <div className="ios-section p-3 space-y-3">
+                <MuscleMap primary={primary} secondary={secondary} />
+                {/* Per-muscle credit ledger (v1.1). Read-only in v1.1
+                    — UI editor lands in v1.2 per gate-locked plan.
+                    MCP `update_exercise(secondary_weights)` is the
+                    v1.1 write path. */}
+                <div className="border-t border-border pt-3 space-y-1">
+                  <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide">
+                    Muscle credit
+                    {exercise.weight_source && exercise.weight_source !== 'default' && (
+                      <span className={`ml-2 normal-case font-normal ${
+                        exercise.weight_source === 'audited' ? 'text-emerald-400/80'
+                        : exercise.weight_source === 'manual-override' ? 'text-amber-400/80'
+                        : 'text-muted-foreground/70'
+                      }`}>
+                        {exercise.weight_source === 'audited' ? 'audited'
+                          : exercise.weight_source === 'manual-override' ? 'manual override'
+                          : 'inferred'}
                       </span>
-                    </div>
-                  );
-                })}
-              </div>
-              {/* Page-mode-equivalent weight provenance footnote. Tells Lou
-                  whether weights are SME-audited or fallback defaults. */}
-              {(() => {
-                const src = exercise.weight_source;
-                if (src == null || src === 'default') {
-                  return (
-                    <p className="mt-1 px-1 text-[10px] text-muted-foreground/70 leading-snug">
-                      Secondary weights default to 0.5. Tap an exercise on the routine
-                      page volume tile to see how each contribution feeds the muscle.
-                    </p>
-                  );
-                }
-                if (src === 'audited') {
-                  return (
-                    <p className="mt-1 px-1 text-[10px] text-emerald-400/70 leading-snug">
-                      Audited weights — sourced from EMG / hypertrophy literature.
-                    </p>
-                  );
-                }
-                if (src === 'manual-override') {
-                  return (
-                    <p className="mt-1 px-1 text-[10px] text-amber-400/70 leading-snug">
-                      Manual override — weights set via chat, not the audit pass.
-                    </p>
-                  );
-                }
-                return (
-                  <p className="mt-1 px-1 text-[10px] text-muted-foreground/70 leading-snug">
-                    Inferred weights — based on biomechanics, not direct measurement.
+                    )}
                   </p>
-                );
-              })()}
+                  {primary.map((m) => (
+                    <div key={`p-${m}`} className="flex items-center justify-between text-xs">
+                      <span className="text-foreground">{MUSCLE_DEFS[m].display_name}</span>
+                      <span className="text-emerald-400/80 font-mono tabular-nums">primary · 1.0</span>
+                    </div>
+                  ))}
+                  {secondary.map((m) => {
+                    const w = exercise.secondary_weights?.[m];
+                    const usingDefault = w == null;
+                    return (
+                      <div key={`s-${m}`} className="flex items-center justify-between text-xs">
+                        <span className="text-foreground">{MUSCLE_DEFS[m].display_name}</span>
+                        <span className={`font-mono tabular-nums ${
+                          usingDefault ? 'text-muted-foreground/70' : 'text-foreground/80'
+                        }`}>
+                          secondary · {(w ?? 0.5).toFixed(2)}
+                          {usingDefault && (
+                            <span className="ml-1 text-[9px] text-muted-foreground/60">default</span>
+                          )}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
             </div>
           );
         })()}
 
         {/* Tracking mode toggle — flip an exercise between weight × reps and
             held duration. Mirrors the segmented control on CreateExerciseForm
-            so the UX is consistent with first-creation. Only editable in
-            page mode; the in-workout modal stays read-only. The set logger
+            so the UX is consistent with first-creation. The set logger
             (workout page) and routine builder (plans page) both branch on
             this value to render the right inputs. */}
-        {chrome === 'page' && (
-          <TrackingModeToggle
-            value={trackingMode}
-            onChange={async (next) => {
-              await updateExercise(exercise.uuid, { tracking_mode: next });
-            }}
-          />
-        )}
+        <TrackingModeToggle
+          value={trackingMode}
+          onChange={async (next) => {
+            await updateExercise(exercise.uuid, { tracking_mode: next });
+          }}
+        />
 
         {/* Has-sides toggle — when on, the in-workout stopwatch enters a 10s
             switch countdown after side 1 stops, then resumes counting up
-            for side 2. Surfaces only on the page chrome (same gating as
-            tracking_mode). Wired through to exercises.has_sides via
+            for side 2. Wired through to exercises.has_sides via
             updateExercise. */}
-        {chrome === 'page' && (
-          <div className="ios-section">
-            <button
-              type="button"
-              onClick={async () => {
-                await updateExercise(exercise.uuid, { has_sides: !exercise.has_sides });
-              }}
-              className="ios-row flex items-center justify-between w-full"
-              aria-pressed={exercise.has_sides}
-            >
-              <div className="flex flex-col items-start">
-                <span className="text-sm">Has sides (each leg / each arm)</span>
-                <span className="text-[11px] text-muted-foreground mt-0.5">
-                  Stopwatch adds a 10s switch between sides
-                </span>
-              </div>
+        <div className="ios-section">
+          <button
+            type="button"
+            onClick={async () => {
+              await updateExercise(exercise.uuid, { has_sides: !exercise.has_sides });
+            }}
+            className="ios-row flex items-center justify-between w-full"
+            aria-pressed={exercise.has_sides}
+          >
+            <div className="flex flex-col items-start">
+              <span className="text-sm">Has sides (each leg / each arm)</span>
+              <span className="text-[11px] text-muted-foreground mt-0.5">
+                Stopwatch adds a 10s switch between sides
+              </span>
+            </div>
+            <div className={
+              'w-11 h-6 rounded-full relative transition-colors flex-shrink-0 ' +
+              (exercise.has_sides ? 'bg-primary' : 'bg-secondary')
+            }>
               <div className={
-                'w-11 h-6 rounded-full relative transition-colors flex-shrink-0 ' +
-                (exercise.has_sides ? 'bg-primary' : 'bg-secondary')
-              }>
-                <div className={
-                  'absolute top-0.5 w-5 h-5 rounded-full bg-white transition-transform ' +
-                  (exercise.has_sides ? 'translate-x-[22px]' : 'translate-x-0.5')
-                } />
-              </div>
-            </button>
-          </div>
-        )}
+                'absolute top-0.5 w-5 h-5 rounded-full bg-white transition-transform ' +
+                (exercise.has_sides ? 'translate-x-[22px]' : 'translate-x-0.5')
+              } />
+            </div>
+          </button>
+        </div>
 
         {exercise.equipment.length > 0 && (
           <div>
@@ -1186,7 +1102,7 @@ export default function ExerciseDetail({
           label="Steps"
           value={exercise.steps}
           emptyPlaceholder="Add a step…"
-          editable={chrome === 'page'}
+          editable
           onSave={async (next) => {
             await updateExercise(exercise.uuid, { steps: next });
           }}
@@ -1201,7 +1117,7 @@ export default function ExerciseDetail({
           label="Tips"
           value={exercise.tips}
           emptyPlaceholder="Add a tip or thing to watch out for…"
-          editable={chrome === 'page'}
+          editable
           onSave={async (next) => {
             await updateExercise(exercise.uuid, { tips: next });
           }}

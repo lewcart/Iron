@@ -415,3 +415,41 @@ the listed order — earliest items are cheapest and have highest expected
 impact. Stop when the suite hits an acceptable pass rate or when the
 remaining items hit the XCUITest line.
 
+---
+
+## Per-set notes (session-to-session setup memory)
+
+Surfaced 2026-05-09 in chat. Use case: cable lateral raise with ankle
+cuff at the elbow — cuff position varies between sessions and Lou wants
+to remember where it was last time. Same problem applies to machine
+seat positions, band tensions, foot positioning, etc. Exercise-level
+notes (already exist) cover universal cues; this layer covers per-session
+*setup state* that needs to carry forward to the next session.
+
+Decision so far: skip program-level notes (boundary too fuzzy with
+exercise notes for a single-author single-user app). Build per-set
+notes only.
+
+- [ ] **Per-set optional one-liner.** Add an optional short note field
+      (≤ ~40 chars) to each set row in the workout UI. Empty by default,
+      no visual weight when unused. Trigger: small icon at the right edge
+      of the row, or long-press. Stored on `workout_sets` (new column,
+      nullable text).
+
+- [ ] **Surface previous session's note inline at the same set index.**
+      Under the "Last: 8 × 20kg" reference line on each set row, ghost-text
+      the matching note from the most recent session of this exercise at
+      the same set index (set 1 → set 1, set 2 → set 2). This is the
+      whole point of the feature — write once, read next time.
+
+- [ ] **Watch snapshot pass-through.** Echo the new column in the
+      WC payload + watch-wrote-set echo per the existing convention
+      (every column round-trips so server-side `EXCLUDED.column` doesn't
+      NULL it). Watch UI doesn't need to render the note in v1; just don't
+      drop the field.
+
+Out of scope for v1: history view, search, aggregation, program-level
+notes. If the per-set affordance turns into clutter on exercises that
+never use it, revisit by gating the icon behind a per-exercise "uses
+setup notes" flag.
+
