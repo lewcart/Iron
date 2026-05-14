@@ -1,7 +1,8 @@
 import 'fake-indexeddb/auto';
 import { describe, it, expect, beforeEach } from 'vitest';
 import { db } from '@/db/local';
-import { getExerciseTimePRsLocal } from './useLocalDB';
+import { exerciseFilterPredicate, getExerciseTimePRsLocal } from './useLocalDB';
+import type { LocalExercise } from '@/db/local';
 
 // Regression: when an exercise is flipped to time mode, the local PR/chart
 // pipeline must reinterpret historical reps-mode sets as held duration. Per
@@ -210,5 +211,83 @@ describe('getExerciseTimePRsLocal — retroactive interpretation after mode flip
     const result = await getExerciseTimePRsLocal(PLANK_UUID);
     expect(result.longestHold).toBeNull();
     expect(result.progress).toHaveLength(0);
+  });
+});
+
+// Regression: post-migration-026 exercises store canonical slugs (delts,
+// lats, quads) — never UI labels (shoulders, back, legs). The Add Exercise
+// sheet in /workout passes UI labels straight to useExercises({ muscleGroup }),
+// so the filter must expand UI keys to slugs. Before this fix, 5/6 chips
+// (back, shoulders, arms, legs, abdominals) showed zero results.
+function fakeExercise(opts: Partial<LocalExercise> & { uuid: string; title: string; primary_muscles: string[]; secondary_muscles?: string[] }): LocalExercise {
+  return {
+    everkinetic_id: 1,
+    alias: [],
+    description: null,
+    secondary_muscles: [],
+    equipment: [],
+    steps: [],
+    tips: [],
+    is_custom: false,
+    is_hidden: false,
+    movement_pattern: null,
+    tracking_mode: 'reps' as const,
+    image_count: 0,
+    youtube_url: null,
+    image_urls: null,
+    has_sides: false,
+    lateral_emphasis: false,
+    secondary_weights: null,
+    weight_source: null,
+    ...opts,
+  } as LocalExercise;
+}
+
+describe('exerciseFilterPredicate — UI muscle-group keys', () => {
+  const overheadPress = fakeExercise({ uuid: 'u1', title: 'Overhead Press', primary_muscles: ['delts'], secondary_muscles: ['triceps'] });
+  const pullUp = fakeExercise({ uuid: 'u2', title: 'Pull Up', primary_muscles: ['lats'], secondary_muscles: ['biceps'] });
+  const squat = fakeExercise({ uuid: 'u3', title: 'Squat', primary_muscles: ['quads'], secondary_muscles: ['glutes'] });
+  const plank = fakeExercise({ uuid: 'u4', title: 'Plank', primary_muscles: ['core'] });
+  const curl = fakeExercise({ uuid: 'u5', title: 'Curl', primary_muscles: ['biceps'] });
+  const bench = fakeExercise({ uuid: 'u6', title: 'Bench Press', primary_muscles: ['chest', 'triceps'], secondary_muscles: ['delts'] });
+
+  it('expands "shoulders" → delts (was the reported zero-results case)', () => {
+    expect(exerciseFilterPredicate(overheadPress, { muscleGroup: 'shoulders' })).toBe(true);
+    expect(exerciseFilterPredicate(squat, { muscleGroup: 'shoulders' })).toBe(false);
+  });
+
+  it('expands "back" → lats/rhomboids/etc.', () => {
+    expect(exerciseFilterPredicate(pullUp, { muscleGroup: 'back' })).toBe(true);
+    expect(exerciseFilterPredicate(squat, { muscleGroup: 'back' })).toBe(false);
+  });
+
+  it('expands "legs" → quads/glutes/etc.', () => {
+    expect(exerciseFilterPredicate(squat, { muscleGroup: 'legs' })).toBe(true);
+    expect(exerciseFilterPredicate(curl, { muscleGroup: 'legs' })).toBe(false);
+  });
+
+  it('expands "arms" → biceps/triceps/forearms', () => {
+    expect(exerciseFilterPredicate(curl, { muscleGroup: 'arms' })).toBe(true);
+    expect(exerciseFilterPredicate(squat, { muscleGroup: 'arms' })).toBe(false);
+  });
+
+  it('expands "abdominals" → core', () => {
+    expect(exerciseFilterPredicate(plank, { muscleGroup: 'abdominals' })).toBe(true);
+    expect(exerciseFilterPredicate(squat, { muscleGroup: 'abdominals' })).toBe(false);
+  });
+
+  it('matches via secondary muscles too', () => {
+    // Bench Press has delts as secondary — should appear under "shoulders".
+    expect(exerciseFilterPredicate(bench, { muscleGroup: 'shoulders' })).toBe(true);
+  });
+
+  it('still accepts a canonical slug directly', () => {
+    expect(exerciseFilterPredicate(overheadPress, { muscleGroup: 'delts' })).toBe(true);
+    expect(exerciseFilterPredicate(squat, { muscleGroup: 'delts' })).toBe(false);
+  });
+
+  it('hides is_hidden exercises regardless of filter', () => {
+    const hidden = fakeExercise({ uuid: 'h1', title: 'Hidden', primary_muscles: ['delts'], is_hidden: true });
+    expect(exerciseFilterPredicate(hidden, { muscleGroup: 'shoulders' })).toBe(false);
   });
 });

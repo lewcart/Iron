@@ -4,6 +4,7 @@ import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '@/db/local';
 import type { LocalWorkout, LocalWorkoutExercise, LocalWorkoutSet, LocalBodyweightLog, LocalExercise } from '@/db/local';
 import { estimate1RM } from '@/lib/pr';
+import { exerciseMatchesMuscleGroup } from '@/lib/muscle-groups';
 
 // ─── Compound type for full workout view ───────────────────────────────────────
 
@@ -157,6 +158,41 @@ export function useWorkoutSets(workout_exercise_uuid: string | null): LocalWorko
 
 // ─── Exercises ─────────────────────────────────────────────────────────────────
 
+/** Pure predicate for the exercise list filter. Exported for testing — the
+ *  useLiveQuery wrapper is hard to drive in unit tests, but the predicate
+ *  carries the bug-prone logic. */
+export function exerciseFilterPredicate(
+  ex: LocalExercise,
+  opts: { search?: string; muscleGroup?: string; equipment?: string },
+): boolean {
+  if (ex.is_hidden) return false;
+  if (opts.muscleGroup) {
+    // Accept either a UI parent-group key (chest/back/shoulders/arms/legs/
+    // abdominals) — expanded to canonical slugs via exerciseMatchesMuscleGroup
+    // — or a canonical slug directly. Pre-migration-026 callers passed UI
+    // keys like "shoulders"; post-migration data only contains slugs like
+    // "delts", so a literal includes() check matched zero rows.
+    const matchesGroup = exerciseMatchesMuscleGroup(
+      ex.primary_muscles,
+      ex.secondary_muscles,
+      opts.muscleGroup,
+    );
+    const matchesSlug =
+      ex.primary_muscles.includes(opts.muscleGroup) ||
+      ex.secondary_muscles.includes(opts.muscleGroup);
+    if (!matchesGroup && !matchesSlug) return false;
+  }
+  if (opts.equipment && !ex.equipment.includes(opts.equipment)) return false;
+  if (opts.search) {
+    const q = opts.search.toLowerCase();
+    return (
+      ex.title.toLowerCase().includes(q) ||
+      ex.alias.some(a => a.toLowerCase().includes(q))
+    );
+  }
+  return true;
+}
+
 /** Returns all visible exercises, optionally filtered. */
 export function useExercises(opts: {
   search?: string;
@@ -166,19 +202,7 @@ export function useExercises(opts: {
   return useLiveQuery(
     () =>
       db.exercises
-        .filter(ex => {
-          if (ex.is_hidden) return false;
-          if (opts.muscleGroup && !ex.primary_muscles.includes(opts.muscleGroup)) return false;
-          if (opts.equipment && !ex.equipment.includes(opts.equipment)) return false;
-          if (opts.search) {
-            const q = opts.search.toLowerCase();
-            return (
-              ex.title.toLowerCase().includes(q) ||
-              ex.alias.some(a => a.toLowerCase().includes(q))
-            );
-          }
-          return true;
-        })
+        .filter(ex => exerciseFilterPredicate(ex, opts))
         .sortBy('title'),
     [opts.search, opts.muscleGroup, opts.equipment],
     [],
