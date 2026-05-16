@@ -67,6 +67,8 @@ xcodebuild \
   -authenticationKeyPath "$KEY_PATH" \
   -authenticationKeyID "$KEY_ID" \
   -authenticationKeyIssuerID "$ISSUER_ID" \
+  -skipPackagePluginValidation \
+  -skipMacroValidation \
   DEVELOPMENT_TEAM="$TEAM" \
   CODE_SIGN_STYLE=Automatic \
   build \
