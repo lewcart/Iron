@@ -2,6 +2,42 @@
 
 All notable changes to Rebirth are documented here.
 
+## [0.12.0] - 2026-05-22
+
+### Added
+
+- **Supersets in workout sessions.** Per-exercise `⋮` overflow menu offers "Pair with previous exercise" / "Join superset above" / "Remove from superset." Paired cards share a primary-tinted left connector + small `Sup A`/`Sup B` badge near the title + a "SUPERSET" header on the leader. N-arity ready (group of 3+ is the same code path; UI scales with member count). Rest timer skips mid-round via pure-function `isMidSupersetRound` (handles asymmetric set counts: round N complete when every member with ≥N working sets has its N-th done). Workout exercises with no group render byte-identical to pre-feature.
+- **Supersets in `/plans` editor.** "Pair above" / "+ Join above" / "Ungroup" toggle on each routine exercise. Server auto-cleanup dissolves groups dropping below 2 members.
+- **Drop sets in workout sessions.** Per-set `⋯` action sheet (on completed working sets) offers "Add drop set after this." Inserts a new `workout_sets` row with `tag: 'dropSet'`, prefills weight at 70% of parent (rounded to 2.5kg), shifts later sets up. Renders inline with `D1`/`D2`/... label in the set-number cell + a thin primary-tinted left border. Working-set numbering skips drops (parent stays `1`, drop = `D1`, next working set = `2`). Rest timer skips mid-chain. Drops default to "Failure" pill (RIR 0) with tap-to-edit override.
+- **Drop sets in `/plans` editor.** "Drop?" toggle per routine set (hidden on the first set of an exercise — drops need a parent). Active drops render with primary-tinted label + left border, mirroring the session view.
+- **`working_set_count` field on `get_sets_per_muscle` and `get_weekly_summary`** (RP convention: drop chains collapse to 1 working set; `set_count` still returns the raw audit count). `status` (zero/under/optimal/over) now derives from `working_set_count` so MEV/MAV bands stay honest when drop chains are present. `effective_set_count` filters drops too (parent's recorded RIR governs; drops add 0).
+- **MCP `create_drop_chain` convenience tool.** Programs N drops after a parent set in one call. Cuts the typical "list routine → find exercise → find parent → add N drops" sequence from ~5–7 calls to 1. Single Postgres transaction (shift + N inserts) so a mid-loop failure can't leave the routine half-shifted.
+- **MCP `update_routine_exercise` tool.** Set/clear superset_group_uuid + round_target + rest_override. Server auto-cleanup runs leader-metadata promotion (round/rest moves to the lowest-order_index member after any reorder/move). Cross-routine group reuse rejected as `INVALID_SUPERSET_CROSS_ROUTINE`.
+- **`tag` param on `add_exercise` + `update_set_targets` MCP tools.** Drop chains programmable from chat without the convenience tool. First-set drop rejected as `INVALID_DROP_TAG_NEEDS_PARENT`; chained on another drop rejected as `INVALID_DROP_PARENT_IS_DROP`.
+
+### Changed
+
+- **Sync push upserts (`workout_exercises`, `workout_routine_exercises`)** gain `superset_group_uuid`, `superset_round_target`, `superset_rest_override_seconds` columns in INSERT + EXCLUDED SET.
+- **Sync pull mappers (`workout_exercises`, `workout_routine_exercises`)** project the 3 new columns so server-authored routine supersets round-trip to clients.
+- **Routine → session seed** copies `superset_group_uuid` + round/rest from `workout_routine_exercises` to the new `workout_exercises` rows. Programmed supersets seed into a started workout already paired.
+- **Watch snapshot bumped to `schema_version: 2`.** Per-exercise payload gains `superset_group_uuid` + `superset_round_target` + `superset_rest_override_seconds`. Old watch decoders ignore unknown fields and render legs as straight exercises — degraded but safe (no new column on `workout_sets`, so the watch's set-echo path is unaffected).
+- **Drag-reorder of workout exercises runs auto-cleanup atomically.** A single Dexie transaction writes new `order_index` values, then runs `dissolveOrphanGroups` to clear membership for any superset member that became non-contiguous, then re-leaders surviving groups (round/rest metadata moves to the new lowest-order_index member). No sync-pull race.
+
+### Fixed
+
+- Auto-cleanup on superset membership writes no longer dissolves a just-formed pair mid-build. The "Pair with previous" affordance writes two rows sequentially; the intermediate single-member state is transient. Cleanup now only runs on REMOVE (going to NULL), never on ADD.
+- `handleOpenSetActions` is no longer wrapped in `useCallback` with stale-closure capture of `workout`. The previous version silently dropped drop-set writes when the workout query was still resolving at first render.
+
+### Migrations
+
+- **049_superset_grouping** — `ALTER TABLE workout_exercises` + `workout_routine_exercises` add 3 nullable columns each. Partial indexes on `superset_group_uuid` (only paths through grouped rows pay the index cost; N=0 groups sees no impact). No data backfill needed.
+
+### Notes
+
+- Drop chains in volume math: a parent + 3 drops = `set_count: 4` (raw audit), `working_set_count: 1` (RP), `effective_set_count` = parent's contribution alone (drops contribute 0). Use `working_set_count` for MEV/MAV comparisons; `set_count` for audit / display.
+- Schema scope: drops use `tag = 'dropSet'` + adjacency-by-`order_index`, no FK column. Supersets use shared `superset_group_uuid` on exercise rows, no separate `superset_groups` table (per autoplan UC1+UC2 final-gate decisions — promotes to a table later non-breakingly if group-level metadata grows).
+- Watch is render-only for these patterns in v1 — add-from-watch is deferred. Adding a future column to `workout_sets` requires updating the watch echo OR adopting the `COALESCE(EXCLUDED.col, table.col)` defensive pattern (see `CLAUDE.md` "Watch echo column contract").
+
 ## [0.11.1] - 2026-05-15
 
 ### Changed

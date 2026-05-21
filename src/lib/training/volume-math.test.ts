@@ -504,3 +504,81 @@ describe('volumeZone — range-driven classifier', () => {
     expect(volumeZone(28, 14, 26)).toBe('over');
   });
 });
+
+// ── working_set_count — RP drop-collapse convention (migration 049) ─────
+
+describe('aggregateMuscleHits — working_set_count drop collapse (UC4/UC7)', () => {
+  it('bare set: working_set_count == set_count', () => {
+    const rows = aggregateMuscleHits([
+      { set_uuid: 'a', rir: 2, weight: 100, repetitions: 8,
+        primary_muscles: ['chest'], secondary_muscles: [] },
+    ]);
+    const chest = rows.find(r => r.muscle_slug === 'chest')!;
+    expect(chest.set_count).toBe(1);
+    expect(chest.working_set_count).toBe(1);
+  });
+
+  it('parent + 3 drops on same muscle: set_count=4, working_set_count=1', () => {
+    const rows = aggregateMuscleHits([
+      { set_uuid: 'p', rir: 1, weight: 100, repetitions: 8,
+        primary_muscles: ['chest'], secondary_muscles: [], tag: null },
+      { set_uuid: 'd1', rir: 0, weight: 70, repetitions: 6,
+        primary_muscles: ['chest'], secondary_muscles: [], tag: 'dropSet' },
+      { set_uuid: 'd2', rir: 0, weight: 50, repetitions: 6,
+        primary_muscles: ['chest'], secondary_muscles: [], tag: 'dropSet' },
+      { set_uuid: 'd3', rir: 0, weight: 30, repetitions: 6,
+        primary_muscles: ['chest'], secondary_muscles: [], tag: 'dropSet' },
+    ]);
+    const chest = rows.find(r => r.muscle_slug === 'chest')!;
+    expect(chest.set_count).toBe(4);          // raw audit
+    expect(chest.working_set_count).toBe(1);  // RP-aligned
+  });
+
+  it('drops contribute 0 to effective_set_count (per UC7)', () => {
+    const rows = aggregateMuscleHits([
+      // Parent at RIR 0 on a primary muscle → 1.0 effective.
+      { set_uuid: 'p', rir: 0, weight: 100, repetitions: 8,
+        primary_muscles: ['chest'], secondary_muscles: [], tag: null },
+      // Drop at RIR 0 on the same muscle — previously would have counted
+      // 1.0; now counts 0.0 because it extends the parent's stimulus.
+      { set_uuid: 'd1', rir: 0, weight: 70, repetitions: 6,
+        primary_muscles: ['chest'], secondary_muscles: [], tag: 'dropSet' },
+    ]);
+    const chest = rows.find(r => r.muscle_slug === 'chest')!;
+    expect(chest.effective_set_count).toBeCloseTo(1.0);  // parent only
+  });
+
+  it('failure tag is NOT a drop — still counts toward working_set_count', () => {
+    const rows = aggregateMuscleHits([
+      { set_uuid: 'a', rir: 0, weight: 100, repetitions: 8,
+        primary_muscles: ['chest'], secondary_muscles: [], tag: 'failure' },
+    ]);
+    const chest = rows.find(r => r.muscle_slug === 'chest')!;
+    expect(chest.working_set_count).toBe(1);
+  });
+
+  it('kg_volume includes drops (the kg actually moved is real)', () => {
+    const rows = aggregateMuscleHits([
+      { set_uuid: 'p', rir: 1, weight: 100, repetitions: 8,
+        primary_muscles: ['chest'], secondary_muscles: [], tag: null },
+      { set_uuid: 'd1', rir: 0, weight: 70, repetitions: 6,
+        primary_muscles: ['chest'], secondary_muscles: [], tag: 'dropSet' },
+    ]);
+    const chest = rows.find(r => r.muscle_slug === 'chest')!;
+    expect(chest.kg_volume).toBe(100 * 8 + 70 * 6);  // both included
+  });
+
+  it('parity: zero-drop week — working_set_count == set_count for every muscle', () => {
+    const rows = aggregateMuscleHits([
+      { set_uuid: 's1', rir: 2, weight: 100, repetitions: 8,
+        primary_muscles: ['chest'], secondary_muscles: ['triceps'] },
+      { set_uuid: 's2', rir: 2, weight: 100, repetitions: 8,
+        primary_muscles: ['chest'], secondary_muscles: ['triceps'] },
+      { set_uuid: 's3', rir: 3, weight: 60, repetitions: 12,
+        primary_muscles: ['lats'], secondary_muscles: ['biceps'] },
+    ]);
+    for (const r of rows) {
+      expect(r.working_set_count).toBe(r.set_count);
+    }
+  });
+});

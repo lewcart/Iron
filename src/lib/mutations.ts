@@ -132,6 +132,9 @@ export async function addExerciseToWorkout(
     exercise_uuid,
     comment: null,
     order_index,
+    superset_group_uuid: null,
+    superset_round_target: null,
+    superset_rest_override_seconds: null,
     ...syncMeta(),
   };
   await db.workout_exercises.add(row);
@@ -368,14 +371,136 @@ export async function deleteBodyweightLog(uuid: string): Promise<void> {
 
 // ─── Exercise reordering ──────────────────────────────────────────────────────
 
+import { dissolveOrphanGroups, planMetadataMoves } from './supersetGrouping';
+
 export async function reorderExercises(orderedUuids: string[]): Promise<void> {
-  await Promise.all(
-    orderedUuids.map((uuid, index) =>
-      db.workout_exercises.update(uuid, {
-        order_index: index,
-        ...syncMeta(),
-      }),
-    ),
-  );
+  // Drag-reorder is sync-hostile if grouping changes implicitly. Run as one
+  // Dexie transaction: write new order_index, then run a single repair
+  // pass that (a) dissolves groups whose members are no longer contiguous
+  // and (b) re-leaders surviving groups so round_target / rest_override
+  // sit on the lowest-order_index member. Eng-review F7.1 + F14.
+  await db.transaction('rw', db.workout_exercises, async () => {
+    const sync = syncMeta();
+    // Step 1: write new order_index for every reordered row.
+    await Promise.all(
+      orderedUuids.map((uuid, index) =>
+        db.workout_exercises.update(uuid, {
+          order_index: index,
+          ...sync,
+        }),
+      ),
+    );
+    // Step 2: re-read the affected rows from inside the transaction so
+    // the contiguity check sees post-reorder state.
+    const exercises = await db.workout_exercises
+      .where('uuid').anyOf(orderedUuids).toArray();
+    const toClear = dissolveOrphanGroups(exercises);
+    for (const uuid of toClear) {
+      await db.workout_exercises.update(uuid, {
+        superset_group_uuid: null,
+        superset_round_target: null,
+        superset_rest_override_seconds: null,
+        ...sync,
+      });
+    }
+    // Step 3: re-read post-dissolve, then re-leader the surviving groups.
+    const survivors = await db.workout_exercises
+      .where('uuid').anyOf(orderedUuids).toArray();
+    const moves = planMetadataMoves(survivors);
+    for (const m of moves) {
+      await db.workout_exercises.update(m.leaderUuid, {
+        superset_round_target: m.round_target,
+        superset_rest_override_seconds: m.rest_override_seconds,
+        ...sync,
+      });
+      for (const s of m.siblingUuids) {
+        await db.workout_exercises.update(s, {
+          superset_round_target: null,
+          superset_rest_override_seconds: null,
+          ...sync,
+        });
+      }
+    }
+  });
+  syncEngine.schedulePush();
+}
+
+/**
+ * Update a workout exercise's superset membership. Pass null on
+ * superset_group_uuid to remove from group entirely; round_target and
+ * rest_override_seconds only honored on the lowest-order_index member
+ * (siblings get them cleared). Auto-cleanup runs across the whole
+ * workout's exercises to keep contiguity + leader invariants.
+ *
+ * Cleanup runs ONLY on REMOVE (going to null) — joining a group is
+ * never destructive on its own. The "pair with previous" affordance
+ * writes one row at a time; if cleanup fired between writes it would
+ * dissolve the just-formed single-member group as an orphan. Removals
+ * dissolve correctly because the group's last surviving members surface
+ * as singletons that the next cleanup catches. (Tested manually: bug
+ * surfaced when pair-with-previous left both rows ungrouped because the
+ * first write's cleanup nuked the new group ID.)
+ */
+export async function setWorkoutExerciseSuperset(
+  uuid: string,
+  patch: {
+    superset_group_uuid: string | null;
+    superset_round_target?: number | null;
+    superset_rest_override_seconds?: number | null;
+  },
+): Promise<void> {
+  const sync = syncMeta();
+  await db.transaction('rw', db.workout_exercises, async () => {
+    const row = await db.workout_exercises.get(uuid);
+    if (!row) return;
+    const isRemove = patch.superset_group_uuid == null;
+    await db.workout_exercises.update(uuid, {
+      superset_group_uuid: patch.superset_group_uuid,
+      ...(isRemove
+        ? { superset_round_target: null, superset_rest_override_seconds: null }
+        : {
+            superset_round_target: patch.superset_round_target ?? null,
+            superset_rest_override_seconds: patch.superset_rest_override_seconds ?? null,
+          }),
+      ...sync,
+    });
+    // Auto-cleanup: only run on REMOVE. Adds never create an orphan; only
+    // removes do (the group's now-singleton remaining member). Running
+    // cleanup on add would dissolve a just-formed pair mid-build (the
+    // pair-with-previous handler writes two rows sequentially and the
+    // intermediate single-member state is transient, not real).
+    if (!isRemove) {
+      syncEngine.schedulePush();
+      return;
+    }
+    const workoutExs = await db.workout_exercises
+      .where('workout_uuid').equals(row.workout_uuid).toArray();
+    const toClear = dissolveOrphanGroups(workoutExs);
+    for (const u of toClear) {
+      await db.workout_exercises.update(u, {
+        superset_group_uuid: null,
+        superset_round_target: null,
+        superset_rest_override_seconds: null,
+        ...sync,
+      });
+    }
+    const survivors = await db.workout_exercises
+      .where('workout_uuid').equals(row.workout_uuid).toArray();
+    const moves = planMetadataMoves(survivors);
+    for (const m of moves) {
+      await db.workout_exercises.update(m.leaderUuid, {
+        superset_round_target: m.round_target,
+        superset_rest_override_seconds: m.rest_override_seconds,
+        ...sync,
+      });
+      for (const s of m.siblingUuids) {
+        await db.workout_exercises.update(s, {
+          superset_round_target: null,
+          superset_rest_override_seconds: null,
+          ...sync,
+        });
+      }
+    }
+  });
   syncEngine.schedulePush();
 }

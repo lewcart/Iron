@@ -85,6 +85,18 @@ export interface LocalWorkoutExercise extends SyncMeta {
   exercise_uuid: string;
   comment: string | null;
   order_index: number;
+  /** Shared UUID across consecutive exercises in the same workout that form
+   *  a superset. NULL = not part of any group. Two or more rows in the same
+   *  workout sharing this UUID render as a superset; the lowest-order_index
+   *  member owns the round/rest metadata. */
+  superset_group_uuid: string | null;
+  /** Round target for the superset (NULL = open-ended). Only honored on the
+   *  lowest-order_index member of the group; siblings ignore it. */
+  superset_round_target: number | null;
+  /** Rest override (seconds) between rounds of the superset. NULL = inherit
+   *  from per-exercise default. Only honored on the lowest-order_index
+   *  member of the group; siblings ignore it. */
+  superset_rest_override_seconds: number | null;
 }
 
 export interface LocalWorkoutSet extends SyncMeta {
@@ -151,6 +163,17 @@ export interface LocalWorkoutRoutineExercise extends SyncMeta {
   /** Rep-window goal (strength|power|build|pump|endurance). See
    *  src/lib/rep-windows.ts for the canonical registry. NULL = unassigned. */
   goal_window: 'strength' | 'power' | 'build' | 'pump' | 'endurance' | null;
+  /** Shared UUID across consecutive exercises in the same routine that form
+   *  a programmed superset. NULL = not part of any group. Copied verbatim
+   *  to workout_exercises when the routine is started; group metadata
+   *  (round_target, rest_override) lives on the lowest-order_index member. */
+  superset_group_uuid: string | null;
+  /** Round target for the programmed superset (NULL = open-ended). Honored
+   *  only on the lowest-order_index member of the group. */
+  superset_round_target: number | null;
+  /** Programmed rest override (seconds). NULL = inherit per-exercise default.
+   *  Honored only on the lowest-order_index member of the group. */
+  superset_rest_override_seconds: number | null;
 }
 
 export interface LocalWorkoutRoutineSet extends SyncMeta {
@@ -955,6 +978,30 @@ export class IronDB extends Dexie {
       await tx.table('exercises').toCollection().modify(row => {
         if (row.secondary_weights === undefined) row.secondary_weights = null;
         if (row.weight_source === undefined) row.weight_source = null;
+      });
+    });
+
+    // v24: superset grouping (mirrors Postgres migration 049).
+    //   - workout_exercises.superset_group_uuid + round_target + rest_override_seconds
+    //   - workout_routine_exercises.superset_group_uuid + round_target + rest_override_seconds
+    // Group identity = shared UUID across consecutive exercise rows; metadata
+    // lives on the lowest-order_index member. Index superset_group_uuid for
+    // live-query lookup of members.
+    const v24Stores = {
+      ...v22Stores,
+      workout_exercises: 'uuid, workout_uuid, exercise_uuid, superset_group_uuid, _synced, _updated_at',
+      workout_routine_exercises: 'uuid, workout_routine_uuid, exercise_uuid, order_index, superset_group_uuid, _synced, _updated_at',
+    };
+    this.version(24).stores(v24Stores).upgrade(async tx => {
+      await tx.table('workout_exercises').toCollection().modify(row => {
+        if (row.superset_group_uuid === undefined) row.superset_group_uuid = null;
+        if (row.superset_round_target === undefined) row.superset_round_target = null;
+        if (row.superset_rest_override_seconds === undefined) row.superset_rest_override_seconds = null;
+      });
+      await tx.table('workout_routine_exercises').toCollection().modify(row => {
+        if (row.superset_group_uuid === undefined) row.superset_group_uuid = null;
+        if (row.superset_round_target === undefined) row.superset_round_target = null;
+        if (row.superset_rest_override_seconds === undefined) row.superset_rest_override_seconds = null;
       });
     });
 

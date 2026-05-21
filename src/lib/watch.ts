@@ -59,6 +59,20 @@ export interface WatchExercise {
   rep_window: WatchRepWindow | null;
   sets: WatchSet[];
   history: WatchExerciseHistory | null;
+  /** Superset grouping (Slice 6 / migration 049). NULL when not part of a
+   *  group. Exercises sharing this UUID form a superset; the watch can
+   *  render legs side-by-side or with a "Round N · Up next: X" banner.
+   *  Old watches that don't decode this field render the exercise as a
+   *  straight standalone — degraded but safe. */
+  superset_group_uuid: string | null;
+  /** Round target on the lowest-order_index member of the group; null on
+   *  siblings (and on non-members). Watch picks this up from the leader's
+   *  exercise row for the round counter. */
+  superset_round_target: number | null;
+  /** Rest override (seconds) between rounds, on the leader only. Null on
+   *  siblings. Watch substitutes this for rest_timer_default_seconds when
+   *  computing rest at round boundaries. */
+  superset_rest_override_seconds: number | null;
 }
 
 export interface WatchRestTimer {
@@ -78,6 +92,14 @@ export interface WatchRestTimer {
 }
 
 export interface WatchSnapshot {
+  /** Snapshot schema version. Bumped 1 → 2 in Slice 6 (Migration 049
+   *  supersets). Old watches that don't know about superset_group_uuid
+   *  decode using decodeIfPresent and render legs as straight exercises —
+   *  degraded but safe (UC5 watch render-only locks in). New rows on
+   *  workout_sets are NOT introduced (UC2: drops are tag + adjacency,
+   *  no new set column), so the watch's set-echo CDC path doesn't risk
+   *  NULLing anything new. */
+  schema_version: 2;
   workout_uuid: string;
   pushed_at: string;
   current_exercise_index: number;
@@ -180,6 +202,15 @@ export function buildWatchSnapshot(input: BuildSnapshotInput): WatchSnapshot {
         }
       : null;
 
+    // Superset fields are on the LocalWorkoutExercise row directly (Slice 1
+     // migration 049). Cast through unknown because the page's
+     // LocalWorkoutExerciseEntry uses a wider type than the local schema —
+     // safe because the Dexie row carries the fields after the v24 upgrade.
+    const groupingFields = ex as unknown as {
+      superset_group_uuid?: string | null;
+      superset_round_target?: number | null;
+      superset_rest_override_seconds?: number | null;
+    };
     return {
       // The plan needs `routine_exercise_uuid` for set targets; if the workout
       // wasn't started from a routine, fall back to the workout_exercise UUID.
@@ -192,6 +223,9 @@ export function buildWatchSnapshot(input: BuildSnapshotInput): WatchSnapshot {
       rep_window: repWindow,
       sets: sets.map(toWatchSet),
       history: watchHistory,
+      superset_group_uuid: groupingFields.superset_group_uuid ?? null,
+      superset_round_target: groupingFields.superset_round_target ?? null,
+      superset_rest_override_seconds: groupingFields.superset_rest_override_seconds ?? null,
     };
   });
 
@@ -200,6 +234,7 @@ export function buildWatchSnapshot(input: BuildSnapshotInput): WatchSnapshot {
   if (currentExerciseIndex < 0) currentExerciseIndex = 0;
 
   return {
+    schema_version: 2,
     workout_uuid: workout.uuid,
     pushed_at: new Date().toISOString(),
     current_exercise_index: currentExerciseIndex,

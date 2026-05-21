@@ -178,9 +178,18 @@ async function fetchRows(table: SyncedTable, uuids: string[]): Promise<Array<Rec
           frequency_per_week: r.frequency_per_week != null ? Number(r.frequency_per_week) : null,
         }));
     case 'workout_routine_exercises':
+      // Migration 049: superset_group_uuid + round_target + rest_override
+      // columns added. Explicit SELECT must include them so server-authored
+      // routine supersets round-trip to the client.
       return (await query<Record<string, unknown>>(
-        'SELECT uuid, workout_routine_uuid, exercise_uuid, comment, order_index, goal_window FROM workout_routine_exercises WHERE uuid = ANY($1::text[])', [uuids]))
-        .map(r => ({ ...r, exercise_uuid: String(r.exercise_uuid).toLowerCase() }));
+        'SELECT uuid, workout_routine_uuid, exercise_uuid, comment, order_index, goal_window, superset_group_uuid, superset_round_target, superset_rest_override_seconds FROM workout_routine_exercises WHERE uuid = ANY($1::text[])', [uuids]))
+        .map(r => ({
+          ...r,
+          exercise_uuid: String(r.exercise_uuid).toLowerCase(),
+          superset_group_uuid: r.superset_group_uuid ?? null,
+          superset_round_target: r.superset_round_target != null ? Number(r.superset_round_target) : null,
+          superset_rest_override_seconds: r.superset_rest_override_seconds != null ? Number(r.superset_rest_override_seconds) : null,
+        }));
     case 'workout_routine_sets':
       return (await query<Record<string, unknown>>(
         'SELECT uuid, workout_routine_exercise_uuid, min_repetitions, max_repetitions, tag, comment, order_index, target_duration_seconds, target_rir FROM workout_routine_sets WHERE uuid = ANY($1::text[])', [uuids]))
@@ -409,6 +418,12 @@ function mapWorkoutExercise(r: Record<string, unknown>) {
     exercise_uuid: String(r.exercise_uuid).toLowerCase(),
     comment: r.comment ?? null,
     order_index: Number(r.order_index),
+    // Migration 049: superset grouping. SELECT * above already returns
+    // these, but the explicit map drops anything not listed — so they
+    // need to be projected here for Dexie to receive them on pull.
+    superset_group_uuid: r.superset_group_uuid ?? null,
+    superset_round_target: nullableNumber(r.superset_round_target),
+    superset_rest_override_seconds: nullableNumber(r.superset_rest_override_seconds),
   };
 }
 

@@ -205,6 +205,9 @@ export async function addRoutineExercise(opts: {
     comment: opts.comment ?? null,
     order_index: max,
     goal_window: null,
+    superset_group_uuid: null,
+    superset_round_target: null,
+    superset_rest_override_seconds: null,
     ...syncMeta(),
   };
   await db.workout_routine_exercises.add(re);
@@ -327,5 +330,77 @@ export async function updateRoutineSet(
 
 export async function deleteRoutineSet(uuid: string): Promise<void> {
   await db.workout_routine_sets.update(uuid, { _deleted: true, _synced: false, _updated_at: now() });
+  syncEngine.schedulePush();
+}
+
+// ─── Routine superset grouping ──────────────────────────────────────────────
+
+import { dissolveOrphanGroups, planMetadataMoves } from './supersetGrouping';
+
+/**
+ * Update a routine_exercise's superset membership. Same shape as
+ * setWorkoutExerciseSuperset (live workout side). Auto-cleanup runs the
+ * contiguity + leader-metadata repair on the routine's exercises.
+ */
+export async function setRoutineExerciseSuperset(
+  uuid: string,
+  patch: {
+    superset_group_uuid: string | null;
+    superset_round_target?: number | null;
+    superset_rest_override_seconds?: number | null;
+  },
+): Promise<void> {
+  const sync = { _synced: false as const, _updated_at: now() };
+  await db.transaction('rw', db.workout_routine_exercises, async () => {
+    const row = await db.workout_routine_exercises.get(uuid);
+    if (!row) return;
+    const isRemove = patch.superset_group_uuid == null;
+    await db.workout_routine_exercises.update(uuid, {
+      superset_group_uuid: patch.superset_group_uuid,
+      ...(isRemove
+        ? { superset_round_target: null, superset_rest_override_seconds: null }
+        : {
+            superset_round_target: patch.superset_round_target ?? null,
+            superset_rest_override_seconds: patch.superset_rest_override_seconds ?? null,
+          }),
+      ...sync,
+    });
+    // Same cleanup-on-REMOVE-only rule as the live workout side. Adding
+    // to a group can never produce an orphan; only removes do. Pair-with-
+    // previous writes two rows sequentially and the intermediate single-
+    // member state must not be dissolved mid-build.
+    if (!isRemove) {
+      syncEngine.schedulePush();
+      return;
+    }
+    const routineExs = await db.workout_routine_exercises
+      .where('workout_routine_uuid').equals(row.workout_routine_uuid).toArray();
+    const toClear = dissolveOrphanGroups(routineExs);
+    for (const u of toClear) {
+      await db.workout_routine_exercises.update(u, {
+        superset_group_uuid: null,
+        superset_round_target: null,
+        superset_rest_override_seconds: null,
+        ...sync,
+      });
+    }
+    const survivors = await db.workout_routine_exercises
+      .where('workout_routine_uuid').equals(row.workout_routine_uuid).toArray();
+    const moves = planMetadataMoves(survivors);
+    for (const m of moves) {
+      await db.workout_routine_exercises.update(m.leaderUuid, {
+        superset_round_target: m.round_target,
+        superset_rest_override_seconds: m.rest_override_seconds,
+        ...sync,
+      });
+      for (const s of m.siblingUuids) {
+        await db.workout_routine_exercises.update(s, {
+          superset_round_target: null,
+          superset_rest_override_seconds: null,
+          ...sync,
+        });
+      }
+    }
+  });
   syncEngine.schedulePush();
 }

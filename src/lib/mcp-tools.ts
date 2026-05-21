@@ -19,6 +19,7 @@ import { computeCardioWeek } from '@/lib/server/health-data';
 import { getWeekSetsPerMuscle, getExercisePRs, recomputePRFlagsForExercise } from '@/db/queries';
 import { resolveMuscleSlug, MUSCLE_SLUGS } from '@/lib/muscles';
 import { APP_TZ, resolveTz } from '@/lib/app-tz';
+import { planMetadataMoves } from '@/lib/supersetGrouping';
 
 // ── Result helpers ────────────────────────────────────────────────────────────
 
@@ -860,17 +861,21 @@ async function getWeeklySummary(args: Record<string, unknown> = {}) {
   const trainingDays = workoutRows.length;
   const totalVolume = Math.round(workoutRows.reduce((sum, w) => sum + Number(w.total_volume), 0));
 
-  // by_muscle = merged shape per /autoplan DX review. set_count is the headline
-  // metric (Schoenfeld 10–20); effective_set_count is the RIR-weighted variant
-  // (Phase 3); kg_volume kept alongside as legacy for callers that haven't migrated.
+  // by_muscle = merged shape per /autoplan DX review.
+  //   working_set_count = RP-aligned count (drop chains collapse to 1 per
+  //     parent). Use this for MEV/MAV comparisons + prescription verdicts.
+  //   set_count = raw rows (every set credits 1), kept for audit / display.
+  //   effective_set_count = RIR-weighted, drops excluded (UC7 final-gate).
+  // Status uses working_set_count so the headline matches RP convention.
   const byMuscle = byMuscleRows.map(m => ({
     slug: m.slug,
     display_name: m.display_name,
+    working_set_count: m.working_set_count,
     set_count: m.set_count,
     effective_set_count: Math.round(m.effective_set_count * 10) / 10,
     optimal_min: m.optimal_sets_min,
     optimal_max: m.optimal_sets_max,
-    status: muscleStatusOf(m.set_count, m.optimal_sets_min, m.optimal_sets_max),
+    status: muscleStatusOf(m.working_set_count, m.optimal_sets_min, m.optimal_sets_max),
     kg_volume: Math.round(m.kg_volume),
   }));
 
@@ -922,6 +927,7 @@ async function getSetsPerMuscle(args: Record<string, unknown> = {}) {
   type MuscleOut = {
     slug: string;
     display_name: string;
+    working_set_count: number;
     set_count: number;
     effective_set_count: number;
     optimal_min: number;
@@ -931,14 +937,19 @@ async function getSetsPerMuscle(args: Record<string, unknown> = {}) {
     kg_volume: number;
   };
 
+  // working_set_count is the RP-aligned headline (drops collapse to 1 per
+  // parent). set_count is the raw audit count. effective_set_count is
+  // RIR-weighted with drops excluded. Status uses working_set_count so MEV/
+  // MAV bands stay honest when drop chains are present.
   const rows: MuscleOut[] = muscles.map(m => ({
     slug: m.slug,
     display_name: m.display_name,
+    working_set_count: m.working_set_count,
     set_count: m.set_count,
     effective_set_count: Math.round(m.effective_set_count * 10) / 10,
     optimal_min: m.optimal_sets_min,
     optimal_max: m.optimal_sets_max,
-    status: muscleStatusOf(m.set_count, m.optimal_sets_min, m.optimal_sets_max),
+    status: muscleStatusOf(m.working_set_count, m.optimal_sets_min, m.optimal_sets_max),
     coverage: m.coverage,
     kg_volume: Math.round(m.kg_volume),
   }));
@@ -954,18 +965,21 @@ async function getSetsPerMuscle(args: Record<string, unknown> = {}) {
   let overCount = 0;
   let zeroCount = 0;
 
+  // Delta calc compares against working_set_count — status was computed
+  // from working_set_count above, so the delta must use the same source to
+  // stay self-consistent. set_count remains in the payload for audit.
   for (const r of rows) {
-    if (r.coverage === 'none' && r.set_count === 0) continue; // exclude untagged buckets from summary
+    if (r.coverage === 'none' && r.working_set_count === 0) continue; // exclude untagged buckets from summary
     if (r.status === 'optimal') optimalCount++;
     else if (r.status === 'under' || r.status === 'zero') {
       if (r.status === 'zero') zeroCount++; else underCount++;
-      const delta = r.optimal_min - r.set_count;
+      const delta = r.optimal_min - r.working_set_count;
       if (!biggestUndershoot || delta > biggestUndershoot.delta) {
         biggestUndershoot = { slug: r.slug, display_name: r.display_name, delta };
       }
     } else if (r.status === 'over') {
       overCount++;
-      const delta = r.optimal_max - r.set_count; // negative
+      const delta = r.optimal_max - r.working_set_count; // negative
       if (!biggestOvershoot || delta < biggestOvershoot.delta) {
         biggestOvershoot = { slug: r.slug, display_name: r.display_name, delta };
       }
@@ -1524,6 +1538,7 @@ async function addExercise(args: Record<string, unknown>) {
       min_repetitions?: number;
       rpe_target?: number;
       target_duration_seconds?: number;
+      tag?: 'dropSet' | null;
     }>;
   };
 
@@ -1549,10 +1564,27 @@ async function addExercise(args: Record<string, unknown>) {
 
   for (let si = 0; si < sets.length; si++) {
     const s = sets[si];
+    // Drop on the first set is invalid (no parent above it). Reject up-front
+    // with the same INVALID_DROP_TAG_NEEDS_PARENT contract used by
+    // update_set_targets / create_drop_chain.
+    if (s.tag === 'dropSet' && si === 0) {
+      return toolErrorEnvelope(
+        'INVALID_DROP_TAG_NEEDS_PARENT',
+        'Cannot mark the first set of an exercise as a drop — drops chain off the previous working set.',
+        'Make the first set a working set (omit tag) and tag subsequent sets as "dropSet".'
+      );
+    }
+    if (s.tag === 'dropSet' && si > 0 && sets[si - 1]?.tag === 'dropSet') {
+      // Two consecutive drops within the SAME addExercise call would imply
+      // a drop-on-drop relationship. Per UC2 model, only the immediately-
+      // preceding WORKING set is the parent — that's fine. So this is
+      // actually allowed: drop1 + drop2 both attach to the working set
+      // before them. No error.
+    }
     await query(
       `INSERT INTO workout_routine_sets
-         (uuid, workout_routine_exercise_uuid, min_repetitions, max_repetitions, target_weight, rpe_target, target_duration_seconds, order_index)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+         (uuid, workout_routine_exercise_uuid, min_repetitions, max_repetitions, target_weight, rpe_target, target_duration_seconds, tag, order_index)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
       [
         crypto.randomUUID(), reUuid,
         s.min_repetitions ?? null,
@@ -1560,6 +1592,7 @@ async function addExercise(args: Record<string, unknown>) {
         s.target_weight ?? null,
         s.rpe_target ?? null,
         s.target_duration_seconds ?? null,
+        s.tag ?? null,
         si,
       ]
     );
@@ -1588,6 +1621,11 @@ async function updateSetTargets(args: Record<string, unknown>) {
       min_repetitions?: number;
       max_repetitions?: number;
       target_duration_seconds?: number;
+      /** 'dropSet' marks the set as a drop (chains off the previous
+       *  working set). null restores it to a working set. Omit to leave
+       *  the tag unchanged. Server rejects 'dropSet' on the first set of
+       *  the exercise (a drop needs a parent above it). */
+      tag?: 'dropSet' | null;
     }>;
   };
 
@@ -1595,31 +1633,286 @@ async function updateSetTargets(args: Record<string, unknown>) {
     'SELECT uuid FROM workout_routine_exercises WHERE workout_routine_uuid = $1 AND exercise_uuid = $2 LIMIT 1',
     [routine_uuid, exercise_uuid]
   );
-  if (!re) return toolError(`Exercise ${exercise_uuid} not found in routine ${routine_uuid}`);
+  if (!re) return toolErrorEnvelope(
+    'EXERCISE_NOT_IN_ROUTINE',
+    `Exercise ${exercise_uuid} not found in routine ${routine_uuid}.`,
+    'Call get_active_routine or list_routines to find a valid exercise_uuid.'
+  );
 
   let updated = 0;
   for (const s of sets) {
+    // Validate drop-tag pre-condition: a drop needs a parent working set
+    // above it (order_index >= 1 AND the set at order_index - 1 in the
+    // same exercise isn't itself a drop). Per UC2 (tag + adjacency model).
+    if (s.tag === 'dropSet') {
+      if (s.order_index < 1) {
+        return toolErrorEnvelope(
+          'INVALID_DROP_TAG_NEEDS_PARENT',
+          `Cannot mark set #${s.order_index + 1} as a drop — drops chain off the previous working set. The first set of an exercise must be a working set.`,
+          'Reassign the working set to order_index 0, then mark order_index 1+ as the drop.'
+        );
+      }
+      const prev = await queryOne<{ tag: string | null }>(
+        'SELECT tag FROM workout_routine_sets WHERE workout_routine_exercise_uuid = $1 AND order_index = $2',
+        [re.uuid, s.order_index - 1]
+      );
+      if (prev?.tag === 'dropSet') {
+        return toolErrorEnvelope(
+          'INVALID_DROP_PARENT_IS_DROP',
+          `Cannot mark set #${s.order_index + 1} as a drop — the set above it is also a drop. Drop chains attach to a working set.`,
+          'Convert the preceding drop back to a working set first, or chain this drop off a different parent.'
+        );
+      }
+    }
     // COALESCE pattern: undefined fields don't overwrite. Mode-aware
     // callers (time-mode) pass target_duration_seconds and leave reps
-    // null; rep-mode callers do the inverse.
-    const result = await query(
+    // null; rep-mode callers do the inverse. tag uses an explicit
+    // sentinel so passing `null` (clear) is distinguishable from
+    // `undefined` (preserve).
+    await query(
       `UPDATE workout_routine_sets
        SET min_repetitions = COALESCE($1, min_repetitions),
            max_repetitions = COALESCE($2, max_repetitions),
-           target_duration_seconds = COALESCE($3, target_duration_seconds)
-       WHERE workout_routine_exercise_uuid = $4 AND order_index = $5`,
+           target_duration_seconds = COALESCE($3, target_duration_seconds),
+           tag = CASE WHEN $4::boolean THEN $5 ELSE tag END
+       WHERE workout_routine_exercise_uuid = $6 AND order_index = $7`,
       [
         s.min_repetitions ?? null,
         s.max_repetitions ?? null,
         s.target_duration_seconds ?? null,
+        s.tag !== undefined,           // $4 — true if caller wants to write tag
+        s.tag ?? null,                  // $5 — the tag value (null clears)
         re.uuid,
         s.order_index,
       ]
     );
-    if (result.length >= 0) updated++;
+    updated++;
   }
 
   return toolResult({ updated_sets: updated });
+}
+
+/**
+ * Update a routine_exercise's superset grouping. Mirrors the client mutation
+ * `setRoutineExerciseSuperset` (src/lib/mutations-plans.ts) — same auto-
+ * cleanup (orphan dissolve + leader-metadata promotion) so the server side
+ * stays consistent with what the client writes when the user toggles
+ * grouping in the /plans editor.
+ */
+async function updateRoutineExerciseSuperset(args: Record<string, unknown>) {
+  const { routine_exercise_uuid, superset_group_uuid, superset_round_target, superset_rest_override_seconds } = args as {
+    routine_exercise_uuid: string;
+    superset_group_uuid?: string | null;
+    superset_round_target?: number | null;
+    superset_rest_override_seconds?: number | null;
+  };
+  if (!routine_exercise_uuid) {
+    return toolErrorEnvelope('INVALID_INPUT', 'routine_exercise_uuid is required.', 'Pass the UUID of the workout_routine_exercises row to update.');
+  }
+  const re = await queryOne<{ uuid: string; workout_routine_uuid: string }>(
+    'SELECT uuid, workout_routine_uuid FROM workout_routine_exercises WHERE uuid = $1',
+    [routine_exercise_uuid]
+  );
+  if (!re) {
+    return toolErrorEnvelope('EXERCISE_NOT_FOUND', `No routine_exercise with uuid ${routine_exercise_uuid}.`, 'List the routine\'s exercises via get_active_routine and use one of those UUIDs.');
+  }
+  // Validate cross-routine: if the caller is joining a group, the group must
+  // already exist on another member of the SAME routine (or be a brand-new
+  // unused UUID). Reject if any existing member of the group is in a
+  // different routine — that's a logical violation.
+  if (superset_group_uuid != null) {
+    const otherMembers = await query<{ workout_routine_uuid: string }>(
+      'SELECT workout_routine_uuid FROM workout_routine_exercises WHERE superset_group_uuid = $1 AND uuid <> $2',
+      [superset_group_uuid, routine_exercise_uuid]
+    );
+    const wrongRoutine = otherMembers.find(m => m.workout_routine_uuid !== re.workout_routine_uuid);
+    if (wrongRoutine) {
+      return toolErrorEnvelope(
+        'INVALID_SUPERSET_CROSS_ROUTINE',
+        `superset_group_uuid ${superset_group_uuid} already exists in routine ${wrongRoutine.workout_routine_uuid}. Supersets are scoped per-routine.`,
+        'Mint a fresh UUID (uuidv4) for this routine\'s group, or omit superset_group_uuid to remove from group.'
+      );
+    }
+  }
+  await query(
+    `UPDATE workout_routine_exercises
+     SET superset_group_uuid = $1,
+         superset_round_target = CASE WHEN $1::text IS NULL THEN NULL ELSE COALESCE($2, superset_round_target) END,
+         superset_rest_override_seconds = CASE WHEN $1::text IS NULL THEN NULL ELSE COALESCE($3, superset_rest_override_seconds) END,
+         updated_at = NOW()
+     WHERE uuid = $4`,
+    [
+      superset_group_uuid ?? null,
+      superset_round_target ?? null,
+      superset_rest_override_seconds ?? null,
+      routine_exercise_uuid,
+    ]
+  );
+  // Auto-cleanup pass 1: if any group ends up with <2 members, dissolve it
+  // server-side (same behavior as client mutation).
+  await query(
+    `UPDATE workout_routine_exercises
+     SET superset_group_uuid = NULL,
+         superset_round_target = NULL,
+         superset_rest_override_seconds = NULL,
+         updated_at = NOW()
+     WHERE workout_routine_uuid = $1
+       AND superset_group_uuid IS NOT NULL
+       AND superset_group_uuid IN (
+         SELECT superset_group_uuid
+         FROM workout_routine_exercises
+         WHERE workout_routine_uuid = $1
+           AND superset_group_uuid IS NOT NULL
+         GROUP BY superset_group_uuid
+         HAVING COUNT(*) < 2
+       )`,
+    [re.workout_routine_uuid]
+  );
+  // Auto-cleanup pass 2: leader-metadata promotion. The invariant says
+  // round_target / rest_override live ONLY on the lowest-order_index
+  // member of each group. After a join/move, the previous leader may
+  // have demoted to sibling slot — its metadata must move to the new
+  // leader. Mirrors planMetadataMoves() client-side logic.
+  const survivors = await query<{
+    uuid: string;
+    superset_group_uuid: string | null;
+    superset_round_target: number | null;
+    superset_rest_override_seconds: number | null;
+    order_index: number;
+  }>(
+    `SELECT uuid, superset_group_uuid, superset_round_target, superset_rest_override_seconds, order_index
+     FROM workout_routine_exercises
+     WHERE workout_routine_uuid = $1
+     ORDER BY order_index ASC`,
+    [re.workout_routine_uuid]
+  );
+  const moves = planMetadataMoves(survivors.map(s => ({
+    uuid: s.uuid,
+    order_index: Number(s.order_index),
+    superset_group_uuid: s.superset_group_uuid ?? null,
+    superset_round_target: s.superset_round_target != null ? Number(s.superset_round_target) : null,
+    superset_rest_override_seconds: s.superset_rest_override_seconds != null ? Number(s.superset_rest_override_seconds) : null,
+  })));
+  for (const m of moves) {
+    await query(
+      `UPDATE workout_routine_exercises
+       SET superset_round_target = $1,
+           superset_rest_override_seconds = $2,
+           updated_at = NOW()
+       WHERE uuid = $3`,
+      [m.round_target ?? null, m.rest_override_seconds ?? null, m.leaderUuid]
+    );
+    for (const sibling of m.siblingUuids) {
+      await query(
+        `UPDATE workout_routine_exercises
+         SET superset_round_target = NULL,
+             superset_rest_override_seconds = NULL,
+             updated_at = NOW()
+         WHERE uuid = $1`,
+        [sibling]
+      );
+    }
+  }
+  return toolResult({ routine_exercise_uuid, superset_group_uuid: superset_group_uuid ?? null });
+}
+
+/**
+ * Convenience: programs a drop chain of N sets after a working parent set.
+ * Cuts TTHW from ~5-7 calls (resolve routine, find exercise, find parent,
+ * add N drops with parent UUID lookups) to a single call.
+ *
+ * Per DX checklist (autoplan Phase 3.5).
+ */
+async function createDropChain(args: Record<string, unknown>) {
+  const { routine_uuid, exercise_uuid, exercise_name, parent_set_order, drops } = args as {
+    routine_uuid: string;
+    exercise_uuid?: string;
+    exercise_name?: string;
+    parent_set_order: number;
+    drops: Array<{ min_repetitions?: number; max_repetitions?: number; target_weight?: number }>;
+  };
+
+  if (!routine_uuid) {
+    return toolErrorEnvelope('INVALID_INPUT', 'routine_uuid is required.', 'Pass the workout_routines.uuid.');
+  }
+  if (parent_set_order == null || parent_set_order < 0) {
+    return toolErrorEnvelope('INVALID_INPUT', 'parent_set_order must be a non-negative integer (0-based order_index of the parent working set).', 'Use list_routines or get_active_routine to find a valid parent set order_index.');
+  }
+  if (!Array.isArray(drops) || drops.length === 0) {
+    return toolErrorEnvelope('INVALID_INPUT', 'drops must be a non-empty array.', 'Pass at least one drop: [{ min_repetitions, max_repetitions, target_weight? }].');
+  }
+
+  const resolved = await resolveExercise({ exercise_id: exercise_uuid, exercise_name });
+  if ('error' in resolved) {
+    return toolErrorEnvelope('EXERCISE_NOT_FOUND', exerciseErrorMessage(resolved), 'Pass exercise_uuid (preferred) or a unique exercise_name fragment.');
+  }
+
+  const re = await queryOne<{ uuid: string }>(
+    'SELECT uuid FROM workout_routine_exercises WHERE workout_routine_uuid = $1 AND exercise_uuid = $2 LIMIT 1',
+    [routine_uuid, resolved.uuid]
+  );
+  if (!re) {
+    return toolErrorEnvelope(
+      'EXERCISE_NOT_IN_ROUTINE',
+      `Exercise "${resolved.title}" is not in routine ${routine_uuid}.`,
+      'Call add_exercise to add the exercise to the routine first, then re-call create_drop_chain.'
+    );
+  }
+
+  // Verify the parent set exists AND is a working set (not itself a drop).
+  const parent = await queryOne<{ tag: string | null }>(
+    'SELECT tag FROM workout_routine_sets WHERE workout_routine_exercise_uuid = $1 AND order_index = $2',
+    [re.uuid, parent_set_order]
+  );
+  if (!parent) {
+    return toolErrorEnvelope(
+      'INVALID_DROP_PARENT_NOT_FOUND',
+      `No set at order_index ${parent_set_order} for "${resolved.title}" in this routine.`,
+      'List the routine\'s sets and pass an existing parent_set_order.'
+    );
+  }
+  if (parent.tag === 'dropSet') {
+    return toolErrorEnvelope(
+      'INVALID_DROP_PARENT_IS_DROP',
+      `Set #${parent_set_order + 1} is already a drop. Drops chain off a working set, not off another drop.`,
+      'Pick a parent_set_order whose set is a working set (tag NULL or "failure"), or extend the existing chain by passing the working-set parent.'
+    );
+  }
+
+  // Shift later sets in this exercise up by N, then insert N drops — all
+  // inside one transaction so a mid-loop failure can't leave the routine
+  // in a half-shifted state with no chain. Codex review LOW finding.
+  const insertCount = drops.length;
+  const insertedUuids: string[] = drops.map(() => crypto.randomUUID());
+  await transaction([
+    {
+      text: `UPDATE workout_routine_sets
+             SET order_index = order_index + $1
+             WHERE workout_routine_exercise_uuid = $2
+               AND order_index > $3`,
+      params: [insertCount, re.uuid, parent_set_order],
+    },
+    ...drops.map((d, i) => ({
+      text: `INSERT INTO workout_routine_sets
+               (uuid, workout_routine_exercise_uuid, min_repetitions, max_repetitions, target_weight, tag, order_index)
+             VALUES ($1, $2, $3, $4, $5, 'dropSet', $6)`,
+      params: [
+        insertedUuids[i], re.uuid,
+        d.min_repetitions ?? null,
+        d.max_repetitions ?? null,
+        d.target_weight ?? null,
+        parent_set_order + 1 + i,
+      ],
+    })),
+  ]);
+
+  return toolResult({
+    routine_uuid,
+    exercise: resolved.title,
+    parent_set_order,
+    drops_added: insertedUuids.length,
+    drop_set_uuids: insertedUuids,
+  });
 }
 
 async function swapExercise(args: Record<string, unknown>) {
@@ -3537,7 +3830,11 @@ export const tools: MCPTool[] = [
   },
   {
     name: 'update_set_targets',
-    description: 'Updates rep/RPE/duration targets for sets on a specific exercise in a routine. For time-mode exercises (e.g. plank), pass target_duration_seconds instead of min/max_repetitions.',
+    description:
+      'Updates rep/RPE/duration targets (and optionally tag) for sets on a specific exercise in a routine. ' +
+      'For time-mode exercises (e.g. plank), pass target_duration_seconds instead of min/max_repetitions. ' +
+      'Pass tag: "dropSet" to mark a set as a drop (chains off the previous working set); pass tag: null to clear. ' +
+      'Drops on the first set of an exercise are rejected (INVALID_DROP_TAG_NEEDS_PARENT) — drops need a working parent above them.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -3552,6 +3849,11 @@ export const tools: MCPTool[] = [
               min_repetitions: { type: 'number' },
               max_repetitions: { type: 'number' },
               target_duration_seconds: { type: 'number', description: 'Target hold in seconds (time-mode only)' },
+              tag: {
+                type: ['string', 'null'],
+                enum: ['dropSet', null],
+                description: 'Mark the set as a drop ("dropSet") or clear (null). Omit to leave unchanged. Drops are recognized by tag + adjacency-by-order_index (no parent FK).',
+              },
             },
             required: ['order_index'],
           },
@@ -3560,6 +3862,38 @@ export const tools: MCPTool[] = [
       required: ['routine_uuid', 'exercise_uuid', 'sets'],
     },
     execute: updateSetTargets,
+  },
+  {
+    name: 'create_drop_chain',
+    description:
+      'Convenience: programs a chain of drop sets after a working parent set in one call. ' +
+      'Cuts the typical "list routine → find exercise → find parent → add N drops" sequence to a single MCP call. ' +
+      'Drop sets in volume math: each drop adds 0 to working_set_count and 0 to effective_set_count (the parent ' +
+      'working set carries all the stimulus credit per RP convention). Raw set_count still increments per drop. ' +
+      'Errors: INVALID_DROP_PARENT_NOT_FOUND (no set at parent_set_order), INVALID_DROP_PARENT_IS_DROP (parent is itself a drop).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        routine_uuid: { type: 'string', description: 'UUID of the workout_routine (day) containing the parent set.' },
+        exercise_uuid: { type: 'string', description: 'UUID of the exercise (use instead of exercise_name).' },
+        exercise_name: { type: 'string', description: 'Name fragment to fuzzy-match (use instead of exercise_uuid).' },
+        parent_set_order: { type: 'number', description: '0-based order_index of the parent working set. Drops are inserted right after.' },
+        drops: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              min_repetitions: { type: 'number' },
+              max_repetitions: { type: 'number' },
+              target_weight: { type: 'number', description: 'Target load in kg (typically ~70% of parent).' },
+            },
+          },
+          description: 'Array of drops to add. Each drop becomes a workout_routine_sets row with tag="dropSet" right after the parent.',
+        },
+      },
+      required: ['routine_uuid', 'parent_set_order', 'drops'],
+    },
+    execute: createDropChain,
   },
   {
     name: 'add_exercise',
@@ -3587,6 +3921,11 @@ export const tools: MCPTool[] = [
               target_weight: { type: 'number', description: 'Target load in kg' },
               rpe_target: { type: 'number', description: 'RPE target (5.0–10.0)' },
               target_duration_seconds: { type: 'number', description: 'Target hold in seconds (time-mode only)' },
+              tag: {
+                type: ['string', 'null'],
+                enum: ['dropSet', null],
+                description: 'Mark this set as a drop ("dropSet"). Drop sets chain off the previous working set in the exercise. NOT valid on the first set (no parent above it).',
+              },
             },
           },
         },
@@ -3594,6 +3933,25 @@ export const tools: MCPTool[] = [
       required: ['routine_id'],
     },
     execute: addExercise,
+  },
+  {
+    name: 'update_routine_exercise',
+    description:
+      'Update a routine_exercise\'s superset grouping. Supersets are denormalized: exercises sharing the same superset_group_uuid form a group; round/rest metadata lives on the lowest-order_index member. ' +
+      'Pass superset_group_uuid: <uuid> to join/move a group; pass null to remove from group. ' +
+      'Auto-cleanup: if a group ends up with <2 members after the change, the orphan\'s membership is also cleared server-side. ' +
+      'Cross-routine groups are rejected (INVALID_SUPERSET_CROSS_ROUTINE). To create a brand-new group, mint a UUID client-side, call this tool on the second member with the new UUID (the first member must already be in the same group, or be updated separately).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        routine_exercise_uuid: { type: 'string', description: 'UUID of the workout_routine_exercises row.' },
+        superset_group_uuid: { type: ['string', 'null'], description: 'Group UUID to join, or null to remove from current group.' },
+        superset_round_target: { type: ['number', 'null'], description: 'Round target. Only honored on the lowest-order_index member; siblings get null. Pass when this row is (or will become) the leader.' },
+        superset_rest_override_seconds: { type: ['number', 'null'], description: 'Rest override between rounds (seconds). Same leader-only honoring as round_target.' },
+      },
+      required: ['routine_exercise_uuid'],
+    },
+    execute: updateRoutineExerciseSuperset,
   },
   {
     name: 'list_rep_windows',

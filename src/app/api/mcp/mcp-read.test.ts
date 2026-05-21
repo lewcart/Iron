@@ -225,14 +225,16 @@ describe('get_weekly_summary', () => {
       { uuid: 'w1', title: 'Push', start_time: '2026-04-01T09:00:00Z', total_volume: '4500' },
       { uuid: 'w2', title: 'Pull', start_time: '2026-04-02T09:00:00Z', total_volume: '3200' },
     ]);
-    // getWeekSetsPerMuscle row shape (post-migration 023, canonical slugs).
+    // getWeekSetsPerMuscle row shape (post-migration 049, canonical slugs +
+    // working_set_count). In the no-drop case (the fixture below),
+    // working_set_count == set_count.
     vi.mocked(db.query).mockResolvedValueOnce([
       { slug: 'chest', display_name: 'Chest', parent_group: 'chest',
         optimal_sets_min: 10, optimal_sets_max: 20, display_order: 10,
-        set_count: 12, kg_volume: '3000', coverage: 'tagged' },
+        set_count: 12, working_set_count: 12, kg_volume: '3000', coverage: 'tagged' },
       { slug: 'lats', display_name: 'Lats', parent_group: 'back',
         optimal_sets_min: 10, optimal_sets_max: 20, display_order: 20,
-        set_count: 8, kg_volume: '2700', coverage: 'tagged' },
+        set_count: 8, working_set_count: 8, kg_volume: '2700', coverage: 'tagged' },
     ]);
     vi.mocked(db.queryOne).mockResolvedValueOnce({ routine_count: '4' });
 

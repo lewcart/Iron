@@ -106,16 +106,28 @@ export interface SetForAggregation {
    *  undefined preserves the legacy 0.5 default. Primary muscles always
    *  count as 1.0 regardless. */
   secondary_weights?: Readonly<Record<string, number>> | null;
+  /** Tag marker. 'dropSet' rows are excluded from working_set_count and
+   *  effective_set_count (they extend the parent's working set, not a new
+   *  one) per UC4/UC7 final-gate decision. Undefined / null / 'failure'
+   *  all count as working sets. */
+  tag?: 'dropSet' | 'failure' | null;
 }
 
 export interface MuscleAggregate {
   muscle_slug: string;
-  /** Distinct sets touching this muscle (primary OR secondary). */
+  /** Distinct sets touching this muscle (primary OR secondary). Includes
+   *  drop-tagged sets. Raw hit count for audit / display. */
   set_count: number;
-  /** Sum of (primary/secondary credit × RIR credit) over all hits. */
+  /** RP-aligned working-set count — drop-tagged sets contribute 0. Use
+   *  this for MEV/MAV comparisons and prescription verdicts. */
+  working_set_count: number;
+  /** Sum of (primary/secondary credit × RIR credit) over all NON-drop
+   *  hits. Drop-tagged sets contribute 0 per UC7. */
   effective_set_count: number;
   /** Sum of (weight × reps) over all sets touching this muscle (counted
-   *  once per set even if the muscle is in both arrays). */
+   *  once per set even if the muscle is in both arrays). Drops are
+   *  included here because the kg moved is real, even if the stimulus is
+   *  attributed to the parent. */
   kg_volume: number;
   /** Number of distinct days (set_uuid groupings can carry day metadata
    *  upstream; this aggregator does NOT compute days_touched — that's done
@@ -135,10 +147,17 @@ export interface MuscleAggregate {
  *   - `kg_volume` requires both weight AND repetitions to be non-null.
  */
 export function aggregateMuscleHits(sets: readonly SetForAggregation[]): MuscleAggregate[] {
-  // Map<muscle_slug, { set_uuids: Set<string>, effective_sum: number, kg_sum: number }>
-  const buckets = new Map<string, { setUuids: Set<string>; effective: number; kg: number }>();
+  // Map<muscle_slug, { ... }> — track raw set_uuids (audit), working set
+  // uuids (drops excluded), effective sum (drops excluded), kg sum (all).
+  const buckets = new Map<string, {
+    setUuids: Set<string>;
+    workingSetUuids: Set<string>;
+    effective: number;
+    kg: number;
+  }>();
 
   for (const set of sets) {
+    const isDrop = set.tag === 'dropSet';
     // Compute the resolved role for each muscle in THIS set: primary wins
     // when a muscle is in both arrays.
     const primarySet = new Set(set.primary_muscles);
@@ -156,24 +175,30 @@ export function aggregateMuscleHits(sets: readonly SetForAggregation[]): MuscleA
     for (const [muscle, role] of muscleRoles) {
       let bucket = buckets.get(muscle);
       if (!bucket) {
-        bucket = { setUuids: new Set(), effective: 0, kg: 0 };
+        bucket = { setUuids: new Set(), workingSetUuids: new Set(), effective: 0, kg: 0 };
         buckets.set(muscle, bucket);
       }
       // Once per set (the Set<string> dedupes if a muscle somehow appears twice).
       if (!bucket.setUuids.has(set.set_uuid)) {
         bucket.setUuids.add(set.set_uuid);
         bucket.kg += kgPerSet;
+        // Drops do not contribute to working set count.
+        if (!isDrop) bucket.workingSetUuids.add(set.set_uuid);
       }
       // Per-exercise secondary weight (v1.1) overrides the flat 0.5 default
       // for secondary muscles. Primary credit ignores this value.
-      const secondaryWeight = role === 'secondary' ? (set.secondary_weights?.[muscle] ?? null) : null;
-      bucket.effective += effectiveSetContribution(role, set.rir, secondaryWeight);
+      // Drops contribute 0 to effective_set_count per UC7 final-gate decision.
+      if (!isDrop) {
+        const secondaryWeight = role === 'secondary' ? (set.secondary_weights?.[muscle] ?? null) : null;
+        bucket.effective += effectiveSetContribution(role, set.rir, secondaryWeight);
+      }
     }
   }
 
   return Array.from(buckets.entries()).map(([slug, b]) => ({
     muscle_slug: slug,
     set_count: b.setUuids.size,
+    working_set_count: b.workingSetUuids.size,
     effective_set_count: b.effective,
     kg_volume: b.kg,
   }));

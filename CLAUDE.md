@@ -117,16 +117,42 @@ Canonical muscle taxonomy: 18 slugs. Always use canonical slugs (`chest`, `lats`
 PB philosophy: only **e1RM** (Epley) is surfaced as a PB. Heaviest-weight and most-reps-in-a-set were dropped (gameable derivatives, not honest progress signals). Don't independently surface "heaviest weight" or "most reps" framings as PRs — `get_exercise_history` returns `estimated_1rm` per session for reps-mode and `longest_hold_seconds` per session for time-mode. Excluded sets respect this: they're returned in `sets[]` with `excluded_from_pb: true` so you can show full history if asked, but are skipped when the per-session e1RM / longest-hold is computed.
 
 Set quality:
-- A working set = `is_completed=true AND (reps>=1 OR duration_seconds>0)`. Drop sets count as 1 each.
-- **`set_count`** is a raw hit count: every set credits 1 to every muscle in the exercise's `primary_muscles` OR `secondary_muscles` array (counted once per set, even if a muscle appears in both). It answers "did this muscle get worked at all this week?"
+- A working set = `is_completed=true AND (reps>=1 OR duration_seconds>0)`.
+- **`set_count`** is a raw hit count: every set credits 1 to every muscle in the exercise's `primary_muscles` OR `secondary_muscles` array (counted once per set, even if a muscle appears in both). **Includes drop-tagged sets.** Use for audit / display.
+- **`working_set_count`** (NEW, migration 049) is the RP-aligned count: drop-tagged sets contribute 0 (they extend the parent working set, they are not new working sets). Status (zero/under/optimal/over) is now derived from this field on `get_sets_per_muscle` and `get_weekly_summary.by_muscle`. Use for MEV/MAV comparisons and prescription verdicts.
 - **RIR (Reps in Reserve, 0–5)** is collected per-set in the workout UI as a chip strip below each completed set row (0=failure, 5=5+ left). Stored on `workout_sets.rir`. NULL = not recorded.
-- **`effective_set_count`** is the stimulus-weighted variant on every `get_sets_per_muscle` row and `get_weekly_summary.by_muscle` row. Two factors stack:
+- **`effective_set_count`** is the stimulus-weighted variant on every `get_sets_per_muscle` row and `get_weekly_summary.by_muscle` row. Drop-tagged sets contribute 0 (parent's recorded RIR governs its effective contribution; drops don't add stimulus). Two factors stack:
   - Primary/secondary credit (RP / Helms convention): primary muscle = 1.0, secondary-only = 0.5, in-both = 1.0 (primary wins).
   - RIR credit: RIR 0–3 = 1.0, RIR 4 = 0.5, RIR 5+ = 0.0, RIR NULL = 1.0 (charitable default until corpus exists).
   - Worked example: an RDL set @ RIR 4 contributes 0.25 effective sets to glutes (secondary 0.5 × RIR 0.5) and 0.5 effective sets to hamstrings (primary 1.0 × RIR 0.5).
   - The /feed Muscles This Week tile flags a muscle with a "JUNK" badge when `effective / set_count < 0.6` AND `set_count > 0` — meaning most logged sets were sub-stimulus, either too far from failure OR mostly secondary work.
 
 `coverage` flag on `get_sets_per_muscle` rows: `'none'` means no exercise in the catalog tags this muscle (yet — the audit pass will populate). Until then those muscles can't accumulate sets. UI collapses them into a footer.
+
+## Supersets and drop sets (migration 049, 2026-05-22)
+
+Both patterns ship in `/workout` (live session) and `/plans` (routine editor), plus MCP. Schema model:
+
+- **Drop sets** — recognized by `workout_sets.tag = 'dropSet'` + adjacency-by-`order_index` within an exercise. No FK column. A drop chain = a working set followed by 1+ `dropSet`-tagged sets contiguous in order. The session UI's `⋯` action menu on a completed set offers "Add drop set after this" (prefills weight at 70% of parent, rounded to 2.5kg). Rest timer skips mid-chain (`isMidDropChain` in `src/lib/restGating.ts`). Drops render with `D1`/`D2`/... labels in the set-number cell + a thin primary-tinted left border; working-set numbering skips drops.
+- **Supersets** — recognized by shared `superset_group_uuid` (text) on `workout_exercises` (and `workout_routine_exercises`). Group metadata (`superset_round_target`, `superset_rest_override_seconds`) lives on the lowest-`order_index` member only; siblings keep them NULL. The session UI's `⋮` overflow per exercise offers "Pair with previous exercise" / "Join superset above" / "Remove from superset." Paired cards render with a `Sup A` / `Sup B` badge near the title + a primary-tinted left connector + a "SUPERSET" header on the leader. Rest timer skips mid-round (`isMidSupersetRound`); round N is complete when every member with ≥N working sets has its N-th set done.
+
+MCP exposure (per `src/lib/mcp-tools.ts`):
+- `add_exercise(sets: [..., { tag?: 'dropSet' | null }])` — drops on first set rejected as `INVALID_DROP_TAG_NEEDS_PARENT`.
+- `update_set_targets(sets: [..., { tag?: 'dropSet' | null }])` — same validation. Pass `tag: null` to clear.
+- `create_drop_chain({ routine_uuid, exercise_uuid | exercise_name, parent_set_order, drops: [...] })` — convenience tool, single call programs N drops after a parent. Errors: `INVALID_DROP_PARENT_NOT_FOUND`, `INVALID_DROP_PARENT_IS_DROP`.
+- `update_routine_exercise({ routine_exercise_uuid, superset_group_uuid, superset_round_target?, superset_rest_override_seconds? })` — set/clear superset membership. Server auto-cleanups when a group drops below 2 members.
+
+Volume math reminder: a parent + 3 drops = `set_count: 4`, `working_set_count: 1`, `effective_set_count` = parent's contribution alone (drops are 0).
+
+## Watch echo column contract
+
+The watch's set CDC echo (set completion / weight edit from the watch) must include EVERY column on `workout_sets` it might touch, or `/api/sync/push`'s `EXCLUDED.*` upsert will NULL out columns the watch's payload doesn't carry. Today the columns it echoes are listed in `src/lib/watch.ts:38-46`:
+
+`uuid, workout_exercise_uuid, weight, repetitions, min_target_reps, max_target_reps, rpe, rir, tag, comment, is_completed, is_pr, excluded_from_pb, order_index, duration_seconds`
+
+**Before adding a new column to `workout_sets`:** either extend the watch echo payload to include it (TS `WatchSet` + Swift `WatchSetEcho` + the inbound bridge), OR add the column to the server upsert as `COALESCE(EXCLUDED.col, workout_sets.col)` (defensive preservation, same pattern that already protects `image_urls`/`secondary_weights` at `src/app/api/sync/push/route.ts:377-383`). The watch does NOT echo `workout_exercises`, `workout_routines`, or any other table — single-writer rule applies only to set rows.
+
+Migration 049 (superset grouping) added 3 columns to `workout_exercises` only, so the watch echo contract is not affected.
 
 ## HealthKit type catalog (for any code touching the iOS HealthKit plugin)
 

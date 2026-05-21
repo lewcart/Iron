@@ -12,6 +12,12 @@ export interface SetActionSheetTarget {
   duration_seconds: number | null;
   /** Optional label used in the sheet title — e.g. "Set 3 of Bench Press". */
   label?: string;
+  /** Set tag — used to hide "Add drop set" when this set is already a drop. */
+  tag?: 'dropSet' | 'failure' | null;
+  /** When provided, the sheet shows "Add drop set after this." Wired by the
+   *  active-workout page only; the historical views (WorkoutDetail,
+   *  ExerciseDetail) omit this callback so the action doesn't appear. */
+  onAddDropSet?: () => void | Promise<void>;
 }
 
 interface Props {
@@ -70,6 +76,22 @@ export function SetActionSheet({ target, onClose, unitLabel }: Props) {
     ? `${target.weight != null && target.weight > 0 ? `${target.weight} ${unitLabel} × ` : ''}${target.duration_seconds}s hold`
     : `${target.weight ?? '—'} ${unitLabel} × ${target.repetitions ?? '—'}`;
 
+  // Drop-set action shows when the caller wired a handler AND this set
+  // isn't itself a drop. Drops chain off a working set, not off another
+  // drop (per validator INVALID_DROP_PARENT_IS_DROP — see Slice 4).
+  const canAddDrop = !!target.onAddDropSet && target.tag !== 'dropSet';
+
+  async function handleAddDropSet() {
+    if (!target?.onAddDropSet) return;
+    setBusy(true);
+    try {
+      await target.onAddDropSet();
+      onClose();
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <Sheet
       open={open}
@@ -82,6 +104,25 @@ export function SetActionSheet({ target, onClose, unitLabel }: Props) {
     >
       <div className="px-4 py-3 space-y-3">
         <p className="text-xs text-muted-foreground">{setSummary}</p>
+
+        {canAddDrop && (
+          <button
+            type="button"
+            onClick={handleAddDropSet}
+            disabled={busy}
+            className="w-full flex items-center justify-between gap-3 px-4 py-3 rounded-xl border border-border bg-card text-left active:bg-card/70 disabled:opacity-50"
+          >
+            <div className="flex flex-col min-w-0">
+              <span className="text-sm font-semibold">Add drop set after this</span>
+              <span className="text-xs text-muted-foreground mt-0.5">
+                Chains a lighter set right after. Rest timer won&apos;t pop until the chain ends.
+              </span>
+            </div>
+            <span className="text-[10px] font-bold px-2 py-1 rounded-full border whitespace-nowrap text-primary bg-primary/10 border-primary/30">
+              + DROP
+            </span>
+          </button>
+        )}
 
         <button
           type="button"

@@ -47,6 +47,8 @@ import { usePlansFull } from '@/lib/useLocalDB-plans';
 import type { LocalWorkoutExerciseEntry, LocalWorkoutWithExercises } from '@/lib/useLocalDB';
 import { isNewEstimated1RM } from '@/lib/pr';
 import type { LocalWorkoutSet } from '@/db/local';
+import { SetActionSheet, type SetActionSheetTarget } from '@/components/SetActionSheet';
+import { isMidDropChain, isMidSupersetRound, setNumberLabels, type SetForChain, type ExerciseForRound } from '@/lib/restGating';
 import {
   startWorkout as mutStartWorkout,
   finishWorkout as mutFinishWorkout,
@@ -57,6 +59,7 @@ import {
   updateSet as mutUpdateSet,
   deleteSet as mutDeleteSet,
   reorderExercises,
+  setWorkoutExerciseSuperset as mutSetSuperset,
 } from '@/lib/mutations';
 import {
   DndContext,
@@ -984,10 +987,48 @@ function RpeChipStrip({
   );
 }
 
+/**
+ * Decide whether to skip the rest-timer auto-start after completing a set.
+ * True when EITHER:
+ *   - The just-completed set has more drops chained after it in the same
+ *     exercise (isMidDropChain — tag + adjacency model, UC2).
+ *   - The set's exercise is a superset leg AND another leg in the same
+ *     group has an uncompleted set at the same round index (isMidSupersetRound).
+ *
+ * Lives at module scope so the three call sites (manual checkmark, stopwatch
+ * commit, time-mode update) all share the same gate. Pure given inputs.
+ */
+function shouldSkipRestForSet(
+  setUuid: string,
+  we: LocalWorkoutExerciseEntry,
+  workout: LocalWorkoutWithExercises | null | undefined,
+): boolean {
+  const justCompleted = we.sets.find(s => s.uuid === setUuid);
+  if (!justCompleted) return false;
+  if (isMidDropChain(justCompleted as unknown as SetForChain, we.sets as unknown as SetForChain[])) return true;
+  if (workout && isMidSupersetRound(
+    justCompleted as unknown as SetForChain,
+    weToExerciseForRound(we, workout.uuid),
+    workout.exercises.map(e => weToExerciseForRound(e, workout.uuid)),
+  )) return true;
+  return false;
+}
+
+function weToExerciseForRound(we: LocalWorkoutExerciseEntry, workoutUuid: string): ExerciseForRound {
+  return {
+    uuid: we.uuid,
+    workout_uuid: workoutUuid,
+    superset_group_uuid: (we as unknown as { superset_group_uuid?: string | null }).superset_group_uuid ?? null,
+    order_index: we.order_index,
+    sets: we.sets as unknown as SetForChain[],
+  };
+}
+
 // ─── SetRow ───────────────────────────────────────────────────────────────────
 
 function SetRow({
-  setNumber,
+  setLabel,
+  isDrop,
   set,
   workoutExerciseUuid,
   trackingMode,
@@ -1000,12 +1041,19 @@ function SetRow({
   onUpdateRpe,
   onOpenStopwatch,
   onDelete,
+  onOpenActions,
   allTimeBest1RM,
   previousRir,
   stopwatchRunning,
   stopwatchElapsed,
 }: {
-  setNumber: number;
+  /** Display label for the set-number cell. Working sets get '1','2',...;
+   *  drops get 'D1','D2',... within their chain. Pure helper:
+   *  setNumberLabels (src/lib/restGating.ts). */
+  setLabel: string;
+  /** True if this row is a drop set (tag === 'dropSet'). Drives the intra-
+   *  cell indent + Failure pill instead of RIR slider. */
+  isDrop: boolean;
   set: LocalWorkoutSet;
   workoutExerciseUuid: string;
   trackingMode: 'reps' | 'time';
@@ -1018,6 +1066,9 @@ function SetRow({
   onUpdateRpe: (setUuid: string, rpe: number | null) => Promise<void>;
   onOpenStopwatch: (setRowKey: string, hasSides: boolean, replacingSeconds: number | null, currentWeightKg: number, targetDurationSeconds: number | null) => void;
   onDelete: (setUuid: string) => Promise<void>;
+  /** Tap to open the per-set bottom sheet (PB exclusion + delete +
+   *  "Add drop set after this"). Only fired for completed working sets. */
+  onOpenActions: () => void;
   allTimeBest1RM?: number | null;
   previousRir?: number | null;
   stopwatchRunning?: boolean;
@@ -1032,6 +1083,18 @@ function SetRow({
     set.duration_seconds != null ? String(set.duration_seconds) : ''
   );
   const [saving, setSaving] = useState(false);
+
+  // Sync local duration state when set.duration_seconds changes externally
+  // (e.g. the stopwatch sheet commits an elapsed value via mutUpdateSet).
+  // Without this, the input keeps showing the original target/template value
+  // even after the timer wrote the actual hold time to Dexie.
+  const prevDurationSecondsRef = useRef(set.duration_seconds);
+  useEffect(() => {
+    if (set.duration_seconds !== prevDurationSecondsRef.current) {
+      setDuration(set.duration_seconds != null ? String(set.duration_seconds) : '');
+      prevDurationSecondsRef.current = set.duration_seconds;
+    }
+  }, [set.duration_seconds]);
 
   // Live PD detection — compare current estimated 1RM against all-time best.
   // No is_completed guard: badge persists naturally after completion since
@@ -1114,10 +1177,15 @@ function SetRow({
   const stopwatchActive = !!stopwatchRunning;
   const liveSeconds = stopwatchActive ? (stopwatchElapsed ?? 0) : null;
 
+  // Drop rows show a small left-edge accent inside the row to nest them
+  // visually under their parent without shifting the weight/reps/RIR
+  // columns (alignment with the table header is preserved). The label
+  // cell still holds 'D1' / 'D2' (from setNumberLabels) in the same width
+  // as the working-set integer so column scan stays clean.
   const inner = (
-    <div className={`flex flex-col border-b border-border last:border-0 ${completed ? 'opacity-60' : ''}`}>
+    <div className={`flex flex-col border-b border-border last:border-0 ${completed ? 'opacity-60' : ''} ${isDrop ? 'border-l-2 border-l-primary/40' : ''}`}>
       <div className="flex items-center gap-2 py-1.5 px-3">
-        <div className="w-5 text-center text-xs font-semibold text-muted-foreground">{setNumber}</div>
+        <div className={`w-5 text-center text-xs font-semibold ${isDrop ? 'text-primary/80' : 'text-muted-foreground'}`}>{setLabel}</div>
 
         {trackingMode === 'time' ? (
           <>
@@ -1218,13 +1286,46 @@ function SetRow({
           </>
         )}
 
-        <div className="flex-1 flex items-center justify-end">
-          {completed && trackingMode === 'reps' && (
+        <div className="flex-1 flex items-center justify-end gap-1.5">
+          {completed && trackingMode === 'reps' && !isDrop && (
             <RirSlider
               value={set.rir ?? null}
               defaultValue={rirDefault}
               onChange={(n) => onUpdateRir(set.uuid, n)}
             />
+          )}
+          {/* Drops are assumed RIR 0 (failure). A compact pill keeps the
+              state visible (not hidden) and is tappable to expose the
+              normal slider for an override. Slice 3 / Design D7. */}
+          {completed && trackingMode === 'reps' && isDrop && set.rir == null && (
+            <button
+              type="button"
+              onClick={() => onUpdateRir(set.uuid, 0)}
+              className="text-[10px] font-semibold px-2 py-1 rounded-full border border-primary/30 bg-primary/10 text-primary/90 active:bg-primary/20"
+              aria-label="Mark drop set RIR. Default 0 (failure); tap to confirm."
+            >
+              Failure
+            </button>
+          )}
+          {completed && trackingMode === 'reps' && isDrop && set.rir != null && (
+            <RirSlider
+              value={set.rir}
+              defaultValue={0}
+              onChange={(n) => onUpdateRir(set.uuid, n)}
+            />
+          )}
+          {/* ⋯ action menu — only on completed working sets. Drops chain
+              from a parent, not from another drop, so the affordance hides
+              there to prevent agent / user from creating a drop-on-drop. */}
+          {completed && !isDrop && (
+            <button
+              type="button"
+              onClick={onOpenActions}
+              className="w-7 h-7 flex items-center justify-center text-muted-foreground/70 active:text-foreground"
+              aria-label="Set actions"
+            >
+              <span className="text-base leading-none">⋯</span>
+            </button>
           )}
         </div>
 
@@ -1294,6 +1395,13 @@ function SortableExerciseCard({
   onDeleteSet,
   onShowInfo,
   onOpenStopwatch,
+  onOpenSetActions,
+  onPairWithPrevious,
+  onJoinAbove,
+  onUnpair,
+  supersetBadge,
+  isGroupLeader,
+  isGroupMember,
   stopwatchSetKey,
   stopwatchElapsed,
 }: {
@@ -1311,6 +1419,28 @@ function SortableExerciseCard({
   onDeleteSet: (uuid: string) => Promise<void>;
   onShowInfo: () => void;
   onOpenStopwatch: (setRowKey: string, hasSides: boolean, replacingSeconds: number | null, currentWeightKg: number, targetDurationSeconds: number | null) => void;
+  onOpenSetActions: (set: LocalWorkoutSet, exerciseTitle: string, label: string) => void;
+  /** Pair with the previous exercise (forms a new group). Hidden when no
+   *  previous exercise exists, when this card is already grouped, or when
+   *  the previous card is already grouped with a different group. */
+  onPairWithPrevious: (() => void) | null;
+  /** Join the superset group already attached to the previous exercise.
+   *  Shown when previous is grouped and this isn't, and joining would
+   *  preserve adjacency. Null when not applicable. */
+  onJoinAbove: (() => void) | null;
+  /** Remove this card from its group (sets superset_group_uuid = null).
+   *  Auto-cleanup may dissolve the remaining single member. */
+  onUnpair: (() => void) | null;
+  /** 'Sup A' / 'Sup B' label for the small chip next to the title. Null
+   *  when the card isn't grouped. Letter is derived at the page level
+   *  from group order (1st group = A, 2nd = B, ...). */
+  supersetBadge: string | null;
+  /** True if this card is the lowest-order_index member of its group.
+   *  Used to render the slim connector's top edge and the group header. */
+  isGroupLeader: boolean;
+  /** True if this card is in a group (any position). Drives the slim
+   *  connector's vertical bar render. */
+  isGroupMember: boolean;
   stopwatchSetKey: string | null;
   stopwatchElapsed: number;
 }) {
@@ -1364,8 +1494,16 @@ function SortableExerciseCard({
     [prevSets],
   );
 
+  // Overflow menu state for the new ⋮ button (superset actions). Closes
+  // on outside click via a backdrop or on action select.
+  const [showSupersetMenu, setShowSupersetMenu] = useState(false);
+
   return (
-    <div ref={setNodeRef} style={style} className="ios-section">
+    <div
+      ref={setNodeRef}
+      style={style}
+      className={`ios-section relative ${isGroupMember ? 'border-l-2 border-l-primary/60' : ''}`}
+    >
       {/* Exercise header — swipe to delete */}
       <SwipeToDelete onDelete={onRemove}>
         <div className="flex items-center w-full min-h-[44px]">
@@ -1385,8 +1523,16 @@ function SortableExerciseCard({
               : <ChevronRight className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
             }
             <span className="flex-1 min-w-0">
-              <span className={`block font-semibold text-sm truncate ${allDone ? 'text-muted-foreground' : ''}`}>
-                {we.exercise?.title ?? ''}
+              <span className={`block font-semibold text-sm truncate flex items-center gap-1.5 ${allDone ? 'text-muted-foreground' : ''}`}>
+                {supersetBadge && (
+                  <span
+                    className="text-[10px] font-bold px-1.5 py-0.5 rounded border border-primary/40 bg-primary/10 text-primary/90 leading-none flex-shrink-0"
+                    aria-label={`Superset ${supersetBadge}`}
+                  >
+                    {supersetBadge}
+                  </span>
+                )}
+                <span className="truncate">{we.exercise?.title ?? ''}</span>
               </span>
               {(goalWindow || recommendation || we.comment) && (
                 <span className="flex items-center gap-1.5 mt-0.5 min-w-0 flex-wrap">
@@ -1408,6 +1554,66 @@ function SortableExerciseCard({
               </span>
             )}
           </button>
+          {/* ⋮ overflow — Slice 5 superset actions. Visible only when at
+              least one action applies (pairing, joining, or unpairing).
+              Discoverable, two-handed safe. Replaces the rejected long-
+              press-drag-handle design (Design D1). */}
+          {(onPairWithPrevious || onJoinAbove || onUnpair) && (
+            <div className="relative flex-shrink-0">
+              <button
+                onClick={(e) => { e.stopPropagation(); setShowSupersetMenu(v => !v); }}
+                onPointerDown={(e) => e.stopPropagation()}
+                className="px-2 py-2.5 text-muted-foreground hover:text-foreground"
+                aria-label="Superset actions"
+                aria-haspopup="menu"
+                aria-expanded={showSupersetMenu}
+              >
+                <span className="text-base leading-none">⋮</span>
+              </button>
+              {showSupersetMenu && (
+                <>
+                  {/* Backdrop closes the menu on any outside tap. */}
+                  <div
+                    className="fixed inset-0 z-30"
+                    onClick={() => setShowSupersetMenu(false)}
+                    onPointerDown={(e) => e.stopPropagation()}
+                  />
+                  <div
+                    className="absolute right-0 top-full mt-1 z-40 min-w-[200px] rounded-lg border border-border bg-card shadow-lg overflow-hidden"
+                    role="menu"
+                  >
+                    {onPairWithPrevious && (
+                      <button
+                        onClick={() => { setShowSupersetMenu(false); onPairWithPrevious(); }}
+                        className="w-full text-left px-3 py-2.5 text-sm hover:bg-secondary/50 active:bg-secondary"
+                        role="menuitem"
+                      >
+                        Pair with previous exercise
+                      </button>
+                    )}
+                    {onJoinAbove && (
+                      <button
+                        onClick={() => { setShowSupersetMenu(false); onJoinAbove(); }}
+                        className="w-full text-left px-3 py-2.5 text-sm hover:bg-secondary/50 active:bg-secondary"
+                        role="menuitem"
+                      >
+                        Join superset above
+                      </button>
+                    )}
+                    {onUnpair && (
+                      <button
+                        onClick={() => { setShowSupersetMenu(false); onUnpair(); }}
+                        className="w-full text-left px-3 py-2.5 text-sm hover:bg-secondary/50 active:bg-secondary"
+                        role="menuitem"
+                      >
+                        Remove from superset
+                      </button>
+                    )}
+                  </div>
+                </>
+              )}
+            </div>
+          )}
           {/* Info button — opens the exercise detail modal as a sibling overlay
               so the underlying workout state (rest timer, scroll, expanded
               sets) is preserved. stopPropagation prevents the chevron toggle
@@ -1422,6 +1628,11 @@ function SortableExerciseCard({
           </button>
         </div>
       </SwipeToDelete>
+      {isGroupLeader && (
+        <div className="px-3 py-1 text-[10px] text-primary/70 font-semibold uppercase tracking-wide border-b border-border bg-primary/5">
+          Superset
+        </div>
+      )}
 
       {/* Collapsible sets */}
       {isExpanded && (
@@ -1440,33 +1651,41 @@ function SortableExerciseCard({
             <div className="w-8 flex-shrink-0" />
           </div>
 
-          {/* Sets */}
-          {we.sets.map((set, idx) => {
-            const setRowKey = `${we.uuid}:${set.uuid}`;
-            const stopwatchRunning = stopwatchSetKey === setRowKey;
-            return (
-              <SetRow
-                key={set.uuid}
-                setNumber={idx + 1}
-                set={set}
-                workoutExerciseUuid={we.uuid}
-                trackingMode={we.exercise?.tracking_mode ?? 'reps'}
-                hasSides={Boolean(we.exercise?.has_sides)}
-                onUpdate={onUpdateSet}
-                onUpdateDuration={onUpdateSetDuration}
-                onEdit={onEditSet}
-                onEditDuration={onEditSetDuration}
-                onUpdateRir={onUpdateSetRir}
-                onUpdateRpe={onUpdateSetRpe}
-                onOpenStopwatch={onOpenStopwatch}
-                onDelete={onDeleteSet}
-                allTimeBest1RM={allTimeBest1RM}
-                previousRir={previousRirs[idx] ?? null}
-                stopwatchRunning={stopwatchRunning}
-                stopwatchElapsed={stopwatchElapsed}
-              />
-            );
-          })}
+          {/* Sets. Numbering uses setNumberLabels (drops show D1/D2 inline
+              under their parent; working sets count 1,2,3 with drops skipped).
+              Pure function lives in src/lib/restGating.ts. */}
+          {(() => {
+            const labels = setNumberLabels(we.sets as unknown as SetForChain[]);
+            const exerciseTitle = we.exercise?.title ?? 'Exercise';
+            return we.sets.map((set, idx) => {
+              const setRowKey = `${we.uuid}:${set.uuid}`;
+              const stopwatchRunning = stopwatchSetKey === setRowKey;
+              return (
+                <SetRow
+                  key={set.uuid}
+                  setLabel={labels[idx]}
+                  isDrop={set.tag === 'dropSet'}
+                  set={set}
+                  workoutExerciseUuid={we.uuid}
+                  trackingMode={we.exercise?.tracking_mode ?? 'reps'}
+                  hasSides={Boolean(we.exercise?.has_sides)}
+                  onUpdate={onUpdateSet}
+                  onUpdateDuration={onUpdateSetDuration}
+                  onEdit={onEditSet}
+                  onEditDuration={onEditSetDuration}
+                  onUpdateRir={onUpdateSetRir}
+                  onUpdateRpe={onUpdateSetRpe}
+                  onOpenStopwatch={onOpenStopwatch}
+                  onDelete={onDeleteSet}
+                  onOpenActions={() => onOpenSetActions(set, exerciseTitle, labels[idx])}
+                  allTimeBest1RM={allTimeBest1RM}
+                  previousRir={previousRirs[idx] ?? null}
+                  stopwatchRunning={stopwatchRunning}
+                  stopwatchElapsed={stopwatchElapsed}
+                />
+              );
+            });
+          })()}
 
           {/* Add set */}
           <button
@@ -1484,6 +1703,7 @@ function SortableExerciseCard({
 
 // ─── Main page ────────────────────────────────────────────────────────────────
 export default function WorkoutPage() {
+  const { label: unitLabel } = useUnit();
   const workout = useCurrentWorkoutFull(); // undefined = first-ever load, null = no workout
   // Plans for the "Start from Routine" panel — read from Dexie. Same shape
   // as the legacy /api/plans?full=1 response (plan -> routines -> exercises ->
@@ -1495,6 +1715,9 @@ export default function WorkoutPage() {
   const plans = plansLocal as unknown as PlanWithRoutines[];
   const [showExercises, setShowExercises] = useState(false);
   const [showRestTimer, setShowRestTimer] = useState(false);
+  // Per-set bottom sheet (PB exclusion + delete + "Add drop set after this").
+  // Opens from SetRow's ⋯ button. Slice 3.
+  const [setActionTarget, setSetActionTarget] = useState<SetActionSheetTarget | null>(null);
   const [showFinishModal, setShowFinishModal] = useState(false);
   const [showCancelModal, setShowCancelModal] = useState(false);
   const [startingRoutine, setStartingRoutine] = useState<string | null>(null);
@@ -1590,7 +1813,22 @@ export default function WorkoutPage() {
     });
     setStopwatchOpen(false);
     setStopwatchReplacing(null);
-  }, [stopwatch.state, workout]);
+
+    // Auto-start rest timer if enabled — mirrors the manual-checkmark path in
+    // updateSetDuration() so finishing a timed set via the stopwatch sheet
+    // behaves the same as ticking it off by hand. Same drop-chain / superset-
+    // round gating per shouldSkipRestForSet.
+    const { autoStart } = getRestSettings();
+    if (autoStart && we) {
+      const exerciseUuid = we.exercise_uuid ?? null;
+      const exerciseName = we.exercise?.title;
+      const setNumber = we.sets.filter(s => !s._deleted).findIndex(s => s.uuid === setUuid) + 1;
+      if (!shouldSkipRestForSet(setUuid, we, workout)) {
+        const restSec = resolveRestSec({ exerciseUuid });
+        restTimer.start(restSec, { setUuid, exerciseUuid, exerciseName, setNumber });
+      }
+    }
+  }, [stopwatch.state, workout, restTimer]);
 
   const stopwatchSetKey = stopwatch.state && (stopwatch.state.phase === 'counting' || stopwatch.state.phase === 'switching')
     ? stopwatch.state.setRowKey : null;
@@ -1824,6 +2062,15 @@ export default function WorkoutPage() {
         exercise_uuid: routineExercise.exercise_uuid.toLowerCase(),
         comment: routineExercise.comment ?? null,
         order_index: routineExercise.order_index,
+        // Copy superset grouping from the routine to the new workout. Group
+        // identity (the UUID) is reused — each workout's grouping is scoped
+        // by workout_uuid, so two workouts started from the same routine
+        // sharing a superset_group_uuid is fine; queries always filter by
+        // workout_uuid first. Lou can ungroup the live workout without
+        // touching the routine template (the rows are independent).
+        superset_group_uuid: (routineExercise as unknown as { superset_group_uuid?: string | null }).superset_group_uuid ?? null,
+        superset_round_target: (routineExercise as unknown as { superset_round_target?: number | null }).superset_round_target ?? null,
+        superset_rest_override_seconds: (routineExercise as unknown as { superset_rest_override_seconds?: number | null }).superset_rest_override_seconds ?? null,
         ...syncMeta,
       }));
 
@@ -2003,7 +2250,9 @@ export default function WorkoutPage() {
     await mutUpdateSet(setUuid, { weight, repetitions: reps, is_completed: true });
 
     // Auto-start rest timer if enabled in settings. Per-exercise resolved
-    // duration (last-used → settings default → 90s).
+    // duration (last-used → settings default → 90s). Skip when we're mid-
+    // drop-chain or mid-superset-round (Slice 3 + Slice 5 gating). Helpers
+    // are pure functions; see src/lib/restGating.ts.
     const { autoStart } = getRestSettings();
     if (autoStart) {
       const we = workout?.exercises.find(e => e.uuid === workoutExerciseUuid);
@@ -2012,8 +2261,12 @@ export default function WorkoutPage() {
       const setNumber = we
         ? we.sets.filter(s => !s._deleted).findIndex(s => s.uuid === setUuid) + 1
         : undefined;
-      const restSec = resolveRestSec({ exerciseUuid });
-      restTimer.start(restSec, { setUuid, exerciseUuid, exerciseName, setNumber });
+      if (we && shouldSkipRestForSet(setUuid, we, workout)) {
+        // mid-chain or mid-round; the next set is the user's next move.
+      } else {
+        const restSec = resolveRestSec({ exerciseUuid });
+        restTimer.start(restSec, { setUuid, exerciseUuid, exerciseName, setNumber });
+      }
     }
     // Note: PR detection happens server-side after sync; is_pr updates via pull
   };
@@ -2027,7 +2280,8 @@ export default function WorkoutPage() {
 
   // Time-mode counterpart. Writes weight + duration_seconds (weight stays
   // captured for loaded holds like weighted planks/dips). Same auto-rest-timer
-  // behavior as rep mode so the workflow is consistent.
+  // behavior as rep mode (gated by shouldSkipRestForSet for drop chains and
+  // superset rounds).
   const updateSetDuration = async (workoutExerciseUuid: string, setUuid: string, weight: number, durationSeconds: number) => {
     await mutUpdateSet(setUuid, { weight, duration_seconds: durationSeconds, is_completed: true });
 
@@ -2039,13 +2293,69 @@ export default function WorkoutPage() {
       const setNumber = we
         ? we.sets.filter(s => !s._deleted).findIndex(s => s.uuid === setUuid) + 1
         : undefined;
-      const restSec = resolveRestSec({ exerciseUuid });
-      restTimer.start(restSec, { setUuid, exerciseUuid, exerciseName, setNumber });
+      if (we && shouldSkipRestForSet(setUuid, we, workout)) {
+        // mid-chain or mid-round; no rest pop.
+      } else {
+        const restSec = resolveRestSec({ exerciseUuid });
+        restTimer.start(restSec, { setUuid, exerciseUuid, exerciseName, setNumber });
+      }
     }
   };
 
   const editSetDuration = async (_workoutExerciseUuid: string, setUuid: string, weight: number, durationSeconds: number) => {
     await mutUpdateSet(setUuid, { weight, duration_seconds: durationSeconds });
+  };
+
+  /** Open the per-set action sheet (PB exclude + delete + add drop set).
+   *  Builds the SetActionSheetTarget; the sheet itself decides which
+   *  actions to show (drop is hidden for already-drop rows). Plain
+   *  function (no useCallback) so the onAddDropSet closure captures the
+   *  CURRENT workout state, not first-render's undefined. The useCallback
+   *  variant silently dropped writes when workout was async-loaded. */
+  const handleOpenSetActions = (set: LocalWorkoutSet, exerciseTitle: string, label: string) => {
+    setSetActionTarget({
+      set_uuid: set.uuid,
+      is_excluded: set.excluded_from_pb,
+      weight: set.weight,
+      repetitions: set.repetitions,
+      duration_seconds: set.duration_seconds,
+      tag: set.tag,
+      label: `Set ${label} · ${exerciseTitle}`,
+      onAddDropSet: () => handleAddDropSet(set),
+    });
+  };
+
+  /** Append a drop set immediately after the parent. Insertion point is
+   *  `parent.order_index + 1`; subsequent sets in the same exercise are
+   *  shifted +1 to make room. Prefill: weight at ~70% of parent (rounded
+   *  to 2.5kg increment per Design D10 plate-fallback), reps blank, RIR
+   *  null (Failure pill defaults to RIR 0 once user taps it).
+   *
+   *  Insertion is sync-safe: every set row writes a single mutateUpdate
+   *  through the existing sync engine; no transaction boundary needed
+   *  beyond Dexie's per-row write. The shift-other-rows step uses a Dexie
+   *  bulkPut so a partial failure leaves the rows in their pre-call state
+   *  (Dexie wraps bulkPut in an implicit transaction). */
+  const handleAddDropSet = async (parentSet: LocalWorkoutSet) => {
+    const weUuid = parentSet.workout_exercise_uuid;
+    const we = workout?.exercises.find(e => e.uuid === weUuid);
+    if (!we) return;
+    const parentWeight = parentSet.weight;
+    // 70% of parent, rounded to 2.5kg. Mirrors Design D10 fallback when
+    // we don't have an equipment-specific plate increment.
+    const dropWeight = parentWeight != null && parentWeight > 0
+      ? Math.round((parentWeight * 0.7) / 2.5) * 2.5
+      : null;
+    const insertAt = parentSet.order_index + 1;
+    // Shift later sets in the same exercise up by 1 to make room.
+    const laterSets = we.sets.filter(s => !s._deleted && s.order_index >= insertAt);
+    for (const s of laterSets) {
+      await mutUpdateSet(s.uuid, { order_index: s.order_index + 1 });
+    }
+    await mutAddSet(weUuid, {
+      tag: 'dropSet',
+      ...(dropWeight != null && { weight: dropWeight }),
+    }, insertAt);
   };
 
   const handleAddSet = async (we: LocalWorkoutExerciseEntry) => {
@@ -2246,27 +2556,89 @@ export default function WorkoutPage() {
             <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
               <SortableContext items={workout.exercises.map(e => e.uuid)} strategy={verticalListSortingStrategy}>
                 <div className="space-y-2">
-                  {workout.exercises.map((we) => (
-                    <SortableExerciseCard
-                      key={we.uuid}
-                      we={we}
-                      isExpanded={expandedExercises.has(we.uuid)}
-                      onToggle={() => toggleExercise(we.uuid)}
-                      onRemove={() => handleRemoveExercise(we.uuid)}
-                      onAddSet={() => handleAddSet(we)}
-                      onUpdateSet={updateSet}
-                      onUpdateSetDuration={updateSetDuration}
-                      onEditSet={editSet}
-                      onEditSetDuration={editSetDuration}
-                      onUpdateSetRir={updateSetRir}
-                      onUpdateSetRpe={updateSetRpe}
-                      onDeleteSet={mutDeleteSet}
-                      onShowInfo={() => setInfoExerciseUuid(we.exercise.uuid)}
-                      onOpenStopwatch={handleOpenStopwatch}
-                      stopwatchSetKey={stopwatchSetKey}
-                      stopwatchElapsed={stopwatch.elapsed}
-                    />
-                  ))}
+                  {(() => {
+                    // Derive superset group letters and per-card handlers
+                    // once per render. Letters are stable as long as the
+                    // workout's exercises stay in the same order; they're
+                    // for display only, not persisted.
+                    type Ex = (typeof workout.exercises)[number] & { superset_group_uuid?: string | null };
+                    const exs = workout.exercises as readonly Ex[];
+                    const groupLetters = new Map<string, string>();
+                    let nextLetter = 0;
+                    for (const e of exs) {
+                      const g = e.superset_group_uuid;
+                      if (g && !groupLetters.has(g)) {
+                        groupLetters.set(g, String.fromCharCode(65 + nextLetter));
+                        nextLetter++;
+                      }
+                    }
+                    // First member of each group (lowest order_index, but
+                    // exs is already in display order so it's "first seen").
+                    const groupFirstUuid = new Map<string, string>();
+                    for (const e of exs) {
+                      const g = e.superset_group_uuid;
+                      if (g && !groupFirstUuid.has(g)) groupFirstUuid.set(g, e.uuid);
+                    }
+
+                    return exs.map((we, idx) => {
+                      const prev = idx > 0 ? exs[idx - 1] : null;
+                      const myGroup = we.superset_group_uuid ?? null;
+                      const prevGroup = prev?.superset_group_uuid ?? null;
+                      // Pair with previous: only when both are ungrouped.
+                      const onPairWithPrevious = prev && !myGroup && !prevGroup
+                        ? async () => {
+                            const newGroupId = genUUID();
+                            // Write the previous first (so it becomes the
+                            // leader, lowest order_index in the new group).
+                            await mutSetSuperset(prev.uuid, { superset_group_uuid: newGroupId });
+                            await mutSetSuperset(we.uuid, { superset_group_uuid: newGroupId });
+                          }
+                        : null;
+                      // Join above: previous is grouped, this isn't.
+                      const onJoinAbove = prev && prevGroup && !myGroup
+                        ? async () => {
+                            await mutSetSuperset(we.uuid, { superset_group_uuid: prevGroup });
+                          }
+                        : null;
+                      // Unpair: this card is in a group.
+                      const onUnpair = myGroup
+                        ? async () => {
+                            await mutSetSuperset(we.uuid, { superset_group_uuid: null });
+                          }
+                        : null;
+                      const supersetBadge = myGroup ? `Sup ${groupLetters.get(myGroup) ?? '?'}` : null;
+                      const isGroupLeader = !!myGroup && groupFirstUuid.get(myGroup) === we.uuid;
+                      const isGroupMember = !!myGroup;
+                      return (
+                        <SortableExerciseCard
+                          key={we.uuid}
+                          we={we}
+                          isExpanded={expandedExercises.has(we.uuid)}
+                          onToggle={() => toggleExercise(we.uuid)}
+                          onRemove={() => handleRemoveExercise(we.uuid)}
+                          onAddSet={() => handleAddSet(we)}
+                          onUpdateSet={updateSet}
+                          onUpdateSetDuration={updateSetDuration}
+                          onEditSet={editSet}
+                          onEditSetDuration={editSetDuration}
+                          onUpdateSetRir={updateSetRir}
+                          onUpdateSetRpe={updateSetRpe}
+                          onDeleteSet={mutDeleteSet}
+                          onShowInfo={() => setInfoExerciseUuid(we.exercise.uuid)}
+                          onOpenStopwatch={handleOpenStopwatch}
+                          onOpenSetActions={handleOpenSetActions}
+                          onPairWithPrevious={onPairWithPrevious}
+                          onJoinAbove={onJoinAbove}
+                          onUnpair={onUnpair}
+                          supersetBadge={supersetBadge}
+                          isGroupLeader={isGroupLeader}
+                          isGroupMember={isGroupMember}
+                          stopwatchSetKey={stopwatchSetKey}
+                          stopwatchElapsed={stopwatch.elapsed}
+                        />
+                      );
+                    });
+                  })()}
                 </div>
               </SortableContext>
             </DndContext>
@@ -2401,6 +2773,15 @@ export default function WorkoutPage() {
           state when opened. Memoized so 500ms rest-timer ticks in this parent
           don't re-render the chart-heavy modal subtree. */}
       <ExerciseDetailModal exercise={infoExercise} onClose={closeInfoModal} />
+
+      {/* Per-set actions sheet (PB exclusion + delete + add drop set).
+          Opens from SetRow's ⋯ button on completed working sets. Drop is
+          hidden for already-drop rows by the sheet itself. */}
+      <SetActionSheet
+        target={setActionTarget}
+        onClose={() => setSetActionTarget(null)}
+        unitLabel={unitLabel}
+      />
     </>
   );
 }

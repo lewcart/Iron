@@ -28,10 +28,13 @@ import {
   addRoutineSet,
   updateRoutineSet,
   deleteRoutineSet,
+  setRoutineExerciseSuperset,
 } from '@/lib/mutations-plans';
+import { uuid as genUUID } from '@/lib/uuid';
 import type { LocalWorkoutRoutineSet } from '@/db/local';
 import { REP_WINDOWS, REP_WINDOW_ORDER, type RepWindow } from '@/lib/rep-windows';
 import { RoutineVolumeFit } from '@/components/RoutineVolumeFit';
+import { setNumberLabels, type SetForChain } from '@/lib/restGating';
 
 // Trans-mapped colors for active window pills in the picker. Mirrors the
 // visual language on the workout exercise card so the editor and the in-
@@ -323,12 +326,73 @@ function RoutineCard({
               <p className="px-4 py-3 text-sm text-muted-foreground">No exercises yet</p>
             ) : (
               <div className="divide-y divide-border">
-                {routine.exercises.map((re: LocalRoutineExerciseEntry) => (
-                  <div key={re.uuid}>
+                {(() => {
+                  // Derive superset display state for routine exercises —
+                  // mirrors the workout/page.tsx pattern (letters per group,
+                  // leader = first member by display order). Letters are
+                  // local to the routine, not persisted.
+                  const exs = routine.exercises as readonly LocalRoutineExerciseEntry[];
+                  const groupLetters = new Map<string, string>();
+                  const groupFirstUuid = new Map<string, string>();
+                  let nextLetter = 0;
+                  for (const e of exs) {
+                    const g = (e as unknown as { superset_group_uuid?: string | null }).superset_group_uuid ?? null;
+                    if (g && !groupLetters.has(g)) {
+                      groupLetters.set(g, String.fromCharCode(65 + nextLetter));
+                      nextLetter++;
+                    }
+                    if (g && !groupFirstUuid.has(g)) groupFirstUuid.set(g, e.uuid);
+                  }
+                  return exs.map((re: LocalRoutineExerciseEntry, reIdx) => {
+                    const myGroup = (re as unknown as { superset_group_uuid?: string | null }).superset_group_uuid ?? null;
+                    const prev = reIdx > 0 ? exs[reIdx - 1] : null;
+                    const prevGroup = prev ? ((prev as unknown as { superset_group_uuid?: string | null }).superset_group_uuid ?? null) : null;
+                    const supersetBadge = myGroup ? `Sup ${groupLetters.get(myGroup) ?? '?'}` : null;
+                    const isGroupMember = !!myGroup;
+                    const isGroupLeader = !!myGroup && groupFirstUuid.get(myGroup) === re.uuid;
+                    // Toggle dynamic copy per DX checklist:
+                    //   - "Create superset with above" when nothing grouped above
+                    //   - "Add to superset above" when prev is already in a group
+                    //   - "Remove from superset" when this card is in a group
+                    const handleToggleGroup = async () => {
+                      if (myGroup) {
+                        await setRoutineExerciseSuperset(re.uuid, { superset_group_uuid: null });
+                      } else if (prev && prevGroup) {
+                        await setRoutineExerciseSuperset(re.uuid, { superset_group_uuid: prevGroup });
+                      } else if (prev) {
+                        const newGroup = genUUID();
+                        await setRoutineExerciseSuperset(prev.uuid, { superset_group_uuid: newGroup });
+                        await setRoutineExerciseSuperset(re.uuid, { superset_group_uuid: newGroup });
+                      }
+                    };
+                    const toggleLabel = myGroup
+                      ? 'Remove from superset'
+                      : prevGroup
+                        ? 'Add to superset above'
+                        : prev
+                          ? 'Create superset with above'
+                          : null;
+                    return (
+                  <div key={re.uuid} className={isGroupMember ? 'border-l-2 border-l-primary/60' : ''}>
                     {/* Exercise row */}
                     <div className="flex items-start px-4 py-2.5 gap-3">
                       <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium text-foreground">{re.exercise?.title ?? ''}</p>
+                        <p className="text-sm font-medium text-foreground flex items-center gap-1.5">
+                          {supersetBadge && (
+                            <span
+                              className="text-[10px] font-bold px-1.5 py-0.5 rounded border border-primary/40 bg-primary/10 text-primary/90 leading-none flex-shrink-0"
+                              aria-label={`Superset ${supersetBadge}`}
+                            >
+                              {supersetBadge}
+                            </span>
+                          )}
+                          <span className="truncate">{re.exercise?.title ?? ''}</span>
+                          {isGroupLeader && (
+                            <span className="text-[9px] text-primary/60 font-semibold uppercase tracking-wide ml-0.5 flex-shrink-0">
+                              Superset
+                            </span>
+                          )}
+                        </p>
                         {editingNotes?.exerciseUuid === re.uuid ? (
                           <div className="flex items-center gap-1.5 mt-1">
                             <input
@@ -359,6 +423,20 @@ function RoutineCard({
                           </button>
                         )}
                       </div>
+                      {toggleLabel && (
+                        <button
+                          onClick={handleToggleGroup}
+                          className={`text-[10px] font-semibold px-2 py-1 rounded-full border transition-colors flex-shrink-0 ${
+                            myGroup
+                              ? 'text-primary bg-primary/10 border-primary/30'
+                              : 'text-muted-foreground border-border hover:border-primary/40'
+                          }`}
+                          aria-label={toggleLabel}
+                          aria-pressed={!!myGroup}
+                        >
+                          {myGroup ? 'Ungroup' : prevGroup ? '+ Join above' : 'Pair above'}
+                        </button>
+                      )}
                       <button
                         onClick={() => handleRemoveExercise(re.uuid)}
                         className="text-muted-foreground hover:text-destructive transition-colors p-1 flex-shrink-0"
@@ -397,13 +475,34 @@ function RoutineCard({
                       </div>
                     )}
                     {/* Set rows. Branches by exercise.tracking_mode: time-mode
-                        renders a single seconds input; reps stay min/max. */}
+                        renders a single seconds input; reps stay min/max.
+                        Drop-tagged sets show 'D1'/'D2'/... in the label
+                        column and pick up a primary-tinted left border (same
+                        visual model as the live workout page). Toggle is on
+                        the row itself (not the editor) so it's a one-tap
+                        switch between Working and Drop. */}
                     {(() => {
                       const exerciseMode = (re.exercise?.tracking_mode ?? 'reps') as 'reps' | 'time';
+                      const labels = setNumberLabels(re.sets as unknown as SetForChain[]);
                       return (<>
-                      {re.sets.map((set, si) => (
-                      <div key={set.uuid} className="flex items-center pl-8 pr-3 py-1.5 gap-2 bg-muted/30">
-                        <span className="text-xs text-muted-foreground w-10 flex-shrink-0">Set {si + 1}</span>
+                      {re.sets.map((set, si) => {
+                      const isDrop = set.tag === 'dropSet';
+                      // Drop-set toggle is hidden on the first set of an
+                      // exercise — a drop chain by definition has a parent
+                      // working set above it. Server validator also enforces
+                      // INVALID_DROP_TAG_NEEDS_PARENT for the same reason.
+                      const canTagAsDrop = si > 0;
+                      const toggleDrop = async () => {
+                        await updateRoutineSet(set.uuid, { tag: isDrop ? null : 'dropSet' });
+                      };
+                      return (
+                      <div
+                        key={set.uuid}
+                        className={`flex items-center pl-8 pr-3 py-1.5 gap-2 bg-muted/30 ${isDrop ? 'border-l-2 border-l-primary/40' : ''}`}
+                      >
+                        <span className={`text-xs w-10 flex-shrink-0 ${isDrop ? 'text-primary/80 font-semibold' : 'text-muted-foreground'}`}>
+                          {isDrop ? labels[si] : `Set ${labels[si]}`}
+                        </span>
                         {editingSet?.uuid === set.uuid ? (
                           editingSet.mode === 'time' ? (
                             <>
@@ -472,6 +571,20 @@ function RoutineCard({
                                 ? `${formatSet(set, 'time')}${formatSet(set, 'time') === '—' ? '' : ' hold'}`
                                 : `${formatSet(set)} reps`}
                             </button>
+                            {canTagAsDrop && (
+                              <button
+                                onClick={toggleDrop}
+                                className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border transition-colors ${
+                                  isDrop
+                                    ? 'text-primary bg-primary/10 border-primary/30'
+                                    : 'text-muted-foreground border-border'
+                                }`}
+                                aria-label={isDrop ? 'Change to working set' : 'Mark as drop set'}
+                                aria-pressed={isDrop}
+                              >
+                                {isDrop ? 'Drop' : 'Drop?'}
+                              </button>
+                            )}
                             <button
                               onClick={() => handleDeleteSet(set.uuid)}
                               className="text-muted-foreground hover:text-destructive transition-colors p-1"
@@ -482,7 +595,8 @@ function RoutineCard({
                           </>
                         )}
                       </div>
-                    ))}
+                      );
+                    })}
                     {/* Add set */}
                     <button
                       onClick={() => handleAddSet(re.uuid, exerciseMode)}
@@ -494,7 +608,9 @@ function RoutineCard({
                       </>);
                     })()}
                   </div>
-                ))}
+                    );
+                  });
+                })()}
               </div>
             )}
             <button

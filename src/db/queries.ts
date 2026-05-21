@@ -1511,7 +1511,16 @@ export async function getWeekSetsPerMuscle(weekOffset: number = 0, tz: string = 
   optimal_sets_min: number;
   optimal_sets_max: number;
   display_order: number;
+  /** Raw hit count — every set with reps>=1 OR duration>0 credits 1 per
+   *  muscle. Includes drop-tagged sets. For audit / display only. */
   set_count: number;
+  /** RP-aligned working-set count — drop-tagged sets contribute 0 (they
+   *  extend the parent working set, they are not new working sets).
+   *  Use this for MEV/MAV comparisons, prescription verdicts, weekly
+   *  targets. Migration 049 + Slice 2 (2026-05-22). */
+  working_set_count: number;
+  /** Primary/secondary × RIR weighting. Drop-tagged sets contribute 0
+   *  (per UC7 final-gate decision: drops do not add new stimulus). */
   effective_set_count: number;
   kg_volume: number;
   coverage: 'none' | 'tagged';
@@ -1531,6 +1540,7 @@ export async function getWeekSetsPerMuscle(weekOffset: number = 0, tz: string = 
         ws.weight,
         ws.repetitions,
         ws.rir,
+        ws.tag,
         e.primary_muscles,
         e.secondary_muscles,
         e.secondary_weights
@@ -1554,7 +1564,7 @@ export async function getWeekSetsPerMuscle(weekOffset: number = 0, tz: string = 
       -- appearing in both arrays produces two rows here; muscle_hits below
       -- takes MAX(credit) so primary wins.
       SELECT ws.set_uuid, v.muscle_slug, 1.0::numeric AS credit,
-             ws.weight, ws.repetitions, ws.rir
+             ws.weight, ws.repetitions, ws.rir, ws.tag
       FROM week_sets ws,
            LATERAL (
              SELECT jsonb_array_elements_text(COALESCE(ws.primary_muscles, '[]'::jsonb)) AS muscle_slug
@@ -1576,7 +1586,7 @@ export async function getWeekSetsPerMuscle(weekOffset: number = 0, tz: string = 
                END,
                0.5
              )::numeric AS credit,
-             ws.weight, ws.repetitions, ws.rir
+             ws.weight, ws.repetitions, ws.rir, ws.tag
       FROM week_sets ws,
            LATERAL (
              SELECT jsonb_array_elements_text(COALESCE(ws.secondary_muscles, '[]'::jsonb)) AS muscle_slug
@@ -1584,14 +1594,15 @@ export async function getWeekSetsPerMuscle(weekOffset: number = 0, tz: string = 
     ),
     muscle_hits AS (
       -- One row per (set, muscle). credit = 1.0 if primary (or both), else 0.5.
-      -- weight/repetitions/rir are per-set so MAX/MIN/ANY pick the same value.
+      -- weight/repetitions/rir/tag are per-set so MAX/MIN/ANY pick the same value.
       SELECT
         set_uuid,
         muscle_slug,
         MAX(credit)        AS credit,
         MAX(weight)        AS weight,
         MAX(repetitions)   AS repetitions,
-        MAX(rir)           AS rir
+        MAX(rir)           AS rir,
+        MAX(tag)           AS tag
       FROM muscle_hits_raw
       GROUP BY set_uuid, muscle_slug
     ),
@@ -1599,10 +1610,17 @@ export async function getWeekSetsPerMuscle(weekOffset: number = 0, tz: string = 
       SELECT
         muscle_slug,
         COUNT(DISTINCT set_uuid) AS set_count,
+        -- working_set_count: RP convention. A drop is part of the parent's
+        -- working set, not a new working set. Migration 049 + Slice 2.
+        -- Per UC4/UC7 final-gate decision: parent counts 1, each drop
+        -- counts 0. tag IS NULL or 'failure' both count as working sets.
+        COUNT(DISTINCT set_uuid) FILTER (WHERE tag IS DISTINCT FROM 'dropSet') AS working_set_count,
         -- Effective sets — primary/secondary credit × RIR credit.
         --   primary=1.0, secondary=0.5
         --   RIR 0-3=1.0, RIR 4=0.5, RIR 5=0.25, RIR 6+=0.0, NULL=1.0
         --   (5-tier per TD2 2026-05-06; mirrors src/lib/training/volume-math.ts)
+        -- Drops (tag='dropSet') contribute 0 per UC7 (drops do not add new
+        -- stimulus; the parent's recorded RIR governs).
         COALESCE(SUM(
           credit * CASE
             WHEN rir IS NULL THEN 1.0
@@ -1611,7 +1629,7 @@ export async function getWeekSetsPerMuscle(weekOffset: number = 0, tz: string = 
             WHEN rir = 5     THEN 0.25
             ELSE 0.0
           END
-        ), 0)::numeric AS effective_set_count,
+        ) FILTER (WHERE tag IS DISTINCT FROM 'dropSet'), 0)::numeric AS effective_set_count,
         COALESCE(
           SUM(weight * repetitions) FILTER (WHERE weight IS NOT NULL AND repetitions IS NOT NULL),
           0
@@ -1639,6 +1657,7 @@ export async function getWeekSetsPerMuscle(weekOffset: number = 0, tz: string = 
       m.optimal_sets_max,
       m.display_order,
       COALESCE(ma.set_count, 0)::int                                AS set_count,
+      COALESCE(ma.working_set_count, 0)::int                        AS working_set_count,
       COALESCE(ma.effective_set_count, 0)::numeric                  AS effective_set_count,
       COALESCE(ma.kg_volume, 0)::numeric                            AS kg_volume,
       CASE WHEN mc.muscle_slug IS NULL THEN 'none' ELSE 'tagged' END AS coverage
@@ -1656,6 +1675,7 @@ export async function getWeekSetsPerMuscle(weekOffset: number = 0, tz: string = 
     optimal_sets_max: Number(r.optimal_sets_max),
     display_order: Number(r.display_order),
     set_count: Number(r.set_count),
+    working_set_count: Number(r.working_set_count),
     effective_set_count: Number(r.effective_set_count),
     kg_volume: Number(r.kg_volume),
     coverage: r.coverage as 'none' | 'tagged',

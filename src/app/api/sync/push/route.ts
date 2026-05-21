@@ -205,11 +205,16 @@ async function pushWorkoutExercise(r: Record<string, unknown>): Promise<void> {
     return;
   }
   await query(
-    `INSERT INTO workout_exercises (uuid, workout_uuid, exercise_uuid, comment, order_index, updated_at)
-     VALUES ($1, $2, $3, $4, $5, NOW())
+    `INSERT INTO workout_exercises (uuid, workout_uuid, exercise_uuid, comment, order_index, superset_group_uuid, superset_round_target, superset_rest_override_seconds, updated_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
      ON CONFLICT (uuid) DO UPDATE SET
-       comment = EXCLUDED.comment, order_index = EXCLUDED.order_index, updated_at = NOW()`,
-    [r.uuid, r.workout_uuid, r.exercise_uuid, r.comment, r.order_index],
+       comment = EXCLUDED.comment, order_index = EXCLUDED.order_index,
+       superset_group_uuid = EXCLUDED.superset_group_uuid,
+       superset_round_target = EXCLUDED.superset_round_target,
+       superset_rest_override_seconds = EXCLUDED.superset_rest_override_seconds,
+       updated_at = NOW()`,
+    [r.uuid, r.workout_uuid, r.exercise_uuid, r.comment, r.order_index,
+     r.superset_group_uuid ?? null, r.superset_round_target ?? null, r.superset_rest_override_seconds ?? null],
   );
 }
 
@@ -447,12 +452,17 @@ async function pushWorkoutRoutineExercise(r: Record<string, unknown>): Promise<v
     return;
   }
   await query(
-    `INSERT INTO workout_routine_exercises (uuid, workout_routine_uuid, exercise_uuid, comment, order_index, goal_window, updated_at)
-     VALUES ($1, $2, $3, $4, $5, $6, NOW())
+    `INSERT INTO workout_routine_exercises (uuid, workout_routine_uuid, exercise_uuid, comment, order_index, goal_window, superset_group_uuid, superset_round_target, superset_rest_override_seconds, updated_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
      ON CONFLICT (uuid) DO UPDATE SET
        comment = EXCLUDED.comment, order_index = EXCLUDED.order_index,
-       goal_window = EXCLUDED.goal_window, updated_at = NOW()`,
-    [r.uuid, r.workout_routine_uuid, String(r.exercise_uuid).toLowerCase(), r.comment, r.order_index, r.goal_window ?? null],
+       goal_window = EXCLUDED.goal_window,
+       superset_group_uuid = EXCLUDED.superset_group_uuid,
+       superset_round_target = EXCLUDED.superset_round_target,
+       superset_rest_override_seconds = EXCLUDED.superset_rest_override_seconds,
+       updated_at = NOW()`,
+    [r.uuid, r.workout_routine_uuid, String(r.exercise_uuid).toLowerCase(), r.comment, r.order_index, r.goal_window ?? null,
+     r.superset_group_uuid ?? null, r.superset_round_target ?? null, r.superset_rest_override_seconds ?? null],
   );
 }
 
