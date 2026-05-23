@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { App } from '@capacitor/app';
 import { SwipeToDelete } from '@/components/SwipeToDelete';
 import { useStopwatch } from './useStopwatch';
@@ -33,7 +34,7 @@ import {
   onWalkStateChanged,
 } from '@/lib/geofence';
 import Link from 'next/link';
-import { Check, ChevronDown, ChevronRight, ChevronsUp, ChevronUp, ClipboardList, Clock, Dumbbell, Equal, GripVertical, Info, Plus, Search, Timer, X } from 'lucide-react';
+import { Check, ChevronDown, ChevronRight, ChevronsUp, ChevronUp, ClipboardList, Clock, Dumbbell, Equal, GripVertical, Info, MoreHorizontal, MoreVertical, Plus, Search, Timer, X } from 'lucide-react';
 import { ExerciseDetailModal } from '@/components/ExerciseDetailModal';
 import type { WorkoutPlan, WorkoutRoutine, WorkoutRoutineExercise, WorkoutRoutineSet, Exercise } from '@/types';
 import { formatTime, calcCompletedSets, calcTotalVolume } from './workout-utils';
@@ -1314,9 +1315,12 @@ function SetRow({
               onChange={(n) => onUpdateRir(set.uuid, n)}
             />
           )}
-          {/* ⋯ action menu — only on completed working sets. Drops chain
+          {/* Set actions menu — only on completed working sets. Drops chain
               from a parent, not from another drop, so the affordance hides
-              there to prevent agent / user from creating a drop-on-drop. */}
+              there to prevent agent / user from creating a drop-on-drop.
+              Lucide SVG icon — Unicode horizontal-ellipsis renders as tofu
+              in iOS WKWebView; SVG is font-independent and ships on every
+              platform. */}
           {completed && !isDrop && (
             <button
               type="button"
@@ -1324,7 +1328,7 @@ function SetRow({
               className="w-7 h-7 flex items-center justify-center text-muted-foreground/70 active:text-foreground"
               aria-label="Set actions"
             >
-              <span className="text-base leading-none">⋯</span>
+              <MoreHorizontal className="h-4 w-4" />
             </button>
           )}
         </div>
@@ -1494,9 +1498,62 @@ function SortableExerciseCard({
     [prevSets],
   );
 
-  // Overflow menu state for the new ⋮ button (superset actions). Closes
-  // on outside click via a backdrop or on action select.
+  // Superset overflow menu — opens from the ⋮ button, closes on outside tap.
+  //
+  // Why React Portal: the wrapping <SwipeToDelete> (src/components/SwipeToDelete.tsx)
+  // sets `overflow-hidden` on its container so the swipe-revealed Delete
+  // button stays clipped. A normally-positioned `<div className="absolute">`
+  // dropdown inside that container gets clipped too — invisible AND missing
+  // from the accessibility tree, so it looks like the menu never opens
+  // (this is what the iOS-sim QA hit). Render to document.body via Portal
+  // so overflow-hidden doesn't apply. Position is computed from the ⋮
+  // button's bounding rect.
+  //
+  // Why not a `<div className="fixed inset-0" onClick=close>` backdrop:
+  // on iOS WKWebView, React's synchronous re-render between `touchend` and
+  // the synthetic `click` mounts the backdrop UNDER the touch point — the
+  // click then hit-tests against the backdrop (closing the menu) instead of
+  // the ⋮ button (opening it). A document-level listener registered via
+  // useEffect AFTER the menu is open avoids the race entirely (the open-
+  // click has already been fully dispatched by the time the listener exists).
   const [showSupersetMenu, setShowSupersetMenu] = useState(false);
+  const [menuAnchor, setMenuAnchor] = useState<{ top: number; right: number } | null>(null);
+  const supersetTriggerRef = useRef<HTMLButtonElement>(null);
+  const supersetMenuRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!showSupersetMenu) return;
+    // Defer attaching the listener one frame so the same iOS synthetic
+    // click that opened the menu can't immediately close it.
+    const raf = requestAnimationFrame(() => {
+      const handler = (e: MouseEvent | TouchEvent) => {
+        const target = e.target as Node | null;
+        if (target && supersetMenuRef.current?.contains(target)) return;
+        if (target && supersetTriggerRef.current?.contains(target)) return;
+        setShowSupersetMenu(false);
+      };
+      document.addEventListener('mousedown', handler, true);
+      document.addEventListener('touchstart', handler, true);
+      cleanup = () => {
+        document.removeEventListener('mousedown', handler, true);
+        document.removeEventListener('touchstart', handler, true);
+      };
+    });
+    let cleanup: (() => void) | null = null;
+    return () => {
+      cancelAnimationFrame(raf);
+      cleanup?.();
+    };
+  }, [showSupersetMenu]);
+  const openSupersetMenu = useCallback(() => {
+    const rect = supersetTriggerRef.current?.getBoundingClientRect();
+    if (rect) {
+      setMenuAnchor({
+        top: rect.bottom + 4,                          // 4px gap below button
+        right: window.innerWidth - rect.right,
+      });
+    }
+    setShowSupersetMenu(true);
+  }, []);
 
   return (
     <div
@@ -1554,65 +1611,70 @@ function SortableExerciseCard({
               </span>
             )}
           </button>
-          {/* ⋮ overflow — Slice 5 superset actions. Visible only when at
-              least one action applies (pairing, joining, or unpairing).
-              Discoverable, two-handed safe. Replaces the rejected long-
-              press-drag-handle design (Design D1). */}
+          {/* Superset actions overflow — Slice 5. Visible only when at least
+              one action applies (pairing, joining, or unpairing). Lucide SVG
+              icon — Unicode '⋮' (U+22EE) renders as a missing-glyph "tofu"
+              box in iOS WKWebView's default font; SVG is font-independent.
+              onTouchStart stop-propagation prevents SwipeToDelete (parent
+              wrapper) from capturing the tap as a swipe-start gesture.
+              Outside-tap close is handled by the document-level listener in
+              useEffect above, not a backdrop div — the backdrop pattern hits
+              the iOS WKWebView click-race (see comment on showSupersetMenu). */}
           {(onPairWithPrevious || onJoinAbove || onUnpair) && (
-            <div className="relative flex-shrink-0">
-              <button
-                onClick={(e) => { e.stopPropagation(); setShowSupersetMenu(v => !v); }}
-                onPointerDown={(e) => e.stopPropagation()}
-                className="px-2 py-2.5 text-muted-foreground hover:text-foreground"
-                aria-label="Superset actions"
-                aria-haspopup="menu"
-                aria-expanded={showSupersetMenu}
-              >
-                <span className="text-base leading-none">⋮</span>
-              </button>
-              {showSupersetMenu && (
-                <>
-                  {/* Backdrop closes the menu on any outside tap. */}
-                  <div
-                    className="fixed inset-0 z-30"
-                    onClick={() => setShowSupersetMenu(false)}
-                    onPointerDown={(e) => e.stopPropagation()}
-                  />
-                  <div
-                    className="absolute right-0 top-full mt-1 z-40 min-w-[200px] rounded-lg border border-border bg-card shadow-lg overflow-hidden"
-                    role="menu"
-                  >
-                    {onPairWithPrevious && (
-                      <button
-                        onClick={() => { setShowSupersetMenu(false); onPairWithPrevious(); }}
-                        className="w-full text-left px-3 py-2.5 text-sm hover:bg-secondary/50 active:bg-secondary"
-                        role="menuitem"
-                      >
-                        Pair with previous exercise
-                      </button>
-                    )}
-                    {onJoinAbove && (
-                      <button
-                        onClick={() => { setShowSupersetMenu(false); onJoinAbove(); }}
-                        className="w-full text-left px-3 py-2.5 text-sm hover:bg-secondary/50 active:bg-secondary"
-                        role="menuitem"
-                      >
-                        Join superset above
-                      </button>
-                    )}
-                    {onUnpair && (
-                      <button
-                        onClick={() => { setShowSupersetMenu(false); onUnpair(); }}
-                        className="w-full text-left px-3 py-2.5 text-sm hover:bg-secondary/50 active:bg-secondary"
-                        role="menuitem"
-                      >
-                        Remove from superset
-                      </button>
-                    )}
-                  </div>
-                </>
+            <button
+              ref={supersetTriggerRef}
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                if (showSupersetMenu) setShowSupersetMenu(false);
+                else openSupersetMenu();
+              }}
+              onPointerDown={(e) => e.stopPropagation()}
+              onTouchStart={(e) => e.stopPropagation()}
+              className="px-2 py-2.5 text-muted-foreground hover:text-foreground flex-shrink-0"
+              aria-label="Superset actions"
+              aria-haspopup="menu"
+              aria-expanded={showSupersetMenu}
+            >
+              <MoreVertical className="h-4 w-4" />
+            </button>
+          )}
+          {showSupersetMenu && menuAnchor && typeof document !== 'undefined' && createPortal(
+            <div
+              ref={supersetMenuRef}
+              className="fixed z-50 min-w-[200px] rounded-lg border border-border bg-card shadow-lg overflow-hidden"
+              style={{ top: menuAnchor.top, right: menuAnchor.right }}
+              role="menu"
+            >
+              {onPairWithPrevious && (
+                <button
+                  onClick={() => { setShowSupersetMenu(false); onPairWithPrevious(); }}
+                  className="w-full text-left px-3 py-2.5 text-sm hover:bg-secondary/50 active:bg-secondary"
+                  role="menuitem"
+                >
+                  Pair with previous exercise
+                </button>
               )}
-            </div>
+              {onJoinAbove && (
+                <button
+                  onClick={() => { setShowSupersetMenu(false); onJoinAbove(); }}
+                  className="w-full text-left px-3 py-2.5 text-sm hover:bg-secondary/50 active:bg-secondary"
+                  role="menuitem"
+                >
+                  Join superset above
+                </button>
+              )}
+              {onUnpair && (
+                <button
+                  onClick={() => { setShowSupersetMenu(false); onUnpair(); }}
+                  className="w-full text-left px-3 py-2.5 text-sm hover:bg-secondary/50 active:bg-secondary"
+                  role="menuitem"
+                >
+                  Remove from superset
+                </button>
+              )}
+            </div>,
+            document.body,
           )}
           {/* Info button — opens the exercise detail modal as a sibling overlay
               so the underlying workout state (rest timer, scroll, expanded
