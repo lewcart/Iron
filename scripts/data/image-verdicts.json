@@ -1,0 +1,37 @@
+{
+  "_comment": "Authoritative Claude vision-review verdicts for the Q2+Q3 image fill. Applied by apply-verdicts.mjs after the gen process is fully stopped (avoids the concurrent-write race that clobbered the live marks). pass = keep; fail = regen with notes.",
+  "verdicts": [
+    { "uuid": "e6e2bd55-1d64-4a2b-a53a-1420c9439b95", "title": "Cable Flye (Low-to-High)", "review": "pass" },
+    { "uuid": "5aea1c07-c852-45f8-bcdb-802618751e66", "title": "Cable Hip Abduction", "review": "pass" },
+    { "uuid": "c806a82e-cffe-4199-843d-627e9f96d64d", "title": "Clamshell (Warm-Up)", "review": "pass" },
+    { "uuid": "8bfd4d00-1a6a-4f32-8399-1e6a3a52acf7", "title": "Dumbbell Hammer Curl", "review": "pass" },
+    { "uuid": "b96523e3-98c6-4ea5-8b91-174fec14050c", "title": "Dumbbell Row (Single Arm)", "review": "pass" },
+    { "uuid": "1a9a9e60-5ab4-447f-9a8b-ce6599224892", "title": "Dumbbell Step-Up", "review": "pass" },
+    { "uuid": "9dbef625-e40b-4f78-bead-d7294a1c042e", "title": "Hyperextension: 45° Glute Bias", "review": "pass" },
+    { "uuid": "5c17ee24-f237-42d3-8434-de78bc9f4c61", "title": "Incline DB Curl (60° Back)", "review": "pass" },
+    { "uuid": "a45454b0-1602-4d8c-b5cd-e4d9829e2485", "title": "Incline DB Press (30°)", "review": "pass" },
+    { "uuid": "121fc414-0e32-439e-8416-7a2ba9545b6b", "title": "Lateral Raise: Cable (Standing)", "review": "pass" },
+    { "uuid": "e49b66a1-f392-4ddc-b258-349afa5957b5", "title": "Lying Incline DB Lateral Raise (Single-Arm)", "review": "pass" },
+    { "uuid": "e74e99bb-5185-4f26-9b75-c1cf16a2f987", "title": "Machine Crunch", "review": "pass" },
+    { "uuid": "7ed63ce2-45e5-44cf-9883-b9f16edf4b74", "title": "Pallof PRESS (Band)", "review": "pass" },
+    { "uuid": "bef4fb1e-92f6-402f-9d7a-5ee0c014b081", "title": "Rear Delt Fly Bentover (Dumbbell)", "review": "pass" },
+    { "uuid": "f0680ed0-c524-4715-8891-51a36e782b29", "title": "Reverse Crunch", "review": "pass" },
+    { "uuid": "21ed9151-d845-4711-b05b-617e8e4149ea", "title": "Reverse Pec Deck (Rear Delt Machine)", "review": "pass" },
+    { "uuid": "fc4f3589-bf38-4c5e-a9dd-aa987abe4284", "title": "Romanian Deadlift: Barbell", "review": "pass" },
+    { "uuid": "7cce552f-474b-4123-b6e6-188a55578dcc", "title": "Seated Leg Curl", "review": "pass" },
+    { "uuid": "0abfaa02-154c-4e4d-8046-cf46c3ecd6b3", "title": "Single Leg RDL", "review": "pass" },
+    { "uuid": "37d4f07b-d420-4f7b-86ba-3a8ab25d062c", "title": "Wide-Grip EZ-Bar Curl", "review": "pass" },
+
+    { "uuid": "7053466c-29b8-4f74-9a0e-4122f35a7e2b", "title": "Band External Rotation (Prehab)", "review": "fail", "notes": "Frame 1 OK. Frame 2 WRONG: shows arm extended forward like a cable row. CORRECT frame 2: elbow STAYS PINNED to ribs at 90°; ONLY the forearm rotates outward away from belly. Upper arm does NOT move. Like opening a door with the forearm only." },
+    { "uuid": "65b15c0e-8fad-47a6-8ad6-ae24072ed022", "title": "Cable Rope Hammer Curl", "review": "fail", "notes": "Frames too similar. Frame 1: ARMS HANGING FULLY STRAIGHT DOWN, rope at HIP/THIGH level, elbows extended. Frame 2: ELBOWS FULLY BENT pinned to ribs, rope brought UP to CHEST level. Show DRAMATIC contrast between extended arms (down) and flexed elbows (up)." },
+    { "uuid": "88bdb763-9c8d-4e15-bbcf-f18e3b2baf19", "title": "Calf Raise: Seated (Soleus)", "review": "fail", "notes": "Frames near-identical. Frame 1: HEELS DROPPED below platform, ankles dorsiflexed (toes up). Frame 2: HEELS RAISED HIGH, full plantar flexion (toes pointing down, calves contracted). Need OBVIOUS heel-down vs heel-up contrast." },
+    { "uuid": "11d5e985-69b6-48a2-ae67-464a86503a15", "title": "Chest-Supported Row (Machine or T-Bar)", "review": "fail", "notes": "Frame 1 OK (arms extended forward). Frame 2 WRONG: still shows arms extended. CORRECT frame 2: handles pulled BACK to LOWER RIBS, elbows back past torso, shoulder blades fully retracted (squeezed). Show clear row finish position with arms bent and handles near body." },
+    { "uuid": "7c9d246b-eeb3-4361-b3d3-1e64f842cdda", "title": "Donkey Calf", "review": "fail", "notes": "WRONG EXERCISE. Generated donkey-kick (kneeling on all fours). CORRECT donkey CALF RAISE: STANDING bent at hips, forearms on a railing, torso parallel to floor, balls of feet on a raised platform. Frame 1: heels dropped/stretched. Frame 2: up on tippy-toes (plantar flexion)." },
+    { "uuid": "257f77ba-cf5f-49fa-88e8-509883059d13", "title": "Dumbbell Y-Raise", "review": "fail", "notes": "Frame 2 wrong: arms straight out to sides (T-shape lateral raise). CORRECT Y-RAISE: arms raised forward at 30-45° from the sides — forming a Y when viewed front-on. Thumbs UP. Keep hinged hip position (same as frame 1, ~45° forward lean)." },
+    { "uuid": "c4035736-eaf3-4dad-8b74-bd1537e6b72d", "title": "Face Pulls", "review": "fail", "notes": "Wrong attachment. Use a ROPE (two ends) not single handle. Frame 1: ROPE at face height, arms fully extended forward. Frame 2: ROPE pulled to FACE — elbows flared OUT to sides at shoulder height, hands at ears, rope ends pulled apart by face. Show pull motion." },
+    { "uuid": "6bcc12aa-4435-429c-aa81-f27a6c996e8d", "title": "Hip Thrust (Barbell)", "review": "fail", "notes": "No movement contrast — both frames show top position. Frame 1 = BOTTOM: hips ON FLOOR, barbell low, knees deeply flexed, lumbar near ground. Frame 2 = TOP: hips at FULL EXTENSION forming a straight line from shoulders to knees, hips high, lockout squeeze." },
+    { "uuid": "ce29d312-1713-4299-9d95-55a6e91d2452", "title": "Hip Thrust (Barbell) — Banded Pulse", "review": "fail", "notes": "Missing resistance BAND around the knees — critical for this variant. Add visible band wrapped around both legs just above knees. Frame 1: hips bottom, band slack. Frame 2: hips top, knees pushing OUTWARD against band creating tension. Pulse position cue: knees apart." },
+    { "uuid": "cb18a361-4346-4df4-9441-212ddddeebe6", "title": "Overhead Cable Triceps Extension", "review": "fail", "notes": "Frame 1 OK (rope behind head, elbows bent). Frame 2 WRONG: arms forward at chest. CORRECT frame 2: arms fully extended UPWARD overhead — rope HIGH above head, elbows STRAIGHT pointing up, biceps near ears. Same body facing as frame 1." },
+    { "uuid": "522886b6-9b59-4254-8389-d481489d3184", "title": "Pallof Rotations (Band)", "review": "fail", "notes": "Rotation not shown. Frame 1: hands extended at chest height in front, torso PERPENDICULAR to band anchor. Frame 2: torso ROTATED 60-90° AWAY from anchor (hips+shoulders twist), hands stay extended but now point further from anchor." }
+  ]
+}

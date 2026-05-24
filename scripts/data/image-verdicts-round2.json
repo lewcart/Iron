@@ -1,0 +1,16 @@
+{
+  "_comment": "Round-2 verdicts (attempt-2/attempt-3 reviews). Applied by apply-verdicts.mjs AFTER regen2 fully stops. Append remaining verdicts as reviewed.",
+  "verdicts": [
+    { "uuid": "7053466c-29b8-4f74-9a0e-4122f35a7e2b", "title": "Band External Rotation (Prehab)", "review": "pass" },
+    { "uuid": "65b15c0e-8fad-47a6-8ad6-ae24072ed022", "title": "Cable Rope Hammer Curl", "review": "pass" },
+    { "uuid": "88bdb763-9c8d-4e15-bbcf-f18e3b2baf19", "title": "Calf Raise: Seated (Soleus)", "review": "pass" },
+    { "uuid": "11d5e985-69b6-48a2-ae67-464a86503a15", "title": "Chest-Supported Row (Machine or T-Bar)", "review": "pass" },
+    { "uuid": "257f77ba-cf5f-49fa-88e8-509883059d13", "title": "Dumbbell Y-Raise", "review": "pass" },
+    { "uuid": "7c9d246b-eeb3-4361-b3d3-1e64f842cdda", "title": "Donkey Calf", "review": "pass" },
+    { "uuid": "c857ce98-65b1-4314-a589-7c7f0d9f516b", "title": "Cable Crunch (Weighted Kneeling)", "review": "pass" },
+    { "uuid": "ce29d312-1713-4299-9d95-55a6e91d2452", "title": "Hip Thrust (Barbell) — Banded Pulse", "review": "pass" },
+    { "uuid": "cb18a361-4346-4df4-9441-212ddddeebe6", "title": "Overhead Cable Triceps Extension", "review": "pass" },
+    { "uuid": "522886b6-9b59-4254-8389-d481489d3184", "title": "Pallof Rotations (Band)", "review": "pass" },
+    { "uuid": "661bee70-89f0-416a-b90e-5a87abd353b0", "title": "Short Lever Copenhagen", "review": "pass" }
+  ]
+}

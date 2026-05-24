@@ -1,0 +1,518 @@
+[
+  {
+    "uuid": "7053466c-29b8-4f74-9a0e-4122f35a7e2b",
+    "title": "Band External Rotation (Prehab)",
+    "delta": {
+      "description": "Banded shoulder external rotation prehab drill. Elbow pinned to ribs, forearm rotates outward against band resistance to load the infraspinatus and teres minor before pressing work.",
+      "steps": [
+        "Anchor band at elbow height; grip free end in working hand.",
+        "Elbow pinned to side at 90°, forearm across belly to start.",
+        "Rotate forearm outward, keeping elbow glued to the side.",
+        "Pause at end range, control return.",
+        "Complete reps, switch sides."
+      ],
+      "tips": [
+        "Light band — prehab dose, not a strength lift.",
+        "Elbow stays glued to side — no shoulder abduction.",
+        "Slow tempo both ways; full ROM each rep.",
+        "Pre-pressing days, before warm-up sets."
+      ]
+    }
+  },
+  {
+    "uuid": "c857ce98-65b1-4314-a589-7c7f0d9f516b",
+    "title": "Cable Crunch (Weighted Kneeling)",
+    "delta": {
+      "description": "Loaded spinal-flexion crunch. Kneeling under a high cable, the abs curl the torso downward against the rope's pull for top-down ab loading without hip-flexor dominance."
+    }
+  },
+  {
+    "uuid": "e6e2bd55-1d64-4a2b-a53a-1420c9439b95",
+    "title": "Cable Flye (Low-to-High)",
+    "delta": {
+      "description": "Cable flye performed from low pulleys upward to an above-eye-line meeting point. Biases clavicular (upper-chest) fibers — the visible shape under existing tissue."
+    }
+  },
+  {
+    "uuid": "5aea1c07-c852-45f8-bcdb-802618751e66",
+    "title": "Cable Hip Abduction",
+    "delta": {
+      "steps": [
+        "Attach ankle cuff to a low pulley; cuff on the far ankle.",
+        "Stand sideways to the stack, near hand on upright for balance.",
+        "Working leg slightly behind the line of the body, knee soft.",
+        "Raise straight leg out to the side, squeezing glute medius at top.",
+        "Control return — don't let the stack slam."
+      ],
+      "tips": [
+        "Tiny lean AWAY from the stack to free hip ROM.",
+        "Glute medius drives the lift — not lower-back side-bend.",
+        "Standing knee soft, not hyperextended.",
+        "High reps, light load — this is side-glute hypertrophy, not a power lift."
+      ]
+    }
+  },
+  {
+    "uuid": "6b849257-f025-473c-bb69-232e58dd7f66",
+    "title": "Cable Kickback",
+    "delta": {
+      "tips": [
+        "Hinge the standing leg slightly forward for hip extension ROM.",
+        "Squeeze glute at end range — pause before reversing.",
+        "Slow eccentric; don't let the stack slam back.",
+        "No lower-back arch to gain ROM — ribs over hips."
+      ]
+    }
+  },
+  {
+    "uuid": "65b15c0e-8fad-47a6-8ad6-ae24072ed022",
+    "title": "Cable Rope Hammer Curl",
+    "delta": {
+      "description": "Neutral-grip cable curl with a rope handle. Brachialis-biased — the under-bicep muscle that pushes the biceps up and out, driving arm width from all angles."
+    }
+  },
+  {
+    "uuid": "4a5ce1f5-ef10-436c-8acb-1d6d5928aec3",
+    "title": "Calf Raise: Machine (Standing)",
+    "delta": {
+      "tips": [
+        "Full ROM — deep stretch at bottom, full plantar flexion at top.",
+        "Pause 1 sec at peak contraction.",
+        "Standing/straight-knee biases gastrocnemius (the visible diamond).",
+        "Slow eccentric; calves grow from time under stretch."
+      ]
+    }
+  },
+  {
+    "uuid": "88bdb763-9c8d-4e15-bbcf-f18e3b2baf19",
+    "title": "Calf Raise: Seated (Soleus)",
+    "delta": {
+      "description": "Seated calf raise. Bent-knee position takes gastrocnemius off the line and isolates the soleus — the deep, slow-twitch calf below the gastroc."
+    }
+  },
+  {
+    "uuid": "11d5e985-69b6-48a2-ae67-464a86503a15",
+    "title": "Chest-Supported Row (Machine or T-Bar)",
+    "delta": {
+      "description": "Chest-supported row using a machine or T-bar with a chest pad. The pad eliminates torso cheat so rhomboids and mid-traps fire instead of lower-back compensation."
+    }
+  },
+  {
+    "uuid": "c806a82e-cffe-4199-843d-627e9f96d64d",
+    "title": "Clamshell (Warm-Up)",
+    "delta": {
+      "steps": [
+        "Side-lying, hips and knees bent ~90°, band around knees.",
+        "Stack the heels together; feet stay touching.",
+        "Open the top knee against the band by rotating from the hip.",
+        "Pause at end range, control return — don't let the band snap back.",
+        "Complete reps, flip sides."
+      ],
+      "tips": [
+        "Glute medius activator — wakes side-glute before lower-day work.",
+        "Don't roll the pelvis back — keep hips stacked vertically.",
+        "Light band; this is activation, not strength.",
+        "10-15 reps each side, pre-Lower A."
+      ]
+    }
+  },
+  {
+    "uuid": "7c9d246b-eeb3-4361-b3d3-1e64f842cdda",
+    "title": "Donkey Calf",
+    "delta": {
+      "description": "Donkey calf raise. Bent-over with hips hinged forward, partner or hip-belt loading the lower back. Hip flexion lengthens the gastrocnemius for a stretch-biased calf lift.",
+      "steps": [
+        "Hinge at hips and rest forearms on a stable surface, back parallel to floor.",
+        "Balls of feet on a raised platform, heels free.",
+        "Partner sits across lower back, OR use a hip-belt loaded.",
+        "Press up to full plantar flexion, hold 1 sec.",
+        "Lower under control to a deep stretch at bottom."
+      ],
+      "tips": [
+        "Hip flexion stretches the gastroc — strongest stretch position for calves.",
+        "Slow tempo — calves respond to time under tension.",
+        "No partner? Sub with leg-press calf raise.",
+        "Pause at peak contraction; full ROM both ways."
+      ]
+    }
+  },
+  {
+    "uuid": "6c757467-7fe8-419a-95d6-e660e480fbd7",
+    "title": "Dumbbell Bulgarian Split Squat",
+    "delta": {
+      "description": "Single-leg quad-and-glute lift with rear foot elevated on a bench. The split position loads the front leg in deep hip flexion — large hypertrophy stimulus per side.",
+      "steps": [
+        "Stand 2-3 ft in front of a bench, DBs in each hand.",
+        "Top of rear foot on bench, laces down.",
+        "Front foot far enough out that front shin stays vertical at the bottom.",
+        "Descend by bending front knee and hip; rear knee tracks down toward floor.",
+        "Drive up through the front-foot midfoot; lock out at top.",
+        "Complete reps, switch legs."
+      ],
+      "tips": [
+        "Vertical front shin = glute bias. Knee over toe = quad bias.",
+        "Don't push off the rear foot — it's just balance.",
+        "Torso forward = glute bias; upright = quad bias.",
+        "Goblet variation works fine if grip fails before legs."
+      ]
+    }
+  },
+  {
+    "uuid": "8bfd4d00-1a6a-4f32-8399-1e6a3a52acf7",
+    "title": "Dumbbell Hammer Curl",
+    "delta": {
+      "description": "Neutral-grip dumbbell curl, palms facing each other through the full ROM. Brachialis-biased — drives arm width by pushing the biceps up and out.",
+      "steps": [
+        "DBs by sides, palms facing each other (neutral grip).",
+        "Elbows pinned to ribs.",
+        "Curl one or both DBs to shoulder height, keeping palms neutral throughout.",
+        "Pause briefly at top.",
+        "Control descent to full extension."
+      ],
+      "tips": [
+        "Neutral grip = brachialis bias (the under-arm width pusher).",
+        "Elbows do NOT drift forward — that's a front-delt cheat.",
+        "Slow eccentric; stretch position is where the growth lives.",
+        "Both arms together for density; alternate if grip fails first."
+      ]
+    }
+  },
+  {
+    "uuid": "b96523e3-98c6-4ea5-8b91-174fec14050c",
+    "title": "Dumbbell Row (Single Arm)",
+    "delta": {
+      "description": "Unilateral DB row with one knee on a bench. The chest-supported torso lets the lat work through full ROM without lower-back compensation.",
+      "steps": [
+        "Same-side knee + hand on a flat bench, torso parallel to floor.",
+        "Working hand holds DB, arm fully extended toward floor.",
+        "Pull DB to hip — elbow drives back and up.",
+        "Pause at top with shoulder blade retracted.",
+        "Control descent to full stretch.",
+        "Complete reps, switch sides."
+      ],
+      "tips": [
+        "Lead with the elbow, not the hand — biceps shouldn't run the lift.",
+        "Don't rotate the torso to gain ROM; shoulders stay square.",
+        "Full stretch at the bottom — let the shoulder blade protract.",
+        "Cue: pull the elbow to the hip."
+      ]
+    }
+  },
+  {
+    "uuid": "1a9a9e60-5ab4-447f-9a8b-ce6599224892",
+    "title": "Dumbbell Step-Up",
+    "delta": {
+      "description": "Single-leg step-up to a box or bench with DBs in hand. Glute- or quad-biased depending on box height and torso angle.",
+      "steps": [
+        "DBs in each hand at sides, stand facing a knee-height box.",
+        "Place working foot fully on the box.",
+        "Drive through the front midfoot to stand tall on the box.",
+        "Trailing leg comes up to balance — don't push off the floor.",
+        "Step down with the trailing leg first, soft landing.",
+        "Complete reps one side, switch."
+      ],
+      "tips": [
+        "Higher box + slight forward lean = glute bias.",
+        "Lower box + upright torso = quad bias.",
+        "Push through the BOX, not off the floor.",
+        "Slow descent; the eccentric stimulus is half the lift."
+      ]
+    }
+  },
+  {
+    "uuid": "257f77ba-cf5f-49fa-88e8-509883059d13",
+    "title": "Dumbbell Y-Raise",
+    "delta": {
+      "description": "Bent-over DB raise with arms forming a Y. Loads lower-trap and rear-delt fibers in their primary line of pull — posture-fixer without upper-trap creep.",
+      "steps": [
+        "Hinge at hips ~45°, light DBs in each hand, palms facing each other.",
+        "Arms slightly bent, hanging straight down at start.",
+        "Raise both arms out and slightly forward to form a Y, thumbs leading.",
+        "Stop at shoulder-line height; don't shrug.",
+        "Control descent — slow eccentric."
+      ],
+      "tips": [
+        "LIGHT DBs — this is posture work, not a strength lift.",
+        "Thumbs UP through the raise; thumbs forward is the wrong cue.",
+        "No traps/shrug — if upper-trap kicks in, drop the weight.",
+        "Pairs with face pulls + rear delts for posture trio."
+      ]
+    }
+  },
+  {
+    "uuid": "c4035736-eaf3-4dad-8b74-bd1537e6b72d",
+    "title": "Face Pulls",
+    "delta": {
+      "tips": [
+        "Rope at eye height; pull the rope to the FACE not the chest.",
+        "Lead with the elbows — flare them outward to bias rear delt.",
+        "Squeeze rear delts at peak contraction.",
+        "If upper traps fire instead, drop the weight and re-cue elbows."
+      ]
+    }
+  },
+  {
+    "uuid": "6bcc12aa-4435-429c-aa81-f27a6c996e8d",
+    "title": "Hip Thrust (Barbell)",
+    "delta": {
+      "description": "Barbell hip thrust. Upper back on a bench, barbell across hips, drive hips up to full extension — the most direct glute-builder in a gym setting.",
+      "steps": [
+        "Sit on floor with upper-back against the long edge of a bench.",
+        "Roll the barbell into the hip crease (use a pad).",
+        "Feet flat ~shoulder-width, shins vertical at the top of the rep.",
+        "Drive through heels to lift hips until thighs are parallel to floor.",
+        "Squeeze glutes hard at the top, pause 1 sec.",
+        "Lower under control to a deep stretch."
+      ],
+      "tips": [
+        "Top position: knees, hips, shoulders form a straight line.",
+        "Chin tucked, ribs DOWN — don't hyperextend the lumbar.",
+        "Drive through the HEELS — toes-up cue helps.",
+        "Full ROM both ways: deep stretch at bottom, lockout squeeze at top."
+      ]
+    }
+  },
+  {
+    "uuid": "ce29d312-1713-4299-9d95-55a6e91d2452",
+    "title": "Hip Thrust (Barbell) — Banded Pulse",
+    "delta": {
+      "steps": [
+        "Set up a standard barbell hip thrust (back on bench, bar at hip crease).",
+        "Band around knees, tension active before unracking.",
+        "Press hips up to lockout with knees pushing OUT against the band.",
+        "At top, perform 3 small pulses keeping knees apart.",
+        "Lower under control to start; that's one rep."
+      ],
+      "tips": [
+        "Knees push OUT against the band the whole rep — glute medius co-fires.",
+        "Pulses are small — don't drop and re-press.",
+        "Squeeze every rep; this is glute-finisher work, not strength.",
+        "Best paired with a heavy hip-thrust top set; pulse as the burnout."
+      ]
+    }
+  },
+  {
+    "uuid": "5c17ee24-f237-42d3-8434-de78bc9f4c61",
+    "title": "Incline DB Curl (60° Back)",
+    "delta": {
+      "description": "Reclined incline DB curl with bench at 60°. The deep stretch puts the long head of the biceps in its most lengthened position — stretch-bias hypertrophy."
+    }
+  },
+  {
+    "uuid": "a45454b0-1602-4d8c-b5cd-e4d9829e2485",
+    "title": "Incline DB Press (30°)",
+    "delta": {
+      "description": "Low-incline DB press at 30°. Bias is clavicular (upper-chest) fibers — the visible shape just under the collarbone, not chest mass."
+    }
+  },
+  {
+    "uuid": "25b6655e-895a-41cb-835a-247a3a7b2e0f",
+    "title": "Leg Curl (Lying)",
+    "delta": {
+      "tips": [
+        "Roll pad sits on the Achilles, not mid-calf.",
+        "Lying/straight-hip biases the SHORT head of hamstrings.",
+        "Slow eccentric — heels return to full knee extension.",
+        "Pause at peak contraction; don't slam reps."
+      ]
+    }
+  },
+  {
+    "uuid": "c6b9548c-b1ed-4a85-a200-331d1e08be33",
+    "title": "Leg Curl (Standing)",
+    "delta": {
+      "tips": [
+        "One leg at a time — better mind-muscle than alternating quickly.",
+        "Don't arch the lower back to gain ROM; ribs over hips.",
+        "Slow descent; the eccentric is where the stimulus lives.",
+        "Pause at peak contraction; squeeze hamstring at top."
+      ]
+    }
+  },
+  {
+    "uuid": "8b3de466-1552-4978-a378-55f64e8ca66b",
+    "title": "Leg Press",
+    "delta": {
+      "tips": [
+        "Foot position high = glute/ham bias; low = quad bias.",
+        "Don't lock out the knees at the top.",
+        "Lower to ~90° knee bend — don't bounce out of the hole.",
+        "Keep lower back pressed into the seat — no butt lift."
+      ]
+    }
+  },
+  {
+    "uuid": "e49b66a1-f392-4ddc-b258-349afa5957b5",
+    "title": "Lying Incline DB Lateral Raise (Single-Arm)",
+    "delta": {
+      "description": "Side-lying lateral raise on a 30° incline bench. The bottom of the rep loads the medial delt in its fully stretched position — pure stretch-bias dose."
+    }
+  },
+  {
+    "uuid": "e74e99bb-5185-4f26-9b75-c1cf16a2f987",
+    "title": "Machine Crunch",
+    "delta": {
+      "description": "Loaded crunch on a machine. Holding handles or pad while curling the spine flexes the abs against a fixed resistance line — no hip-flexor compensation.",
+      "steps": [
+        "Adjust machine seat so chest pad sits at sternum height.",
+        "Grip handles or hold pad, abs braced.",
+        "Curl spine downward — bring sternum toward pelvis.",
+        "Pause at peak abdominal contraction.",
+        "Control return to full stretch position."
+      ],
+      "tips": [
+        "Flex the SPINE, not the hips — chase the ab contraction.",
+        "Arms just hold position; don't pull with them.",
+        "Slow eccentric — full stretch at top of the lift.",
+        "Cap the load: heavy crunches risk upper-ab thickening; chase reps."
+      ]
+    }
+  },
+  {
+    "uuid": "cb18a361-4346-4df4-9441-212ddddeebe6",
+    "title": "Overhead Cable Triceps Extension",
+    "delta": {
+      "description": "Cable triceps extension with arms overhead, rope attachment. The overhead position puts the long head of the triceps in deep stretch — stretch-mediated hypertrophy."
+    }
+  },
+  {
+    "uuid": "7ed63ce2-45e5-44cf-9883-b9f16edf4b74",
+    "title": "Pallof PRESS (Band)",
+    "delta": {
+      "description": "Anti-rotation core press with a band. Standing perpendicular to anchor, the press extends a band away from chest while the core resists rotational pull."
+    }
+  },
+  {
+    "uuid": "522886b6-9b59-4254-8389-d481489d3184",
+    "title": "Pallof Rotations (Band)",
+    "delta": {
+      "description": "Standing band rotation. Arms extended, torso rotates against a band-anchored line — a rotational core strength move (note: opposite of Pallof PRESS, which is anti-rotation).",
+      "steps": [
+        "Anchor band at chest height, stand perpendicular to anchor.",
+        "Both hands hold band straight out from sternum.",
+        "Rotate torso AWAY from the anchor — hands stay in front of chest.",
+        "Pause at end range; control return.",
+        "Complete reps both sides."
+      ],
+      "tips": [
+        "Confusingly named: PRESS = anti-rotation, ROTATIONS = actual rotation.",
+        "Hips stay square — rotation comes from thoracic spine.",
+        "Light band — torso control over force.",
+        "WHR-priority? Prefer Pallof PRESS; loaded rotations add waist thickness."
+      ]
+    }
+  },
+  {
+    "uuid": "bbd6b085-d50c-4ba5-88fa-aad4a3737f0b",
+    "title": "Pulldown (Overhand)",
+    "delta": {
+      "tips": [
+        "Lean back ~10°; don't pull bar behind the head.",
+        "Lead with elbows down and back — bar to upper chest.",
+        "Squeeze lats at the bottom; pause briefly.",
+        "Full stretch at top; let shoulder blades rise.",
+        "Wide grip = lat width bias; shoulder-width = mid-back."
+      ]
+    }
+  },
+  {
+    "uuid": "bef4fb1e-92f6-402f-9d7a-5ee0c014b081",
+    "title": "Rear Delt Fly Bentover (Dumbbell)",
+    "delta": {
+      "description": "Bent-over DB rear delt fly. The hinge position aligns the rear delts with gravity through the raise — direct rear-delt isolator.",
+      "steps": [
+        "Hinge at hips ~45°, light DBs in each hand, arms hanging straight down.",
+        "Slight bend in elbows, palms facing each other.",
+        "Raise DBs out laterally to shoulder line — squeeze rear delts.",
+        "Pause at top; don't shrug.",
+        "Control descent to full stretch at bottom."
+      ],
+      "tips": [
+        "Lead with the ELBOWS, not the hands — knuckles point sideways.",
+        "Light DBs — easy to compensate with traps if heavy.",
+        "Squeeze at the top with rear delts, not shoulder blades.",
+        "Don't extend the elbows during the raise — fixed slight bend."
+      ]
+    }
+  },
+  {
+    "uuid": "f0680ed0-c524-4715-8891-51a36e782b29",
+    "title": "Reverse Crunch",
+    "delta": {
+      "description": "Lying reverse crunch. Pelvis curls toward ribs through a small posterior pelvic tilt — lower-ab biased without hip-flexor dominance or anterior-tilt risk."
+    }
+  },
+  {
+    "uuid": "21ed9151-d845-4711-b05b-617e8e4149ea",
+    "title": "Reverse Pec Deck (Rear Delt Machine)",
+    "delta": {
+      "description": "Reverse pec deck. Chest against the pad, arms pull handles back and out by squeezing shoulder blades — rear-delt and mid-trap loader without torso cheat."
+    }
+  },
+  {
+    "uuid": "4ad58032-467f-4df6-b01d-27460a67d151",
+    "title": "Seated Cable Row (Low Row)",
+    "delta": {
+      "description": "Seated cable row from a low pulley. Wide-handle or V-grip — primary lat and mid-back work with elbows tucked into the body.",
+      "steps": [
+        "Sit at the cable row station, feet on platform, slight knee bend.",
+        "Grip handle, torso upright, arms fully extended at start.",
+        "Pull handle to lower ribs, leading with the elbows.",
+        "Squeeze shoulder blades together at peak — pause briefly.",
+        "Control return to full stretch; don't slump forward."
+      ],
+      "tips": [
+        "Torso angle stays steady — no rocking to add ROM.",
+        "Elbows tucked tight = mid-back bias; flared = rear delt bias.",
+        "Full stretch at the front; full retraction at the back.",
+        "Pause and squeeze at peak — chase contraction, not range."
+      ]
+    }
+  },
+  {
+    "uuid": "7cce552f-474b-4123-b6e6-188a55578dcc",
+    "title": "Seated Leg Curl",
+    "delta": {
+      "description": "Seated machine leg curl. Hip-flexed seated position lengthens the hamstrings at the start — biases the long head and adds stretch-mediated stimulus."
+    }
+  },
+  {
+    "uuid": "0abfaa02-154c-4e4d-8046-cf46c3ecd6b3",
+    "title": "Single Leg RDL",
+    "delta": {
+      "steps": [
+        "Stand on one leg, slight knee bend; DB in opposite hand (or bodyweight).",
+        "Hinge at hip — torso tips forward as rear leg extends straight back.",
+        "Vertical shin on the working leg; back stays neutral.",
+        "Lower until torso ~parallel to floor or hamstring stretch limits ROM.",
+        "Drive through standing-leg heel to return to standing.",
+        "Complete reps, switch legs."
+      ],
+      "tips": [
+        "Vertical shin cue = pure hip hinge, glute/ham loaded.",
+        "Cue: close a car door behind you with the back foot — keeps hips square.",
+        "Bodyweight first; use mirror to verify shin and back position.",
+        "Both hip points stay level — don't rotate toward lifting leg."
+      ]
+    }
+  },
+  {
+    "uuid": "fdec211b-2157-4232-8e25-f796f067d37d",
+    "title": "Triceps Pushdown: Cable (Rope)",
+    "delta": {
+      "tips": [
+        "Elbows pinned to ribs — no shoulder flexion.",
+        "Split the rope at the bottom for full triceps contraction.",
+        "Slow eccentric — control the return to full stretch.",
+        "If shoulders kick in, the weight is too heavy."
+      ]
+    }
+  },
+  {
+    "uuid": "37d4f07b-d420-4f7b-86ba-3a8ab25d062c",
+    "title": "Wide-Grip EZ-Bar Curl",
+    "delta": {
+      "description": "Wide-grip EZ-bar curl. Palms angled outward emphasizes the short (inner) head of the biceps — drives arm width on the front view."
+    }
+  }
+]

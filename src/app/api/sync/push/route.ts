@@ -369,13 +369,28 @@ async function pushExercise(r: Record<string, unknown>): Promise<void> {
   const validSources = ['audited', 'inferred', 'default', 'manual-override'];
   const wsClean: string | null = (typeof wsRaw === 'string' && validSources.includes(wsRaw)) ? wsRaw : null;
 
+  // description/steps/tips: same defensive-preservation rule as image_urls /
+  // secondary_weights. These can be enriched server-side (catalog backfills,
+  // MCP edits, AI content gen) outside the client → sync layer. A stale-Dexie
+  // push that carries empty content would otherwise wipe that enrichment via
+  // EXCLUDED.*. So only overwrite when the client actually sent a non-empty
+  // value; an empty/absent field preserves whatever the server already holds.
+  // The one trade-off — clearing a field to empty via the app no longer
+  // propagates — matches how image_count/secondary_weights already behave.
+  const clientSentDescription = typeof r.description === 'string' && r.description.trim().length > 0;
+  const clientSentSteps = Array.isArray(r.steps) && (r.steps as unknown[]).length > 0;
+  const clientSentTips = Array.isArray(r.tips) && (r.tips as unknown[]).length > 0;
+
   await query(
     `INSERT INTO exercises (uuid, everkinetic_id, title, alias, description, primary_muscles, secondary_muscles, equipment, steps, tips, is_custom, is_hidden, movement_pattern, tracking_mode, image_count, youtube_url, image_urls, has_sides, lateral_emphasis, secondary_weights, weight_source, updated_at)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, NOW())
      ON CONFLICT (uuid) DO UPDATE SET
-       title = EXCLUDED.title, alias = EXCLUDED.alias, description = EXCLUDED.description,
+       title = EXCLUDED.title, alias = EXCLUDED.alias,
+       description = ${clientSentDescription ? 'EXCLUDED.description' : 'exercises.description'},
        primary_muscles = EXCLUDED.primary_muscles, secondary_muscles = EXCLUDED.secondary_muscles,
-       equipment = EXCLUDED.equipment, steps = EXCLUDED.steps, tips = EXCLUDED.tips,
+       equipment = EXCLUDED.equipment,
+       steps = ${clientSentSteps ? 'EXCLUDED.steps' : 'exercises.steps'},
+       tips = ${clientSentTips ? 'EXCLUDED.tips' : 'exercises.tips'},
        is_custom = EXCLUDED.is_custom, is_hidden = EXCLUDED.is_hidden,
        movement_pattern = EXCLUDED.movement_pattern,
        tracking_mode = EXCLUDED.tracking_mode,
