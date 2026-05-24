@@ -380,6 +380,15 @@ async function pushExercise(r: Record<string, unknown>): Promise<void> {
   const clientSentDescription = typeof r.description === 'string' && r.description.trim().length > 0;
   const clientSentSteps = Array.isArray(r.steps) && (r.steps as unknown[]).length > 0;
   const clientSentTips = Array.isArray(r.tips) && (r.tips as unknown[]).length > 0;
+  // Same rule for muscle/equipment tags + movement_pattern: these drive the
+  // muscle map and volume credit, and get tagged server-side (MCP, catalog
+  // backfill) on exercises a client may hold untagged. A stale push carrying
+  // empty arrays / null pattern would wipe that tagging via EXCLUDED.*, so
+  // preserve the server value unless the client sent something non-empty.
+  const clientSentPrimaryMuscles = Array.isArray(r.primary_muscles) && (r.primary_muscles as unknown[]).length > 0;
+  const clientSentSecondaryMuscles = Array.isArray(r.secondary_muscles) && (r.secondary_muscles as unknown[]).length > 0;
+  const clientSentEquipment = Array.isArray(r.equipment) && (r.equipment as unknown[]).length > 0;
+  const clientSentMovementPattern = typeof r.movement_pattern === 'string' && r.movement_pattern.trim().length > 0;
 
   await query(
     `INSERT INTO exercises (uuid, everkinetic_id, title, alias, description, primary_muscles, secondary_muscles, equipment, steps, tips, is_custom, is_hidden, movement_pattern, tracking_mode, image_count, youtube_url, image_urls, has_sides, lateral_emphasis, secondary_weights, weight_source, updated_at)
@@ -387,12 +396,13 @@ async function pushExercise(r: Record<string, unknown>): Promise<void> {
      ON CONFLICT (uuid) DO UPDATE SET
        title = EXCLUDED.title, alias = EXCLUDED.alias,
        description = ${clientSentDescription ? 'EXCLUDED.description' : 'exercises.description'},
-       primary_muscles = EXCLUDED.primary_muscles, secondary_muscles = EXCLUDED.secondary_muscles,
-       equipment = EXCLUDED.equipment,
+       primary_muscles = ${clientSentPrimaryMuscles ? 'EXCLUDED.primary_muscles' : 'exercises.primary_muscles'},
+       secondary_muscles = ${clientSentSecondaryMuscles ? 'EXCLUDED.secondary_muscles' : 'exercises.secondary_muscles'},
+       equipment = ${clientSentEquipment ? 'EXCLUDED.equipment' : 'exercises.equipment'},
        steps = ${clientSentSteps ? 'EXCLUDED.steps' : 'exercises.steps'},
        tips = ${clientSentTips ? 'EXCLUDED.tips' : 'exercises.tips'},
        is_custom = EXCLUDED.is_custom, is_hidden = EXCLUDED.is_hidden,
-       movement_pattern = EXCLUDED.movement_pattern,
+       movement_pattern = ${clientSentMovementPattern ? 'EXCLUDED.movement_pattern' : 'exercises.movement_pattern'},
        tracking_mode = EXCLUDED.tracking_mode,
        image_count = ${clientSentImageCount ? 'EXCLUDED.image_count' : 'exercises.image_count'},
        youtube_url = EXCLUDED.youtube_url,

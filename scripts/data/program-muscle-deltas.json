@@ -1,0 +1,42 @@
+[
+  {
+    "uuid": "7c9d246b-eeb3-4361-b3d3-1e64f842cdda",
+    "title": "Donkey Calf",
+    "primary_muscles": ["calves"],
+    "secondary_muscles": [],
+    "equipment": ["machine"],
+    "movement_pattern": "plantar flexion"
+  },
+  {
+    "uuid": "6bcc12aa-4435-429c-aa81-f27a6c996e8d",
+    "title": "Hip Thrust (Barbell)",
+    "primary_muscles": ["glutes"],
+    "secondary_muscles": ["hamstrings", "quads"],
+    "equipment": ["barbell", "bench"],
+    "movement_pattern": "hinge"
+  },
+  {
+    "uuid": "522886b6-9b59-4254-8389-d481489d3184",
+    "title": "Pallof Rotations (Band)",
+    "primary_muscles": ["core"],
+    "secondary_muscles": [],
+    "equipment": ["resistance band"],
+    "movement_pattern": "rotation"
+  },
+  {
+    "uuid": "bef4fb1e-92f6-402f-9d7a-5ee0c014b081",
+    "title": "Rear Delt Fly Bentover (Dumbbell)",
+    "primary_muscles": ["delts"],
+    "secondary_muscles": ["rhomboids", "mid_traps"],
+    "equipment": ["dumbbell"],
+    "movement_pattern": "raise"
+  },
+  {
+    "uuid": "4ad58032-467f-4df6-b01d-27460a67d151",
+    "title": "Seated Cable Row (Low Row)",
+    "primary_muscles": ["lats", "rhomboids"],
+    "secondary_muscles": ["biceps", "mid_traps"],
+    "equipment": ["cable", "machine"],
+    "movement_pattern": "pull"
+  }
+]
