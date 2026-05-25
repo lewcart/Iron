@@ -390,9 +390,29 @@ async function pushExercise(r: Record<string, unknown>): Promise<void> {
   const clientSentEquipment = Array.isArray(r.equipment) && (r.equipment as unknown[]).length > 0;
   const clientSentMovementPattern = typeof r.movement_pattern === 'string' && r.movement_pattern.trim().length > 0;
 
+  // machine_settings: only overwrite server value when client sent a non-null
+  // object. Same defensive-preservation pattern as secondary_weights — a stale
+  // Dexie push from a pre-v25 client row carries machine_settings=null (the
+  // backfill default), and we must not wipe settings the user already saved.
+  // Values are numbers (setting positions); we drop non-finite entries silently.
+  const msRaw = r.machine_settings;
+  const clientSentMachineSettings =
+    msRaw !== undefined && msRaw !== null &&
+    typeof msRaw === 'object' && !Array.isArray(msRaw);
+  let msClean: Record<string, number> | null = null;
+  if (clientSentMachineSettings) {
+    const cleaned: Record<string, number> = {};
+    for (const [k, v] of Object.entries(msRaw as Record<string, unknown>)) {
+      if (typeof v === 'number' && Number.isFinite(v)) {
+        cleaned[k] = v;
+      }
+    }
+    msClean = cleaned;
+  }
+
   await query(
-    `INSERT INTO exercises (uuid, everkinetic_id, title, alias, description, primary_muscles, secondary_muscles, equipment, steps, tips, is_custom, is_hidden, movement_pattern, tracking_mode, image_count, youtube_url, image_urls, has_sides, lateral_emphasis, secondary_weights, weight_source, updated_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, NOW())
+    `INSERT INTO exercises (uuid, everkinetic_id, title, alias, description, primary_muscles, secondary_muscles, equipment, steps, tips, is_custom, is_hidden, movement_pattern, tracking_mode, image_count, youtube_url, image_urls, has_sides, lateral_emphasis, secondary_weights, weight_source, machine_settings, updated_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, NOW())
      ON CONFLICT (uuid) DO UPDATE SET
        title = EXCLUDED.title, alias = EXCLUDED.alias,
        description = ${clientSentDescription ? 'EXCLUDED.description' : 'exercises.description'},
@@ -411,6 +431,7 @@ async function pushExercise(r: Record<string, unknown>): Promise<void> {
        lateral_emphasis = EXCLUDED.lateral_emphasis,
        secondary_weights = ${clientSentSecondaryWeights ? 'EXCLUDED.secondary_weights' : 'exercises.secondary_weights'},
        weight_source = ${clientSentSecondaryWeights && wsClean !== null ? 'EXCLUDED.weight_source' : 'exercises.weight_source'},
+       machine_settings = ${clientSentMachineSettings ? 'EXCLUDED.machine_settings' : 'exercises.machine_settings'},
        updated_at = NOW()`,
     [
       String(r.uuid).toLowerCase(), r.everkinetic_id, r.title,
@@ -426,6 +447,7 @@ async function pushExercise(r: Record<string, unknown>): Promise<void> {
       Boolean(r.lateral_emphasis),
       swClean === null ? null : JSON.stringify(swClean),
       wsClean,
+      msClean === null ? null : JSON.stringify(msClean),
     ],
   );
 }

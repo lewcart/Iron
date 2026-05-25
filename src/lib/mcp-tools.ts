@@ -1215,6 +1215,7 @@ async function updateExercise(args: Record<string, unknown>) {
     tracking_mode?: 'reps' | 'time';
     youtube_url?: string | null;
     secondary_weights?: Partial<Record<string, number>> | null;
+    machine_settings?: Record<string, number> | null;
   };
 
   if (!uuid) return toolError('uuid is required');
@@ -1302,6 +1303,23 @@ async function updateExercise(args: Record<string, unknown>) {
       push('weight_source', 'manual-override');
     } else {
       return toolError('secondary_weights must be an object keyed by canonical muscle slug, or null');
+    }
+  }
+
+  if (patch.machine_settings !== undefined) {
+    if (patch.machine_settings === null) {
+      push('machine_settings', null);
+    } else if (typeof patch.machine_settings === 'object' && !Array.isArray(patch.machine_settings)) {
+      const cleaned: Record<string, number> = {};
+      for (const [k, v] of Object.entries(patch.machine_settings)) {
+        if (typeof v !== 'number' || !Number.isFinite(v)) {
+          return toolError(`machine_settings["${k}"] must be a finite number (got ${v})`);
+        }
+        cleaned[k] = v;
+      }
+      push('machine_settings', JSON.stringify(cleaned));
+    } else {
+      return toolError('machine_settings must be an object keyed by setting name, or null');
     }
   }
 
@@ -3729,6 +3747,16 @@ export const tools: MCPTool[] = [
             'Max 18 keys (one per canonical muscle). Use ONLY when Lou explicitly asks to adjust a specific exercise\'s secondary credit — do not auto-tune weights.',
           additionalProperties: { type: 'number', minimum: 0, maximum: 1 },
           maxProperties: 18,
+        },
+        machine_settings: {
+          type: ['object', 'null'],
+          description:
+            'Named machine settings keyed by setting name (e.g. {"seat height": 3, "chest bar": 4}). ' +
+            'Values are numbers (the physical position/level on the machine). ' +
+            'REPLACE semantics: the full object replaces any existing settings. ' +
+            'Pass null to clear all settings. ' +
+            'Use when Lou tells you what position a machine is set to for her.',
+          additionalProperties: { type: 'number' },
         },
       },
       required: ['uuid'],

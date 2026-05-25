@@ -67,6 +67,10 @@ export interface LocalExercise {
    *  UI edit replaced the audited value. Surface this in the exercise page
    *  so Lou can see which weights are reliable. */
   weight_source: 'audited' | 'inferred' | 'default' | 'manual-override' | null;
+  /** Named machine settings keyed by setting name (e.g. "seat height": 3).
+   *  Lou's personal values saved on the exercise and shown as a reminder
+   *  during workouts. Null = no settings recorded. */
+  machine_settings: Record<string, number> | null;
 }
 
 export interface LocalWorkout extends SyncMeta {
@@ -1002,6 +1006,16 @@ export class IronDB extends Dexie {
         if (row.superset_group_uuid === undefined) row.superset_group_uuid = null;
         if (row.superset_round_target === undefined) row.superset_round_target = null;
         if (row.superset_rest_override_seconds === undefined) row.superset_rest_override_seconds = null;
+      });
+    });
+
+    // v25: per-exercise machine settings (mirrors Postgres migration 050).
+    //   - exercises.machine_settings (JSONB Record<name, number> | null)
+    // Additive nullable column. Backfill null on pre-v25 rows; sync pull
+    // will populate when the server returns a non-null value.
+    this.version(25).stores(v24Stores).upgrade(async tx => {
+      await tx.table('exercises').toCollection().modify(row => {
+        if (row.machine_settings === undefined) row.machine_settings = null;
       });
     });
 

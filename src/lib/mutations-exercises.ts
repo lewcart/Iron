@@ -75,6 +75,7 @@ export async function createCustomExercise(opts: {
     lateral_emphasis: false,
     secondary_weights: null,
     weight_source: null,
+    machine_settings: null,
   };
   // Push needs the dirty flag. exercises rows technically don't extend
   // SyncMeta on the type but the sync engine reads _synced/_updated_at

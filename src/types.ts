@@ -38,6 +38,10 @@ export interface Exercise {
   secondary_weights?: Record<string, number> | null;
   /** Provenance for `secondary_weights`. */
   weight_source?: 'audited' | 'inferred' | 'default' | 'manual-override' | null;
+  /** Named machine settings keyed by setting name (e.g. "seat height": 3).
+   *  Lou's personal values saved on the exercise and shown as a reminder
+   *  during workouts. Null = no settings recorded. */
+  machine_settings?: Record<string, number> | null;
 }
 
 export interface Workout {

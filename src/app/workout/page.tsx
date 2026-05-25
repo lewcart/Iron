@@ -1600,6 +1600,22 @@ function SortableExerciseCard({
                   )}
                 </span>
               )}
+              {(() => {
+                const ms = we.exercise?.machine_settings;
+                if (!ms) return null;
+                const entries = Object.entries(ms);
+                if (entries.length === 0) return null;
+                return (
+                  <span className="flex items-center gap-1 mt-0.5 text-[10px] text-muted-foreground/70 font-medium truncate">
+                    {entries.map(([k, v], i) => (
+                      <span key={k}>
+                        {i > 0 && <span className="mx-0.5 opacity-50">·</span>}
+                        {k}: {v}
+                      </span>
+                    ))}
+                  </span>
+                );
+              })()}
             </span>
             {allDone ? (
               <div className="w-5 h-5 rounded-full bg-green-500 flex items-center justify-center flex-shrink-0">

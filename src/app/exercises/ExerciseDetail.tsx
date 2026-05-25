@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ChevronLeft, Trophy, Timer } from 'lucide-react';
+import { ChevronLeft, Trophy, Timer, Settings2, Plus, Pencil, Trash2, Check, X } from 'lucide-react';
 import type { Exercise } from '@/types';
 import { useUnit } from '@/context/UnitContext';
 import { apiBase, fetchJsonAuthed } from '@/lib/api/client';
@@ -346,6 +346,236 @@ async function generateContent(
     }),
     signal,
   });
+}
+
+// ── Machine Settings ───────────────────────────────────────────────────────
+
+/** Inline editor row for a single machine setting (name → value). */
+function SettingRow({
+  name,
+  value,
+  onSave,
+  onDelete,
+}: {
+  name: string;
+  value: number;
+  onSave: (newName: string, newValue: number) => Promise<void>;
+  onDelete: () => Promise<void>;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draftName, setDraftName] = useState(name);
+  const [draftValue, setDraftValue] = useState(String(value));
+  const [saving, setSaving] = useState(false);
+
+  const handleSave = async () => {
+    const n = draftName.trim();
+    const v = parseFloat(draftValue);
+    if (!n || isNaN(v)) return;
+    setSaving(true);
+    try {
+      await onSave(n, v);
+      setEditing(false);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleCancel = () => {
+    setDraftName(name);
+    setDraftValue(String(value));
+    setEditing(false);
+  };
+
+  if (editing) {
+    return (
+      <div className="ios-row flex items-center gap-2">
+        <input
+          type="text"
+          value={draftName}
+          onChange={e => setDraftName(e.target.value)}
+          className="flex-1 bg-transparent text-sm outline-none min-w-0"
+          placeholder="Setting name"
+          autoFocus
+        />
+        <input
+          type="number"
+          inputMode="decimal"
+          value={draftValue}
+          onChange={e => setDraftValue(e.target.value)}
+          className="w-16 bg-transparent text-sm text-right outline-none"
+          placeholder="0"
+        />
+        <button
+          type="button"
+          onClick={handleSave}
+          disabled={saving || !draftName.trim() || isNaN(parseFloat(draftValue))}
+          className="text-primary disabled:opacity-40"
+          aria-label="Save setting"
+        >
+          <Check className="h-4 w-4" />
+        </button>
+        <button
+          type="button"
+          onClick={handleCancel}
+          className="text-muted-foreground"
+          aria-label="Cancel"
+        >
+          <X className="h-4 w-4" />
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="ios-row flex items-center gap-2">
+      <span className="flex-1 text-sm text-foreground truncate">{name}</span>
+      <span className="text-sm font-medium tabular-nums text-foreground/80">{value}</span>
+      <button
+        type="button"
+        onClick={() => setEditing(true)}
+        className="text-muted-foreground active:text-foreground ml-1"
+        aria-label={`Edit ${name}`}
+      >
+        <Pencil className="h-3.5 w-3.5" />
+      </button>
+      <button
+        type="button"
+        onClick={onDelete}
+        className="text-muted-foreground active:text-destructive"
+        aria-label={`Delete ${name}`}
+      >
+        <Trash2 className="h-3.5 w-3.5" />
+      </button>
+    </div>
+  );
+}
+
+/** Add-new-setting inline form. */
+function AddSettingRow({ onAdd }: { onAdd: (name: string, value: number) => Promise<void> }) {
+  const [open, setOpen] = useState(false);
+  const [name, setName] = useState('');
+  const [value, setValue] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  const handleAdd = async () => {
+    const n = name.trim();
+    const v = parseFloat(value);
+    if (!n || isNaN(v)) return;
+    setSaving(true);
+    try {
+      await onAdd(n, v);
+      setName('');
+      setValue('');
+      setOpen(false);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (!open) {
+    return (
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="ios-row flex items-center gap-2 text-primary"
+      >
+        <Plus className="h-4 w-4" />
+        <span className="text-sm">Add setting</span>
+      </button>
+    );
+  }
+
+  return (
+    <div className="ios-row flex items-center gap-2">
+      <input
+        type="text"
+        value={name}
+        onChange={e => setName(e.target.value)}
+        className="flex-1 bg-transparent text-sm outline-none min-w-0"
+        placeholder="Name (e.g. seat height)"
+        autoFocus
+      />
+      <input
+        type="number"
+        inputMode="decimal"
+        value={value}
+        onChange={e => setValue(e.target.value)}
+        className="w-16 bg-transparent text-sm text-right outline-none"
+        placeholder="0"
+      />
+      <button
+        type="button"
+        onClick={handleAdd}
+        disabled={saving || !name.trim() || isNaN(parseFloat(value))}
+        className="text-primary disabled:opacity-40"
+        aria-label="Add setting"
+      >
+        <Check className="h-4 w-4" />
+      </button>
+      <button
+        type="button"
+        onClick={() => { setName(''); setValue(''); setOpen(false); }}
+        className="text-muted-foreground"
+        aria-label="Cancel"
+      >
+        <X className="h-4 w-4" />
+      </button>
+    </div>
+  );
+}
+
+/** Full machine-settings section rendered in ExerciseDetail. */
+function MachineSettingsSection({
+  exerciseUuid,
+  settings,
+}: {
+  exerciseUuid: string;
+  settings: Record<string, number> | null | undefined;
+}) {
+  const current = settings ?? {};
+  const entries = Object.entries(current);
+
+  const save = async (patch: Record<string, number>) => {
+    await updateExercise(exerciseUuid, { machine_settings: patch });
+  };
+
+  const handleAdd = async (name: string, value: number) => {
+    await save({ ...current, [name]: value });
+  };
+
+  const handleEdit = async (oldName: string, newName: string, newValue: number) => {
+    const next = { ...current };
+    delete next[oldName];
+    next[newName] = newValue;
+    await save(next);
+  };
+
+  const handleDelete = async (name: string) => {
+    const next = { ...current };
+    delete next[name];
+    await save(next);
+  };
+
+  return (
+    <div>
+      <div className="flex items-center gap-2 mb-1 px-1">
+        <Settings2 className="h-3.5 w-3.5 text-primary" />
+        <p className="text-xs font-semibold text-primary uppercase tracking-wide">Machine Settings</p>
+      </div>
+      <div className="ios-section">
+        {entries.map(([name, value]) => (
+          <SettingRow
+            key={name}
+            name={name}
+            value={value}
+            onSave={(newName, newValue) => handleEdit(name, newName, newValue)}
+            onDelete={() => handleDelete(name)}
+          />
+        ))}
+        <AddSettingRow onAdd={handleAdd} />
+      </div>
+    </div>
+  );
 }
 
 // ── Main component ─────────────────────────────────────────────────────────
@@ -1040,6 +1270,13 @@ export default function ExerciseDetail({
             </div>
           );
         })()}
+
+        {/* Machine settings — named position values (seat height, bar level, etc.)
+            saved per exercise. Shown as a reminder during workouts. */}
+        <MachineSettingsSection
+          exerciseUuid={exercise.uuid}
+          settings={exercise.machine_settings}
+        />
 
         {/* Tracking mode toggle — flip an exercise between weight × reps and
             held duration. Mirrors the segmented control on CreateExerciseForm
