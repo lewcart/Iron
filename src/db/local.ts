@@ -1117,6 +1117,7 @@ export async function hydrateExercises(): Promise<void> {
           lateral_emphasis: ex.lateral_emphasis ?? false,
           secondary_weights: ex.secondary_weights ?? null,
           weight_source: ex.weight_source ?? null,
+          machine_settings: ex.machine_settings ?? null,
         });
       }
     });

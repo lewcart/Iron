@@ -112,7 +112,7 @@ describe('update_exercise — machine_settings', () => {
       .mockResolvedValueOnce({ uuid: EX_UUID })
       .mockResolvedValueOnce({ uuid: EX_UUID, machine_settings: {} });
 
-    const { isError, result } = await callTool('update_exercise', {
+    const { isError } = await callTool('update_exercise', {
       uuid: EX_UUID,
       machine_settings: {},
     });

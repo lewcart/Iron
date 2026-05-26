@@ -59,6 +59,15 @@ const POSE_GUIDANCE: Record<string, string> = {
   other:      'Anything else worth tracking — outfit, lighting, angle.',
 };
 
+// A photo staged in the Log sheet before save: the raw file, a preview object
+// URL to revoke on removal/close, and the pose it'll be logged under.
+type StagedPhoto = {
+  id: string;
+  blob: File | Blob;
+  preview: string;
+  pose: ProgressPhotoPose;
+};
+
 // Distinct Tailwind-equivalent colors for multi-site overlay (no --chart-N tokens in globals.css)
 const SITE_COLORS: Record<SiteKey, string> = {
   shoulder_width: '#f43f5e', // rose-500
@@ -186,20 +195,24 @@ function MeasurementsInner() {
   // Unified Log sheet state — photo + measurements + bodyweight + note,
   // all optional, all share the same `measured_at` so a single capture
   // session writes consistent timestamps across all three tables.
-  const [logPose, setLogPose] = useState<ProgressPhotoPose>('front');
-  const [logPhotoBlob, setLogPhotoBlob] = useState<File | Blob | null>(null);
-  const [logPhotoPreview, setLogPhotoPreview] = useState<string | null>(null);
+  // A single log entry can stage multiple photos — Lou shoots front/side/back
+  // in one session and attaches them together. Each staged photo carries its
+  // own pose; on save we write one progress_photos row per photo (they share
+  // the same taken_at, so the gallery groups them into one session card).
+  const [logPhotos, setLogPhotos] = useState<StagedPhoto[]>([]);
   const [logNote, setLogNote] = useState('');
   const logFileRef = useRef<HTMLInputElement>(null);
+  // Pose requested via `?compose=<pose>` deep link — used for the first photo
+  // added, then cleared. Subsequent photos auto-assign the next unused pose.
+  const seedPoseRef = useRef<ProgressPhotoPose | null>(null);
 
   useEffect(() => {
     if (!logSheetOpen) {
-      setLogPose('front');
-      setLogPhotoBlob(null);
-      setLogPhotoPreview((prev) => {
-        if (prev) URL.revokeObjectURL(prev);
-        return null;
+      setLogPhotos((prev) => {
+        prev.forEach((p) => URL.revokeObjectURL(p.preview));
+        return [];
       });
+      seedPoseRef.current = null;
       setLogNote('');
     }
   }, [logSheetOpen]);
@@ -213,7 +226,7 @@ function MeasurementsInner() {
     if (!compose) return;
     const validPose = (ALL_POSES as readonly string[]).includes(compose);
     if (!validPose) return;
-    setLogPose(compose as ProgressPhotoPose);
+    seedPoseRef.current = compose as ProgressPhotoPose;
     setLogSheetOpen(true);
     const next = new URLSearchParams(searchParams.toString());
     next.delete('compose');
@@ -301,7 +314,7 @@ function MeasurementsInner() {
   const handleSaveLog = async () => {
     const hasMeasurement = SITES.some(s => inputs[s.key]);
     const hasWeight = !!weightInput;
-    const hasPhoto = !!logPhotoBlob;
+    const hasPhoto = logPhotos.length > 0;
     if (!hasMeasurement && !hasWeight && !hasPhoto) return;
     setSaving(true);
     try {
@@ -325,10 +338,10 @@ function MeasurementsInner() {
         writes.push(logBodyweight(fromInput(parseFloat(weightInput)), note, measured_at));
       }
 
-      if (hasPhoto && logPhotoBlob) {
+      for (const photo of logPhotos) {
         writes.push(recordProgressPhotoFromBlob({
-          blob: logPhotoBlob,
-          pose: logPose,
+          blob: photo.blob,
+          pose: photo.pose,
           notes: note ?? null,
           taken_at: measured_at,
         }));
@@ -345,19 +358,43 @@ function MeasurementsInner() {
     }
   };
 
-  const handleLogPhotoPick = (file: File) => {
-    setLogPhotoBlob(file);
-    setLogPhotoPreview((prev) => {
-      if (prev) URL.revokeObjectURL(prev);
-      return URL.createObjectURL(file);
+  // Stage one or more picked files. Each gets the next unused pose so a
+  // multi-select of three lands front/side/back automatically; the first
+  // photo honours a `?compose=` deep-link pose if one was requested.
+  const handleLogPhotoPick = (files: FileList) => {
+    setLogPhotos((prev) => {
+      const used = new Set(prev.map((p) => p.pose));
+      const next = [...prev];
+      const picked = Array.from(files);
+      picked.forEach((file, i) => {
+        let pose: ProgressPhotoPose;
+        if (i === 0 && prev.length === 0 && seedPoseRef.current && !used.has(seedPoseRef.current)) {
+          pose = seedPoseRef.current;
+        } else {
+          pose = ALL_POSES.find((p) => !used.has(p)) ?? 'other';
+        }
+        used.add(pose);
+        next.push({
+          id: crypto.randomUUID(),
+          blob: file,
+          preview: URL.createObjectURL(file),
+          pose,
+        });
+      });
+      return next;
     });
+    seedPoseRef.current = null;
   };
 
-  const clearLogPhoto = () => {
-    setLogPhotoBlob(null);
-    setLogPhotoPreview((prev) => {
-      if (prev) URL.revokeObjectURL(prev);
-      return null;
+  const setPhotoPose = (id: string, pose: ProgressPhotoPose) => {
+    setLogPhotos((prev) => prev.map((p) => (p.id === id ? { ...p, pose } : p)));
+  };
+
+  const removeLogPhoto = (id: string) => {
+    setLogPhotos((prev) => {
+      const found = prev.find((p) => p.id === id);
+      if (found) URL.revokeObjectURL(found.preview);
+      return prev.filter((p) => p.id !== id);
     });
   };
 
@@ -464,7 +501,7 @@ function MeasurementsInner() {
     };
   }
 
-  const hasInput = SITES.some(s => inputs[s.key]) || !!weightInput || !!logPhotoBlob;
+  const hasInput = SITES.some(s => inputs[s.key]) || !!weightInput || logPhotos.length > 0;
 
   // InBody trend chart — most recent scans oldest-first for the selected metric.
   const inbodyMetricDef = METRICS.find(m => m.key === inbodyMetric);
@@ -1157,66 +1194,57 @@ function MeasurementsInner() {
           </div>
 
           <div>
-            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1 px-1">Photo</p>
+            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1 px-1">Photos</p>
             <div className="ios-section">
-              <div className="ios-row py-2 px-2">
-                <div className="flex-1 flex gap-2 overflow-x-auto scrollbar-none flex-nowrap">
-                  {ALL_POSES.map(pose => (
-                    <button
-                      key={pose}
-                      onClick={() => setLogPose(pose)}
-                      className={`shrink-0 px-3 py-2 text-xs font-medium rounded-lg border whitespace-nowrap transition-colors ${
-                        logPose === pose
-                          ? 'bg-primary text-white border-primary'
-                          : 'border-border text-muted-foreground'
-                      }`}
-                    >
-                      {POSE_LABELS[pose]}
-                    </button>
-                  ))}
+              {logPhotos.map(photo => (
+                <div key={photo.id} className="ios-row py-2 px-2 gap-3 items-start">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={photo.preview} alt="" className="h-12 w-12 rounded-md object-cover shrink-0" />
+                  <div className="flex-1 min-w-0 space-y-1">
+                    <div className="flex gap-1.5 overflow-x-auto scrollbar-none flex-nowrap">
+                      {ALL_POSES.map(pose => (
+                        <button
+                          key={pose}
+                          onClick={() => setPhotoPose(photo.id, pose)}
+                          className={`shrink-0 px-2.5 py-1.5 text-xs font-medium rounded-lg border whitespace-nowrap transition-colors ${
+                            photo.pose === pose
+                              ? 'bg-primary text-white border-primary'
+                              : 'border-border text-muted-foreground'
+                          }`}
+                        >
+                          {POSE_LABELS[pose]}
+                        </button>
+                      ))}
+                    </div>
+                    <p className="text-xs text-muted-foreground">{POSE_GUIDANCE[photo.pose]}</p>
+                  </div>
+                  <button
+                    onClick={() => removeLogPhoto(photo.id)}
+                    className="text-xs text-muted-foreground shrink-0 self-center"
+                  >
+                    Remove
+                  </button>
                 </div>
-              </div>
-              <div className="ios-row py-1">
-                <p className="text-xs text-muted-foreground">{POSE_GUIDANCE[logPose]}</p>
-              </div>
+              ))}
               <div className="ios-row justify-between gap-3">
                 <input
                   ref={logFileRef}
                   type="file"
                   accept="image/*"
+                  multiple
                   className="hidden"
                   onChange={e => {
-                    const file = e.target.files?.[0];
-                    if (file) handleLogPhotoPick(file);
+                    if (e.target.files?.length) handleLogPhotoPick(e.target.files);
                     e.target.value = '';
                   }}
                 />
-                {logPhotoPreview ? (
-                  <div className="flex items-center gap-3 flex-1">
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={logPhotoPreview} alt="" className="h-12 w-12 rounded-md object-cover" />
-                    <button
-                      onClick={() => logFileRef.current?.click()}
-                      className="text-xs text-primary"
-                    >
-                      Replace
-                    </button>
-                    <button
-                      onClick={clearLogPhoto}
-                      className="text-xs text-muted-foreground ml-auto"
-                    >
-                      Remove
-                    </button>
-                  </div>
-                ) : (
-                  <button
-                    onClick={() => logFileRef.current?.click()}
-                    className="flex items-center gap-2 px-3 py-2 border border-border text-sm font-medium rounded-lg text-muted-foreground"
-                  >
-                    <Camera className="h-4 w-4" />
-                    Choose photo
-                  </button>
-                )}
+                <button
+                  onClick={() => logFileRef.current?.click()}
+                  className="flex items-center gap-2 px-3 py-2 border border-border text-sm font-medium rounded-lg text-muted-foreground"
+                >
+                  <Camera className="h-4 w-4" />
+                  {logPhotos.length ? 'Add more photos' : 'Choose photos'}
+                </button>
               </div>
             </div>
           </div>
