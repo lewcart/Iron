@@ -270,7 +270,7 @@ describe('add_exercise', () => {
     vi.mocked(db.queryOne)
       .mockResolvedValueOnce({ uuid: 'routine-1' }) // routine exists
       .mockResolvedValueOnce({ uuid: 'ex-1', title: 'Squat' }) // resolveExercise by id
-      .mockResolvedValueOnce({ count: '2' }); // current count
+      .mockResolvedValueOnce({ max: 1 }); // MAX(order_index) of siblings
     vi.mocked(db.query).mockResolvedValue([]);
 
     const { result, isError } = await callTool('add_exercise', {
@@ -283,6 +283,39 @@ describe('add_exercise', () => {
     expect(result.routine_exercise_id).toBeDefined();
     expect(result.exercise).toBe('Squat');
     expect(result.sets_created).toBe(1);
+  });
+
+  it('places the new exercise above the highest sibling index, not at the count (no collision on a gappy routine)', async () => {
+    const db = await import('@/db/db');
+    // A routine whose siblings sit at indices 0 and 5 (a deleted middle leaves a
+    // gap): COUNT would be 2 and collide with neither here, but MAX-based logic
+    // must land at 6. The collision bug was COUNT landing on an occupied index.
+    vi.mocked(db.queryOne)
+      .mockResolvedValueOnce({ uuid: 'routine-1' }) // routine exists
+      .mockResolvedValueOnce({ uuid: 'ex-1', title: 'Squat' }) // resolveExercise by id
+      .mockResolvedValueOnce({ max: 5 }); // MAX(order_index) of siblings
+    vi.mocked(db.query).mockResolvedValue([]);
+
+    await callTool('add_exercise', { routine_id: 'routine-1', exercise_id: 'ex-1' });
+
+    // First db.query is the INSERT into workout_routine_exercises; order_index is param $4 (index 3).
+    const insertCall = vi.mocked(db.query).mock.calls[0];
+    expect(insertCall[0]).toContain('INSERT INTO workout_routine_exercises');
+    expect((insertCall[1] as unknown[])[3]).toBe(6);
+  });
+
+  it('places the first exercise of an empty routine at index 0', async () => {
+    const db = await import('@/db/db');
+    vi.mocked(db.queryOne)
+      .mockResolvedValueOnce({ uuid: 'routine-1' })
+      .mockResolvedValueOnce({ uuid: 'ex-1', title: 'Squat' })
+      .mockResolvedValueOnce({ max: null }); // empty routine → MAX is NULL
+    vi.mocked(db.query).mockResolvedValue([]);
+
+    await callTool('add_exercise', { routine_id: 'routine-1', exercise_id: 'ex-1' });
+
+    const insertCall = vi.mocked(db.query).mock.calls[0];
+    expect((insertCall[1] as unknown[])[3]).toBe(0);
   });
 
   it('returns error when routine not found', async () => {

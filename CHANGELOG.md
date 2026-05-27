@@ -2,6 +2,13 @@
 
 All notable changes to Rebirth are documented here.
 
+## [0.13.1] - 2026-05-27
+
+### Fixed
+
+- **`add_exercise` order_index collisions.** The MCP `add_exercise` tool derived a new routine exercise's `order_index` from `COUNT(*)` of siblings, which only yields a free slot when indices are dense and 0-based. On any gappy routine (a deleted sibling, a non-zero start, or a prior collision) `COUNT` landed on an already-occupied index, so newly-added exercises shared an `order_index` with an existing sibling. Now derives from `MAX(order_index)+1` (empty routine → 0), robust to gaps. The UI was unaffected (it falls back to insertion order) but the data was untidy.
+- **One-shot re-pack of existing routine collisions** (`npm run db:repack-routine-order`, dry-run by default). Renumbered all 19 routines to a dense `0..n-1` sequence, clearing 5 pre-existing colliding `(routine, index)` pairs and normalizing 1-based routines to 0-based. Tie-break `(order_index, created_at, uuid)` preserves relative order; includes a superset-contiguity guard that aborts rather than split a group. Atomic single `UPDATE` fires the migration-019 CDC + `updated_at` triggers per moved row so the change propagates to the local-first client.
+
 ## [0.13.0] - 2026-05-27
 
 ### Added

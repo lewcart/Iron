@@ -1,6 +1,6 @@
 {
   "name": "rebirth",
-  "version": "0.13.0",
+  "version": "0.13.1",
   "private": true,
   "type": "module",
   "bin": {
@@ -35,6 +35,7 @@
     "db:seed": "tsx src/db/seed.ts",
     "db:seed-routines": "tsx src/db/seed-routines.ts",
     "db:dedupe-exercises": "tsx src/db/deduplicate-exercises.ts",
+    "db:repack-routine-order": "tsx src/db/repack-routine-order-index.ts",
     "db:apply-image-counts": "node scripts/db-apply-image-counts.mjs",
     "fetch-everkinetic-images": "node scripts/fetch-everkinetic-images.mjs",
     "gen-exercise-images": "node scripts/gen-exercise-images.mjs",

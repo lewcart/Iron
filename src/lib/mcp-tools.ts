@@ -1616,11 +1616,15 @@ async function addExercise(args: Record<string, unknown>) {
   const resolved = await resolveExercise({ exercise_id, exercise_name });
   if ('error' in resolved) return toolError(exerciseErrorMessage(resolved));
 
-  const currentCount = await queryOne<{ count: string }>(
-    'SELECT COUNT(*)::int AS count FROM workout_routine_exercises WHERE workout_routine_uuid = $1',
+  // Derive the next slot from MAX(order_index)+1, not COUNT(*). COUNT only
+  // yields a free index when indices are dense and 0-based; any gap (a deleted
+  // sibling, a non-zero start, a prior collision) makes COUNT land on an index
+  // that's already taken, producing the very collisions this once caused.
+  const maxOrder = await queryOne<{ max: number | null }>(
+    'SELECT MAX(order_index)::int AS max FROM workout_routine_exercises WHERE workout_routine_uuid = $1',
     [routine_id]
   );
-  const exerciseOrder = order ?? Number(currentCount?.count ?? 0);
+  const exerciseOrder = order ?? (maxOrder?.max == null ? 0 : maxOrder.max + 1);
 
   const reUuid = crypto.randomUUID();
   await query(
