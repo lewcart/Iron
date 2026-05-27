@@ -108,6 +108,8 @@ The engine is intentionally not exposed via MCP in v1.1 — the verdict stays UI
 Canonical muscle taxonomy: 18 slugs. Always use canonical slugs (`chest`, `lats`, `glutes`, etc.) — legacy values like `pectoralis major` are accepted by `find_exercises(muscle_group)` via synonyms, but `create_exercise` rejects non-canonical input with `UNKNOWN_MUSCLE`.
 
 - **First time touching the strength surface?** → `list_muscles()` returns the full taxonomy with optimal ranges, parent_groups, and legacy synonyms.
+- **"Review my current program"** → `get_active_routine()` returns the active plan (routines → exercises → set targets).
+- **"Review a draft / compare next quarter's plan"** → `list_routines()` to discover every plan (active + drafts) with `uuid`/`title`/`is_active`/`routine_count`, then `get_routine_by_uuid({ plan_uuid })` to read any one in the same shape as `get_active_routine` — read-only, does NOT activate it. Use these to diff a draft against the active plan side-by-side without disrupting current programming. `activate_routine({ plan_uuid })` is the separate, deliberate step that flips which plan is live.
 - **"Did I hit my volume targets this week?"** → `get_sets_per_muscle({ week_offset: 0 })` returns per-muscle set counts vs Schoenfeld 10–20 range. `summary.optimal_count`/`under_count`/`over_count` is the headline; `muscles[]` is the detail.
 - **"Total volume this week + per-muscle breakdown"** → `get_weekly_summary({ week_offset: 0 })` returns `total_volume`, `by_muscle[]` (canonical slugs + set_count + kg_volume), and `compliance_pct` vs active plan.
 - **"Find a glute exercise"** → `find_exercises({ query: 'romanian deadlift', muscle_group: 'glutes' })` — `muscle_group` accepts canonical slugs OR legacy synonyms.

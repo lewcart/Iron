@@ -2,6 +2,12 @@
 
 All notable changes to Rebirth are documented here.
 
+## [0.13.0] - 2026-05-27
+
+### Added
+
+- **MCP `get_routine_by_uuid` + `list_routines` tools.** Closes a gap where an agent couldn't review a draft workout plan without activating it (which disrupts current programming) and couldn't diff draft vs active side-by-side. `list_routines()` returns every plan (active + drafts) with `uuid`/`title`/`is_active`/`created_at`/`routine_count` + a top-level `active_uuid`. `get_routine_by_uuid({ plan_uuid })` returns any plan — including unactivated drafts — in the same nested shape as `get_active_routine` (routines → exercises → set targets) plus an `is_active` flag, read-only (does NOT flip `is_active`). The two pre-existing error hints that already referenced `list_routines` now point at a real tool.
+
 ## [0.12.0] - 2026-05-22
 
 ### Added

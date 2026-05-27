@@ -213,6 +213,85 @@ describe('get_active_routine', () => {
   });
 });
 
+// ── list_routines ─────────────────────────────────────────────────────────────
+
+describe('list_routines', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('returns all plans with active_uuid pointing at the active one', async () => {
+    const db = await import('@/db/db');
+    vi.mocked(db.query).mockResolvedValueOnce([
+      { uuid: 'plan-active', title: 'Q2', is_active: true, created_at: '2026-04-01T00:00:00Z', routine_count: 4 },
+      { uuid: 'plan-draft', title: 'Q3 draft', is_active: false, created_at: '2026-05-20T00:00:00Z', routine_count: 5 },
+    ]);
+
+    const { result, isError } = await callTool('list_routines');
+    expect(isError).toBeFalsy();
+    expect(result.plans).toHaveLength(2);
+    expect(result.active_uuid).toBe('plan-active');
+    expect(result.plans[1].routine_count).toBe(5);
+  });
+
+  it('returns null active_uuid when no plan is active', async () => {
+    const db = await import('@/db/db');
+    vi.mocked(db.query).mockResolvedValueOnce([
+      { uuid: 'plan-draft', title: 'Draft', is_active: false, created_at: '2026-05-20T00:00:00Z', routine_count: 3 },
+    ]);
+
+    const { result, isError } = await callTool('list_routines');
+    expect(isError).toBeFalsy();
+    expect(result.active_uuid).toBeNull();
+  });
+});
+
+// ── get_routine_by_uuid ───────────────────────────────────────────────────────
+
+describe('get_routine_by_uuid', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('errors when plan_uuid is missing', async () => {
+    const { result, isError } = await callTool('get_routine_by_uuid');
+    expect(isError).toBeTruthy();
+    expect(result).toContain('plan_uuid is required');
+  });
+
+  it('errors when the plan does not exist', async () => {
+    const db = await import('@/db/db');
+    vi.mocked(db.queryOne).mockResolvedValueOnce(null);
+
+    const { result, isError } = await callTool('get_routine_by_uuid', { plan_uuid: 'nope' });
+    expect(isError).toBeTruthy();
+    expect(result).toContain('not found');
+  });
+
+  it('returns a draft plan (is_active false) without activating it', async () => {
+    const db = await import('@/db/db');
+    vi.mocked(db.queryOne).mockResolvedValueOnce({ uuid: 'plan-draft', title: 'Q3 draft', is_active: false });
+    // routines
+    vi.mocked(db.query).mockResolvedValueOnce([
+      { uuid: 'r1', title: 'Upper', comment: null, order_index: 0 },
+    ]);
+    // routine exercises
+    vi.mocked(db.query).mockResolvedValueOnce([
+      { routine_uuid: 'r1', re_uuid: 're1', exercise_uuid: 'ex1', exercise_title: 'Row', order_index: 0 },
+    ]);
+    // routine sets
+    vi.mocked(db.query).mockResolvedValueOnce([
+      { workout_routine_exercise_uuid: 're1', min_repetitions: 8, max_repetitions: 12, order_index: 0 },
+    ]);
+
+    const { result, isError } = await callTool('get_routine_by_uuid', { plan_uuid: 'plan-draft' });
+    expect(isError).toBeFalsy();
+    expect(result.uuid).toBe('plan-draft');
+    expect(result.is_active).toBe(false);
+    expect(result.routines[0].exercises[0].exercise_title).toBe('Row');
+    expect(result.routines[0].exercises[0].sets).toHaveLength(1);
+    // No UPDATE was issued — read-only.
+    const updateCalls = vi.mocked(db.query).mock.calls.filter(c => /UPDATE/i.test(String(c[0])));
+    expect(updateCalls).toHaveLength(0);
+  });
+});
+
 // ── get_weekly_summary ────────────────────────────────────────────────────────
 
 describe('get_weekly_summary', () => {

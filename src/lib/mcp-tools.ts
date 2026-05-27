@@ -576,13 +576,10 @@ function pluralizeMcp(word: string, n: number): string {
   return n === 1 ? word : `${word}s`;
 }
 
-async function getActiveRoutine() {
-  const plan = await queryOne<{ uuid: string; title: string | null }>(`
-    SELECT uuid, title FROM workout_plans WHERE is_active = true LIMIT 1
-  `);
-
-  if (!plan) return toolResult(null);
-
+// Hydrates a workout_plans row into the nested { ...plan, routines:[{ exercises:[{ sets }] }] }
+// shape. Shared by get_active_routine (active plan) and get_routine_by_uuid (any plan,
+// including unactivated drafts) so both return an identical structure.
+async function buildRoutinePayload<T extends { uuid: string }>(plan: T) {
   const routines = await query<{
     uuid: string; title: string | null; comment: string | null; order_index: number;
   }>(`
@@ -626,9 +623,60 @@ async function getActiveRoutine() {
     return acc;
   }, {} as Record<string, unknown[]>);
 
-  return toolResult({
+  return {
     ...plan,
     routines: routines.map(r => ({ ...r, exercises: exByRoutine[r.uuid] ?? [] })),
+  };
+}
+
+async function getActiveRoutine() {
+  const plan = await queryOne<{ uuid: string; title: string | null }>(`
+    SELECT uuid, title FROM workout_plans WHERE is_active = true LIMIT 1
+  `);
+
+  if (!plan) return toolResult(null);
+
+  return toolResult(await buildRoutinePayload(plan));
+}
+
+// Read any plan by UUID — including unactivated drafts — without flipping is_active.
+// Lets an agent review a draft (e.g. next quarter's plan) or diff it against the active
+// one side-by-side. Includes is_active so the caller knows which it's looking at.
+async function getRoutineByUuid(args: Record<string, unknown>) {
+  const plan_uuid = args.plan_uuid as string | undefined;
+  if (!plan_uuid) {
+    return toolErrorEnvelope('INVALID_INPUT', 'plan_uuid is required.', 'Call list_routines to see available plan UUIDs.');
+  }
+
+  const plan = await queryOne<{ uuid: string; title: string | null; is_active: boolean }>(`
+    SELECT uuid, title, is_active FROM workout_plans WHERE uuid = $1
+  `, [plan_uuid]);
+
+  if (!plan) {
+    return toolErrorEnvelope('PLAN_NOT_FOUND', `Plan ${plan_uuid} not found.`, 'Call list_routines to see available plan UUIDs.');
+  }
+
+  return toolResult(await buildRoutinePayload(plan));
+}
+
+// Discover plans (active + drafts) without the caller having to be handed a UUID.
+// Lightweight: counts of routines per plan, no exercise/set hydration.
+async function listRoutines() {
+  const plans = await query<{
+    uuid: string; title: string | null; is_active: boolean;
+    created_at: string; routine_count: number;
+  }>(`
+    SELECT p.uuid, p.title, p.is_active, p.created_at,
+           COUNT(r.uuid)::int AS routine_count
+    FROM workout_plans p
+    LEFT JOIN workout_routines r ON r.workout_plan_uuid = p.uuid
+    GROUP BY p.uuid, p.title, p.is_active, p.created_at
+    ORDER BY p.is_active DESC, p.created_at DESC
+  `);
+
+  return toolResult({
+    plans,
+    active_uuid: plans.find(p => p.is_active)?.uuid ?? null,
   });
 }
 
@@ -3481,6 +3529,24 @@ export const tools: MCPTool[] = [
     description: 'Returns the currently active workout plan with all routines, exercises, and set targets.',
     inputSchema: { type: 'object', properties: {} },
     execute: async () => getActiveRoutine(),
+  },
+  {
+    name: 'list_routines',
+    description: 'Lists every workout plan (active + unactivated drafts) with uuid, title, is_active flag, created_at, and routine_count. Use to discover a draft plan UUID without activating it — then call get_routine_by_uuid(plan_uuid) to read its full contents, or diff a draft against the active plan side-by-side. active_uuid names the currently active plan (null if none).',
+    inputSchema: { type: 'object', properties: {} },
+    execute: async () => listRoutines(),
+  },
+  {
+    name: 'get_routine_by_uuid',
+    description: 'Returns any workout plan by UUID — including unactivated drafts — with the same nested shape as get_active_routine (routines → exercises → set targets), plus an is_active flag. Read-only: does NOT activate the plan, so you can review a draft (e.g. next quarter\'s programming) or compare it against the active plan without disrupting current programming. Get the UUID from list_routines.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        plan_uuid: { type: 'string', description: 'UUID of the workout plan to read (from list_routines).' },
+      },
+      required: ['plan_uuid'],
+    },
+    execute: getRoutineByUuid,
   },
   // ── Strategy: Vision / Plan / Progress ────────────────────────────────────
   {
