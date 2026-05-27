@@ -1,0 +1,1107 @@
+[
+  {
+    "uuid": "7053466c-29b8-4f74-9a0e-4122f35a7e2b",
+    "title": "Band External Rotation (Prehab)",
+    "primary_muscles": [
+      "rotator_cuff"
+    ],
+    "secondary_muscles": [
+      "delts"
+    ],
+    "equipment": [
+      "resistance band"
+    ],
+    "movement_pattern": null,
+    "tracking_mode": "reps",
+    "existing": {
+      "description": "",
+      "steps": [],
+      "tips": []
+    },
+    "missing": {
+      "description": true,
+      "steps": true,
+      "tips": true
+    }
+  },
+  {
+    "uuid": "c857ce98-65b1-4314-a589-7c7f0d9f516b",
+    "title": "Cable Crunch (Weighted Kneeling)",
+    "primary_muscles": [
+      "core"
+    ],
+    "secondary_muscles": [],
+    "equipment": [
+      "cable",
+      "rope"
+    ],
+    "movement_pattern": "flexion",
+    "tracking_mode": "reps",
+    "existing": {
+      "description": "",
+      "steps": [
+        "Kneel facing the cable stack with rope at the high pulley.",
+        "Hold rope behind your head, elbows tucked alongside ears.",
+        "Flex spine toward the floor by contracting abs — bring elbows toward hips.",
+        "Pause at peak contraction, control return to full stretch."
+      ],
+      "tips": [
+        "Keep hips fixed — this is a spinal-flexion movement, not a hip-hinge.",
+        "Chase the abdominal contraction, not the weight on the stack.",
+        "Full stretch at the top — let the load pull you tall before each rep.",
+        "Cap the load: heavy crunches risk upper-ab thickening; chase reps over weight."
+      ]
+    },
+    "missing": {
+      "description": true,
+      "steps": false,
+      "tips": false
+    }
+  },
+  {
+    "uuid": "e6e2bd55-1d64-4a2b-a53a-1420c9439b95",
+    "title": "Cable Flye (Low-to-High)",
+    "primary_muscles": [
+      "chest"
+    ],
+    "secondary_muscles": [
+      "delts"
+    ],
+    "equipment": [
+      "cable"
+    ],
+    "movement_pattern": "push",
+    "tracking_mode": "reps",
+    "existing": {
+      "description": "",
+      "steps": [
+        "Both pulleys set low, handle in each hand, staggered stance with slight forward lean.",
+        "Arms slightly bent, hands start at hip level out to the sides.",
+        "Sweep up and in — hands meet above the eye line, NOT in front of the chest.",
+        "Control return to wide stretch at hip level."
+      ],
+      "tips": [
+        "Meet hands ABOVE the eye line — mirrors the incline press path for clavicular bias.",
+        "Chest-driven sweep, not arm-driven — think of squeezing chest to bring hands together.",
+        "Hands stay slightly bent throughout — no elbow extension.",
+        "Pair this with the 30° incline DB press to compound clavicular stimulus."
+      ]
+    },
+    "missing": {
+      "description": true,
+      "steps": false,
+      "tips": false
+    }
+  },
+  {
+    "uuid": "5aea1c07-c852-45f8-bcdb-802618751e66",
+    "title": "Cable Hip Abduction",
+    "primary_muscles": [
+      "hip_abductors"
+    ],
+    "secondary_muscles": [
+      "glutes"
+    ],
+    "equipment": [
+      "cable",
+      "cable machine"
+    ],
+    "movement_pattern": null,
+    "tracking_mode": "reps",
+    "existing": {
+      "description": "Attach an ankle cuff to a low cable pulley. Stand sideways to the machine with the cuff on the far ankle. Keeping the leg straight, raise it out to the side against the cable resistance, squeezing the glute medius at the top, then lower under control.",
+      "steps": [],
+      "tips": []
+    },
+    "missing": {
+      "description": false,
+      "steps": true,
+      "tips": true
+    }
+  },
+  {
+    "uuid": "6b849257-f025-473c-bb69-232e58dd7f66",
+    "title": "Cable Kickback",
+    "primary_muscles": [
+      "glutes"
+    ],
+    "secondary_muscles": [
+      "hamstrings"
+    ],
+    "equipment": [
+      "cable"
+    ],
+    "movement_pattern": null,
+    "tracking_mode": "reps",
+    "existing": {
+      "description": "This is an exercise for gluts and hamstring strengthening.",
+      "steps": [
+        "Standing at a cable tower attach an ankle cuff to a low pulley.",
+        "Facing the weight stack, with a slight bend in your knees and your abs drawn in",
+        "Slowly kick your ankle back in and arc as high as you are able to.",
+        "Return to starting position and switch ankles."
+      ],
+      "tips": []
+    },
+    "missing": {
+      "description": false,
+      "steps": false,
+      "tips": true
+    }
+  },
+  {
+    "uuid": "65b15c0e-8fad-47a6-8ad6-ae24072ed022",
+    "title": "Cable Rope Hammer Curl",
+    "primary_muscles": [
+      "biceps"
+    ],
+    "secondary_muscles": [
+      "forearms"
+    ],
+    "equipment": [
+      "cable",
+      "rope"
+    ],
+    "movement_pattern": "curl",
+    "tracking_mode": "reps",
+    "existing": {
+      "description": "",
+      "steps": [
+        "Low pulley with rope attachment, stand facing the stack.",
+        "Neutral grip — palms facing each other, holding the rope ends.",
+        "Curl with elbows pinned to ribs — rope comes up to chest.",
+        "Optional brachialis cue: rotate thumbs slightly outward at peak contraction.",
+        "Control descent to full extension."
+      ],
+      "tips": [
+        "Neutral grip biases the BRACHIALIS — the under-bicep muscle that pushes biceps up and out, driving arm width from ALL angles.",
+        "Constant tension from the cable is the advantage vs DBs — no rest at top or bottom.",
+        "Keep grip neutral throughout — don't let palms rotate down.",
+        "Brachialis is the under-rated arm-width pusher; this is the headline brachialis lift."
+      ]
+    },
+    "missing": {
+      "description": true,
+      "steps": false,
+      "tips": false
+    }
+  },
+  {
+    "uuid": "4a5ce1f5-ef10-436c-8acb-1d6d5928aec3",
+    "title": "Calf Raise: Machine (Standing)",
+    "primary_muscles": [
+      "calves"
+    ],
+    "secondary_muscles": [],
+    "equipment": [
+      "machine"
+    ],
+    "movement_pattern": null,
+    "tracking_mode": "reps",
+    "existing": {
+      "description": "This exercise uses a machine to allow for proper form.",
+      "steps": [
+        "This exercise uses a machine to allow for proper form.",
+        "Stand with your toes on the footpad of the machine and adjust your shoulders under the upper pads.",
+        "Raise up on the balls of your feet, lifting your heels off the pad.",
+        "Hold for a moment and then return to the starting position."
+      ],
+      "tips": []
+    },
+    "missing": {
+      "description": false,
+      "steps": false,
+      "tips": true
+    }
+  },
+  {
+    "uuid": "88bdb763-9c8d-4e15-bbcf-f18e3b2baf19",
+    "title": "Calf Raise: Seated (Soleus)",
+    "primary_muscles": [
+      "calves"
+    ],
+    "secondary_muscles": [],
+    "equipment": [
+      "machine"
+    ],
+    "movement_pattern": "plantar flexion",
+    "tracking_mode": "reps",
+    "existing": {
+      "description": "",
+      "steps": [
+        "Seated at calf machine, knees bent ~90° under the pad.",
+        "Balls of feet on platform, heels free to drop.",
+        "Press up to full plantar flexion (heels rise).",
+        "Lower under control to deep stretch at bottom."
+      ],
+      "tips": [
+        "Seated/bent-knee = SOLEUS emphasis (the deep calf muscle below gastrocnemius).",
+        "Soleus needs higher reps + tempo work — it's slow-twitch dominant.",
+        "Pause at peak contraction.",
+        "Complements standing (gastroc) work — together = full lower-leg coverage."
+      ]
+    },
+    "missing": {
+      "description": true,
+      "steps": false,
+      "tips": false
+    }
+  },
+  {
+    "uuid": "11d5e985-69b6-48a2-ae67-464a86503a15",
+    "title": "Chest-Supported Row (Machine or T-Bar)",
+    "primary_muscles": [
+      "rhomboids",
+      "mid_traps"
+    ],
+    "secondary_muscles": [
+      "lats",
+      "biceps"
+    ],
+    "equipment": [
+      "machine",
+      "t-bar"
+    ],
+    "movement_pattern": "pull",
+    "tracking_mode": "reps",
+    "existing": {
+      "description": "",
+      "steps": [
+        "Chest on pad, torso braced, feet planted.",
+        "Grip handles, arms fully extended at start.",
+        "Initiate by retracting scapulae — squeeze shoulder blades together FIRST.",
+        "Then pull elbows back to bring handles to lower ribs.",
+        "Control return — let scapulae fully protract at end."
+      ],
+      "tips": [
+        "Scapular retraction STARTS the lift — not the arms. If your biceps fire first, slow down and re-cue.",
+        "Chest stays on the pad the entire set — no chest-pop or hip-drive.",
+        "Don't shrug — elbows stay below shoulder height.",
+        "Best back exercise for rhomboids + mid-traps because the pad eliminates torso cheat."
+      ]
+    },
+    "missing": {
+      "description": true,
+      "steps": false,
+      "tips": false
+    }
+  },
+  {
+    "uuid": "c806a82e-cffe-4199-843d-627e9f96d64d",
+    "title": "Clamshell (Warm-Up)",
+    "primary_muscles": [
+      "hip_abductors"
+    ],
+    "secondary_muscles": [
+      "glutes"
+    ],
+    "equipment": [
+      "resistance band",
+      "band"
+    ],
+    "movement_pattern": null,
+    "tracking_mode": "reps",
+    "existing": {
+      "description": "Warm-up exercise. Performed before Lower A sessions.",
+      "steps": [],
+      "tips": []
+    },
+    "missing": {
+      "description": false,
+      "steps": true,
+      "tips": true
+    }
+  },
+  {
+    "uuid": "7c9d246b-eeb3-4361-b3d3-1e64f842cdda",
+    "title": "Donkey Calf",
+    "primary_muscles": [],
+    "secondary_muscles": [],
+    "equipment": [],
+    "movement_pattern": null,
+    "tracking_mode": "reps",
+    "existing": {
+      "description": "",
+      "steps": [],
+      "tips": []
+    },
+    "missing": {
+      "description": true,
+      "steps": true,
+      "tips": true
+    }
+  },
+  {
+    "uuid": "6c757467-7fe8-419a-95d6-e660e480fbd7",
+    "title": "Dumbbell Bulgarian Split Squat",
+    "primary_muscles": [
+      "glutes",
+      "quads"
+    ],
+    "secondary_muscles": [
+      "hamstrings",
+      "core"
+    ],
+    "equipment": [
+      "dumbbell",
+      "bench"
+    ],
+    "movement_pattern": null,
+    "tracking_mode": "reps",
+    "existing": {
+      "description": "",
+      "steps": [],
+      "tips": []
+    },
+    "missing": {
+      "description": true,
+      "steps": true,
+      "tips": true
+    }
+  },
+  {
+    "uuid": "8bfd4d00-1a6a-4f32-8399-1e6a3a52acf7",
+    "title": "Dumbbell Hammer Curl",
+    "primary_muscles": [
+      "biceps"
+    ],
+    "secondary_muscles": [
+      "forearms"
+    ],
+    "equipment": [
+      "dumbbell"
+    ],
+    "movement_pattern": null,
+    "tracking_mode": "reps",
+    "existing": {
+      "description": "",
+      "steps": [],
+      "tips": []
+    },
+    "missing": {
+      "description": true,
+      "steps": true,
+      "tips": true
+    }
+  },
+  {
+    "uuid": "b96523e3-98c6-4ea5-8b91-174fec14050c",
+    "title": "Dumbbell Row (Single Arm)",
+    "primary_muscles": [
+      "lats"
+    ],
+    "secondary_muscles": [
+      "rhomboids",
+      "biceps",
+      "delts",
+      "core"
+    ],
+    "equipment": [
+      "dumbbell"
+    ],
+    "movement_pattern": null,
+    "tracking_mode": "reps",
+    "existing": {
+      "description": "",
+      "steps": [],
+      "tips": []
+    },
+    "missing": {
+      "description": true,
+      "steps": true,
+      "tips": true
+    }
+  },
+  {
+    "uuid": "1a9a9e60-5ab4-447f-9a8b-ce6599224892",
+    "title": "Dumbbell Step-Up",
+    "primary_muscles": [
+      "glutes",
+      "quads"
+    ],
+    "secondary_muscles": [
+      "hamstrings",
+      "core"
+    ],
+    "equipment": [
+      "dumbbell",
+      "box"
+    ],
+    "movement_pattern": null,
+    "tracking_mode": "reps",
+    "existing": {
+      "description": "",
+      "steps": [],
+      "tips": []
+    },
+    "missing": {
+      "description": true,
+      "steps": true,
+      "tips": true
+    }
+  },
+  {
+    "uuid": "257f77ba-cf5f-49fa-88e8-509883059d13",
+    "title": "Dumbbell Y-Raise",
+    "primary_muscles": [
+      "delts"
+    ],
+    "secondary_muscles": [
+      "rotator_cuff"
+    ],
+    "equipment": [
+      "dumbbell"
+    ],
+    "movement_pattern": null,
+    "tracking_mode": "reps",
+    "existing": {
+      "description": "",
+      "steps": [],
+      "tips": []
+    },
+    "missing": {
+      "description": true,
+      "steps": true,
+      "tips": true
+    }
+  },
+  {
+    "uuid": "c4035736-eaf3-4dad-8b74-bd1537e6b72d",
+    "title": "Face Pulls",
+    "primary_muscles": [
+      "delts"
+    ],
+    "secondary_muscles": [],
+    "equipment": [
+      "cable"
+    ],
+    "movement_pattern": null,
+    "tracking_mode": "reps",
+    "existing": {
+      "description": "An excellent exercise for the rear shoulders.",
+      "steps": [
+        "Stand in front of a pulley with a rope attached.",
+        "Pull the rope directly towards your face, while separating your hands and keeping your upper arms parallel to the ground."
+      ],
+      "tips": []
+    },
+    "missing": {
+      "description": false,
+      "steps": false,
+      "tips": true
+    }
+  },
+  {
+    "uuid": "6bcc12aa-4435-429c-aa81-f27a6c996e8d",
+    "title": "Hip Thrust (Barbell)",
+    "primary_muscles": [],
+    "secondary_muscles": [],
+    "equipment": [],
+    "movement_pattern": null,
+    "tracking_mode": "reps",
+    "existing": {
+      "description": "",
+      "steps": [],
+      "tips": []
+    },
+    "missing": {
+      "description": true,
+      "steps": true,
+      "tips": true
+    }
+  },
+  {
+    "uuid": "ce29d312-1713-4299-9d95-55a6e91d2452",
+    "title": "Hip Thrust (Barbell) — Banded Pulse",
+    "primary_muscles": [
+      "glutes"
+    ],
+    "secondary_muscles": [
+      "hip_abductors",
+      "core",
+      "hamstrings"
+    ],
+    "equipment": [
+      "barbell",
+      "resistance band"
+    ],
+    "movement_pattern": null,
+    "tracking_mode": "reps",
+    "existing": {
+      "description": "Band around knees, 3 pulses at top (knees apart). See-saw effect — straight line shoulders to hips, hips to knees, meets at top.",
+      "steps": [],
+      "tips": []
+    },
+    "missing": {
+      "description": false,
+      "steps": true,
+      "tips": true
+    }
+  },
+  {
+    "uuid": "5c17ee24-f237-42d3-8434-de78bc9f4c61",
+    "title": "Incline DB Curl (60° Back)",
+    "primary_muscles": [
+      "biceps"
+    ],
+    "secondary_muscles": [],
+    "equipment": [
+      "dumbbell",
+      "bench: incline"
+    ],
+    "movement_pattern": "curl",
+    "tracking_mode": "reps",
+    "existing": {
+      "description": "",
+      "steps": [
+        "Set bench to 60° back — lay back so torso is reclined.",
+        "DBs hanging straight down by sides, palms forward, arms fully extended.",
+        "Curl with elbows slightly behind the torso line — don't let them drift forward.",
+        "Pause at peak contraction, control descent to full stretch."
+      ],
+      "tips": [
+        "60° reclined puts the long head of biceps in stretched position = peak-bias hypertrophy.",
+        "Elbows STAY put — no shoulder flexion to help the curl.",
+        "Slow eccentric is where the stretch-mediated growth happens.",
+        "Light weight is fine — stretch position is much harder than standing curls."
+      ]
+    },
+    "missing": {
+      "description": true,
+      "steps": false,
+      "tips": false
+    }
+  },
+  {
+    "uuid": "a45454b0-1602-4d8c-b5cd-e4d9829e2485",
+    "title": "Incline DB Press (30°)",
+    "primary_muscles": [
+      "chest"
+    ],
+    "secondary_muscles": [
+      "delts",
+      "triceps"
+    ],
+    "equipment": [
+      "dumbbell",
+      "bench: incline"
+    ],
+    "movement_pattern": "push",
+    "tracking_mode": "reps",
+    "existing": {
+      "description": "",
+      "steps": [
+        "Set bench to 30° (low incline — clavicular bias).",
+        "DBs at shoulder height, palms forward, feet planted.",
+        "Press up and slightly back — aim for a point above your eyes, not your sternum.",
+        "Control descent to a deep stretch at the bottom."
+      ],
+      "tips": [
+        "30° bias is intentional — biases clavicular (upper-chest) fibers for the visible 'shape under breast tissue' target.",
+        "Press path angled up-and-back. Pressing straight up to the sternum biases sternal fibers — wrong target.",
+        "Don't bounce off chest — controlled descent is where the stimulus lives.",
+        "Light shape-only dose: this is NOT a chest-mass-chasing lift."
+      ]
+    },
+    "missing": {
+      "description": true,
+      "steps": false,
+      "tips": false
+    }
+  },
+  {
+    "uuid": "25b6655e-895a-41cb-835a-247a3a7b2e0f",
+    "title": "Leg Curl (Lying)",
+    "primary_muscles": [
+      "hamstrings"
+    ],
+    "secondary_muscles": [],
+    "equipment": [
+      "machine"
+    ],
+    "movement_pattern": null,
+    "tracking_mode": "reps",
+    "existing": {
+      "description": "This is an exercise for hamstring strengthening.",
+      "steps": [
+        "Lie face down on a leg curl machine and place your heels under the roller pad.",
+        "Grasp the grips with your hands for support and slowly curl your ankles up towards your back.",
+        "Hold for a moment and then return to starting position.",
+        "Repeat."
+      ],
+      "tips": []
+    },
+    "missing": {
+      "description": false,
+      "steps": false,
+      "tips": true
+    }
+  },
+  {
+    "uuid": "c6b9548c-b1ed-4a85-a200-331d1e08be33",
+    "title": "Leg Curl (Standing)",
+    "primary_muscles": [
+      "hamstrings"
+    ],
+    "secondary_muscles": [],
+    "equipment": [
+      "machine"
+    ],
+    "movement_pattern": null,
+    "tracking_mode": "reps",
+    "existing": {
+      "description": "This is an exercise for hamstring strengthening.",
+      "steps": [
+        "Standing at a leg curl machine adjust the rear footpad so it is just above your ankle.",
+        "Grasp the handles of the machine for support and draw your abs in.",
+        "Raise your foot up towards your back slowly.",
+        "Return to the starting position and chance legs."
+      ],
+      "tips": []
+    },
+    "missing": {
+      "description": false,
+      "steps": false,
+      "tips": true
+    }
+  },
+  {
+    "uuid": "8b3de466-1552-4978-a378-55f64e8ca66b",
+    "title": "Leg Press",
+    "primary_muscles": [
+      "quads"
+    ],
+    "secondary_muscles": [
+      "calves",
+      "hamstrings"
+    ],
+    "equipment": [
+      "machine"
+    ],
+    "movement_pattern": null,
+    "tracking_mode": "reps",
+    "existing": {
+      "description": "This exercise is crucial for building and strengthening the legs.",
+      "steps": [
+        "Along with the Squat, this exercise is crucial for building and strengthening the legs.",
+        "Adjust the seat of the machine so that your feet comfortably reach the crosspiece with a slight bend in your knees.",
+        "To begin, press your feet forward at a shoulder width stance and release the safety locks.",
+        "Slowly lower the weight towards your body, keeping your abs drawn in and your knees moving in the same direction as your feet to a 90 degree angle.",
+        "Do not lock your knees or bounce the weight."
+      ],
+      "tips": []
+    },
+    "missing": {
+      "description": false,
+      "steps": false,
+      "tips": true
+    }
+  },
+  {
+    "uuid": "e49b66a1-f392-4ddc-b258-349afa5957b5",
+    "title": "Lying Incline DB Lateral Raise (Single-Arm)",
+    "primary_muscles": [
+      "delts"
+    ],
+    "secondary_muscles": [
+      "rotator_cuff"
+    ],
+    "equipment": [
+      "dumbbell",
+      "bench: incline"
+    ],
+    "movement_pattern": "raise",
+    "tracking_mode": "reps",
+    "existing": {
+      "description": "",
+      "steps": [
+        "Lie on your side on a 30° incline bench, bottom arm supports head.",
+        "Top arm hangs across body holding a LIGHT dumbbell, palm facing thigh.",
+        "Raise the arm out laterally to approximately 90° (parallel to floor).",
+        "2-second controlled lower back to the stretched starting position.",
+        "Complete reps one side, switch."
+      ],
+      "tips": [
+        "STRETCH-BIAS lateral raise — the stimulus is the deep stretch at the bottom, NOT the contraction at the top.",
+        "Light weight only. The leverage is much harder than standing DB laterals.",
+        "Thumb up, not thumb down (don't internally rotate — protects supraspinatus).",
+        "Different stimulus pattern from D2 cable lateral — DON'T collapse them into the same exercise mentally."
+      ]
+    },
+    "missing": {
+      "description": true,
+      "steps": false,
+      "tips": false
+    }
+  },
+  {
+    "uuid": "e74e99bb-5185-4f26-9b75-c1cf16a2f987",
+    "title": "Machine Crunch",
+    "primary_muscles": [
+      "core"
+    ],
+    "secondary_muscles": [],
+    "equipment": [
+      "machine"
+    ],
+    "movement_pattern": null,
+    "tracking_mode": "reps",
+    "existing": {
+      "description": "",
+      "steps": [],
+      "tips": []
+    },
+    "missing": {
+      "description": true,
+      "steps": true,
+      "tips": true
+    }
+  },
+  {
+    "uuid": "cb18a361-4346-4df4-9441-212ddddeebe6",
+    "title": "Overhead Cable Triceps Extension",
+    "primary_muscles": [
+      "triceps"
+    ],
+    "secondary_muscles": [],
+    "equipment": [
+      "cable",
+      "rope"
+    ],
+    "movement_pattern": "extension",
+    "tracking_mode": "reps",
+    "existing": {
+      "description": "",
+      "steps": [
+        "Face away from low pulley, rope held overhead with both hands.",
+        "Elbows pointed forward and slightly up — fixed position.",
+        "Extend at the elbows only — forearms come up and out.",
+        "Control return to deep stretch behind head."
+      ],
+      "tips": [
+        "Keep elbows still — only forearms move. Elbow drift turns this into a press.",
+        "Overhead position puts the long head in stretched position = better hypertrophy stimulus.",
+        "Stop at the point where shoulders start to compensate.",
+        "Slow eccentric, controlled concentric."
+      ]
+    },
+    "missing": {
+      "description": true,
+      "steps": false,
+      "tips": false
+    }
+  },
+  {
+    "uuid": "7ed63ce2-45e5-44cf-9883-b9f16edf4b74",
+    "title": "Pallof PRESS (Band)",
+    "primary_muscles": [
+      "core"
+    ],
+    "secondary_muscles": [],
+    "equipment": [
+      "resistance band",
+      "band"
+    ],
+    "movement_pattern": "anti-rotation",
+    "tracking_mode": "reps",
+    "existing": {
+      "description": "",
+      "steps": [
+        "Anchor band at chest height, stand perpendicular to anchor.",
+        "Both hands hold band at sternum, arms relaxed.",
+        "Press band straight out from chest — extend arms fully.",
+        "Resist the band's pull trying to rotate your torso back toward anchor.",
+        "Return band to chest under control. Complete reps, switch sides."
+      ],
+      "tips": [
+        "ANTI-ROTATION — this is NOT a rotation exercise. Resist the pull, do NOT rotate.",
+        "Stiffness and control drill — does NOT reward training to failure. RIR 2-3 floor.",
+        "Both sides every set — same rep count each side.",
+        "Lou-specific: this is the WHR-protective core move; never sub in Pallof rotations or weighted twists."
+      ]
+    },
+    "missing": {
+      "description": true,
+      "steps": false,
+      "tips": false
+    }
+  },
+  {
+    "uuid": "522886b6-9b59-4254-8389-d481489d3184",
+    "title": "Pallof Rotations (Band)",
+    "primary_muscles": [],
+    "secondary_muscles": [],
+    "equipment": [],
+    "movement_pattern": null,
+    "tracking_mode": "reps",
+    "existing": {
+      "description": "",
+      "steps": [],
+      "tips": []
+    },
+    "missing": {
+      "description": true,
+      "steps": true,
+      "tips": true
+    }
+  },
+  {
+    "uuid": "bbd6b085-d50c-4ba5-88fa-aad4a3737f0b",
+    "title": "Pulldown (Overhand)",
+    "primary_muscles": [
+      "lats"
+    ],
+    "secondary_muscles": [
+      "biceps"
+    ],
+    "equipment": [
+      "cable"
+    ],
+    "movement_pattern": null,
+    "tracking_mode": "reps",
+    "existing": {
+      "description": "This is an exercise for lats and biceps strengthening.",
+      "steps": [
+        "Sitting upright with your abs drawn in grasp a pulldown bar with and overhand grip shoulder width apart.",
+        "Pull the bar down till the bar reaches your upper chest, keeping your elbows close to your body.",
+        "Slowly return the bar to the starting position.",
+        "Repeat."
+      ],
+      "tips": []
+    },
+    "missing": {
+      "description": false,
+      "steps": false,
+      "tips": true
+    }
+  },
+  {
+    "uuid": "bef4fb1e-92f6-402f-9d7a-5ee0c014b081",
+    "title": "Rear Delt Fly Bentover (Dumbbell)",
+    "primary_muscles": [],
+    "secondary_muscles": [],
+    "equipment": [],
+    "movement_pattern": null,
+    "tracking_mode": "reps",
+    "existing": {
+      "description": "",
+      "steps": [],
+      "tips": []
+    },
+    "missing": {
+      "description": true,
+      "steps": true,
+      "tips": true
+    }
+  },
+  {
+    "uuid": "f0680ed0-c524-4715-8891-51a36e782b29",
+    "title": "Reverse Crunch",
+    "primary_muscles": [
+      "core"
+    ],
+    "secondary_muscles": [],
+    "equipment": [
+      "bodyweight",
+      "mat"
+    ],
+    "movement_pattern": "flexion",
+    "tracking_mode": "reps",
+    "existing": {
+      "description": "",
+      "steps": [
+        "Lie supine on mat, arms beside hips for stability (optional: hold a bench above head).",
+        "Legs vertical or slightly bent at the knees.",
+        "Lift hips off the floor by curling the pelvis toward ribs — small range, controlled.",
+        "Lower under control to start position."
+      ],
+      "tips": [
+        "Keep the lower back FLAT against the pad — stop at hips-perpendicular, don't chase ROM.",
+        "Posterior pelvic tilt, not hip flexion — the move is pelvis → ribs, not knees → chest.",
+        "SI joint protection: if the lumbar lifts off, you've gone too far.",
+        "Better than hanging leg raises for hip-flexor / anterior-pelvic-tilt risk."
+      ]
+    },
+    "missing": {
+      "description": true,
+      "steps": false,
+      "tips": false
+    }
+  },
+  {
+    "uuid": "21ed9151-d845-4711-b05b-617e8e4149ea",
+    "title": "Reverse Pec Deck (Rear Delt Machine)",
+    "primary_muscles": [
+      "delts"
+    ],
+    "secondary_muscles": [
+      "rhomboids",
+      "mid_traps"
+    ],
+    "equipment": [
+      "machine"
+    ],
+    "movement_pattern": "raise",
+    "tracking_mode": "reps",
+    "existing": {
+      "description": "",
+      "steps": [
+        "Sit facing the pec deck, chest against pad, handles in front.",
+        "Grip handles with palms facing each other (or thumbs up for more rear delt bias).",
+        "Pull handles back and out by squeezing shoulder blades together.",
+        "Pause at peak contraction, control return."
+      ],
+      "tips": [
+        "Lead with the elbows — don't pull with the hands.",
+        "Squeeze shoulder blades together at peak — this is where rhomboids + mid-traps fire.",
+        "Chest stays on the pad the entire set.",
+        "Pairs nicely with face pulls + chest-supported row for posture work without trap creep."
+      ]
+    },
+    "missing": {
+      "description": true,
+      "steps": false,
+      "tips": false
+    }
+  },
+  {
+    "uuid": "4ad58032-467f-4df6-b01d-27460a67d151",
+    "title": "Seated Cable Row (Low Row)",
+    "primary_muscles": [],
+    "secondary_muscles": [],
+    "equipment": [],
+    "movement_pattern": null,
+    "tracking_mode": "reps",
+    "existing": {
+      "description": "",
+      "steps": [],
+      "tips": []
+    },
+    "missing": {
+      "description": true,
+      "steps": true,
+      "tips": true
+    }
+  },
+  {
+    "uuid": "7cce552f-474b-4123-b6e6-188a55578dcc",
+    "title": "Seated Leg Curl",
+    "primary_muscles": [
+      "hamstrings"
+    ],
+    "secondary_muscles": [],
+    "equipment": [
+      "machine"
+    ],
+    "movement_pattern": "curl",
+    "tracking_mode": "reps",
+    "existing": {
+      "description": "",
+      "steps": [
+        "Sit at the seated leg curl machine, back firmly against pad.",
+        "Adjust thigh pad so it sits just above the knees.",
+        "Ankles behind the lower pad, legs extended.",
+        "Curl heels under and back, squeezing hamstrings.",
+        "Control return to full knee extension."
+      ],
+      "tips": [
+        "Seated position biases the LONG HEAD of hamstrings (vs lying which biases short head) — complementary stimulus.",
+        "Don't rush the eccentric — control return is where stretch-mediated growth happens.",
+        "Pause for 1 second at peak contraction.",
+        "Hip flexed position = hamstrings in stretch — great for hypertrophy."
+      ]
+    },
+    "missing": {
+      "description": true,
+      "steps": false,
+      "tips": false
+    }
+  },
+  {
+    "uuid": "0abfaa02-154c-4e4d-8046-cf46c3ecd6b3",
+    "title": "Single Leg RDL",
+    "primary_muscles": [
+      "glutes",
+      "hamstrings"
+    ],
+    "secondary_muscles": [
+      "core"
+    ],
+    "equipment": [],
+    "movement_pattern": null,
+    "tracking_mode": "reps",
+    "existing": {
+      "description": "Single leg hip hinge. Vertical shin, lean over fence cue. Start bodyweight, use mirror for form.",
+      "steps": [],
+      "tips": []
+    },
+    "missing": {
+      "description": false,
+      "steps": true,
+      "tips": true
+    }
+  },
+  {
+    "uuid": "fdec211b-2157-4232-8e25-f796f067d37d",
+    "title": "Triceps Pushdown: Cable (Rope)",
+    "primary_muscles": [
+      "triceps"
+    ],
+    "secondary_muscles": [],
+    "equipment": [
+      "cable"
+    ],
+    "movement_pattern": null,
+    "tracking_mode": "reps",
+    "existing": {
+      "description": "This version of the triceps pushdown uses a rope for better definition in the muscle.",
+      "steps": [
+        "Stand in front of a cable machine and attach a rope to a high pulley.",
+        "Grasp the rope with palms facing down.",
+        "Draw your abs in and keep your back straight.",
+        "Keeping your elbows at your side push the rope down towards your thighs, if possible “split” the rope apart at the bottom.",
+        "Pause for a moment and then return to the starting position.",
+        "Note: You may want to stager one foot in front of the other for a better stance."
+      ],
+      "tips": []
+    },
+    "missing": {
+      "description": false,
+      "steps": false,
+      "tips": true
+    }
+  },
+  {
+    "uuid": "37d4f07b-d420-4f7b-86ba-3a8ab25d062c",
+    "title": "Wide-Grip EZ-Bar Curl",
+    "primary_muscles": [
+      "biceps"
+    ],
+    "secondary_muscles": [],
+    "equipment": [
+      "barbell: ez"
+    ],
+    "movement_pattern": "curl",
+    "tracking_mode": "reps",
+    "existing": {
+      "description": "",
+      "steps": [
+        "Stand with EZ-bar at widest grip (outer notch), palms angled outward.",
+        "Elbows pinned to ribs, fully extended at start.",
+        "Curl with elbows fixed — bar comes up to chest height.",
+        "Control descent to full extension."
+      ],
+      "tips": [
+        "Wider grip biases the SHORT HEAD (inner head) of biceps — drives arm WIDTH (front view).",
+        "Strict form — no swinging or hip kick.",
+        "Full ROM bottom to top: full stretch at bottom, full contraction at top.",
+        "Paired with cable rope hammer for the brachialis = the width combo."
+      ]
+    },
+    "missing": {
+      "description": true,
+      "steps": false,
+      "tips": false
+    }
+  }
+]
