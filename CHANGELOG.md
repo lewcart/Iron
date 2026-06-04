@@ -2,6 +2,14 @@
 
 All notable changes to Rebirth are documented here.
 
+## [0.14.0] - 2026-06-05
+
+### Added
+
+- **e1RM PB chip on exercise header.** An amber `PB 102kg` (or lb) chip appears next to the rep-window `WindowPill` in the exercise header during an active workout session. Shows the all-time best estimated 1-rep max (Epley) for reps-mode exercises; hidden for time-mode exercises (where e1RM is not meaningful) and when no prior reps-mode history exists (guard: `allTimeBest1RM > 0`). Formatted via `useUnit().toDisplay` so it respects the user's kg/lb setting with no hardcoded unit. Hovering surfaces a tooltip: "Estimated 1-rep max (all time)" so the `PB` label isn't misread as a direct-lift weight. Reuses the all-time best e1RM already loaded by `getAllTimeBest1RM` — no new queries.
+
+- **Last-attempt hint per set row.** A muted `last 80×10` (reps-mode) or `last 45s` (time-mode) caption is rendered below each set-row input. Pairs previous-session sets to current rows by working-set position (same index basis already used to supply default RIR values). Null-guarded: missing prior sets render nothing; weight 0 / missing reps also suppress the hint. Uses `text-muted-foreground/70` (10px) — subtle enough not to crowd the input fields but readable at a glance. Reuses the already-fetched `prevSets` array from `getLastSessionSetsForExercise` — no new queries. Time-mode uses `formatTime(duration_seconds)` for the hint.
+
 ## [0.13.1] - 2026-05-27
 
 ### Fixed
