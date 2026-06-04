@@ -1358,12 +1358,12 @@ function SetRow({
       {previousSet && (
         trackingMode === 'time'
           ? previousSet.duration_seconds != null && (
-            <div className="px-3 pb-1 text-[10px] text-muted-foreground/50 leading-none">
+            <div className="px-3 pb-1 text-[10px] text-muted-foreground/70 leading-none">
               last {formatTime(previousSet.duration_seconds)}
             </div>
           )
           : previousSet.weight != null && previousSet.repetitions != null && (
-            <div className="px-3 pb-1 text-[10px] text-muted-foreground/50 leading-none">
+            <div className="px-3 pb-1 text-[10px] text-muted-foreground/70 leading-none">
               last {toDisplay(previousSet.weight)}×{previousSet.repetitions}
             </div>
           )
@@ -1612,7 +1612,7 @@ function SortableExerciseCard({
                 <span className="flex items-center gap-1.5 mt-0.5 min-w-0 flex-wrap">
                   {goalWindow && <WindowPill window={goalWindow} />}
                   {trackingMode !== 'time' && allTimeBest1RM > 0 && (
-                    <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-medium tabular-nums bg-amber-500/10 text-amber-400/80">
+                    <span title="Estimated 1-rep max (all time)" className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-medium tabular-nums bg-amber-500/10 text-amber-400/80">
                       <span>PB</span>
                       <span>{toDisplay(allTimeBest1RM)}{unitLabel}</span>
                     </span>
