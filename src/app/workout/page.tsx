@@ -851,6 +851,7 @@ function SetRow({
         >
           <Check className="h-3.5 w-3.5" />
         </button>
+        {/* PB chip = all-time best estimated 1RM (e1RM); reps-mode only. */}
         {showPD && (
           <span className="absolute -top-1.5 -right-1.5 text-[8px] font-bold px-0.5 leading-[14px] rounded-full text-amber-400 bg-amber-400/15 border border-amber-400/30 pointer-events-none">
             PR
