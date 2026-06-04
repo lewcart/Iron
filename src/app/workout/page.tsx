@@ -1045,6 +1045,7 @@ function SetRow({
   onOpenActions,
   allTimeBest1RM,
   previousRir,
+  previousSet,
   stopwatchRunning,
   stopwatchElapsed,
 }: {
@@ -1072,6 +1073,7 @@ function SetRow({
   onOpenActions: () => void;
   allTimeBest1RM?: number | null;
   previousRir?: number | null;
+  previousSet?: LocalWorkoutSet | null;
   stopwatchRunning?: boolean;
   stopwatchElapsed?: number;
 }) {
@@ -1353,6 +1355,19 @@ function SetRow({
         </div>
       </div>
 
+      {previousSet && (
+        trackingMode === 'time'
+          ? previousSet.duration_seconds != null && (
+            <div className="px-3 pb-1 text-[10px] text-muted-foreground/50 leading-none">
+              last {formatTime(previousSet.duration_seconds)}
+            </div>
+          )
+          : previousSet.weight != null && previousSet.repetitions != null && (
+            <div className="px-3 pb-1 text-[10px] text-muted-foreground/50 leading-none">
+              last {toDisplay(previousSet.weight)}×{previousSet.repetitions}
+            </div>
+          )
+      )}
       {completed && trackingMode === 'time' && (
         <RpeChipStrip
           value={set.rpe ?? null}
@@ -1449,6 +1464,8 @@ function SortableExerciseCard({
   stopwatchElapsed: number;
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: we.uuid });
+  const { toDisplay, label: unitLabel } = useUnit();
+  const trackingMode = we.exercise?.tracking_mode ?? 'reps';
   const style = {
     transform: CSS.Transform.toString(transform),
     transition,
@@ -1591,9 +1608,15 @@ function SortableExerciseCard({
                 )}
                 <span className="truncate">{we.exercise?.title ?? ''}</span>
               </span>
-              {(goalWindow || recommendation || we.comment) && (
+              {(goalWindow || recommendation || we.comment || (trackingMode !== 'time' && allTimeBest1RM > 0)) && (
                 <span className="flex items-center gap-1.5 mt-0.5 min-w-0 flex-wrap">
                   {goalWindow && <WindowPill window={goalWindow} />}
+                  {trackingMode !== 'time' && allTimeBest1RM > 0 && (
+                    <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-medium tabular-nums bg-amber-500/10 text-amber-400/80">
+                      <span>PB</span>
+                      <span>{toDisplay(allTimeBest1RM)}{unitLabel}</span>
+                    </span>
+                  )}
                   {recommendation && !allDone && <RecommendationBadge rec={recommendation} />}
                   {we.comment && (
                     <span className="text-xs text-muted-foreground italic truncate">{we.comment}</span>
@@ -1758,6 +1781,7 @@ function SortableExerciseCard({
                   onOpenActions={() => onOpenSetActions(set, exerciseTitle, labels[idx])}
                   allTimeBest1RM={allTimeBest1RM}
                   previousRir={previousRirs[idx] ?? null}
+                  previousSet={prevSets[idx] ?? null}
                   stopwatchRunning={stopwatchRunning}
                   stopwatchElapsed={stopwatchElapsed}
                 />
