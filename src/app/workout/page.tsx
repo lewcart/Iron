@@ -1611,7 +1611,6 @@ function SortableExerciseCard({
               {(goalWindow || recommendation || we.comment || (trackingMode !== 'time' && allTimeBest1RM > 0)) && (
                 <span className="flex items-center gap-1.5 mt-0.5 min-w-0 flex-wrap">
                   {goalWindow && <WindowPill window={goalWindow} />}
-                  {/* PB = all-time best e1RM (reps-mode only). */}
                   {trackingMode !== 'time' && allTimeBest1RM > 0 && (
                     <span title="Estimated 1-rep max (all time)" className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-medium tabular-nums bg-amber-500/10 text-amber-400/80">
                       <span>PB</span>
