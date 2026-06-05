@@ -1158,7 +1158,16 @@ function SetRow({
   const isPR = set.is_pr;
   const showPD = isPR || isLivePD;
 
+  // Ghost placeholders for the empty input columns: prefer last session's numbers
+  // (so the autofill shows what you did last time, right where you'd type it),
+  // falling back to the routine target. Replaces the old separate "last W×R" caption.
+  const prevWeightPlaceholder =
+    previousSet?.weight != null && previousSet.weight > 0 ? `${toDisplay(previousSet.weight)}` : '—';
+  const prevDurationPlaceholder =
+    previousSet?.duration_seconds != null && previousSet.duration_seconds > 0
+      ? `${previousSet.duration_seconds}` : '60';
   const repsPlaceholder = (() => {
+    if (previousSet?.repetitions != null && previousSet.repetitions > 0) return `${previousSet.repetitions}`;
     const min = set.min_target_reps;
     const max = set.max_target_reps;
     if (min != null && max != null) return min === max ? `${min}` : `${min}–${max}`;
@@ -1196,7 +1205,7 @@ function SetRow({
               <input
                 type="number"
                 inputMode="decimal"
-                placeholder="—"
+                placeholder={prevWeightPlaceholder}
                 value={weight}
                 onChange={e => setWeight(e.target.value)}
                 onFocus={e => { e.target.scrollIntoView({ behavior: 'smooth', block: 'center' }); e.target.select(); }}
@@ -1220,7 +1229,7 @@ function SetRow({
                 <input
                   type="number"
                   inputMode="numeric"
-                  placeholder="60"
+                  placeholder={prevDurationPlaceholder}
                   value={duration}
                   onChange={e => setDuration(e.target.value)}
                   onFocus={e => { e.target.scrollIntoView({ behavior: 'smooth', block: 'center' }); e.target.select(); }}
@@ -1259,7 +1268,7 @@ function SetRow({
               <input
                 type="number"
                 inputMode="decimal"
-                placeholder="—"
+                placeholder={prevWeightPlaceholder}
                 value={weight}
                 onChange={e => setWeight(e.target.value)}
                 onFocus={e => { e.target.scrollIntoView({ behavior: 'smooth', block: 'center' }); e.target.select(); }}
@@ -1355,19 +1364,6 @@ function SetRow({
         </div>
       </div>
 
-      {previousSet && (
-        trackingMode === 'time'
-          ? previousSet.duration_seconds != null && (
-            <div className="px-3 pb-1 text-[10px] text-muted-foreground/70 leading-none">
-              last {formatTime(previousSet.duration_seconds)}
-            </div>
-          )
-          : previousSet.weight != null && previousSet.repetitions != null && (
-            <div className="px-3 pb-1 text-[10px] text-muted-foreground/70 leading-none">
-              last {toDisplay(previousSet.weight)}×{previousSet.repetitions}
-            </div>
-          )
-      )}
       {completed && trackingMode === 'time' && (
         <RpeChipStrip
           value={set.rpe ?? null}
@@ -1590,7 +1586,7 @@ function SortableExerciseCard({
           </div>
           <button
             onClick={onToggle}
-            className="flex items-center gap-2 px-2 py-2.5 flex-1 text-left"
+            className="flex items-center gap-2 px-2 py-2.5 flex-1 text-left min-w-0"
           >
             {isExpanded
               ? <ChevronDown className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
@@ -1606,7 +1602,7 @@ function SortableExerciseCard({
                     {supersetBadge}
                   </span>
                 )}
-                <span className="truncate">{we.exercise?.title ?? ''}</span>
+                <span className="truncate min-w-0">{we.exercise?.title ?? ''}</span>
               </span>
               {(goalWindow || recommendation || we.comment || (trackingMode !== 'time' && allTimeBest1RM > 0)) && (
                 <span className="flex items-center gap-1.5 mt-0.5 min-w-0 flex-wrap">
@@ -1659,25 +1655,23 @@ function SortableExerciseCard({
               Outside-tap close is handled by the document-level listener in
               useEffect above, not a backdrop div — the backdrop pattern hits
               the iOS WKWebView click-race (see comment on showSupersetMenu). */}
-          {(onPairWithPrevious || onJoinAbove || onUnpair) && (
-            <button
-              ref={supersetTriggerRef}
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                if (showSupersetMenu) setShowSupersetMenu(false);
-                else openSupersetMenu();
-              }}
-              onPointerDown={(e) => e.stopPropagation()}
-              onTouchStart={(e) => e.stopPropagation()}
-              className="px-2 py-2.5 text-muted-foreground hover:text-foreground flex-shrink-0"
-              aria-label="Superset actions"
-              aria-haspopup="menu"
-              aria-expanded={showSupersetMenu}
-            >
-              <MoreVertical className="h-4 w-4" />
-            </button>
-          )}
+          <button
+            ref={supersetTriggerRef}
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              if (showSupersetMenu) setShowSupersetMenu(false);
+              else openSupersetMenu();
+            }}
+            onPointerDown={(e) => e.stopPropagation()}
+            onTouchStart={(e) => e.stopPropagation()}
+            className="px-2 py-2.5 text-muted-foreground hover:text-foreground flex-shrink-0"
+            aria-label="Exercise actions"
+            aria-haspopup="menu"
+            aria-expanded={showSupersetMenu}
+          >
+            <MoreVertical className="h-4 w-4" />
+          </button>
           {showSupersetMenu && menuAnchor && typeof document !== 'undefined' && createPortal(
             <div
               ref={supersetMenuRef}
@@ -1685,6 +1679,13 @@ function SortableExerciseCard({
               style={{ top: menuAnchor.top, right: menuAnchor.right }}
               role="menu"
             >
+              <button
+                onClick={() => { setShowSupersetMenu(false); onShowInfo(); }}
+                className="w-full text-left px-3 py-2.5 text-sm hover:bg-secondary/50 active:bg-secondary flex items-center gap-2"
+                role="menuitem"
+              >
+                <Info className="h-4 w-4 text-muted-foreground" /> Information
+              </button>
               {onPairWithPrevious && (
                 <button
                   onClick={() => { setShowSupersetMenu(false); onPairWithPrevious(); }}
@@ -1715,18 +1716,8 @@ function SortableExerciseCard({
             </div>,
             document.body,
           )}
-          {/* Info button — opens the exercise detail modal as a sibling overlay
-              so the underlying workout state (rest timer, scroll, expanded
-              sets) is preserved. stopPropagation prevents the chevron toggle
-              and swipe-to-delete from firing on the same tap. */}
-          <button
-            onClick={(e) => { e.stopPropagation(); onShowInfo(); }}
-            onPointerDown={(e) => e.stopPropagation()}
-            className="px-2 py-2.5 text-muted-foreground hover:text-foreground flex-shrink-0"
-            aria-label={`Show details for ${we.exercise?.title ?? 'exercise'}`}
-          >
-            <Info className="h-4 w-4" />
-          </button>
+          {/* Info now lives in the ⋮ menu (Information) — frees header width so
+              long titles never push the count/⋮ off the edge. */}
         </div>
       </SwipeToDelete>
       {isGroupLeader && (
