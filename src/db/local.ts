@@ -428,7 +428,7 @@ export interface LocalNutritionWeekMeal extends SyncMeta {
 // ─── Foods (canonical ingredient table) ─────────────────────────────────────
 //
 // Each row represents a named food with macros expressed per (per_qty, per_unit).
-// Effective macros for an ingredient = (amount / per_qty) * food.macro.
+// Effective macros for an ingredient = deriveMealMacros() in src/lib/nutrition/derive-macros.ts.
 // Foods are archive-only (never hard-deleted) because ON DELETE RESTRICT on
 // week_meal_ingredients.food_uuid would wedge the push batch.
 
