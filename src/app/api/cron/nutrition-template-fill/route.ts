@@ -94,15 +94,21 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     );
     if (noteRows[0]?.template_applied_at) continue;
 
+    // Read from the effective-macros view (U1) so recipe meals carry their
+    // derived ingredient-based macros rather than the stale stored aggregate.
+    // The view's CASE logic: is_recipe=false → stored; is_recipe=true → SUM.
+    // meal_slot maps to meal_slot on nutrition_week_meals; the view exposes it.
     const templates = await query<{
       uuid: string; meal_slot: string; meal_name: string;
       protein_g: number | null; carbs_g: number | null; fat_g: number | null;
       calories: number | null; sort_order: number;
     }>(
-      `SELECT uuid, meal_slot, meal_name, protein_g, carbs_g, fat_g, calories, sort_order
-         FROM nutrition_week_meals
-         WHERE day_of_week = $1
-         ORDER BY sort_order ASC`,
+      `SELECT e.uuid, w.meal_slot, e.meal_name,
+              e.protein_g, e.carbs_g, e.fat_g, e.calories, e.sort_order
+         FROM nutrition_week_meal_effective e
+         JOIN nutrition_week_meals w ON w.uuid = e.uuid
+         WHERE w.day_of_week = $1
+         ORDER BY e.sort_order ASC`,
       [dow],
     );
 
