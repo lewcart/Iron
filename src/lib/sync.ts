@@ -31,6 +31,8 @@ import type {
   LocalBodyPlan,
   LocalPlanCheckpoint,
   LocalVisionMuscleOverride,
+  LocalFood,
+  LocalWeekMealIngredient,
 } from '@/db/local';
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
@@ -83,6 +85,8 @@ const SYNCED_TABLES = [
   'body_vision', 'body_plan', 'plan_checkpoint',
   // Nutrition
   'nutrition_logs', 'nutrition_week_meals', 'nutrition_day_notes', 'nutrition_targets',
+  // Foods + ingredients (foods before week_meal_ingredients — FK order)
+  'foods', 'week_meal_ingredients',
   // HRT timeline periods
   'hrt_timeline_periods',
   // Labs (draws before results — results reference draw_uuid)
@@ -135,6 +139,8 @@ interface PushPayload {
   nutrition_week_meals?: LocalNutritionWeekMeal[];
   nutrition_day_notes?: LocalNutritionDayNote[];
   nutrition_targets?: LocalNutritionTarget[];
+  foods?: LocalFood[];
+  week_meal_ingredients?: LocalWeekMealIngredient[];
   hrt_timeline_periods?: LocalHrtTimelinePeriod[];
   lab_draws?: LocalLabDraw[];
   lab_results?: LocalLabResult[];

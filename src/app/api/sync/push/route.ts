@@ -74,6 +74,8 @@ interface PushPayload {
   nutrition_week_meals?: Array<Record<string, unknown>>;
   nutrition_day_notes?: Array<Record<string, unknown>>;
   nutrition_targets?: Array<Record<string, unknown>>;
+  foods?: Array<Record<string, unknown>>;
+  week_meal_ingredients?: Array<Record<string, unknown>>;
   hrt_timeline_periods?: Array<Record<string, unknown>>;
   lab_draws?: Array<Record<string, unknown>>;
   lab_results?: Array<Record<string, unknown>>;
@@ -130,6 +132,9 @@ export async function POST(req: Request) {
     for (const r of body.nutrition_week_meals ?? []) await pushNutritionWeekMeal(r);
     for (const r of body.nutrition_day_notes ?? []) await pushNutritionDayNote(r);
     for (const r of body.nutrition_targets ?? []) await pushNutritionTargets(r);
+    // Foods before week_meal_ingredients (FK: ingredients reference foods).
+    for (const r of body.foods ?? []) await pushFood(r);
+    for (const r of body.week_meal_ingredients ?? []) await pushWeekMealIngredient(r);
 
     for (const r of body.hrt_timeline_periods ?? []) await pushHrtTimelinePeriod(r);
     for (const r of body.lab_draws ?? []) await pushLabDraw(r);
@@ -873,18 +878,20 @@ async function pushNutritionWeekMeal(r: Record<string, unknown>): Promise<void> 
     return;
   }
   await query(
-    `INSERT INTO nutrition_week_meals (uuid, day_of_week, meal_slot, meal_name, protein_g, carbs_g, fat_g, calories, quality_rating, sort_order, updated_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW())
+    `INSERT INTO nutrition_week_meals (uuid, day_of_week, meal_slot, meal_name, protein_g, carbs_g, fat_g, calories, quality_rating, sort_order, is_recipe, updated_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW())
      ON CONFLICT (uuid) DO UPDATE SET
        day_of_week = EXCLUDED.day_of_week, meal_slot = EXCLUDED.meal_slot,
        meal_name = EXCLUDED.meal_name, protein_g = EXCLUDED.protein_g,
        carbs_g = EXCLUDED.carbs_g, fat_g = EXCLUDED.fat_g,
        calories = EXCLUDED.calories, quality_rating = EXCLUDED.quality_rating,
-       sort_order = EXCLUDED.sort_order, updated_at = NOW()`,
+       sort_order = EXCLUDED.sort_order, is_recipe = EXCLUDED.is_recipe,
+       updated_at = NOW()`,
     [
       r.uuid, r.day_of_week, sanitizeMealSlot(r.meal_slot), r.meal_name,
       r.protein_g, r.carbs_g ?? null, r.fat_g ?? null,
       r.calories, r.quality_rating, r.sort_order,
+      r.is_recipe === true,
     ],
   );
 }
@@ -933,6 +940,100 @@ async function pushNutritionTargets(r: Record<string, unknown>): Promise<void> {
     [
       r.calories, r.protein_g, r.carbs_g, r.fat_g,
       r.bands == null ? null : JSON.stringify(r.bands),
+    ],
+  );
+}
+
+// ─── Foods + Week meal ingredients ───────────────────────────────────────────
+//
+// ARCHIVE-ONLY deletion for foods: a _deleted food row MUST NOT hard-DELETE
+// because week_meal_ingredients has ON DELETE RESTRICT on food_uuid. A hard
+// DELETE would wedge the entire push batch with a foreign-key violation.
+// Instead, _deleted translates to archived_at = NOW() — the food disappears
+// from the picker but still resolves in existing ingredient rows.
+//
+// Week meal ingredients use normal hard-DELETE (ON DELETE CASCADE from the
+// meal side ensures referential integrity when the parent meal is deleted).
+
+// Valid per_unit values — enforced by DB CHECK, mirrored here for server-side
+// validation so we reject garbage before it hits the FK/CHECK constraint.
+const FOOD_PER_UNITS = new Set(['g', 'ml', 'serve']);
+
+function sanitizeFoodPerUnit(v: unknown): string {
+  return typeof v === 'string' && FOOD_PER_UNITS.has(v) ? v : 'serve';
+}
+
+/** Clamp a macro value: if non-finite (NaN/Infinity), return null. */
+function clampMacro(v: unknown): number | null {
+  if (v == null) return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+async function pushFood(r: Record<string, unknown>): Promise<void> {
+  // _deleted → archive-only (never hard-DELETE — would wedge ON DELETE RESTRICT)
+  if (r._deleted) {
+    await query(
+      `UPDATE foods SET archived_at = NOW(), updated_at = NOW() WHERE uuid = $1`,
+      [r.uuid],
+    );
+    return;
+  }
+
+  // Server-side validation: per_unit whitelist; per_qty must be finite & > 0.
+  const perUnit = sanitizeFoodPerUnit(r.per_unit);
+  const perQty = Number(r.per_qty);
+  const safePerQty = Number.isFinite(perQty) && perQty > 0 ? perQty : 1;
+
+  await query(
+    `INSERT INTO foods (uuid, name, brand, per_unit, per_qty, calories, protein_g, carbs_g, fat_g, nutrients, source, archived_at, updated_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11, $12, NOW())
+     ON CONFLICT (uuid) DO UPDATE SET
+       name = EXCLUDED.name, brand = EXCLUDED.brand,
+       per_unit = EXCLUDED.per_unit, per_qty = EXCLUDED.per_qty,
+       calories = EXCLUDED.calories, protein_g = EXCLUDED.protein_g,
+       carbs_g = EXCLUDED.carbs_g, fat_g = EXCLUDED.fat_g,
+       nutrients = EXCLUDED.nutrients, source = EXCLUDED.source,
+       archived_at = EXCLUDED.archived_at,
+       updated_at = NOW()`,
+    [
+      r.uuid, r.name, r.brand ?? null, perUnit, safePerQty,
+      clampMacro(r.calories), clampMacro(r.protein_g),
+      clampMacro(r.carbs_g), clampMacro(r.fat_g),
+      JSON.stringify(r.nutrients ?? {}),
+      typeof r.source === 'string' ? r.source : 'manual',
+      r.archived_at ?? null,
+    ],
+  );
+}
+
+async function pushWeekMealIngredient(r: Record<string, unknown>): Promise<void> {
+  if (r._deleted) {
+    // Hard-delete: removing an ingredient from a recipe de-lists it.
+    await query('DELETE FROM week_meal_ingredients WHERE uuid = $1', [r.uuid]);
+    return;
+  }
+
+  // Server-side validation: amount must be finite & > 0.
+  const amount = Number(r.amount);
+  if (!Number.isFinite(amount) || amount <= 0) {
+    // Reject silently — the DB CHECK (amount > 0) would throw anyway; this
+    // gives a clean no-op instead of a batch-aborting constraint error.
+    return;
+  }
+
+  await query(
+    `INSERT INTO week_meal_ingredients (uuid, week_meal_uuid, food_uuid, amount, sort_order, updated_at)
+     VALUES ($1, $2, $3, $4, $5, NOW())
+     ON CONFLICT (uuid) DO UPDATE SET
+       week_meal_uuid = EXCLUDED.week_meal_uuid,
+       food_uuid = EXCLUDED.food_uuid,
+       amount = EXCLUDED.amount,
+       sort_order = EXCLUDED.sort_order,
+       updated_at = NOW()`,
+    [
+      r.uuid, r.week_meal_uuid ?? null, r.food_uuid,
+      amount, r.sort_order ?? 0,
     ],
   );
 }
