@@ -5,8 +5,11 @@ import { ChevronLeft, Pencil, Plus, Trash2 } from 'lucide-react';
 import Link from 'next/link';
 import { dateToDayOfWeek } from '@/lib/api/nutrition';
 import { useWeekMeals } from '@/lib/useLocalDB-nutrition';
+import { useFoodsById, useMealIngredients, useMealIngredientCounts } from '@/lib/useLocalDB-nutrition-foods';
 import { setWeekMeal, deleteWeekMeal } from '@/lib/mutations-nutrition';
-import type { LocalNutritionWeekMeal } from '@/db/local';
+import { deriveMealMacros } from '@/lib/nutrition/derive-macros';
+import { MealIngredientEditor } from './MealIngredientEditor';
+import type { LocalNutritionWeekMeal, LocalFood, LocalWeekMealIngredient } from '@/db/local';
 import type { MealSlot } from '@/types';
 
 const DAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
@@ -50,6 +53,9 @@ export default function NutritionWeekPage() {
   const [saving, setSaving] = useState(false);
 
   const allWeekMeals = useWeekMeals();
+  const foodsById = useFoodsById();
+  const ingredientCounts = useMealIngredientCounts();
+
   const dayMeals = useMemo(
     () => allWeekMeals.filter(m => m.day_of_week === weekDay),
     [allWeekMeals, weekDay],
@@ -153,6 +159,8 @@ export default function NutritionWeekPage() {
                 editingUuid={editingUuid}
                 editForm={editForm}
                 saving={saving}
+                foodsById={foodsById}
+                ingredientCounts={ingredientCounts}
                 onStartAdd={() => {
                   setAddingSlot(slot);
                   setAddForm(EMPTY_FORM);
@@ -195,6 +203,8 @@ interface SlotSectionProps {
   editingUuid: string | null;
   editForm: WeekMealForm;
   saving: boolean;
+  foodsById: Record<string, LocalFood>;
+  ingredientCounts: Record<string, number>;
   onStartAdd: () => void;
   onCancelAdd: () => void;
   onSaveAdd: () => void;
@@ -208,6 +218,7 @@ interface SlotSectionProps {
 
 function SlotSection({
   slot, meals, isAdding, addForm, editingUuid, editForm, saving,
+  foodsById, ingredientCounts,
   onStartAdd, onCancelAdd, onSaveAdd, onAddFormChange,
   onStartEdit, onCancelEdit, onSaveEdit, onEditFormChange, onDelete,
 }: SlotSectionProps) {
@@ -238,55 +249,21 @@ function SlotSection({
         {meals.map((meal, i) => {
           const isEditing = editingUuid === meal.uuid;
           return (
-            <div
+            <MealRow
               key={meal.uuid}
-              className={`flex flex-col gap-1 py-3 px-4 ${i < meals.length - 1 ? 'border-b border-border' : ''}`}
-            >
-              {!isEditing ? (
-                <div className="flex items-center justify-between gap-2">
-                  <div className="flex-1 min-w-0">
-                    <span className="text-sm font-medium">{meal.meal_name}</span>
-                    <div className="flex gap-3 mt-0.5">
-                      {meal.protein_g != null && (
-                        <span className="text-xs text-muted-foreground">{meal.protein_g}g protein</span>
-                      )}
-                      {meal.calories != null && (
-                        <span className="text-xs text-muted-foreground">{meal.calories} kcal</span>
-                      )}
-                      {meal.quality_rating != null && (
-                        <span className="text-xs text-muted-foreground">★ {meal.quality_rating}/5</span>
-                      )}
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-0">
-                    <button
-                      type="button"
-                      onClick={() => onStartEdit(meal)}
-                      className="p-2 text-muted-foreground min-h-[44px] min-w-[44px] flex items-center justify-center"
-                      aria-label="Edit meal"
-                    >
-                      <Pencil className="h-4 w-4" />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => onDelete(meal.uuid)}
-                      className="p-2 text-red-500 min-h-[44px] min-w-[44px] flex items-center justify-center"
-                      aria-label="Delete meal"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </button>
-                  </div>
-                </div>
-              ) : (
-                <MealEditFields
-                  form={editForm}
-                  onChange={onEditFormChange}
-                  onSave={() => onSaveEdit(meal.uuid)}
-                  onCancel={onCancelEdit}
-                  saving={saving}
-                />
-              )}
-            </div>
+              meal={meal}
+              isEditing={isEditing}
+              editForm={editForm}
+              saving={saving}
+              foodsById={foodsById}
+              ingredientCount={ingredientCounts[meal.uuid] ?? 0}
+              hasBorder={i < meals.length - 1}
+              onStartEdit={() => onStartEdit(meal)}
+              onCancelEdit={onCancelEdit}
+              onSaveEdit={() => onSaveEdit(meal.uuid)}
+              onEditFormChange={onEditFormChange}
+              onDelete={() => onDelete(meal.uuid)}
+            />
           );
         })}
 
@@ -311,6 +288,146 @@ function SlotSection({
         )}
       </div>
     </section>
+  );
+}
+
+// ─── MealRow ─────────────────────────────────────────────────────────────────
+
+interface MealRowProps {
+  meal: LocalNutritionWeekMeal;
+  isEditing: boolean;
+  editForm: WeekMealForm;
+  saving: boolean;
+  foodsById: Record<string, LocalFood>;
+  ingredientCount: number;
+  hasBorder: boolean;
+  onStartEdit: () => void;
+  onCancelEdit: () => void;
+  onSaveEdit: () => void;
+  onEditFormChange: (f: WeekMealForm) => void;
+  onDelete: () => void;
+}
+
+/**
+ * A single meal row.
+ *
+ * Display mode: name + effective macros (derived for recipe meals, stored aggregate
+ * for flat meals). A small "✦" indicator appears next to derived values so Lou can
+ * see which macros are ingredient-driven.
+ *
+ * Below the display row the MealIngredientEditor is always shown:
+ *   - is_recipe=false → ConvertPrompt ("Convert to recipe" link)
+ *   - is_recipe=true  → RecipeEditor (disclosure header + ingredient list)
+ *
+ * GATE DECISION 1: converting to recipe is a deliberate user action — the flat
+ * stored aggregate is never silently replaced.
+ */
+function MealRow({
+  meal, isEditing, editForm, saving, foodsById, hasBorder,
+  onStartEdit, onCancelEdit, onSaveEdit, onEditFormChange, onDelete,
+}: MealRowProps) {
+  // Live ingredients for this meal (Dexie live query inside useMealIngredients)
+  const ingredients = useMealIngredients(meal.uuid);
+
+  // Build DeriveIngredient list for effective macro computation
+  const deriveIngredients = useMemo<{ amount: number; food: { per_qty: number | null; calories: number | null; protein_g: number | null; carbs_g: number | null; fat_g: number | null; } }[]>(
+    () =>
+      ingredients
+        .map((i: LocalWeekMealIngredient) => {
+          const food = foodsById[i.food_uuid];
+          if (!food) return null;
+          return {
+            amount: Number(i.amount),
+            food: {
+              per_qty: Number(food.per_qty),
+              calories: food.calories != null ? Number(food.calories) : null,
+              protein_g: food.protein_g != null ? Number(food.protein_g) : null,
+              carbs_g: food.carbs_g != null ? Number(food.carbs_g) : null,
+              fat_g: food.fat_g != null ? Number(food.fat_g) : null,
+            },
+          };
+        })
+        .filter((x): x is NonNullable<typeof x> => x !== null),
+    [ingredients, foodsById],
+  );
+
+  const effectiveMacros = deriveMealMacros(
+    {
+      is_recipe: !!meal.is_recipe,
+      calories: meal.calories,
+      protein_g: meal.protein_g,
+      carbs_g: meal.carbs_g,
+      fat_g: meal.fat_g,
+    },
+    deriveIngredients,
+  );
+
+  return (
+    <div className={`flex flex-col ${hasBorder ? 'border-b border-border' : ''}`}>
+      {!isEditing ? (
+        <>
+          {/* Display row */}
+          <div className="flex items-center justify-between gap-2 py-3 px-4">
+            <div className="flex-1 min-w-0">
+              <span className="text-sm font-medium">{meal.meal_name}</span>
+              <div className="flex gap-3 mt-0.5">
+                {effectiveMacros.protein_g != null && (
+                  <span className="text-xs text-muted-foreground">
+                    {Math.round(Number(effectiveMacros.protein_g))}g protein
+                    {meal.is_recipe && <span className="text-primary/60"> ✦</span>}
+                  </span>
+                )}
+                {effectiveMacros.calories != null && (
+                  <span className="text-xs text-muted-foreground">
+                    {Math.round(Number(effectiveMacros.calories))} kcal
+                    {meal.is_recipe && <span className="text-primary/60"> ✦</span>}
+                  </span>
+                )}
+                {meal.quality_rating != null && (
+                  <span className="text-xs text-muted-foreground">★ {meal.quality_rating}/5</span>
+                )}
+              </div>
+            </div>
+            <div className="flex items-center gap-0">
+              <button
+                type="button"
+                onClick={onStartEdit}
+                className="p-2 text-muted-foreground min-h-[44px] min-w-[44px] flex items-center justify-center"
+                aria-label="Edit meal"
+              >
+                <Pencil className="h-4 w-4" />
+              </button>
+              <button
+                type="button"
+                onClick={onDelete}
+                className="p-2 text-red-500 min-h-[44px] min-w-[44px] flex items-center justify-center"
+                aria-label="Delete meal"
+              >
+                <Trash2 className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
+
+          {/* Ingredient editor — always visible below display row (never hidden).
+              ConvertPrompt for flat meals; RecipeEditor for recipe meals. */}
+          <MealIngredientEditor
+            meal={meal}
+            ingredients={ingredients}
+            foodsById={foodsById}
+          />
+        </>
+      ) : (
+        <div className="py-3 px-4">
+          <MealEditFields
+            form={editForm}
+            onChange={onEditFormChange}
+            onSave={onSaveEdit}
+            onCancel={onCancelEdit}
+            saving={saving}
+          />
+        </div>
+      )}
+    </div>
   );
 }
 
