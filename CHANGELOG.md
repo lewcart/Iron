@@ -2,6 +2,12 @@
 
 All notable changes to Rebirth are documented here.
 
+## [Unreleased]
+
+### Added
+
+- **Nutrition meals composed of foods/ingredients.** Standard Week meals can now be turned into recipes built from `(food, amount)` ingredients with live derived macros, instead of flat hand-typed totals. Conversion is explicit ("Convert to recipe") — a meal keeps its stored aggregate until you opt in, so there is no silent macro drop. Migration 052 adds a `foods` canonical catalog (promote-on-attach: foods are minted only when attached as an ingredient, carrying real serving metadata so gram-native scaling like "40g oats" works), a `week_meal_ingredients` join, an `is_recipe` flag, and the `nutrition_week_meal_effective` view as the single SQL source of truth for derived macros (mirrored by `src/lib/nutrition/derive-macros.ts` for the Dexie UI, grep-guarded so the formula lives in one place). Template-fill (client + cron) materializes effective macros into `nutrition_logs` at insert time, so editing a recipe's ingredients actually moves tracked daily totals; already-logged past days stay immutable. Full local-first sync threading (Dexie v27, `foods` archive-only to avoid FK-restrict push wedges, numeric-coerced pulls). Foods search stays on the existing canonical view (no second corpus). Reviewed via `/autoplan` (design + eng + DX + Codex). **Fast-follow (not yet shipped):** ingredient-level daily logging and ingredient-aware MCP tools (`get_nutrition_plan` / `add_week_meal` / `log_nutrition_meal` still read/write flat macros for now).
+
 ## [0.14.0] - 2026-06-05
 
 ### Added
