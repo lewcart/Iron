@@ -4,6 +4,7 @@ import { db } from '@/db/local';
 import { syncEngine } from '@/lib/sync';
 import { uuid as genUUID } from '@/lib/uuid';
 import { dateToDayOfWeek } from '@/lib/api/nutrition';
+import { deriveMealMacros } from '@/lib/nutrition/derive-macros';
 import type { MealSlot } from '@/types';
 import type {
   LocalNutritionLog,
@@ -214,18 +215,67 @@ export async function ensurePlannedLogsForDate(date: string): Promise<void> {
   // is preserved via the template's sort_order (1s offset per row).
   const baseMs = Date.parse(`${date}T12:00:00.000Z`);
   const sorted = templateMeals.sort((a, b) => a.sort_order - b.sort_order);
+
+  // Pre-fetch all ingredients + foods needed for recipe meals in this batch.
+  // Only fetched when at least one meal is a recipe — otherwise zero overhead.
+  const recipeMealUuids = sorted
+    .filter(m => !usedTemplateIds.has(m.uuid) && m.is_recipe)
+    .map(m => m.uuid);
+
+  // Map: week_meal_uuid → array of { amount, food }
+  type FoodLike = { per_qty: number | null; calories: number | null; protein_g: number | null; carbs_g: number | null; fat_g: number | null };
+  const ingredientsByMeal = new Map<string, Array<{ amount: number; food: FoodLike }>>();
+
+  if (recipeMealUuids.length > 0) {
+    const allIngredients = await db.week_meal_ingredients
+      .filter(ing => ing.week_meal_uuid !== null && recipeMealUuids.includes(ing.week_meal_uuid!) && !ing._deleted)
+      .toArray();
+
+    // Collect unique food UUIDs
+    const foodUuids = [...new Set(allIngredients.map(ing => ing.food_uuid))];
+    const foods = foodUuids.length > 0
+      ? await db.foods.where('uuid').anyOf(foodUuids).toArray()
+      : [];
+    const foodsById = new Map(foods.map(f => [f.uuid, f]));
+
+    for (const ing of allIngredients) {
+      if (!ing.week_meal_uuid) continue;
+      const food = foodsById.get(ing.food_uuid);
+      if (!food) continue; // skip dangling reference
+      const list = ingredientsByMeal.get(ing.week_meal_uuid) ?? [];
+      list.push({ amount: ing.amount, food });
+      ingredientsByMeal.set(ing.week_meal_uuid, list);
+    }
+  }
+
   for (let i = 0; i < sorted.length; i++) {
     const meal = sorted[i];
     if (usedTemplateIds.has(meal.uuid)) continue;
+
+    // Compute effective macros: recipe meals derive from ingredients; flat meals
+    // use stored aggregate. Past/already-filled logs are untouched (idempotency
+    // gate above). Only NEW fills (future days) reach this branch.
+    const ingredients = ingredientsByMeal.get(meal.uuid) ?? [];
+    const macros = deriveMealMacros(
+      {
+        is_recipe: meal.is_recipe ?? false,
+        calories: meal.calories,
+        protein_g: meal.protein_g,
+        carbs_g: meal.carbs_g,
+        fat_g: meal.fat_g,
+      },
+      ingredients,
+    );
+
     const log: LocalNutritionLog = {
       uuid: genUUID(),
       logged_at: new Date(baseMs + i * 1000).toISOString(),
       meal_type: meal.meal_slot,
       meal_name: meal.meal_name,
-      calories: meal.calories,
-      protein_g: meal.protein_g,
-      carbs_g: meal.carbs_g,
-      fat_g: meal.fat_g,
+      calories: macros.calories,
+      protein_g: macros.protein_g,
+      carbs_g: macros.carbs_g,
+      fat_g: macros.fat_g,
       notes: null,
       template_meal_id: meal.uuid,
       status: 'planned',

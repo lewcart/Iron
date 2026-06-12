@@ -317,16 +317,30 @@ async function searchNutritionFoods(args: Record<string, unknown>) {
   const rawQ = query_.trim();
   const safeQ = rawQ.toLowerCase().replace(/[\\%_]/g, (c) => '\\' + c);
 
+  // DISTINCT ON (c.food_name): same fan-out guard as the HTTP route. One result
+  // per canonical name; LATERAL sub-select picks the single most-recent
+  // non-archived food row so uuid is deterministic.
   const layer1 = sources.has('local')
     ? await query<Record<string, unknown>>(
-        `SELECT food_name, calories, protein_g, carbs_g, fat_g,
-                last_logged_at, times_logged
-         FROM nutrition_food_canonical
-         WHERE canonical_name LIKE $1 || '%' ESCAPE '\\'
-            OR canonical_name LIKE '%' || $1 || '%' ESCAPE '\\'
-            OR similarity(canonical_name, $2) >= 0.22
-         ORDER BY (canonical_name LIKE $1 || '%' ESCAPE '\\') DESC,
-                  times_logged DESC, last_logged_at DESC
+        `SELECT DISTINCT ON (c.food_name)
+                c.food_name, c.calories, c.protein_g, c.carbs_g, c.fat_g,
+                c.last_logged_at, c.times_logged,
+                f.uuid AS uuid
+         FROM nutrition_food_canonical c
+         LEFT JOIN LATERAL (
+           SELECT uuid
+           FROM foods
+           WHERE lower(name) = c.canonical_name
+             AND archived_at IS NULL
+           ORDER BY created_at DESC
+           LIMIT 1
+         ) f ON true
+         WHERE c.canonical_name LIKE $1 || '%' ESCAPE '\\'
+            OR c.canonical_name LIKE '%' || $1 || '%' ESCAPE '\\'
+            OR similarity(c.canonical_name, $2) >= 0.22
+         ORDER BY c.food_name,
+                  (c.canonical_name LIKE $1 || '%' ESCAPE '\\') DESC,
+                  c.times_logged DESC, c.last_logged_at DESC
          LIMIT $3`,
         [safeQ, rawQ.toLowerCase(), limit],
       )
@@ -339,6 +353,7 @@ async function searchNutritionFoods(args: Record<string, unknown>) {
 
   return toolResult({
     query: rawQ,
+    // uuid is null for foods not yet promoted; non-null when previously attached as ingredient
     layer1: layer1.map((r) => ({ source: 'local', ...r })),
     layer2,
     layer3,

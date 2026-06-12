@@ -32,6 +32,7 @@ const SYNCED_TABLES = [
   'bodyweight_logs', 'body_spec_logs', 'measurement_logs', 'inbody_scans', 'body_goals',
   'body_vision', 'body_plan', 'plan_checkpoint',
   'nutrition_logs', 'nutrition_week_meals', 'nutrition_day_notes', 'nutrition_targets',
+  'foods', 'week_meal_ingredients',
   'hrt_timeline_periods',
   'lab_draws', 'lab_results',
   'wellbeing_logs', 'dysphoria_logs', 'clothes_test_logs',
@@ -311,7 +312,7 @@ async function fetchRows(table: SyncedTable, uuids: string[]): Promise<Array<Rec
     case 'nutrition_week_meals':
       return (await query<Record<string, unknown>>(
         `SELECT uuid, day_of_week, meal_slot, meal_name, protein_g, carbs_g, fat_g,
-                calories, quality_rating, sort_order
+                calories, quality_rating, sort_order, is_recipe
          FROM nutrition_week_meals WHERE uuid = ANY($1::text[])`, [uuids]))
         .map(r => ({
           ...r,
@@ -319,6 +320,9 @@ async function fetchRows(table: SyncedTable, uuids: string[]): Promise<Array<Rec
           protein_g: r.protein_g != null ? Number(r.protein_g) : null,
           carbs_g: r.carbs_g != null ? Number(r.carbs_g) : null,
           fat_g: r.fat_g != null ? Number(r.fat_g) : null,
+          // is_recipe is a Postgres boolean — comes back as JS boolean already,
+          // but coerce defensively in case driver varies.
+          is_recipe: r.is_recipe === true,
         }));
     case 'nutrition_day_notes':
       return (await query<Record<string, unknown>>(
@@ -336,6 +340,34 @@ async function fetchRows(table: SyncedTable, uuids: string[]): Promise<Array<Rec
         `SELECT id, calories, protein_g, carbs_g, fat_g, bands
          FROM nutrition_targets WHERE id::TEXT = ANY($1::text[])`, [uuids]))
         .map(r => ({ ...r, id: Number(r.id) }));
+    case 'foods':
+      return (await query<Record<string, unknown>>(
+        `SELECT uuid, name, brand, per_unit, per_qty, calories, protein_g, carbs_g, fat_g,
+                nutrients, source, archived_at, created_at
+         FROM foods WHERE uuid = ANY($1::text[])`, [uuids]))
+        .map(r => ({
+          ...r,
+          // Postgres NUMERIC → string by default in node-postgres. Coerce all
+          // numeric columns so macro sums on the client compute correctly.
+          per_qty: Number(r.per_qty),
+          calories: r.calories != null ? Number(r.calories) : null,
+          protein_g: r.protein_g != null ? Number(r.protein_g) : null,
+          carbs_g: r.carbs_g != null ? Number(r.carbs_g) : null,
+          fat_g: r.fat_g != null ? Number(r.fat_g) : null,
+          archived_at: r.archived_at ? toIso(r.archived_at) : null,
+          created_at: toIso(r.created_at),
+        }));
+    case 'week_meal_ingredients':
+      return (await query<Record<string, unknown>>(
+        `SELECT uuid, week_meal_uuid, food_uuid, amount, sort_order, created_at
+         FROM week_meal_ingredients WHERE uuid = ANY($1::text[])`, [uuids]))
+        .map(r => ({
+          ...r,
+          // NUMERIC → coerce to number so ingredient amounts don't stringify.
+          amount: Number(r.amount),
+          sort_order: Number(r.sort_order),
+          created_at: toIso(r.created_at),
+        }));
     case 'hrt_timeline_periods':
       return (await query<Record<string, unknown>>(
         'SELECT uuid, name, started_at, ended_at, doses_e, doses_t_blocker, doses_other, notes FROM hrt_timeline_periods WHERE uuid = ANY($1::text[])', [uuids]))

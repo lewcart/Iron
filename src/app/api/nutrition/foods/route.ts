@@ -34,6 +34,8 @@ interface CanonicalRow {
   last_logged_at: Date | string | null;
   times_logged: string | number;
   is_prefix_match: boolean;
+  /** Stable uuid if this food has already been promoted to the `foods` table. */
+  food_uuid: string | null;
 }
 
 function num(v: string | number | null | undefined): number | null {
@@ -58,22 +60,35 @@ function escapeLike(s: string): string {
 const TRIGRAM_THRESHOLD = 0.22;
 
 async function searchLayer1(safeQ: string, rawQ: string, limit: number): Promise<FoodResult[]> {
+  // DISTINCT ON (c.food_name) prevents fan-out when the same canonical name has
+  // been promoted to the `foods` table under multiple source rows (e.g. once as
+  // 'local', once as 'off'). The LATERAL sub-select picks the single most-recent
+  // non-archived food row per canonical name, so uuid is deterministic.
   const rows = await query<CanonicalRow>(
-    `SELECT
-       food_name,
-       calories,
-       protein_g,
-       carbs_g,
-       fat_g,
-       nutrients,
-       last_logged_at,
-       times_logged,
-       (canonical_name LIKE $1 || '%' ESCAPE '\\') AS is_prefix_match
-     FROM nutrition_food_canonical
-     WHERE canonical_name LIKE $1 || '%' ESCAPE '\\'
-        OR canonical_name LIKE '%' || $1 || '%' ESCAPE '\\'
-        OR similarity(canonical_name, $2) >= $4
-     ORDER BY is_prefix_match DESC, times_logged DESC, last_logged_at DESC
+    `SELECT DISTINCT ON (c.food_name)
+       c.food_name,
+       c.calories,
+       c.protein_g,
+       c.carbs_g,
+       c.fat_g,
+       c.nutrients,
+       c.last_logged_at,
+       c.times_logged,
+       (c.canonical_name LIKE $1 || '%' ESCAPE '\\') AS is_prefix_match,
+       f.uuid AS food_uuid
+     FROM nutrition_food_canonical c
+     LEFT JOIN LATERAL (
+       SELECT uuid
+       FROM foods
+       WHERE lower(name) = c.canonical_name
+         AND archived_at IS NULL
+       ORDER BY created_at DESC
+       LIMIT 1
+     ) f ON true
+     WHERE c.canonical_name LIKE $1 || '%' ESCAPE '\\'
+        OR c.canonical_name LIKE '%' || $1 || '%' ESCAPE '\\'
+        OR similarity(c.canonical_name, $2) >= $4
+     ORDER BY c.food_name, is_prefix_match DESC, c.times_logged DESC, c.last_logged_at DESC
      LIMIT $3`,
     [safeQ, rawQ.toLowerCase(), limit, TRIGRAM_THRESHOLD],
   );
@@ -88,6 +103,7 @@ async function searchLayer1(safeQ: string, rawQ: string, limit: number): Promise
     fat_g: num(r.fat_g),
     nutrients: r.nutrients ?? null,
     external_id: null,
+    uuid: r.food_uuid ?? null,
     meta: {
       times_logged: Number(r.times_logged),
       last_logged_at: isoOrNull(r.last_logged_at) ?? undefined,

@@ -31,6 +31,8 @@ import type {
   LocalBodyPlan,
   LocalPlanCheckpoint,
   LocalVisionMuscleOverride,
+  LocalFood,
+  LocalWeekMealIngredient,
 } from '@/db/local';
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
@@ -83,6 +85,8 @@ const SYNCED_TABLES = [
   'body_vision', 'body_plan', 'plan_checkpoint',
   // Nutrition
   'nutrition_logs', 'nutrition_week_meals', 'nutrition_day_notes', 'nutrition_targets',
+  // Foods + ingredients (foods before week_meal_ingredients — FK order)
+  'foods', 'week_meal_ingredients',
   // HRT timeline periods
   'hrt_timeline_periods',
   // Labs (draws before results — results reference draw_uuid)
@@ -135,6 +139,8 @@ interface PushPayload {
   nutrition_week_meals?: LocalNutritionWeekMeal[];
   nutrition_day_notes?: LocalNutritionDayNote[];
   nutrition_targets?: LocalNutritionTarget[];
+  foods?: LocalFood[];
+  week_meal_ingredients?: LocalWeekMealIngredient[];
   hrt_timeline_periods?: LocalHrtTimelinePeriod[];
   lab_draws?: LocalLabDraw[];
   lab_results?: LocalLabResult[];
@@ -515,6 +521,10 @@ class SyncEngine {
   //
   //   v1 (2026-05-03): backfill body_vision/body_plan/plan_checkpoint added
   //                    to SYNCED_TABLES on 2026-05-01 (commit 36a4f41).
+  //
+  // foods + week_meal_ingredients (migration 052, 2026-06-13): no bump needed —
+  // these tables are brand-new with no pre-existing rows, so devices that pull
+  // from seq 0 will naturally receive all rows on first sync.
   private static readonly SYNC_RESET_VERSION = 1;
   private async ensureSyncResetBaseline(): Promise<void> {
     const current = Number(await getMeta('sync_reset_version') ?? 0);

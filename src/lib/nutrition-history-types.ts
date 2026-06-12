@@ -37,4 +37,11 @@ export interface FoodResult {
   nutrients: Record<string, unknown> | null;
   external_id: string | null;
   meta: { times_logged?: number; last_logged_at?: string } | null;
+  /**
+   * Stable uuid if this food has already been promoted to the local `foods`
+   * table (via promoteFoodFromResult). Null for canonical-view rows that have
+   * not yet been attached to any recipe — uuid is minted at promote time.
+   * Callers that need a stable handle should call promoteFoodFromResult first.
+   */
+  uuid?: string | null;
 }

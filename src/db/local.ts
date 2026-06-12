@@ -419,6 +419,54 @@ export interface LocalNutritionWeekMeal extends SyncMeta {
   calories: number | null;
   quality_rating: number | null;
   sort_order: number;
+  /** When true, effective macros derive from week_meal_ingredients × foods.
+   *  When false (default), the stored aggregate is used (legacy quick-add).
+   *  See migration 052 GATE DECISION 1. */
+  is_recipe?: boolean;
+}
+
+// ─── Foods (canonical ingredient table) ─────────────────────────────────────
+//
+// Each row represents a named food with macros expressed per (per_qty, per_unit).
+// Effective macros for an ingredient = deriveMealMacros() in src/lib/nutrition/derive-macros.ts.
+// Foods are archive-only (never hard-deleted) because ON DELETE RESTRICT on
+// week_meal_ingredients.food_uuid would wedge the push batch.
+
+export interface LocalFood extends SyncMeta {
+  uuid: string;
+  name: string;
+  brand: string | null;
+  /** Unit of measure for per_qty — 'g', 'ml', or 'serve'. */
+  per_unit: 'g' | 'ml' | 'serve';
+  /** Quantity of per_unit that the macros describe (e.g. 100 for per-100g). */
+  per_qty: number;
+  calories: number | null;
+  protein_g: number | null;
+  carbs_g: number | null;
+  fat_g: number | null;
+  /** Carry-through micro-nutrient JSONB from food_entries / manual entry. */
+  nutrients: Record<string, unknown>;
+  /** Provenance: 'manual' | 'fitbee-seed' | future sources. */
+  source: string;
+  /** When set, the food is archived (hidden from picker, still resolves in
+   *  existing ingredient rows). ISO-8601 string. See migration 052. */
+  archived_at: string | null;
+  created_at: string;
+}
+
+// ─── Week meal ingredients (join: nutrition_week_meals ↔ foods) ──────────────
+
+export interface LocalWeekMealIngredient extends SyncMeta {
+  uuid: string;
+  /** FK → nutrition_week_meals.uuid. Nullable in DB for future polymorphism
+   *  (log-level ingredients fast-follow); CHECK enforces NOT NULL for MVP. */
+  week_meal_uuid: string | null;
+  /** FK → foods.uuid. ON DELETE RESTRICT — archive the food instead. */
+  food_uuid: string;
+  /** Quantity in food.per_unit. */
+  amount: number;
+  sort_order: number;
+  created_at: string;
 }
 
 export interface LocalNutritionDayNote extends SyncMeta {
@@ -670,6 +718,10 @@ export class IronDB extends Dexie {
 
   // ── v22 additions ──
   vision_muscle_overrides!: Table<LocalVisionMuscleOverride, string>;
+
+  // ── v27 additions ──
+  foods!: Table<LocalFood, string>;
+  week_meal_ingredients!: Table<LocalWeekMealIngredient, string>;
 
   constructor() {
     super('iron-db');
@@ -1030,6 +1082,33 @@ export class IronDB extends Dexie {
     this.version(26).stores(v24Stores).upgrade(async tx => {
       await tx.table('progress_photos').toCollection().modify(row => {
         if (row.ab_visibility === undefined) row.ab_visibility = null;
+      });
+    });
+
+    // v27: nutrition ingredients (mirrors Postgres migration 052).
+    //
+    //   - foods: canonical ingredient table. FK parent for week_meal_ingredients.
+    //     Indexed on uuid (PK). Archive-only deletion — no hard-delete client path.
+    //     _synced/_updated_at indexes so push() can find dirty rows.
+    //
+    //   - week_meal_ingredients: join (nutrition_week_meals → foods). Indexed on
+    //     week_meal_uuid (list all ingredients for a meal) and food_uuid
+    //     (check whether a food is still referenced). _synced/_updated_at for push.
+    //
+    //   - nutrition_week_meals.is_recipe: additive nullable boolean, not indexed.
+    //     Backfill undefined → false on pre-v27 rows so reads return a defined
+    //     value rather than undefined.
+    //
+    // Note: Dexie version number (27) is NOT aligned to the Postgres migration
+    // number (052) — they are on different sequences. See plan review decision 3.
+    const v27Stores = {
+      ...v24Stores,
+      foods: 'uuid, source, archived_at, _synced, _updated_at',
+      week_meal_ingredients: 'uuid, week_meal_uuid, food_uuid, _synced, _updated_at',
+    };
+    this.version(27).stores(v27Stores).upgrade(async tx => {
+      await tx.table('nutrition_week_meals').toCollection().modify(row => {
+        if (row.is_recipe === undefined) row.is_recipe = false;
       });
     });
 
