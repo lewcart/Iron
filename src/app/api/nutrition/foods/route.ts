@@ -60,8 +60,12 @@ function escapeLike(s: string): string {
 const TRIGRAM_THRESHOLD = 0.22;
 
 async function searchLayer1(safeQ: string, rawQ: string, limit: number): Promise<FoodResult[]> {
+  // DISTINCT ON (c.food_name) prevents fan-out when the same canonical name has
+  // been promoted to the `foods` table under multiple source rows (e.g. once as
+  // 'local', once as 'off'). The LATERAL sub-select picks the single most-recent
+  // non-archived food row per canonical name, so uuid is deterministic.
   const rows = await query<CanonicalRow>(
-    `SELECT
+    `SELECT DISTINCT ON (c.food_name)
        c.food_name,
        c.calories,
        c.protein_g,
@@ -73,13 +77,18 @@ async function searchLayer1(safeQ: string, rawQ: string, limit: number): Promise
        (c.canonical_name LIKE $1 || '%' ESCAPE '\\') AS is_prefix_match,
        f.uuid AS food_uuid
      FROM nutrition_food_canonical c
-     LEFT JOIN foods f
-       ON lower(f.name) = c.canonical_name
-      AND f.archived_at IS NULL
+     LEFT JOIN LATERAL (
+       SELECT uuid
+       FROM foods
+       WHERE lower(name) = c.canonical_name
+         AND archived_at IS NULL
+       ORDER BY created_at DESC
+       LIMIT 1
+     ) f ON true
      WHERE c.canonical_name LIKE $1 || '%' ESCAPE '\\'
         OR c.canonical_name LIKE '%' || $1 || '%' ESCAPE '\\'
         OR similarity(c.canonical_name, $2) >= $4
-     ORDER BY is_prefix_match DESC, c.times_logged DESC, c.last_logged_at DESC
+     ORDER BY c.food_name, is_prefix_match DESC, c.times_logged DESC, c.last_logged_at DESC
      LIMIT $3`,
     [safeQ, rawQ.toLowerCase(), limit, TRIGRAM_THRESHOLD],
   );

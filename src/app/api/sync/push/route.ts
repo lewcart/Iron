@@ -1010,7 +1010,14 @@ async function pushFood(r: Record<string, unknown>): Promise<void> {
 async function pushWeekMealIngredient(r: Record<string, unknown>): Promise<void> {
   if (r._deleted) {
     // Hard-delete: removing an ingredient from a recipe de-lists it.
-    await query('DELETE FROM week_meal_ingredients WHERE uuid = $1', [r.uuid]);
+    // Match on uuid AND on the (week_meal_uuid, food_uuid) pair so any stale
+    // duplicate row for this pair is also cleaned up in one shot.
+    await query(
+      `DELETE FROM week_meal_ingredients
+       WHERE uuid = $1
+          OR (week_meal_uuid = $2 AND food_uuid = $3)`,
+      [r.uuid, r.week_meal_uuid ?? null, r.food_uuid],
+    );
     return;
   }
 
@@ -1022,12 +1029,22 @@ async function pushWeekMealIngredient(r: Record<string, unknown>): Promise<void>
     return;
   }
 
+  // Suspenders (belt): upsert on the composite (week_meal_uuid, food_uuid) key
+  // first. If a row already exists for this (meal, food) pair under any uuid,
+  // update it in place — this prevents a 23505 violation that would wedge the
+  // entire push batch. The uuid of the winning row becomes whatever was in the DB
+  // first (stable); the client's uuid is only used on a true first-insert.
+  //
+  // Pattern: INSERT … ON CONFLICT (week_meal_uuid, food_uuid) DO UPDATE covers
+  // the duplicate-add case. ON CONFLICT (uuid) covers the normal re-push of an
+  // existing row (same uuid, updated amount). Postgres only allows one ON CONFLICT
+  // target per INSERT, so we use the composite key as the primary guard and rely
+  // on the client-side dedup (addMealIngredient) to ensure the uuid is already
+  // correct for subsequent pushes.
   await query(
     `INSERT INTO week_meal_ingredients (uuid, week_meal_uuid, food_uuid, amount, sort_order, updated_at)
      VALUES ($1, $2, $3, $4, $5, NOW())
-     ON CONFLICT (uuid) DO UPDATE SET
-       week_meal_uuid = EXCLUDED.week_meal_uuid,
-       food_uuid = EXCLUDED.food_uuid,
+     ON CONFLICT (week_meal_uuid, food_uuid) DO UPDATE SET
        amount = EXCLUDED.amount,
        sort_order = EXCLUDED.sort_order,
        updated_at = NOW()`,

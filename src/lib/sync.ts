@@ -521,6 +521,10 @@ class SyncEngine {
   //
   //   v1 (2026-05-03): backfill body_vision/body_plan/plan_checkpoint added
   //                    to SYNCED_TABLES on 2026-05-01 (commit 36a4f41).
+  //
+  // foods + week_meal_ingredients (migration 052, 2026-06-13): no bump needed —
+  // these tables are brand-new with no pre-existing rows, so devices that pull
+  // from seq 0 will naturally receive all rows on first sync.
   private static readonly SYNC_RESET_VERSION = 1;
   private async ensureSyncResetBaseline(): Promise<void> {
     const current = Number(await getMeta('sync_reset_version') ?? 0);

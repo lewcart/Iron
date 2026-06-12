@@ -317,19 +317,29 @@ async function searchNutritionFoods(args: Record<string, unknown>) {
   const rawQ = query_.trim();
   const safeQ = rawQ.toLowerCase().replace(/[\\%_]/g, (c) => '\\' + c);
 
+  // DISTINCT ON (c.food_name): same fan-out guard as the HTTP route. One result
+  // per canonical name; LATERAL sub-select picks the single most-recent
+  // non-archived food row so uuid is deterministic.
   const layer1 = sources.has('local')
     ? await query<Record<string, unknown>>(
-        `SELECT c.food_name, c.calories, c.protein_g, c.carbs_g, c.fat_g,
+        `SELECT DISTINCT ON (c.food_name)
+                c.food_name, c.calories, c.protein_g, c.carbs_g, c.fat_g,
                 c.last_logged_at, c.times_logged,
                 f.uuid AS uuid
          FROM nutrition_food_canonical c
-         LEFT JOIN foods f
-           ON lower(f.name) = c.canonical_name
-          AND f.archived_at IS NULL
+         LEFT JOIN LATERAL (
+           SELECT uuid
+           FROM foods
+           WHERE lower(name) = c.canonical_name
+             AND archived_at IS NULL
+           ORDER BY created_at DESC
+           LIMIT 1
+         ) f ON true
          WHERE c.canonical_name LIKE $1 || '%' ESCAPE '\\'
             OR c.canonical_name LIKE '%' || $1 || '%' ESCAPE '\\'
             OR similarity(c.canonical_name, $2) >= 0.22
-         ORDER BY (c.canonical_name LIKE $1 || '%' ESCAPE '\\') DESC,
+         ORDER BY c.food_name,
+                  (c.canonical_name LIKE $1 || '%' ESCAPE '\\') DESC,
                   c.times_logged DESC, c.last_logged_at DESC
          LIMIT $3`,
         [safeQ, rawQ.toLowerCase(), limit],

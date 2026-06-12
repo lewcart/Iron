@@ -206,8 +206,8 @@ export async function createManualFood(input: ManualFoodInput): Promise<string> 
  * - uuid lookup: exact match, includes archived foods (so existing ingredient
  *   rows still resolve even if the food was later archived).
  * - name lookup: case-insensitive match on non-archived, non-deleted foods.
- *   Returns the first match if unique; null if none found; throws if ambiguous
- *   (caller should surface "be more specific" to user).
+ *   Returns the first match if any found (insertion-order; most recently created
+ *   row wins); returns null if no match. Does NOT throw on ambiguity.
  *
  * @returns The LocalFood row, or null if not found.
  */

@@ -74,6 +74,11 @@ export async function archiveFood(uuid: string): Promise<void> {
 /**
  * Add a food as an ingredient to a week meal. Schedules a push.
  * Caller is responsible for ensuring food_uuid already exists in db.foods.
+ *
+ * Duplicate-safe: if the food is already an ingredient of this meal (same
+ * week_meal_uuid + food_uuid), the existing row's amount is UPDATED (additive)
+ * instead of inserting a second row. This prevents the UNIQUE constraint on
+ * (week_meal_uuid, food_uuid) from wedging the push batch with a 23505 error.
  */
 export async function addMealIngredient(opts: {
   week_meal_uuid: string;
@@ -84,6 +89,26 @@ export async function addMealIngredient(opts: {
   if (!Number.isFinite(opts.amount) || opts.amount <= 0) {
     throw new Error(`INVALID_QUANTITY: amount must be > 0, got ${opts.amount}`);
   }
+
+  // Belt: check for an existing non-deleted ingredient with the same (meal, food) pair.
+  const existing = await db.week_meal_ingredients
+    .filter(i => i.week_meal_uuid === opts.week_meal_uuid &&
+                 i.food_uuid === opts.food_uuid &&
+                 !i._deleted)
+    .first();
+
+  if (existing) {
+    // Additive update: combine amounts instead of inserting a duplicate.
+    const newAmount = Number(existing.amount) + opts.amount;
+    await db.week_meal_ingredients.update(existing.uuid, {
+      amount: newAmount,
+      _synced: false,
+      _updated_at: now(),
+    });
+    syncEngine.schedulePush();
+    return { ...existing, amount: newAmount };
+  }
+
   // Default sort_order = next slot in this meal
   const sortOrder = opts.sort_order ??
     await db.week_meal_ingredients

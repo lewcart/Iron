@@ -186,12 +186,13 @@ describe('pushWeekMealIngredient — upsert', () => {
     expect(res.status).toBe(200);
   });
 
-  it('inserts with ON CONFLICT upsert clause', async () => {
+  it('inserts with ON CONFLICT upsert clause on composite (meal, food) key', async () => {
     const db = await import('@/db/db');
     await pushPayload({ week_meal_ingredients: [baseIngredient] });
     const [sql] = vi.mocked(db.query).mock.calls[0] as [string, unknown[]];
     expect(sql).toContain('INSERT INTO week_meal_ingredients');
-    expect(sql).toContain('ON CONFLICT (uuid) DO UPDATE SET');
+    // The composite unique key is the primary conflict guard (prevents 23505 batch wedge)
+    expect(sql).toContain('ON CONFLICT (week_meal_uuid, food_uuid) DO UPDATE SET');
   });
 
   it('hard-DELETEs on _deleted (de-listing an ingredient is safe)', async () => {
@@ -202,6 +203,32 @@ describe('pushWeekMealIngredient — upsert', () => {
     const [sql, params] = vi.mocked(db.query).mock.calls[0] as [string, unknown[]];
     expect(sql).toMatch(/^DELETE FROM week_meal_ingredients/i);
     expect(params).toContain(baseIngredient.uuid);
+  });
+
+  // ─── F1 regression guard: duplicate (meal, food) push does NOT throw ───────
+
+  it('two pushes of the same (meal, food) pair — second push does NOT throw 23505', async () => {
+    const db = await import('@/db/db');
+
+    // Simulate: two payloads with the same (week_meal_uuid, food_uuid) but different uuids
+    // (the race condition that was causing the push-batch wedge).
+    const dup1 = { ...baseIngredient, uuid: 'ingr-dup1-0000-0000-000000000001', amount: 80 };
+    const dup2 = { ...baseIngredient, uuid: 'ingr-dup2-0000-0000-000000000002', amount: 40 };
+
+    // Both pushes must succeed (200); neither throws
+    const res1 = await pushPayload({ week_meal_ingredients: [dup1] });
+    const res2 = await pushPayload({ week_meal_ingredients: [dup2] });
+
+    expect(res1.status).toBe(200);
+    expect(res2.status).toBe(200);
+
+    // Both calls used ON CONFLICT (week_meal_uuid, food_uuid) — no 23505 possible
+    const calls = vi.mocked(db.query).mock.calls as [string, unknown[]][];
+    const insertCalls = calls.filter(([sql]) => sql.includes('INSERT INTO week_meal_ingredients'));
+    expect(insertCalls.length).toBeGreaterThanOrEqual(2);
+    for (const [sql] of insertCalls) {
+      expect(sql).toContain('ON CONFLICT (week_meal_uuid, food_uuid) DO UPDATE SET');
+    }
   });
 
   it('silently drops an ingredient with amount <= 0 (server-side validation)', async () => {
