@@ -144,6 +144,8 @@ export async function recordProgressPhotoFromBlob(opts: {
   pose: ProgressPhotoPose;
   notes?: string | null;
   taken_at?: string;
+  /** Ab-visibility self-rating 0-5; null/undefined = unrated. */
+  ab_visibility?: number | null;
 }): Promise<LocalProgressPhoto> {
   const photoUuid = genUUID();
   // Best-effort face detection — null on Safari/iOS or back-pose photos.
@@ -158,6 +160,8 @@ export async function recordProgressPhotoFromBlob(opts: {
     blob: opts.blob,
     uploaded: '0',
     crop_offset_y: cropOffsetY,
+    ab_visibility:
+      opts.ab_visibility == null ? null : clampAbVisibility(opts.ab_visibility),
     // Hold _synced=true while uploaded='0' so the local: stub never reaches
     // the server. uploadProgressPhotoRow flips _synced=false once the real
     // URL is in place.
@@ -173,5 +177,27 @@ export async function recordProgressPhotoFromBlob(opts: {
 
 export async function deleteProgressPhoto(uuid: string): Promise<void> {
   await db.progress_photos.update(uuid, { _deleted: true, _synced: false, _updated_at: now() });
+  syncEngine.schedulePush();
+}
+
+/** Clamp an ab-visibility input to the valid 0-5 integer band. */
+function clampAbVisibility(value: number): number {
+  return Math.max(0, Math.min(5, Math.round(value)));
+}
+
+/**
+ * Set (or clear) the ab-visibility 0-5 tag on an existing progress photo.
+ * Pass `null` to clear the rating. Marks the row dirty so the next push
+ * carries it to the server.
+ */
+export async function setProgressPhotoAbVisibility(
+  uuid: string,
+  value: number | null,
+): Promise<void> {
+  await db.progress_photos.update(uuid, {
+    ab_visibility: value == null ? null : clampAbVisibility(value),
+    _synced: false,
+    _updated_at: now(),
+  });
   syncEngine.schedulePush();
 }

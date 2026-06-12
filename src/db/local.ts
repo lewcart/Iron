@@ -582,6 +582,10 @@ export interface LocalProgressPhoto extends SyncMeta {
   /** Server-cached person-segmentation mask URL (Vercel Blob). NULL = not yet
    *  computed. See migration 038. Read-only client-side; server-owned cache. */
   mask_url?: string | null;
+  /** Ab-visibility self-rating 0-5 (0 = no separation, 5 = fully shredded).
+   *  NULL = unrated. One-tap tag set on capture or via the adjust sheet.
+   *  See migration 051. */
+  ab_visibility?: number | null;
 }
 
 // ─── Exercise image candidates (read-only, server-owned) ────────────────────
@@ -1016,6 +1020,16 @@ export class IronDB extends Dexie {
     this.version(25).stores(v24Stores).upgrade(async tx => {
       await tx.table('exercises').toCollection().modify(row => {
         if (row.machine_settings === undefined) row.machine_settings = null;
+      });
+    });
+
+    // v26: ab-visibility 0-5 tag on progress photos (mirrors Postgres
+    // migration 051). Additive nullable column, not indexed — no schema-string
+    // change. Backfill null on pre-v26 rows; sync pull populates from the
+    // server's returned value.
+    this.version(26).stores(v24Stores).upgrade(async tx => {
+      await tx.table('progress_photos').toCollection().modify(row => {
+        if (row.ab_visibility === undefined) row.ab_visibility = null;
       });
     });
 

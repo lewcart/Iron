@@ -66,6 +66,8 @@ type StagedPhoto = {
   blob: File | Blob;
   preview: string;
   pose: ProgressPhotoPose;
+  /** Ab-visibility 0-5 self-rating; null = unrated. */
+  ab_visibility: number | null;
 };
 
 // Distinct Tailwind-equivalent colors for multi-site overlay (no --chart-N tokens in globals.css)
@@ -344,6 +346,7 @@ function MeasurementsInner() {
           pose: photo.pose,
           notes: note ?? null,
           taken_at: measured_at,
+          ab_visibility: photo.ab_visibility,
         }));
       }
 
@@ -379,6 +382,7 @@ function MeasurementsInner() {
           blob: file,
           preview: URL.createObjectURL(file),
           pose,
+          ab_visibility: null,
         });
       });
       return next;
@@ -388,6 +392,12 @@ function MeasurementsInner() {
 
   const setPhotoPose = (id: string, pose: ProgressPhotoPose) => {
     setLogPhotos((prev) => prev.map((p) => (p.id === id ? { ...p, pose } : p)));
+  };
+
+  const setPhotoAbVisibility = (id: string, value: number | null) => {
+    setLogPhotos((prev) =>
+      prev.map((p) => (p.id === id ? { ...p, ab_visibility: value } : p)),
+    );
   };
 
   const removeLogPhoto = (id: string) => {
@@ -1217,6 +1227,31 @@ function MeasurementsInner() {
                       ))}
                     </div>
                     <p className="text-xs text-muted-foreground">{POSE_GUIDANCE[photo.pose]}</p>
+                    {(photo.pose === 'front' || photo.pose === 'side') && (
+                      <div className="flex items-center gap-1.5 pt-0.5">
+                        <span className="text-[11px] text-muted-foreground shrink-0">Abs</span>
+                        {[0, 1, 2, 3, 4, 5].map((n) => (
+                          <button
+                            key={n}
+                            onClick={() =>
+                              setPhotoAbVisibility(
+                                photo.id,
+                                photo.ab_visibility === n ? null : n,
+                              )
+                            }
+                            aria-pressed={photo.ab_visibility === n}
+                            aria-label={`Ab visibility ${n} of 5`}
+                            className={`shrink-0 h-6 w-6 text-xs font-medium rounded-md border transition-colors ${
+                              photo.ab_visibility === n
+                                ? 'bg-primary text-white border-primary'
+                                : 'border-border text-muted-foreground'
+                            }`}
+                          >
+                            {n}
+                          </button>
+                        ))}
+                      </div>
+                    )}
                   </div>
                   <button
                     onClick={() => removeLogPhoto(photo.id)}
