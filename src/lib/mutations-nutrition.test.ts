@@ -244,7 +244,7 @@ describe('ensurePlannedLogsForDate — U5 effective-macro materialization', () =
   });
 
   it('flat meal (is_recipe=false): log carries stored aggregate macros unchanged (regression)', async () => {
-    const mealId = await setWeekMeal({
+    const _mealId = await setWeekMeal({
       day_of_week: 0,
       meal_slot: 'lunch',
       meal_name: 'Chicken Rice',
@@ -337,7 +337,7 @@ describe('ensurePlannedLogsForDate — U5 effective-macro materialization', () =
 
   it('mixed day: recipe + flat meals in the same day each carry correct macros', async () => {
     // Flat meal
-    const flatId = await setWeekMeal({
+    const _flatId = await setWeekMeal({
       day_of_week: 0,
       meal_slot: 'lunch',
       meal_name: 'Chicken Rice',
