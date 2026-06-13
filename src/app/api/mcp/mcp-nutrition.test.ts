@@ -33,11 +33,13 @@ describe('get_nutrition_plan', () => {
 
   it('returns week_plan grouped by day with macros + targets', async () => {
     const db = await import('@/db/db');
-    vi.mocked(db.query).mockResolvedValueOnce([
-      { uuid: 'u1', day_of_week: 0, meal_slot: 'breakfast', meal_name: 'Oats', protein_g: 30, carbs_g: 60, fat_g: 8, calories: 400, quality_rating: 4, sort_order: 0 },
-      { uuid: 'u2', day_of_week: 0, meal_slot: 'lunch', meal_name: 'Chicken', protein_g: 50, carbs_g: 70, fat_g: 10, calories: 550, quality_rating: null, sort_order: 1 },
-      { uuid: 'u3', day_of_week: 1, meal_slot: 'breakfast', meal_name: 'Eggs', protein_g: 25, carbs_g: 5, fat_g: 20, calories: 350, quality_rating: null, sort_order: 0 },
-    ]);
+    vi.mocked(db.query)
+      .mockResolvedValueOnce([
+        { uuid: 'u1', day_of_week: 0, meal_slot: 'breakfast', meal_name: 'Oats', protein_g: 30, carbs_g: 60, fat_g: 8, calories: 400, quality_rating: 4, sort_order: 0, is_recipe: false },
+        { uuid: 'u2', day_of_week: 0, meal_slot: 'lunch', meal_name: 'Chicken', protein_g: 50, carbs_g: 70, fat_g: 10, calories: 550, quality_rating: null, sort_order: 1, is_recipe: false },
+        { uuid: 'u3', day_of_week: 1, meal_slot: 'breakfast', meal_name: 'Eggs', protein_g: 25, carbs_g: 5, fat_g: 20, calories: 350, quality_rating: null, sort_order: 0, is_recipe: false },
+      ])
+      .mockResolvedValueOnce([]); // fetchIngredientsForMeals (flat meals → no ingredients)
     vi.mocked(db.queryOne).mockResolvedValueOnce({
       calories: 2200, protein_g: 160, carbs_g: 220, fat_g: 70,
     });
