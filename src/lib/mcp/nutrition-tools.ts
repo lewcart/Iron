@@ -506,15 +506,128 @@ async function getNutritionSummary(args: Record<string, unknown>) {
 // (Pre-existing tools — moved out of mcp-tools.ts so the entire nutrition
 // MCP surface lives in one file.)
 
+// ─── Server-side food resolver (mirrors resolveExercise in mcp-tools.ts) ─────
+
+type ResolvedFood = {
+  uuid: string;
+  name: string;
+  per_unit: string;
+  per_qty: number;
+  calories: number | null;
+  protein_g: number | null;
+  carbs_g: number | null;
+  fat_g: number | null;
+};
+type FoodError = { error: string };
+
+async function resolveFood(args: { food_uuid?: string; food_name?: string }): Promise<ResolvedFood | FoodError> {
+  const { food_uuid, food_name } = args;
+
+  if (food_uuid) {
+    // UUID lookup: include archived so existing ingredient rows can still resolve
+    const row = await queryOne<ResolvedFood>(
+      `SELECT uuid, name, per_unit, per_qty::float AS per_qty,
+              calories::float AS calories, protein_g::float AS protein_g,
+              carbs_g::float AS carbs_g, fat_g::float AS fat_g
+       FROM foods WHERE uuid = $1`,
+      [food_uuid],
+    );
+    if (!row) return { error: `Food not found: ${food_uuid}` };
+    return row;
+  }
+
+  if (food_name) {
+    // Name lookup: case-insensitive, non-archived only
+    const row = await queryOne<ResolvedFood>(
+      `SELECT uuid, name, per_unit, per_qty::float AS per_qty,
+              calories::float AS calories, protein_g::float AS protein_g,
+              carbs_g::float AS carbs_g, fat_g::float AS fat_g
+       FROM foods
+       WHERE lower(name) = lower($1) AND archived_at IS NULL
+       ORDER BY created_at DESC
+       LIMIT 1`,
+      [food_name.trim()],
+    );
+    if (!row) return { error: `Food not found: "${food_name}"` };
+    return row;
+  }
+
+  return { error: 'Provide food_uuid or food_name' };
+}
+
+function isFoodError(r: ResolvedFood | FoodError): r is FoodError {
+  return 'error' in r;
+}
+
+// ─── Ingredients query helper ─────────────────────────────────────────────────
+
+interface IngredientRow {
+  uuid: string;
+  food_uuid: string;
+  food_name: string;
+  amount: number;
+  per_unit: string;
+  per_qty: number;
+  calories: number | null;
+  protein_g: number | null;
+  carbs_g: number | null;
+  fat_g: number | null;
+  sort_order: number;
+}
+
+async function fetchIngredientsForMeals(mealUuids: string[]): Promise<Map<string, IngredientRow[]>> {
+  if (mealUuids.length === 0) return new Map();
+
+  // Build $1, $2, ... placeholders
+  const placeholders = mealUuids.map((_, i) => `$${i + 1}`).join(', ');
+  const rows = await query<IngredientRow & { week_meal_uuid: string }>(
+    `SELECT wmi.uuid, wmi.week_meal_uuid, wmi.food_uuid, f.name AS food_name,
+            wmi.amount::float AS amount,
+            f.per_unit, f.per_qty::float AS per_qty,
+            (wmi.amount / NULLIF(f.per_qty, 0) * f.calories)::float AS calories,
+            (wmi.amount / NULLIF(f.per_qty, 0) * f.protein_g)::float AS protein_g,
+            (wmi.amount / NULLIF(f.per_qty, 0) * f.carbs_g)::float AS carbs_g,
+            (wmi.amount / NULLIF(f.per_qty, 0) * f.fat_g)::float AS fat_g,
+            wmi.sort_order
+     FROM week_meal_ingredients wmi
+     JOIN foods f ON f.uuid = wmi.food_uuid
+     WHERE wmi.week_meal_uuid IN (${placeholders})
+     ORDER BY wmi.week_meal_uuid, wmi.sort_order`,
+    mealUuids,
+  );
+
+  const map = new Map<string, IngredientRow[]>();
+  for (const r of rows) {
+    const { week_meal_uuid, ...rest } = r;
+    if (!map.has(week_meal_uuid)) map.set(week_meal_uuid, []);
+    map.get(week_meal_uuid)!.push(rest);
+  }
+  return map;
+}
+
 // get_active_nutrition_plan
 async function getActiveNutritionPlan() {
-  const meals = await query(`
-    SELECT uuid, day_of_week, meal_slot, meal_name,
-           protein_g, carbs_g, fat_g, calories, quality_rating, sort_order
-    FROM nutrition_week_meals
-    ORDER BY day_of_week, sort_order
+  const meals = await query<{
+    uuid: string; day_of_week: number; meal_slot: string; meal_name: string;
+    protein_g: number | null; carbs_g: number | null; fat_g: number | null;
+    calories: number | null; quality_rating: number | null; sort_order: number;
+    is_recipe: boolean;
+  }>(`
+    SELECT nwm.uuid, nwm.day_of_week, nwm.meal_slot, nwm.meal_name,
+           e.calories::float AS calories, e.protein_g::float AS protein_g,
+           e.carbs_g::float AS carbs_g, e.fat_g::float AS fat_g,
+           nwm.quality_rating, nwm.sort_order, nwm.is_recipe
+    FROM nutrition_week_meals nwm
+    JOIN nutrition_week_meal_effective e ON e.uuid = nwm.uuid
+    ORDER BY nwm.day_of_week, nwm.sort_order
   `);
-  return toolResult(meals);
+
+  const ingredientsMap = await fetchIngredientsForMeals(meals.map(m => m.uuid));
+
+  return toolResult(meals.map(m => ({
+    ...m,
+    ingredients: ingredientsMap.get(m.uuid) ?? [],
+  })));
 }
 
 // get_nutrition_plan
@@ -525,12 +638,18 @@ async function getNutritionPlan(args: Record<string, unknown>) {
     uuid: string; day_of_week: number; meal_slot: string; meal_name: string;
     protein_g: number | null; carbs_g: number | null; fat_g: number | null;
     calories: number | null; quality_rating: number | null; sort_order: number;
+    is_recipe: boolean;
   }>(`
-    SELECT uuid, day_of_week, meal_slot, meal_name,
-           protein_g, carbs_g, fat_g, calories, quality_rating, sort_order
-    FROM nutrition_week_meals
-    ORDER BY day_of_week, sort_order
+    SELECT nwm.uuid, nwm.day_of_week, nwm.meal_slot, nwm.meal_name,
+           e.calories::float AS calories, e.protein_g::float AS protein_g,
+           e.carbs_g::float AS carbs_g, e.fat_g::float AS fat_g,
+           nwm.quality_rating, nwm.sort_order, nwm.is_recipe
+    FROM nutrition_week_meals nwm
+    JOIN nutrition_week_meal_effective e ON e.uuid = nwm.uuid
+    ORDER BY nwm.day_of_week, nwm.sort_order
   `);
+
+  const ingredientsMap = await fetchIngredientsForMeals(meals.map(m => m.uuid));
 
   const byDay = new Map<number, typeof meals>();
   for (const m of meals) {
@@ -546,11 +665,13 @@ async function getNutritionPlan(args: Record<string, unknown>) {
         uuid: m.uuid,
         slot: m.meal_slot,
         description: m.meal_name,
+        is_recipe: m.is_recipe,
         calories: m.calories,
         protein_g: m.protein_g,
         carbs_g: m.carbs_g,
         fat_g: m.fat_g,
         quality_rating: m.quality_rating,
+        ingredients: ingredientsMap.get(m.uuid) ?? [],
       })),
     }));
 
@@ -860,8 +981,245 @@ async function getNutritionRules() {
       log_food: 'search_nutrition_foods → log_nutrition_meal',
       edit_past_day: 'list_nutrition_logs(date) → update_nutrition_log(uuid, ...)',
       catch_up: 'bulk_log_nutrition_meals(date, [...meals])',
+      compose_recipe_from_ingredients:
+        'search_nutrition_foods (returns uuid) → set_meal_ingredients; or create_food for items not in search',
     },
   });
+}
+
+// ─── Ingredient write tools ───────────────────────────────────────────────────
+
+// create_food — mint a foods row for later use as an ingredient
+async function createFood(args: Record<string, unknown>) {
+  const name = typeof args.name === 'string' ? args.name.trim() : '';
+  if (!name) return toolError('INVALID_INPUT', 'name is required');
+
+  const perUnit = typeof args.per_unit === 'string' ? args.per_unit.trim() : 'serve';
+  if (!['g', 'ml', 'serve'].includes(perUnit)) {
+    return toolError('INVALID_INPUT', 'per_unit must be one of g | ml | serve');
+  }
+  const perQty = num(args.per_qty ?? 1);
+  if (!perQty || perQty <= 0) {
+    return toolError('INVALID_INPUT', 'per_qty must be a positive number');
+  }
+
+  for (const field of ['calories', 'protein_g', 'carbs_g', 'fat_g'] as const) {
+    const v = num(args[field]);
+    if (args[field] != null && (v === null || !Number.isFinite(v))) {
+      return toolError('INVALID_INPUT', `${field} must be a finite number`);
+    }
+  }
+
+  // Idempotent by lower(name) + source='manual'
+  const existing = await queryOne<{ uuid: string }>(
+    `SELECT uuid FROM foods WHERE lower(name) = lower($1) AND source = 'manual' AND archived_at IS NULL LIMIT 1`,
+    [name],
+  );
+  if (existing) return toolResult({ uuid: existing.uuid, deduplicated: true });
+
+  const row = await queryOne<{ uuid: string; name: string }>(
+    `INSERT INTO foods (uuid, name, brand, per_unit, per_qty, calories, protein_g, carbs_g, fat_g, source)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'manual')
+     RETURNING uuid, name`,
+    [
+      crypto.randomUUID(),
+      name,
+      args.brand ? String(args.brand).trim() : null,
+      perUnit,
+      perQty,
+      num(args.calories) ?? null,
+      num(args.protein_g) ?? null,
+      num(args.carbs_g) ?? null,
+      num(args.fat_g) ?? null,
+    ],
+  );
+  return toolResult(row);
+}
+
+// convert_week_meal_to_recipe — idempotent flag-flip
+async function convertWeekMealToRecipe(args: Record<string, unknown>) {
+  const { week_meal_uuid } = args;
+  if (typeof week_meal_uuid !== 'string') {
+    return toolError('INVALID_INPUT', 'week_meal_uuid is required');
+  }
+  const row = await queryOne(
+    `UPDATE nutrition_week_meals SET is_recipe = true WHERE uuid = $1 RETURNING uuid, is_recipe`,
+    [week_meal_uuid],
+  );
+  if (!row) return toolError('NOT_FOUND', `Meal ${week_meal_uuid} not found`);
+  return toolResult(row);
+}
+
+// set_meal_ingredients — bulk replace all ingredients for a meal
+async function setMealIngredients(args: Record<string, unknown>) {
+  const { week_meal_uuid } = args;
+  if (typeof week_meal_uuid !== 'string') {
+    return toolError('INVALID_INPUT', 'week_meal_uuid is required');
+  }
+  const ingredients = args.ingredients;
+  if (!Array.isArray(ingredients)) {
+    return toolError('INVALID_INPUT', 'ingredients must be an array');
+  }
+
+  // Resolve all foods first (fail fast before any writes)
+  type ResolvedIngredient = { food: ResolvedFood; amount: number; sortOrder: number };
+  const resolved: ResolvedIngredient[] = [];
+
+  for (let i = 0; i < ingredients.length; i++) {
+    const ing = ingredients[i] as Record<string, unknown>;
+    if (!ing || typeof ing !== 'object') {
+      return toolError('INVALID_INPUT', `ingredient[${i}] must be an object`);
+    }
+
+    const amount = num(ing.amount);
+    if (!amount || amount <= 0) {
+      return toolError('INVALID_INPUT', `ingredient[${i}].amount must be > 0`);
+    }
+
+    const foodResult = await resolveFood({
+      food_uuid: ing.food_uuid ? String(ing.food_uuid) : undefined,
+      food_name: ing.food_name ? String(ing.food_name) : undefined,
+    });
+    if (isFoodError(foodResult)) {
+      return toolError(
+        'FOOD_NOT_FOUND',
+        `ingredient[${i}]: ${foodResult.error}`,
+        'create the food first with create_food, or search_nutrition_foods',
+      );
+    }
+    resolved.push({ food: foodResult, amount, sortOrder: i });
+  }
+
+  // Verify meal exists
+  const meal = await queryOne<{ uuid: string }>(
+    `SELECT uuid FROM nutrition_week_meals WHERE uuid = $1`,
+    [week_meal_uuid],
+  );
+  if (!meal) return toolError('NOT_FOUND', `Meal ${week_meal_uuid} not found`);
+
+  // Delete old ingredients, insert new set, set is_recipe=true — all in a transaction
+  const statements: Array<{ text: string; params?: unknown[] }> = [
+    { text: `DELETE FROM week_meal_ingredients WHERE week_meal_uuid = $1`, params: [week_meal_uuid] },
+    { text: `UPDATE nutrition_week_meals SET is_recipe = true WHERE uuid = $1`, params: [week_meal_uuid] },
+    ...resolved.map(({ food, amount, sortOrder }) => ({
+      text: `INSERT INTO week_meal_ingredients (uuid, week_meal_uuid, food_uuid, amount, sort_order)
+             VALUES ($1, $2, $3, $4, $5)
+             ON CONFLICT (week_meal_uuid, food_uuid) DO UPDATE SET amount = EXCLUDED.amount, sort_order = EXCLUDED.sort_order`,
+      params: [crypto.randomUUID(), week_meal_uuid, food.uuid, amount, sortOrder],
+    })),
+  ];
+
+  await transaction(statements);
+
+  // Return the updated ingredients list
+  const updatedIngredients = await fetchIngredientsForMeals([week_meal_uuid]);
+  return toolResult({
+    week_meal_uuid,
+    is_recipe: true,
+    ingredients: updatedIngredients.get(week_meal_uuid) ?? [],
+  });
+}
+
+// add_meal_ingredient — upsert a single ingredient (never throws 23505)
+async function addMealIngredient(args: Record<string, unknown>) {
+  const { week_meal_uuid } = args;
+  if (typeof week_meal_uuid !== 'string') {
+    return toolError('INVALID_INPUT', 'week_meal_uuid is required');
+  }
+
+  const amount = num(args.amount);
+  if (!amount || amount <= 0) {
+    return toolError('INVALID_INPUT', 'amount must be > 0');
+  }
+
+  const foodResult = await resolveFood({
+    food_uuid: args.food_uuid ? String(args.food_uuid) : undefined,
+    food_name: args.food_name ? String(args.food_name) : undefined,
+  });
+  if (isFoodError(foodResult)) {
+    return toolError(
+      'FOOD_NOT_FOUND',
+      foodResult.error,
+      'create the food first with create_food, or search_nutrition_foods',
+    );
+  }
+
+  // Verify meal exists
+  const meal = await queryOne<{ uuid: string }>(
+    `SELECT uuid FROM nutrition_week_meals WHERE uuid = $1`,
+    [week_meal_uuid],
+  );
+  if (!meal) return toolError('NOT_FOUND', `Meal ${week_meal_uuid} not found`);
+
+  // Get the next sort_order
+  const countRow = await queryOne<{ c: string | number }>(
+    `SELECT COUNT(*)::int AS c FROM week_meal_ingredients WHERE week_meal_uuid = $1`,
+    [week_meal_uuid],
+  );
+  const sortOrder = Number(countRow?.c ?? 0);
+
+  // Upsert — never 23505
+  await transaction([
+    {
+      text: `INSERT INTO week_meal_ingredients (uuid, week_meal_uuid, food_uuid, amount, sort_order)
+             VALUES ($1, $2, $3, $4, $5)
+             ON CONFLICT (week_meal_uuid, food_uuid) DO UPDATE SET amount = EXCLUDED.amount`,
+      params: [crypto.randomUUID(), week_meal_uuid, foodResult.uuid, amount, sortOrder],
+    },
+    {
+      text: `UPDATE nutrition_week_meals SET is_recipe = true WHERE uuid = $1`,
+      params: [week_meal_uuid],
+    },
+  ]);
+
+  const updatedIngredients = await fetchIngredientsForMeals([week_meal_uuid]);
+  return toolResult({
+    week_meal_uuid,
+    is_recipe: true,
+    ingredients: updatedIngredients.get(week_meal_uuid) ?? [],
+  });
+}
+
+// update_meal_ingredient
+async function updateMealIngredient(args: Record<string, unknown>) {
+  const { ingredient_uuid } = args;
+  if (typeof ingredient_uuid !== 'string') {
+    return toolError('INVALID_INPUT', 'ingredient_uuid is required');
+  }
+
+  const amount = num(args.amount);
+  if (!amount || amount <= 0) {
+    return toolError('INVALID_INPUT', 'amount must be > 0');
+  }
+
+  const row = await queryOne<{ uuid: string; week_meal_uuid: string }>(
+    `UPDATE week_meal_ingredients SET amount = $1 WHERE uuid = $2 RETURNING uuid, week_meal_uuid`,
+    [amount, ingredient_uuid],
+  );
+  if (!row) return toolError('NOT_FOUND', `Ingredient ${ingredient_uuid} not found`);
+
+  const updatedIngredients = await fetchIngredientsForMeals([row.week_meal_uuid]);
+  return toolResult({
+    ingredient_uuid,
+    week_meal_uuid: row.week_meal_uuid,
+    ingredients: updatedIngredients.get(row.week_meal_uuid) ?? [],
+  });
+}
+
+// remove_meal_ingredient
+async function removeMealIngredient(args: Record<string, unknown>) {
+  const { ingredient_uuid } = args;
+  if (typeof ingredient_uuid !== 'string') {
+    return toolError('INVALID_INPUT', 'ingredient_uuid is required');
+  }
+
+  const row = await queryOne<{ uuid: string; week_meal_uuid: string }>(
+    `DELETE FROM week_meal_ingredients WHERE uuid = $1 RETURNING uuid, week_meal_uuid`,
+    [ingredient_uuid],
+  );
+  if (!row) return toolError('NOT_FOUND', `Ingredient ${ingredient_uuid} not found`);
+
+  return toolResult({ deleted: ingredient_uuid, week_meal_uuid: row.week_meal_uuid });
 }
 
 // ─── Tool registry export ────────────────────────────────────────────────────
@@ -1150,5 +1508,117 @@ export const nutritionTools: MCPTool[] = [
       },
     },
     execute: setNutritionTargetsTool,
+  },
+
+  // ─── Ingredient / recipe tools ────────────────────────────────────────────
+
+  {
+    name: 'create_food',
+    description:
+      'Mints a new food in the foods table (source=manual). Use for foods not found in search_nutrition_foods. ' +
+      'Idempotent by lower(name): if a manual food with the same name already exists (non-archived), returns its uuid with deduplicated=true. ' +
+      'Returns the food uuid for use in set_meal_ingredients / add_meal_ingredient.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: 'Food name (deduplicated by lower-case match)' },
+        per_unit: { type: 'string', description: 'g | ml | serve (default: serve)' },
+        per_qty: { type: 'number', description: 'How many units the macros are per (default: 1). E.g. 100 for per_unit=g means macros are per 100g.' },
+        calories: { type: 'number' },
+        protein_g: { type: 'number' },
+        carbs_g: { type: 'number' },
+        fat_g: { type: 'number' },
+        brand: { type: 'string' },
+      },
+      required: ['name'],
+    },
+    execute: createFood,
+  },
+  {
+    name: 'convert_week_meal_to_recipe',
+    description:
+      'Marks a standard-week meal as a recipe (is_recipe=true). Idempotent. ' +
+      'Once flagged, the meal\'s macros are derived from its ingredients (via nutrition_week_meal_effective) instead of stored flat values. ' +
+      'Call this before adding ingredients if you want the UI to show derived macros immediately.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        week_meal_uuid: { type: 'string', description: 'UUID of the nutrition_week_meals row' },
+      },
+      required: ['week_meal_uuid'],
+    },
+    execute: convertWeekMealToRecipe,
+  },
+  {
+    name: 'set_meal_ingredients',
+    description:
+      'Bulk-replaces all ingredients for a standard-week meal and sets is_recipe=true. ' +
+      'The agent-friendly tool: call search_nutrition_foods first to get food uuids; pass food_uuid or food_name per ingredient. ' +
+      'If a food_name has no match, returns FOOD_NOT_FOUND with hint to call create_food. ' +
+      'Replaces the full ingredient set — to add/edit one ingredient without touching others, use add_meal_ingredient or update_meal_ingredient instead.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        week_meal_uuid: { type: 'string', description: 'UUID of the nutrition_week_meals row' },
+        ingredients: {
+          type: 'array',
+          description: 'Ordered list of ingredients (sort_order = array index)',
+          items: {
+            type: 'object',
+            properties: {
+              food_uuid: { type: 'string', description: 'Preferred: use uuid from search_nutrition_foods or create_food' },
+              food_name: { type: 'string', description: 'Alternative: case-insensitive name lookup (requires prior create_food if not in search)' },
+              amount: { type: 'number', description: 'Amount in the food\'s per_unit (grams if per_unit=g, etc.)' },
+            },
+            required: ['amount'],
+          },
+        },
+      },
+      required: ['week_meal_uuid', 'ingredients'],
+    },
+    execute: setMealIngredients,
+  },
+  {
+    name: 'add_meal_ingredient',
+    description:
+      'Adds or updates a single ingredient in a standard-week meal. Sets is_recipe=true on the parent meal. ' +
+      'If the same food is already an ingredient, updates its amount (no duplicate error). ' +
+      'Pass food_uuid (preferred — from search_nutrition_foods) or food_name (case-insensitive lookup).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        week_meal_uuid: { type: 'string', description: 'UUID of the nutrition_week_meals row' },
+        food_uuid: { type: 'string', description: 'Preferred: food uuid from search_nutrition_foods or create_food' },
+        food_name: { type: 'string', description: 'Alternative: case-insensitive name lookup' },
+        amount: { type: 'number', description: 'Amount in the food\'s per_unit' },
+      },
+      required: ['week_meal_uuid', 'amount'],
+    },
+    execute: addMealIngredient,
+  },
+  {
+    name: 'update_meal_ingredient',
+    description: 'Updates the amount on a single week_meal_ingredients row. Get ingredient_uuid from get_nutrition_plan or get_active_nutrition_plan.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ingredient_uuid: { type: 'string', description: 'UUID of the week_meal_ingredients row' },
+        amount: { type: 'number', description: 'New amount in the food\'s per_unit' },
+      },
+      required: ['ingredient_uuid', 'amount'],
+    },
+    execute: updateMealIngredient,
+  },
+  {
+    name: 'remove_meal_ingredient',
+    description: 'Removes a single ingredient from a week meal. Get ingredient_uuid from get_nutrition_plan or get_active_nutrition_plan.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ingredient_uuid: { type: 'string', description: 'UUID of the week_meal_ingredients row' },
+      },
+      required: ['ingredient_uuid'],
+    },
+    execute: removeMealIngredient,
   },
 ];

@@ -43,6 +43,17 @@ Common workflows:
 - **"Log a whole day at once"** → `bulk_log_nutrition_meals(date, [meals])` (per-item results, partial failures don't abort)
 - **"How adherent was last week?"** → `get_nutrition_summary(start_date, end_date)` → returns adherence_pct, streak, approval counts
 - **First time touching nutrition?** → `get_nutrition_rules()` returns the full rule set
+- **"Compose a meal from ingredients"** → `search_nutrition_foods(query)` (returns uuid) → `set_meal_ingredients({ week_meal_uuid, ingredients: [{ food_uuid, amount }] })`; or `create_food(...)` first for items not in search.
+- **"Add one ingredient to an existing meal"** → `add_meal_ingredient({ week_meal_uuid, food_uuid, amount })` — upserts, never throws on duplicate.
+- **"Change how much oats is in my breakfast"** → `get_nutrition_plan` (returns ingredient_uuid per row) → `update_meal_ingredient({ ingredient_uuid, amount })`.
+- **"Remove an ingredient"** → `get_nutrition_plan` → `remove_meal_ingredient({ ingredient_uuid })`.
+
+Recipe / ingredient model:
+- `nutrition_week_meals.is_recipe` (bool, default false) gates derived macros. A meal's macros come from stored flat values until `is_recipe=true`, at which point they're computed from `week_meal_ingredients` via the `nutrition_week_meal_effective` view.
+- `set_meal_ingredients` and `add_meal_ingredient` both auto-set `is_recipe=true`. You can also set it explicitly with `convert_week_meal_to_recipe` (idempotent).
+- `get_nutrition_plan` and `get_active_nutrition_plan` now return `is_recipe` and `ingredients: [{ uuid, food_uuid, food_name, amount, per_unit, calories, protein_g, carbs_g, fat_g }]` per meal. Macros are effective values (derived for recipes, stored for flat meals). Flat meals return `ingredients: []`.
+- `search_nutrition_foods` layer-1 results include a `uuid` field when the food has been promoted into the `foods` table (e.g. previously used as an ingredient). Pass that directly as `food_uuid`.
+- `create_food` is idempotent by `lower(name)` + `source='manual'` — returns existing uuid with `deduplicated: true` if already present.
 
 Updates:
 - `update_nutrition_log` uses named params (not a `fields` blob). Server-side whitelist on which columns are editable.
