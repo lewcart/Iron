@@ -1246,6 +1246,316 @@ async function createExercise(args: Record<string, unknown>) {
   return toolResult(row);
 }
 
+// ── log_workout ───────────────────────────────────────────────────────────────
+//
+// Inserts a COMPLETED ad-hoc session into workout history so it shows in
+// get_recent_workouts and feeds get_sets_per_muscle / get_weekly_summary.
+//
+// Critical schema contract (verified against getWeekSetsPerMuscle in
+// src/db/queries.ts and getRecentWorkouts above):
+//   - workouts row MUST set start_time AND end_time, is_current=false. The
+//     per-muscle rollup filters on `end_time IS NOT NULL AND is_current=false`,
+//     so an unfinished session would silently never count. We always stamp
+//     end_time (= start_time + duration_min, or = start_time when no duration).
+//   - A working set = is_completed=true AND (repetitions>=1 OR duration_seconds>0).
+//     We set is_completed=true and write repetitions for reps-mode / duration_seconds
+//     for time-mode so the set flows into set / per-muscle tallies automatically.
+//   - weight:0 is valid (bodyweight / banded). It counts toward set + per-muscle
+//     tallies but contributes 0 to load volume (weight*reps). estimate1RM(0, n)
+//     returns 0 (src/lib/pr.ts), so a weight-0 set can NEVER win a PB —
+//     recomputePRFlagsForExercise only promotes orm > bestE1RM (starts at 0).
+//     => we leave excluded_from_pb=false; the Epley guard already neutralizes it.
+//   - band metadata is NOT a new column (the watch-echo contract forbids adding
+//     columns to workout_sets). We stash it in the existing `comment` field as
+//     "band: <value>".
+
+/** Infer a sensible canonical primary muscle from an exercise name for the
+ *  auto-create path. Conservative: returns empty when unsure rather than
+ *  guessing wrong (per task spec). Only emits slugs in MUSCLE_SLUGS. */
+function inferMusclesFromName(name: string): { primary: string[]; secondary: string[] } {
+  const n = name.toLowerCase();
+  // Order matters: more specific patterns first.
+  if (/pull[\s-]?apart/.test(n)) return { primary: ['rhomboids'], secondary: ['delts'] };
+  if (/(rear|reverse)\s*(delt|fly|flye)/.test(n)) return { primary: ['delts'], secondary: ['rhomboids'] };
+  if (/lateral raise|side raise|lat raise/.test(n)) return { primary: ['delts'], secondary: [] };
+  if (/glute bridge|hip thrust|glute kickback|kickback/.test(n)) return { primary: ['glutes'], secondary: [] };
+  if (/bulgarian split squat|split squat/.test(n)) return { primary: ['glutes', 'quads'], secondary: ['hamstrings'] };
+  if (/romanian deadlift|rdl|good ?morning/.test(n)) return { primary: ['hamstrings'], secondary: ['glutes'] };
+  if (/squat|leg press|lunge/.test(n)) return { primary: ['quads'], secondary: ['glutes'] };
+  if (/leg curl|hamstring curl/.test(n)) return { primary: ['hamstrings'], secondary: [] };
+  if (/leg extension/.test(n)) return { primary: ['quads'], secondary: [] };
+  if (/calf raise/.test(n)) return { primary: ['calves'], secondary: [] };
+  if (/bicep curl|hammer curl|curl/.test(n) && !/leg/.test(n)) return { primary: ['biceps'], secondary: [] };
+  if (/tricep|pushdown|pressdown|skull ?crusher|overhead extension/.test(n)) return { primary: ['triceps'], secondary: [] };
+  if (/bench press|chest press|push[\s-]?up|chest fly|pec/.test(n)) return { primary: ['chest'], secondary: ['triceps', 'delts'] };
+  if (/lat pulldown|pulldown|pull[\s-]?up|chin[\s-]?up|row/.test(n)) return { primary: ['lats'], secondary: ['biceps'] };
+  if (/face pull/.test(n)) return { primary: ['delts'], secondary: ['rhomboids'] };
+  if (/shoulder press|overhead press|ohp|military press/.test(n)) return { primary: ['delts'], secondary: ['triceps'] };
+  if (/plank|crunch|sit[\s-]?up|ab |abs|hollow|dead ?bug/.test(n)) return { primary: ['core'], secondary: [] };
+  return { primary: [], secondary: [] };
+}
+
+type LogWorkoutSetInput = {
+  weight?: number;
+  reps?: number;
+  duration_seconds?: number;
+  rpe?: number;
+  band?: string;
+};
+
+type LogWorkoutExerciseInput = {
+  exercise_id?: string;
+  exercise_name?: string;
+  sets?: LogWorkoutSetInput[];
+};
+
+async function logWorkout(args: Record<string, unknown>) {
+  const {
+    date,
+    name,
+    duration_min,
+    notes,
+    routine_id,
+    exercises,
+  } = args as {
+    date?: string;
+    name?: string;
+    duration_min?: number;
+    notes?: string;
+    routine_id?: string | null;
+    exercises?: LogWorkoutExerciseInput[];
+  };
+
+  if (typeof name !== 'string' || !name.trim()) {
+    return toolErrorEnvelope('INVALID_INPUT', 'name is required.');
+  }
+  if (!Array.isArray(exercises) || exercises.length === 0) {
+    return toolErrorEnvelope('INVALID_INPUT', 'exercises must be a non-empty array.');
+  }
+
+  // ── Resolve started_at / finished_at ──────────────────────────────────────
+  const startedAt = date ? new Date(date) : new Date();
+  if (Number.isNaN(startedAt.getTime())) {
+    return toolErrorEnvelope('INVALID_INPUT', 'date must be a valid ISO-8601 timestamp.');
+  }
+  const durationMin =
+    duration_min != null && Number.isFinite(Number(duration_min)) && Number(duration_min) > 0
+      ? Number(duration_min)
+      : null;
+  // end_time is REQUIRED for the set to flow into per-muscle rollups. When no
+  // duration is given we collapse it onto start_time (0-length, still non-null).
+  const finishedAt = new Date(startedAt.getTime() + (durationMin ?? 0) * 60000);
+
+  // ── Optional routine link validation ──────────────────────────────────────
+  let routineUuid: string | null = null;
+  if (routine_id != null) {
+    const routineRow = await queryOne<{ uuid: string }>(
+      'SELECT uuid FROM workout_routines WHERE uuid = $1',
+      [routine_id],
+    );
+    if (!routineRow) {
+      return toolErrorEnvelope(
+        'NOT_FOUND',
+        `No routine with uuid ${routine_id}.`,
+        'list_routines',
+      );
+    }
+    routineUuid = routineRow.uuid;
+  }
+
+  // ── Resolve / auto-create each exercise (fail fast before any write) ───────
+  const autoCreated: string[] = [];
+  const resolvedExercises: Array<{
+    uuid: string;
+    title: string;
+    tracking_mode: 'reps' | 'time';
+    sets: LogWorkoutSetInput[];
+  }> = [];
+
+  for (let i = 0; i < exercises.length; i++) {
+    const ex = exercises[i];
+    if (!Array.isArray(ex.sets) || ex.sets.length === 0) {
+      return toolErrorEnvelope('INVALID_INPUT', `exercises[${i}] must have a non-empty sets array.`);
+    }
+
+    let uuid: string | null = null;
+    let title = '';
+
+    if (ex.exercise_id) {
+      const resolved = await resolveExercise({ exercise_id: ex.exercise_id });
+      if ('error' in resolved) {
+        return toolErrorEnvelope('NOT_FOUND', `exercises[${i}]: ${resolved.error}`, 'find_exercises');
+      }
+      uuid = resolved.uuid;
+      title = resolved.title;
+    } else if (ex.exercise_name?.trim()) {
+      const resolved = await resolveExercise({ exercise_name: ex.exercise_name });
+      if ('error' in resolved) {
+        if (resolved.candidates && resolved.candidates.length > 0) {
+          // Ambiguous match — don't auto-create, surface candidates so the
+          // agent can re-call with an exercise_id.
+          return toolErrorEnvelope(
+            'MULTIPLE_MATCHES',
+            `exercises[${i}]: ${exerciseErrorMessage(resolved)}`,
+            'pass exercise_id from candidates',
+          );
+        }
+        // No match → auto-create a custom (manual) exercise.
+        const { primary, secondary } = inferMusclesFromName(ex.exercise_name);
+        const inferredMode: 'reps' | 'time' =
+          ex.sets.some(s => s.duration_seconds != null && s.reps == null) ? 'time' : 'reps';
+        const newUuid = crypto.randomUUID();
+        await query(
+          `INSERT INTO exercises
+             (uuid, everkinetic_id, title, alias, description, primary_muscles, secondary_muscles,
+              equipment, steps, tips, is_custom, tracking_mode, image_count)
+           VALUES ($1, 0, $2, '[]'::jsonb, NULL, $3, $4, '[]'::jsonb, '[]'::jsonb, '[]'::jsonb,
+                   true, $5, 0)`,
+          [
+            newUuid,
+            ex.exercise_name.trim(),
+            JSON.stringify(primary),
+            JSON.stringify(secondary),
+            inferredMode,
+          ],
+        );
+        uuid = newUuid;
+        title = ex.exercise_name.trim();
+        autoCreated.push(title);
+      } else {
+        uuid = resolved.uuid;
+        title = resolved.title;
+      }
+    } else {
+      return toolErrorEnvelope('INVALID_INPUT', `exercises[${i}]: provide exercise_id or exercise_name.`);
+    }
+
+    const modeRow = await queryOne<{ tracking_mode: string | null }>(
+      'SELECT tracking_mode FROM exercises WHERE uuid = $1',
+      [uuid],
+    );
+    const trackingMode: 'reps' | 'time' = modeRow?.tracking_mode === 'time' ? 'time' : 'reps';
+
+    // Validate each set's rpe up front (5–10 per spec; DB allows int 1–10).
+    for (let si = 0; si < ex.sets.length; si++) {
+      const s = ex.sets[si];
+      if (s.weight != null && (typeof s.weight !== 'number' || s.weight < 0)) {
+        return toolErrorEnvelope('INVALID_INPUT', `exercises[${i}].sets[${si}].weight must be >= 0.`);
+      }
+      if (s.rpe != null) {
+        if (typeof s.rpe !== 'number' || s.rpe < 5 || s.rpe > 10 || !Number.isInteger(s.rpe)) {
+          return toolErrorEnvelope('INVALID_INPUT', `exercises[${i}].sets[${si}].rpe must be an integer 5–10.`);
+        }
+      }
+    }
+
+    resolvedExercises.push({ uuid, title, tracking_mode: trackingMode, sets: ex.sets });
+  }
+
+  // ── Idempotency check: same title + same calendar day already logged? ─────
+  const dayStr = startedAt.toISOString().slice(0, 10);
+  const dup = await queryOne<{ uuid: string }>(
+    `SELECT uuid FROM workouts
+     WHERE is_current = false
+       AND LOWER(TRIM(title)) = LOWER(TRIM($1))
+       AND start_time::date = $2::date
+     LIMIT 1`,
+    [name, dayStr],
+  );
+  const warning = dup
+    ? `A workout named "${name.trim()}" already exists on ${dayStr}. This created a second session — delete one if it's a duplicate.`
+    : undefined;
+
+  // ── Build the insert batch (one transaction) ──────────────────────────────
+  const workoutUuid = crypto.randomUUID();
+  const statements: Array<{ text: string; params?: unknown[] }> = [];
+
+  statements.push({
+    text: `INSERT INTO workouts (uuid, start_time, end_time, title, comment, is_current, workout_routine_uuid)
+           VALUES ($1, $2, $3, $4, $5, false, $6)`,
+    params: [
+      workoutUuid,
+      startedAt.toISOString(),
+      finishedAt.toISOString(),
+      name.trim(),
+      notes ?? null,
+      routineUuid,
+    ],
+  });
+
+  const responseExercises: Array<{ name: string; sets: Array<{ weight: number | null; reps: number | null; rpe: number | null; duration_seconds: number | null }> }> = [];
+  let totalVolume = 0;
+
+  for (let ei = 0; ei < resolvedExercises.length; ei++) {
+    const re = resolvedExercises[ei];
+    const weUuid = crypto.randomUUID();
+    statements.push({
+      text: `INSERT INTO workout_exercises (uuid, workout_uuid, exercise_uuid, order_index)
+             VALUES ($1, $2, $3, $4)`,
+      params: [weUuid, workoutUuid, re.uuid, ei],
+    });
+
+    const respSets: Array<{ weight: number | null; reps: number | null; rpe: number | null; duration_seconds: number | null }> = [];
+    for (let si = 0; si < re.sets.length; si++) {
+      const s = re.sets[si];
+      const setUuid = crypto.randomUUID();
+      const weight = s.weight ?? 0;
+      const isTime = re.tracking_mode === 'time';
+      const repetitions = isTime ? null : s.reps ?? 0;
+      const durationSeconds = isTime ? s.duration_seconds ?? 0 : null;
+      const comment = s.band ? `band: ${s.band}` : null;
+
+      statements.push({
+        text: `INSERT INTO workout_sets
+                 (uuid, workout_exercise_uuid, weight, repetitions, duration_seconds, rpe,
+                  comment, is_completed, is_pr, excluded_from_pb, order_index)
+               VALUES ($1, $2, $3, $4, $5, $6, $7, true, false, false, $8)`,
+        params: [
+          setUuid,
+          weUuid,
+          weight,
+          repetitions,
+          durationSeconds,
+          s.rpe ?? null,
+          comment,
+          si,
+        ],
+      });
+
+      if (!isTime && repetitions != null) {
+        totalVolume += weight * repetitions;
+      }
+      respSets.push({
+        weight,
+        reps: repetitions,
+        rpe: s.rpe ?? null,
+        duration_seconds: durationSeconds,
+      });
+    }
+    responseExercises.push({ name: re.title, sets: respSets });
+  }
+
+  await transaction(statements);
+
+  // ── Re-stamp is_pr for every distinct exercise touched (PRs are derived,
+  // never trusted from input). Weight-0 sets can't win (estimate1RM guard). ─
+  const distinctExerciseUuids = [...new Set(resolvedExercises.map(re => re.uuid))];
+  for (const exUuid of distinctExerciseUuids) {
+    await recomputePRFlagsForExercise(exUuid);
+  }
+
+  return toolResult({
+    uuid: workoutUuid,
+    date: startedAt.toISOString(),
+    name: name.trim(),
+    duration_min: durationMin,
+    exercises: responseExercises,
+    total_volume: Math.round(totalVolume),
+    auto_created_exercises: autoCreated,
+    ...(warning ? { warning } : {}),
+  });
+}
+
 /** Update any exercise row (catalog or custom) — text fields, equipment,
  *  movement pattern, tracking mode, YouTube URL. Server validates youtube_url
  *  and rejects garbage. */
@@ -3527,6 +3837,49 @@ export const tools: MCPTool[] = [
       },
     },
     execute: getExerciseHistory,
+  },
+  {
+    name: 'log_workout',
+    description:
+      'Logs a COMPLETED ad-hoc workout session into history (a PERFORMED session, NOT a routine template — use create_routine for templates). It shows in get_recent_workouts and feeds get_sets_per_muscle / get_weekly_summary. Each exercise is resolved by exercise_id first, else fuzzy-matched by exercise_name; an unmatched name AUTO-CREATES a custom (manual) exercise (muscles inferred from the name when obvious, else left empty — reported in auto_created_exercises). weight:0 is valid (bodyweight / banded): it counts toward set + per-muscle tallies but adds 0 to load volume, and can never become a PB (Epley × 0 = 0). Time-mode exercises log duration_seconds instead of reps. Band info (e.g. "medium") is stored in the set comment as "band: <value>". If a workout with the same name already exists on the same day, the session is still created but a warning is returned.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        date: { type: 'string', description: 'ISO-8601 start timestamp with offset (default: now).' },
+        name: { type: 'string', description: 'Session title (required).' },
+        duration_min: { type: 'number', description: 'Session length in minutes (optional; sets end_time).' },
+        notes: { type: 'string', description: 'Optional session comment.' },
+        routine_id: { type: ['string', 'null'], description: 'Optional uuid of the routine this session followed.' },
+        exercises: {
+          type: 'array',
+          description: 'Exercises performed, in order.',
+          items: {
+            type: 'object',
+            properties: {
+              exercise_id: { type: 'string', description: 'UUID of the exercise (preferred over exercise_name).' },
+              exercise_name: { type: 'string', description: 'Name to fuzzy-match; auto-creates a custom exercise if unmatched. Required if no exercise_id.' },
+              sets: {
+                type: 'array',
+                items: {
+                  type: 'object',
+                  properties: {
+                    weight: { type: 'number', description: 'kg (required, 0 ok for bodyweight/banded).' },
+                    reps: { type: 'number', description: 'Reps for reps-mode exercises.' },
+                    duration_seconds: { type: 'number', description: 'Held duration for time-mode exercises (instead of reps).' },
+                    rpe: { type: 'number', description: 'Integer RPE 5–10 (optional).' },
+                    band: { type: 'string', description: 'Resistance band label, e.g. "medium" — stored in the set comment.' },
+                  },
+                  required: ['weight'],
+                },
+              },
+            },
+            required: ['sets'],
+          },
+        },
+      },
+      required: ['name', 'exercises'],
+    },
+    execute: logWorkout,
   },
   {
     name: 'get_active_routine',
