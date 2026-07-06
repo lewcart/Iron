@@ -59,6 +59,7 @@
 		PS0000000000000000000001 /* PersonSegmentationPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = PS0000000000000000000002 /* PersonSegmentationPlugin.swift */; };
 		RB0000000000000000000003 /* FitspoBurstIntent.swift in Sources */ = {isa = PBXBuildFile; fileRef = E64E87D18C5A9BB8F67CCC7F /* FitspoBurstIntent.swift */; };
 		WT0000000000000000000100 /* WalkTracker.swift in Sources */ = {isa = PBXBuildFile; fileRef = WT0000000000000000000200 /* WalkTracker.swift */; };
+		WM0000000000000000000100 /* WalkGeofenceMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = WM0000000000000000000200 /* WalkGeofenceMonitor.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -179,6 +180,7 @@
 		HK0000000000000000000008 /* HealthKitTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthKitTypes.swift; sourceTree = "<group>"; };
 		PS0000000000000000000002 /* PersonSegmentationPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersonSegmentationPlugin.swift; sourceTree = "<group>"; };
 		WT0000000000000000000200 /* WalkTracker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WalkTracker.swift; sourceTree = "<group>"; };
+		WM0000000000000000000200 /* WalkGeofenceMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WalkGeofenceMonitor.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -277,6 +279,7 @@
 				FD5E740390A75C0F2061E3BF /* RestTimerPlugin.swift */,
 				GP0000000000000000000200 /* GeofencePlugin.swift */,
 				WT0000000000000000000200 /* WalkTracker.swift */,
+				WM0000000000000000000200 /* WalkGeofenceMonitor.swift */,
 				58F7A926B1F60B6F1A1EA46A /* WatchConnectivityPlugin.swift */,
 			);
 			path = App;
@@ -585,6 +588,7 @@
 				HK0000000000000000000007 /* HealthKitTypes.swift in Sources */,
 				GP0000000000000000000100 /* GeofencePlugin.swift in Sources */,
 				WT0000000000000000000100 /* WalkTracker.swift in Sources */,
+				WM0000000000000000000100 /* WalkGeofenceMonitor.swift in Sources */,
 				PS0000000000000000000001 /* PersonSegmentationPlugin.swift in Sources */,
 				BCDB60B1669B43B1F7D02C66 /* InspoBurstPlugin.swift in Sources */,
 				35976665B93CB7279F053E62 /* RestTimerPlugin.swift in Sources */,

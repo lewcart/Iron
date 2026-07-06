@@ -8,9 +8,16 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     var window: UIWindow?
 
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
-        // When iOS relaunches the app in the background due to a CLRegion boundary crossing,
-        // GeofencePlugin.load() re-creates the CLLocationManager and re-registers the monitored
-        // region so the didDetermineState callback fires within the ~10 s background window.
+        // When iOS relaunches the app in the BACKGROUND due to a CLRegion boundary
+        // crossing (e.g. leaving home in the morning after the app was terminated
+        // overnight), the Capacitor WKWebView bridge does not reliably boot, so
+        // GeofencePlugin.load() never runs. Bootstrapping the monitor here — at
+        // app-launch scope, independent of the bridge — re-creates the
+        // CLLocationManager and re-registers the monitored regions so the
+        // didExitRegion / didDetermineState callback has a live delegate to land
+        // on within the brief background-launch window. Without this, the morning
+        // walk silently never initiated after a cold/background relaunch.
+        WalkGeofenceMonitor.shared.bootstrapAtLaunch()
 
         // Register the notification-action delegate at app-launch (not plugin load). When iOS
         // delivers a notification action via cold launch, the plugin instance may not exist
@@ -83,9 +90,11 @@ class AppLaunchNotificationDelegate: NSObject, UNUserNotificationCenterDelegate 
                                  didReceive response: UNNotificationResponse,
                                  withCompletionHandler completionHandler: @escaping () -> Void) {
         if response.actionIdentifier == "REBIRTH_WALK_CANCEL" {
-            // Cancel the active walk using only persisted state — works even if
-            // the plugin instance hasn't been created yet.
-            WalkTracker().cancelFromPersistedState()
+            // Cancel the active walk via the shared monitor — works even if the
+            // Capacitor plugin instance hasn't been created yet (cold launch via
+            // notification action). The monitor stops location updates and resets
+            // persisted state in one step.
+            WalkGeofenceMonitor.shared.cancelFromPersistedState()
         }
         completionHandler()
     }
