@@ -219,6 +219,7 @@ class SyncEngine {
   private _started = false;
   private _pulling = false;
   private _pushing = false;
+  private _pushRequestedWhileInFlight = false;
 
   private _onOnline = () => { if (!document.hidden) this.sync(); };
   private _onOffline = () => this.setStatus('offline');
@@ -243,7 +244,15 @@ class SyncEngine {
   // ─── Push: send unsynced local changes to server ──────────────────────────
 
   async push(): Promise<void> {
-    if (this._pushing) return;
+    if (this._pushing) {
+      // A push is already in flight. Don't drop the request — the caller's
+      // mutation isn't in the in-flight payload, so remember to run another
+      // push once this one settles. Without this, an edit made during the
+      // flight window waited for the 15s poll (or was lost entirely before
+      // the _updated_at guard below existed).
+      this._pushRequestedWhileInFlight = true;
+      return;
+    }
     if (!navigator.onLine) { this.setStatus('offline'); return; }
 
     this._pushing = true;
@@ -300,17 +309,34 @@ class SyncEngine {
         throw httpErr;
       }
 
-      // Mark all pushed rows as synced. Hard-purge soft-deleted ones now that
+      // Mark pushed rows as synced. Hard-purge soft-deleted ones now that
       // the server has accepted the delete.
+      //
+      // Guard against the in-flight edit race: the payload was snapshotted
+      // BEFORE the fetch, and the user may have edited a row while the
+      // request was on the wire (e.g. adjusting a set's RIR right after the
+      // check-off push fired). Only mark a row clean if its _updated_at is
+      // still what we pushed — otherwise the newer edit would be stamped
+      // "synced" without ever reaching the server, and the next pull's CDC
+      // echo would visibly revert it. Re-dirtied rows stay dirty and a
+      // follow-up push is scheduled.
       const now = Date.now();
+      let editedDuringFlight = false;
       await db.transaction('rw', SYNCED_TABLES.map(t => (db as unknown as Record<string, unknown>)[t]) as never, async () => {
         for (const [name, rows] of dirty) {
           if (rows.length === 0) continue;
-          const table = (db as unknown as Record<string, { bulkUpdate: (patches: Array<{ key: string | number; changes: unknown }>) => Promise<unknown>; bulkDelete: (keys: Array<string | number>) => Promise<unknown> }>)[name];
+          const table = (db as unknown as Record<string, { bulkGet: (keys: Array<string | number>) => Promise<Array<{ _updated_at: number } | undefined>>; bulkUpdate: (patches: Array<{ key: string | number; changes: unknown }>) => Promise<unknown>; bulkDelete: (keys: Array<string | number>) => Promise<unknown> }>)[name];
           const keyOf = (r: { uuid?: string; metric_key?: string; id?: number }) =>
             r.uuid ?? r.metric_key ?? r.id!;
-          const tombstones = rows.filter(r => (r as unknown as { _deleted: boolean })._deleted);
-          const survivors = rows.filter(r => !(r as unknown as { _deleted: boolean })._deleted);
+          const current = await table.bulkGet(rows.map(keyOf));
+          const unchanged = rows.filter((r, i) => {
+            const cur = current[i];
+            const same = cur != null && cur._updated_at === (r as unknown as { _updated_at: number })._updated_at;
+            if (!same) editedDuringFlight = true;
+            return same;
+          });
+          const tombstones = unchanged.filter(r => (r as unknown as { _deleted: boolean })._deleted);
+          const survivors = unchanged.filter(r => !(r as unknown as { _deleted: boolean })._deleted);
           if (tombstones.length > 0) {
             await table.bulkDelete(tombstones.map(keyOf));
           }
@@ -321,6 +347,7 @@ class SyncEngine {
           }
         }
       });
+      if (editedDuringFlight) this.schedulePush();
 
       // Only clear push-origin errors. A prior pull error is still active and
       // its details must survive — otherwise sync() (push→pull) wipes the
@@ -360,6 +387,10 @@ class SyncEngine {
       this.setStatus(navigator.onLine ? 'error' : 'offline');
     } finally {
       this._pushing = false;
+      if (this._pushRequestedWhileInFlight) {
+        this._pushRequestedWhileInFlight = false;
+        this.schedulePush();
+      }
     }
   }
 
@@ -450,11 +481,23 @@ class SyncEngine {
     const tableHandles = SYNCED_TABLES.map(t => (db as unknown as Record<string, unknown>)[t]) as never;
     await db.transaction('rw', tableHandles, async () => {
       for (const tableName of SYNCED_TABLES) {
-        const table = (db as unknown as Record<string, { bulkPut: (rows: unknown[]) => Promise<unknown>; bulkDelete: (keys: Array<string | number>) => Promise<unknown> }>)[tableName];
+        const table = (db as unknown as Record<string, { bulkGet: (keys: Array<string | number>) => Promise<Array<{ _synced?: boolean } | undefined>>; bulkPut: (rows: unknown[]) => Promise<unknown>; bulkDelete: (keys: Array<string | number>) => Promise<unknown> }>)[tableName];
 
         // Server-supplied rows (insert/update). Server already filters
         // tombstoned rows out — we only see live data here.
-        const rows = data.rows[tableName];
+        let rows = data.rows[tableName];
+        if (rows && rows.length > 0) {
+          // Never overwrite a locally-dirty row. A dirty row holds an edit
+          // that hasn't reached the server yet (e.g. a RIR adjusted while
+          // the previous push was in flight) — the pulled row is by
+          // definition older, and it pushes on the next cycle. Applying it
+          // would both revert the UI and stamp the row _synced, losing the
+          // edit permanently.
+          const keyOf = (r: Record<string, unknown>) =>
+            (r.uuid ?? r.metric_key ?? r.id) as string | number;
+          const existing = await table.bulkGet(rows.map(keyOf));
+          rows = rows.filter((_, i) => existing[i]?._synced !== false);
+        }
         if (rows && rows.length > 0) {
           const stamped = rows.map(r => ({
             ...r,
