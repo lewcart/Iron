@@ -24,6 +24,11 @@
 	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<!-- Export compliance: Rebirth uses only standard HTTPS/TLS (exempt
+	     encryption). Declaring this here skips the per-build export-compliance
+	     prompt in App Store Connect / TestFlight. -->
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 	<!-- ActivityKit — required to start Live Activities for the rest timer. -->
 	<key>NSSupportsLiveActivities</key>
 	<true/>
