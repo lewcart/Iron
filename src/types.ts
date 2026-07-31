@@ -124,6 +124,9 @@ export interface WorkoutRoutineSet {
   order_index: number;
   /** Routine target hold in seconds — set on time-mode exercise routines only. */
   target_duration_seconds: number | null;
+  /** Prescribed load in kg. Prefilled onto the workout set at start so the
+   *  session opens on the programmed weight instead of a blank field. */
+  target_weight: number | null;
 }
 
 // Helper types

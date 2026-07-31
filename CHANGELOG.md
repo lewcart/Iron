@@ -6,6 +6,8 @@ All notable changes to Rebirth are documented here.
 
 ### Fixed
 
+- **Routine target weights now prefill workout sets.** `startWorkoutFromRoutine` copied rep targets from the routine template but hardcoded `weight: null`, ignoring the `workout_routine_sets.target_weight` column that `add_exercise` / `create_drop_chain` already write. Sessions started from a routine now open with the programmed load in the weight field (e.g. Hip Thrust 4×8–12 @ 100kg) instead of a blank box. Prefill only — `is_completed` stays false, so volume/set-count rollups are unaffected until the set is checked off. `parseRoutineSet` now surfaces `target_weight` on `WorkoutRoutineSet`.
+
 - **RIR edits no longer revert after checking off a set.** Checking off a set schedules a sync push at +500ms; adjusting the RIR chip 1–3s later landed while that push's HTTP request was in flight, and the sync engine (a) stamped the row `_synced` from its pre-flight snapshot — silently marking the unsent RIR edit as already pushed — then (b) let the push's own CDC echo `bulkPut` the stale server row over local state on the next 15s poll, visibly reverting the chip. Now `push()` only marks a row clean when its `_updated_at` still matches the pushed snapshot (re-dirtied rows stay dirty and a follow-up push is scheduled), `applyChanges()` skips server rows whose local copy is dirty (the local edit is newer and pushes next cycle), and a push requested while one is in flight re-queues instead of being dropped. The race wasn't RIR-specific — any edit within ~1–2s of a previous one (post-check-off weight corrections, comments, tags) could be lost the same way. Regression tests: `src/lib/sync-race.test.ts`.
 
 ### Added

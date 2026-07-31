@@ -358,6 +358,7 @@ function makeSet(min: number | null, max: number | null, durationSeconds: number
     comment: null,
     order_index: 0,
     target_duration_seconds: durationSeconds,
+    target_weight: null,
   };
 }
 

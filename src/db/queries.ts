@@ -1311,14 +1311,18 @@ export async function startWorkoutFromRoutine(routineUuid: string): Promise<Star
     if (routineSets.length > 0) {
       for (const routineSet of routineSets) {
         const setUuid = randomUUID();
+        // target_weight is the PROGRAMMED load — prefilled onto the (incomplete)
+        // set so the session opens on the prescribed weight. It is not a
+        // performed value: is_completed stays false, so volume and set-count
+        // rollups (which require is_completed) ignore it until Lou ticks it off.
         await query(
-          'INSERT INTO workout_sets (uuid, workout_exercise_uuid, min_target_reps, max_target_reps, tag, comment, order_index, is_completed) VALUES ($1, $2, $3, $4, $5, $6, $7, false)',
-          [setUuid, weUuid, routineSet.min_repetitions, routineSet.max_repetitions, routineSet.tag, routineSet.comment, routineSet.order_index]
+          'INSERT INTO workout_sets (uuid, workout_exercise_uuid, weight, min_target_reps, max_target_reps, tag, comment, order_index, is_completed) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, false)',
+          [setUuid, weUuid, routineSet.target_weight, routineSet.min_repetitions, routineSet.max_repetitions, routineSet.tag, routineSet.comment, routineSet.order_index]
         );
         allSets.push({
           uuid: setUuid,
           workout_exercise_uuid: weUuid,
-          weight: null,
+          weight: routineSet.target_weight,
           repetitions: null,
           min_target_reps: routineSet.min_repetitions ?? null,
           max_target_reps: routineSet.max_repetitions ?? null,
@@ -1863,6 +1867,7 @@ export function parseRoutineSet(row: DbRow): WorkoutRoutineSet {
     comment: row.comment as string | null,
     order_index: row.order_index as number,
     target_duration_seconds: (row.target_duration_seconds as number | null) ?? null,
+    target_weight: row.target_weight != null ? Number(row.target_weight) : null,
   };
 }
 
