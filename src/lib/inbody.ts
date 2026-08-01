@@ -184,3 +184,153 @@ export function resolveStatus(
   const range = norms?.[metric.key as string]?.[0];
   return evaluateAgainstNorm(value, range);
 }
+
+// ─── Sheet layout (mirrors the printed InBody 570 result sheet) ──────────────
+//
+// The detail page renders these sections in printout order so a scan can be
+// eyeballed against a fresh sheet line-by-line. Segmental rows carry a
+// companion `pctKey` so kg and % display combined on one row ("2.74 kg · 101.0%"),
+// exactly as the sheet prints them. Keys are `keyof InbodyScan` on purpose —
+// a typo'd column name fails typecheck instead of silently rendering "—".
+
+/** Numeric-valued InbodyScan columns (sheet rows never point at strings). */
+export type ScanNumericKey = {
+  [K in keyof InbodyScan]: InbodyScan[K] extends number | null ? K : never;
+}[keyof InbodyScan];
+
+export interface SheetRow {
+  key: ScanNumericKey;
+  label: string;
+  unit: string;
+  dp?: number;
+  /** Companion % rendered alongside the primary value (segmental lean/fat). */
+  pctKey?: ScanNumericKey;
+  /** Render with an explicit sign, as the sheet's Weight Control block does (+4.0). */
+  signed?: boolean;
+}
+
+export interface SheetSection {
+  id: string;
+  title: string;
+  /** Which printed-sheet column this section belongs to (page layout hint). */
+  column: 'left' | 'right';
+  rows: SheetRow[];
+}
+
+export const SHEET_SECTIONS: SheetSection[] = [
+  {
+    id: 'body_comp_analysis', title: 'Body Composition Analysis', column: 'left',
+    rows: [
+      { key: 'total_body_water_l', label: 'Total Body Water', unit: 'L', dp: 1 },
+      { key: 'protein_kg', label: 'Protein', unit: 'kg', dp: 1 },
+      { key: 'minerals_kg', label: 'Minerals', unit: 'kg', dp: 2 },
+      { key: 'body_fat_mass_kg', label: 'Body Fat Mass', unit: 'kg', dp: 1 },
+      { key: 'soft_lean_mass_kg', label: 'Soft Lean Mass', unit: 'kg', dp: 1 },
+      { key: 'fat_free_mass_kg', label: 'Fat Free Mass', unit: 'kg', dp: 1 },
+    ],
+  },
+  {
+    id: 'muscle_fat', title: 'Muscle-Fat Analysis', column: 'left',
+    rows: [
+      { key: 'weight_kg', label: 'Weight', unit: 'kg', dp: 1 },
+      { key: 'smm_kg', label: 'SMM (Skeletal Muscle Mass)', unit: 'kg', dp: 1 },
+      { key: 'body_fat_mass_kg', label: 'Body Fat Mass', unit: 'kg', dp: 1 },
+    ],
+  },
+  {
+    id: 'calculated', title: 'Calculated Analysis', column: 'left',
+    rows: [
+      { key: 'bmi', label: 'BMI', unit: 'kg/m²', dp: 1 },
+      { key: 'pbf_pct', label: 'PBF (Percent Body Fat)', unit: '%', dp: 1 },
+    ],
+  },
+  {
+    id: 'seg_lean', title: 'Segmental Lean Analysis', column: 'left',
+    rows: [
+      { key: 'seg_lean_right_arm_kg', pctKey: 'seg_lean_right_arm_pct', label: 'Right Arm', unit: 'kg', dp: 2 },
+      { key: 'seg_lean_left_arm_kg', pctKey: 'seg_lean_left_arm_pct', label: 'Left Arm', unit: 'kg', dp: 2 },
+      { key: 'seg_lean_trunk_kg', pctKey: 'seg_lean_trunk_pct', label: 'Trunk', unit: 'kg', dp: 1 },
+      { key: 'seg_lean_right_leg_kg', pctKey: 'seg_lean_right_leg_pct', label: 'Right Leg', unit: 'kg', dp: 2 },
+      { key: 'seg_lean_left_leg_kg', pctKey: 'seg_lean_left_leg_pct', label: 'Left Leg', unit: 'kg', dp: 2 },
+    ],
+  },
+  {
+    id: 'body_water', title: 'Body Water Analysis', column: 'left',
+    rows: [
+      { key: 'ecw_ratio', label: 'ECW Ratio', unit: '', dp: 3 },
+    ],
+  },
+  {
+    id: 'seg_fat', title: 'Segmental Fat Analysis', column: 'left',
+    rows: [
+      { key: 'seg_fat_right_arm_kg', pctKey: 'seg_fat_right_arm_pct', label: 'Right Arm', unit: 'kg', dp: 1 },
+      { key: 'seg_fat_left_arm_kg', pctKey: 'seg_fat_left_arm_pct', label: 'Left Arm', unit: 'kg', dp: 1 },
+      { key: 'seg_fat_trunk_kg', pctKey: 'seg_fat_trunk_pct', label: 'Trunk', unit: 'kg', dp: 1 },
+      { key: 'seg_fat_right_leg_kg', pctKey: 'seg_fat_right_leg_pct', label: 'Right Leg', unit: 'kg', dp: 1 },
+      { key: 'seg_fat_left_leg_kg', pctKey: 'seg_fat_left_leg_pct', label: 'Left Leg', unit: 'kg', dp: 1 },
+    ],
+  },
+  {
+    id: 'weight_control', title: 'Weight Control', column: 'right',
+    rows: [
+      { key: 'target_weight_kg', label: 'Target Weight', unit: 'kg', dp: 1 },
+      { key: 'weight_control_kg', label: 'Weight Control', unit: 'kg', dp: 1, signed: true },
+      { key: 'fat_control_kg', label: 'Fat Control', unit: 'kg', dp: 1, signed: true },
+      { key: 'muscle_control_kg', label: 'Muscle Control', unit: 'kg', dp: 1, signed: true },
+    ],
+  },
+  {
+    id: 'seg_circ', title: 'Segmental Circumference', column: 'right',
+    rows: [
+      { key: 'circ_neck_cm', label: 'Neck', unit: 'cm', dp: 1 },
+      { key: 'circ_chest_cm', label: 'Chest', unit: 'cm', dp: 1 },
+      { key: 'circ_abdomen_cm', label: 'Abdomen', unit: 'cm', dp: 1 },
+      { key: 'circ_hip_cm', label: 'Hip', unit: 'cm', dp: 1 },
+      { key: 'circ_right_arm_cm', label: 'Right Arm', unit: 'cm', dp: 1 },
+      { key: 'circ_left_arm_cm', label: 'Left Arm', unit: 'cm', dp: 1 },
+      { key: 'circ_right_thigh_cm', label: 'Right Thigh', unit: 'cm', dp: 1 },
+      { key: 'circ_left_thigh_cm', label: 'Left Thigh', unit: 'cm', dp: 1 },
+    ],
+  },
+  {
+    id: 'research', title: 'Research Parameters', column: 'right',
+    rows: [
+      { key: 'intracellular_water_l', label: 'Intracellular Water', unit: 'L', dp: 1 },
+      { key: 'extracellular_water_l', label: 'Extracellular Water', unit: 'L', dp: 1 },
+      { key: 'bmr_kcal', label: 'Basal Metabolic Rate', unit: 'kcal', dp: 0 },
+      { key: 'whr', label: 'Waist-Hip Ratio', unit: '', dp: 2 },
+      { key: 'visceral_fat_level', label: 'Visceral Fat Level', unit: '', dp: 0 },
+      { key: 'bone_mineral_kg', label: 'Bone Mineral Content', unit: 'kg', dp: 2 },
+      { key: 'body_cell_mass_kg', label: 'Body Cell Mass', unit: 'kg', dp: 1 },
+      { key: 'arm_muscle_circumference_cm', label: 'Arm Muscle Circumference', unit: 'cm', dp: 1 },
+    ],
+  },
+];
+
+/** Sheet-style number: fixed decimals, optional +sign (Weight Control block). */
+export function formatSheetNumber(val: number | null, dp = 1, signed = false): string {
+  if (val == null) return '—';
+  const s = val.toFixed(dp);
+  return signed && val > 0 ? `+${s}` : s;
+}
+
+/** Impedance table in sheet order: rows = frequencies, cols = RA LA TR RL LL. */
+export const IMPEDANCE_SEGMENTS = ['ra', 'la', 'trunk', 'rl', 'll'] as const;
+export const IMPEDANCE_SEGMENT_LABELS = ['RA', 'LA', 'TR', 'RL', 'LL'] as const;
+
+export function impedanceRows(
+  impedance: Record<string, Record<string, number>> | null | undefined,
+): { freq: string; values: (number | null)[] }[] {
+  if (!impedance) return [];
+  // Sort numerically ("5khz" < "50khz" < "500khz") — object key order isn't guaranteed.
+  const freqs = Object.keys(impedance)
+    .filter(f => /^\d+khz$/i.test(f))
+    .sort((a, b) => parseInt(a) - parseInt(b));
+  return freqs.map(freq => ({
+    freq: freq.replace(/khz/i, ' kHz'),
+    values: IMPEDANCE_SEGMENTS.map(seg => {
+      const v = impedance[freq]?.[seg];
+      return typeof v === 'number' && Number.isFinite(v) ? v : null;
+    }),
+  }));
+}

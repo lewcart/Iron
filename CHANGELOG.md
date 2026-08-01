@@ -4,6 +4,10 @@ All notable changes to Rebirth are documented here.
 
 ## [Unreleased]
 
+### Changed
+
+- **InBody scan detail mirrors the printed 570 sheet.** Sections now render in printout order (Body Composition / Muscle-Fat / Calculated / Segmental Lean / Body Water / Segmental Fat on the left; Weight Control / Segmental Circumference / Research Parameters / Body Balance / Impedance on the right) so a scan can be compared line-by-line against a fresh sheet. Segmental rows show kg and % combined ("2.74 kg · 101.0%") — segmental lean % was previously never displayed. Weight Control values render signed (+4.0), the raw impedance Z(Ω) table is shown (3 frequencies × RA/LA/TR/RL/LL), and height/age appear in the header. Layout is driven by `SHEET_SECTIONS` in `src/lib/inbody.ts` with row keys typed as `keyof InbodyScan` so a typo'd column fails typecheck instead of rendering "—". Norm/goal badges unchanged.
+
 ### Fixed
 
 - **Routine target weights now prefill workout sets.** `startWorkoutFromRoutine` copied rep targets from the routine template but hardcoded `weight: null`, ignoring the `workout_routine_sets.target_weight` column that `add_exercise` / `create_drop_chain` already write. Sessions started from a routine now open with the programmed load in the weight field (e.g. Hip Thrust 4×8–12 @ 100kg) instead of a blank box. Prefill only — `is_completed` stays false, so volume/set-count rollups are unaffected until the set is checked off. `parseRoutineSet` now surfaces `target_weight` on `WorkoutRoutineSet`.

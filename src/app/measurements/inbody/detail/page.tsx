@@ -7,8 +7,9 @@ import { ChevronLeft, Trash2 } from 'lucide-react';
 import type { InbodyScan, BodyGoal, BodyNormRange } from '@/types';
 import { apiBase } from '@/lib/api/client';
 import {
-  METRICS, GROUP_LABELS, scanValue, formatValue, statusColorClasses,
-  resolveStatus, type ReferenceSet, type MetricGroup,
+  METRICS, scanValue, statusColorClasses, resolveStatus,
+  SHEET_SECTIONS, formatSheetNumber, impedanceRows, IMPEDANCE_SEGMENT_LABELS,
+  type ReferenceSet, type MetricDef, type SheetSection,
 } from '@/lib/inbody';
 
 function apiHeaders(): HeadersInit {
@@ -18,7 +19,108 @@ function apiHeaders(): HeadersInit {
     : { 'Content-Type': 'application/json' };
 }
 
-const GROUPS: MetricGroup[] = ['body_comp', 'derived', 'seg_lean', 'seg_fat', 'circumference', 'recommendation'];
+/** METRICS def lookup for status resolution; sheet rows fall back to a synthetic def. */
+const METRIC_BY_KEY = new Map(METRICS.map(m => [m.key as string, m]));
+function defFor(key: string, label: string, unit: string): MetricDef {
+  return METRIC_BY_KEY.get(key) ?? { key, label, unit, group: 'body_comp' };
+}
+
+function SheetSectionCard({ section, scan, reference, norms, goals }: {
+  section: SheetSection;
+  scan: InbodyScan;
+  reference: ReferenceSet;
+  norms: Record<string, BodyNormRange[]> | null;
+  goals: Record<string, BodyGoal> | null;
+}) {
+  const rows = section.rows
+    .map(row => {
+      const value = scanValue(scan, row.key);
+      const pct = row.pctKey ? scanValue(scan, row.pctKey) : null;
+      const status = resolveStatus(value, defFor(row.key, row.label, row.unit), reference, norms, goals);
+      return { row, value, pct, status };
+    })
+    .filter(r => r.value != null);
+
+  if (rows.length === 0) return null;
+
+  return (
+    <div>
+      <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1 px-1">
+        {section.title}
+      </p>
+      <div className="ios-section">
+        {rows.map(({ row, value, pct, status }) => {
+          const cls = statusColorClasses(status.color);
+          const hasRef = status.label !== 'NO REF';
+          return (
+            <div key={row.key} className="ios-row flex-wrap gap-2">
+              <div className="flex-1 min-w-0">
+                <div className="text-sm font-medium truncate">{row.label}</div>
+                {hasRef && (
+                  <div className="text-xs text-muted-foreground">
+                    {reference === 'ME' ? 'Goal' : 'Normal'}: {status.refText}
+                  </div>
+                )}
+              </div>
+              <div className="text-right">
+                <div className="text-sm font-semibold tabular-nums">
+                  {formatSheetNumber(value, row.dp ?? 1, row.signed)}
+                  {row.unit ? <span className="font-normal text-muted-foreground"> {row.unit}</span> : null}
+                  {pct != null && (
+                    <span className="text-muted-foreground font-normal"> · {pct.toFixed(1)}%</span>
+                  )}
+                </div>
+                {hasRef && (
+                  <span
+                    className={`inline-block mt-0.5 px-1.5 py-0.5 text-[10px] font-bold rounded ring-1 ${cls.text} ${cls.bg} ${cls.ring}`}
+                  >
+                    {status.label}
+                  </span>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function ImpedanceBlock({ impedance }: { impedance: InbodyScan['impedance'] }) {
+  const rows = impedanceRows(impedance);
+  if (rows.length === 0) return null;
+  return (
+    <div>
+      <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1 px-1">
+        Impedance <span className="normal-case font-normal">Z(Ω)</span>
+      </p>
+      <div className="ios-section">
+        <div className="ios-row">
+          <table className="w-full text-xs tabular-nums">
+            <thead>
+              <tr className="text-muted-foreground">
+                <th className="text-left font-medium pb-1" />
+                {IMPEDANCE_SEGMENT_LABELS.map(seg => (
+                  <th key={seg} className="text-right font-medium pb-1">{seg}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map(({ freq, values }) => (
+                <tr key={freq}>
+                  <td className="text-left text-muted-foreground py-0.5">{freq}</td>
+                  {values.map((v, i) => (
+                    <td key={i} className="text-right py-0.5">{v == null ? '—' : v.toFixed(1)}</td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export default function InbodyScanDetailPage() {
   return (
@@ -166,6 +268,14 @@ function InbodyScanDetailInner() {
                 <div>
                   <div className="text-sm text-muted-foreground">{scan.device}{scan.venue ? ` · ${scan.venue}` : ''}</div>
                   <div className="text-sm font-medium">{dateStr}</div>
+                  {(scan.height_cm != null || scan.age_at_scan != null) && (
+                    <div className="text-xs text-muted-foreground mt-0.5">
+                      {[
+                        scan.height_cm != null ? `${scan.height_cm} cm` : null,
+                        scan.age_at_scan != null ? `${scan.age_at_scan} yrs` : null,
+                      ].filter(Boolean).join(' · ')}
+                    </div>
+                  )}
                 </div>
                 {scan.inbody_score != null && (
                   <div className="text-right">
@@ -211,53 +321,40 @@ function InbodyScanDetailInner() {
             </div>
           </div>
 
-          {/* Right column: metric groups as a 2-col grid on md:+, 1-col on mobile.
-              auto-rows-min keeps cards intrinsic height so uneven groups don't inflate rows. */}
-          <div className="md:col-span-3 grid grid-cols-1 md:grid-cols-2 gap-4 auto-rows-min">
-            {GROUPS.map(group => {
-              const metrics = METRICS.filter(m => m.group === group);
-              const rows = metrics.map(m => {
-                const value = scanValue(scan, m.key as string);
-                const status = resolveStatus(value, m, reference, norms, goals);
-                return { m, value, status };
-              }).filter(r => r.value != null || r.status.label !== 'NO REF');
+          {/* Right area: two column stacks mirroring the printed InBody 570 sheet —
+              left = analysis tables (top-to-bottom in printout order, segmental rows
+              show kg · % combined), right = Weight Control / Balance / Circumference /
+              Research Parameters / Impedance. Single column on mobile keeps the same
+              top-to-bottom read order as the sheet's left page then right page. */}
+          <div className="md:col-span-3 grid grid-cols-1 md:grid-cols-2 gap-4 auto-rows-min items-start">
+            <div className="space-y-4">
+              {SHEET_SECTIONS.filter(s => s.column === 'left').map(section => (
+                <SheetSectionCard
+                  key={section.id}
+                  section={section}
+                  scan={scan}
+                  reference={reference}
+                  norms={norms}
+                  goals={goals}
+                />
+              ))}
+            </div>
 
-              if (rows.length === 0) return null;
-
-              return (
-                <div key={group}>
-                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1 px-1">
-                    {GROUP_LABELS[group]}
-                  </p>
-                  <div className="ios-section">
-                    {rows.map(({ m, value, status }) => {
-                      const cls = statusColorClasses(status.color);
-                      return (
-                        <div key={m.key as string} className="ios-row flex-wrap gap-2">
-                          <div className="flex-1 min-w-0">
-                            <div className="text-sm font-medium truncate">{m.label}</div>
-                            <div className="text-xs text-muted-foreground">
-                              {reference === 'ME' ? 'Goal' : 'Normal'}: {status.refText}
-                            </div>
-                          </div>
-                          <div className="text-right">
-                            <div className="text-sm font-semibold">{formatValue(value, m)}</div>
-                            <span
-                              className={`inline-block mt-0.5 px-1.5 py-0.5 text-[10px] font-bold rounded ring-1 ${cls.text} ${cls.bg} ${cls.ring}`}
-                            >
-                              {status.label}
-                            </span>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              );
-            })}
-
-            {balanceBlock}
-            {notesBlock}
+            <div className="space-y-4">
+              {SHEET_SECTIONS.filter(s => s.column === 'right').map(section => (
+                <SheetSectionCard
+                  key={section.id}
+                  section={section}
+                  scan={scan}
+                  reference={reference}
+                  norms={norms}
+                  goals={goals}
+                />
+              ))}
+              {balanceBlock}
+              <ImpedanceBlock impedance={scan.impedance} />
+              {notesBlock}
+            </div>
           </div>
         </div>
       </div>
