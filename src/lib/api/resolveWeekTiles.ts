@@ -23,7 +23,9 @@ import {
 } from '../training/anchor-lifts';
 import {
   buildAnchorLiftTrend,
+  anchorSlopeFromTrend,
   type AnchorLiftSessionPoint,
+  type AnchorSlope,
 } from '../training/anchor-lift-trend';
 import { computeEwma, ewmaDeltaOverDays, type EwmaPoint } from '../training/ewma';
 import { computeHrvBalance, type HrvBalanceResult } from '../training/hrv-balance';
@@ -633,4 +635,53 @@ function resolveWeightEwma(facts: WeekFacts): WeekTile {
       raw: facts.bodyweight.map(p => ({ date: p.date, weight: p.weight })),
     },
   };
+}
+
+// ── Anchor slope per priority muscle (prescription-engine input) ────────
+
+export interface AnchorSlopeForMuscle {
+  slope: AnchorSlope;
+  /** Display name of the lift the slope came from, for the reason chip. */
+  lift: string;
+}
+
+/**
+ * Resolve each priority muscle's anchor lift and reduce its e1RM trend to a
+ * coarse slope for `PrescriptionMuscleFact.anchor_slope`.
+ *
+ * Deliberately reuses the same resolution path as the anchor-lift-trend tile
+ * (`resolveAnchorLiftTrend` above) so the prescription card and that tile can
+ * never disagree about which lift represents a muscle, or which way it is
+ * going. Muscles whose lift can't be resolved, or that lack enough sessions
+ * for a trend, are simply absent from the map — the engine reads a missing
+ * entry as null ("no signal"), not as stagnation.
+ */
+export function anchorSlopesByMuscle(facts: WeekFacts): Map<string, AnchorSlopeForMuscle> {
+  const out = new Map<string, AnchorSlopeForMuscle>();
+
+  for (const config of ANCHOR_LIFTS) {
+    const exercise = resolveAnchorLift(config, facts.catalog, facts.exerciseLogSignals);
+    if (!exercise) continue;
+
+    const exerciseSets = facts.anchorSets.filter(s => s.exercise_uuid === exercise.uuid);
+    const dateMap = new Map<string, string>();
+    for (const s of exerciseSets) dateMap.set(s.workout_exercise_uuid, s.workout_date);
+
+    const trend = buildAnchorLiftTrend(
+      exerciseSets.map(s => ({
+        is_completed: s.is_completed,
+        excluded_from_pb: s.excluded_from_pb,
+        repetitions: s.repetitions,
+        weight: s.weight,
+        workout_exercise_uuid: s.workout_exercise_uuid,
+      })),
+      dateMap,
+      { anchorDisplayName: config.display_name },
+    );
+
+    const slope = anchorSlopeFromTrend(trend);
+    if (slope) out.set(config.muscle, { slope, lift: exercise.title ?? config.display_name });
+  }
+
+  return out;
 }

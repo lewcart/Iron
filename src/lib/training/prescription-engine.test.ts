@@ -20,6 +20,7 @@ function muscle(overrides: Partial<PrescriptionMuscleFact> = {}): PrescriptionMu
     zone: 'in-zone',
     weeks_with_data: 5,
     rir_drift: 0,
+    failure_share: null,
     anchor_slope: 'up',
     anchor_lift_name: 'Hip Thrust',
     build_emphasis_rank: 0,
@@ -352,5 +353,134 @@ describe('prescriptionsFor — boundary tests', () => {
       todayHrt,
     );
     expect(r.prescriptions.find(p => p.action === 'DELOAD')).toBeUndefined();
+  });
+});
+
+describe('prescriptionsFor — failure-load DELOAD (HRV-independent)', () => {
+  /** Healthy HRV — the existing DELOAD path cannot fire here. */
+  const healthyHrv = { available: true, sigma_below: 0, baseline_days: 28 };
+
+  it('fires on 2+ priority muscles over the failure threshold, with HRV fine', () => {
+    const r = prescriptionsFor(
+      facts({
+        hrv: healthyHrv,
+        muscles: [
+          muscle({ muscle: 'delts', failure_share: 0.91 }),
+          muscle({ muscle: 'glutes', failure_share: 0.71 }),
+        ],
+      }),
+      NO_HRT,
+    );
+    const deload = r.prescriptions.find(p => p.action === 'DELOAD');
+    expect(deload).toBeDefined();
+    expect(deload!.muscle).toBe('whole-body');
+    expect(deload!.confidence).toBe('high');
+  });
+
+  it('does NOT fire on a single severe muscle', () => {
+    const r = prescriptionsFor(
+      facts({
+        hrv: healthyHrv,
+        muscles: [
+          muscle({ muscle: 'delts', failure_share: 0.95 }),
+          muscle({ muscle: 'glutes', failure_share: 0.20 }),
+        ],
+      }),
+      NO_HRT,
+    );
+    expect(r.prescriptions.find(p => p.action === 'DELOAD')).toBeUndefined();
+  });
+
+  it('does NOT fire below the threshold — the healthy June baseline', () => {
+    const r = prescriptionsFor(
+      facts({
+        hrv: healthyHrv,
+        muscles: [
+          muscle({ muscle: 'delts', failure_share: 0.43 }),
+          muscle({ muscle: 'glutes', failure_share: 0.43 }),
+          muscle({ muscle: 'core', failure_share: 0.40 }),
+        ],
+      }),
+      NO_HRT,
+    );
+    expect(r.prescriptions.find(p => p.action === 'DELOAD')).toBeUndefined();
+  });
+
+  it('treats null failure_share (thin RIR coverage) as no signal, not as zero risk', () => {
+    const r = prescriptionsFor(
+      facts({
+        hrv: healthyHrv,
+        muscles: [
+          muscle({ muscle: 'delts', failure_share: null }),
+          muscle({ muscle: 'glutes', failure_share: null }),
+        ],
+      }),
+      NO_HRT,
+    );
+    expect(r.prescriptions.find(p => p.action === 'DELOAD')).toBeUndefined();
+  });
+
+  it('omits the hrv_low chip when HRV is not corroborating', () => {
+    const r = prescriptionsFor(
+      facts({
+        hrv: healthyHrv,
+        muscles: [
+          muscle({ muscle: 'delts', failure_share: 0.91 }),
+          muscle({ muscle: 'glutes', failure_share: 0.71 }),
+        ],
+      }),
+      NO_HRT,
+    );
+    const chips = r.prescriptions[0].reasons;
+    expect(chips.some(c => c.kind === 'failure_load')).toBe(true);
+    expect(chips.some(c => c.kind === 'hrv_low')).toBe(false);
+  });
+
+  it('reports the mean share and muscle count on the chip', () => {
+    const r = prescriptionsFor(
+      facts({
+        hrv: healthyHrv,
+        muscles: [
+          muscle({ muscle: 'delts', failure_share: 0.90 }),
+          muscle({ muscle: 'glutes', failure_share: 0.70 }),
+        ],
+      }),
+      NO_HRT,
+    );
+    const chip = r.prescriptions[0].reasons.find(c => c.kind === 'failure_load')!;
+    expect(chip).toMatchObject({ muscle_count: 2 });
+    expect((chip as { share: number }).share).toBeCloseTo(0.80, 5);
+  });
+
+  it('suppresses PUSH — DELOAD supersedes per-muscle prescriptions', () => {
+    const r = prescriptionsFor(
+      facts({
+        hrv: healthyHrv,
+        muscles: [
+          muscle({ muscle: 'delts', zone: 'under', failure_share: 0.91 }),
+          muscle({ muscle: 'glutes', zone: 'under', failure_share: 0.71 }),
+        ],
+      }),
+      NO_HRT,
+    );
+    expect(r.prescriptions).toHaveLength(1);
+    expect(r.prescriptions[0].action).toBe('DELOAD');
+    expect(r.totalSetsAdded).toBe(0);
+  });
+
+  it('fires under the ceiling effect: extreme level, flat rir_drift', () => {
+    // The exact state this path exists for — drift below every threshold
+    // because failure training has already been sustained for weeks.
+    const r = prescriptionsFor(
+      facts({
+        hrv: healthyHrv,
+        muscles: [
+          muscle({ muscle: 'delts', rir_drift: 0.1, failure_share: 0.91 }),
+          muscle({ muscle: 'biceps', rir_drift: 0.0, failure_share: 0.95 }),
+        ],
+      }),
+      NO_HRT,
+    );
+    expect(r.prescriptions[0].action).toBe('DELOAD');
   });
 });

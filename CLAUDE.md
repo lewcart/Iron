@@ -145,6 +145,14 @@ Set quality:
   - RIR credit: RIR 0–3 = 1.0, RIR 4 = 0.5, RIR 5+ = 0.0, RIR NULL = 1.0 (charitable default until corpus exists).
   - Worked example: an RDL set @ RIR 4 contributes 0.25 effective sets to glutes (secondary 0.5 × RIR 0.5) and 0.5 effective sets to hamstrings (primary 1.0 × RIR 0.5).
   - The /feed Muscles This Week tile flags a muscle with a "JUNK" badge when `effective / set_count < 0.6` AND `set_count > 0` — meaning most logged sets were sub-stimulus, either too far from failure OR mostly secondary work.
+- **`failure_share`** (0..1 or null) is the **fatigue** counterpart on the same rows. `effective_set_count` structurally cannot express it: RIR 0 and RIR 2 both score 1.0 there because the hypertrophy stimulus really is the same — but the recovery cost is not, and that difference lives here. Don't "fix" `rirCredit()` to make RIR 0 score differently; the ladder is correct and carries a comment saying so.
+  - `failure_share = failure_set_count / rir_logged_set_count` over non-drop working sets. Both counts also ship on the row.
+  - The denominator is RIR-**logged** sets, not all working sets: `rir = NULL` means "unknown", not "not failure". Dividing by every working set would understate failure load exactly when RIR logging is patchy.
+  - **`null` means unknown, never "fine"** — returned when fewer than 4 RIR-logged sets exist, or RIR covers under half the working sets. Never treat null as an all-clear.
+  - Threshold is 0.65 (`FAILURE_SHARE_THRESHOLD` in `src/lib/training/volume-math.ts`). Above it the /feed tile shows a red `N% FAIL` badge — the mirror of JUNK: JUNK is "too far from failure", this is "too close, too often".
+  - Two or more priority muscles over the threshold triggers a whole-body DELOAD on the /feed prescription card, **independent of HRV**. That path exists because HRV can be healthy, absent, or (with wrist spot-readings rather than overnight capture) too noisy to gate on.
+- **`rir_drift`** (`src/lib/training/rir-drift.ts`) is the *rate* signal: mean RIR over the prior 7d minus the recent 7d, per muscle; positive = drifting toward failure. It pairs with `failure_share` (the *level*) and does not replace it — once failure training has been sustained for a few weeks the rate flattens toward zero while the level stays extreme, so a rate-only signal goes blind exactly when it matters most.
+- **`days_touched`** is distinct training days that week, feeding frequency-aware MRV via `mrvAt()`.
 
 `coverage` flag on `get_sets_per_muscle` rows: `'none'` means no exercise in the catalog tags this muscle (yet — the audit pass will populate). Until then those muscles can't accumulate sets. UI collapses them into a footer.
 

@@ -7,10 +7,35 @@ import {
 
 describe('REASON_CHIP_REGISTRY', () => {
   it('every kind has a registry entry', () => {
-    const kinds: ReasonChip['kind'][] = ['hrv_low', 'rir_drift', 'e1rm_stagnant', 'zone_over', 'zone_risk'];
+    const kinds: ReasonChip['kind'][] = [
+      'hrv_low', 'rir_drift', 'failure_load', 'e1rm_stagnant', 'zone_over', 'zone_risk',
+    ];
     for (const kind of kinds) {
       expect(REASON_CHIP_REGISTRY[kind]).toBeDefined();
     }
+    // Guard both directions: a new kind added to the union without being
+    // listed here would otherwise slip through untested.
+    expect(new Set(Object.keys(REASON_CHIP_REGISTRY))).toEqual(new Set(kinds));
+  });
+
+  it('failure_load label states the share as a percentage', () => {
+    const meta = REASON_CHIP_REGISTRY.failure_load;
+    expect(meta.label({ kind: 'failure_load', muscle: 'delts', share: 0.85, muscle_count: 4 }))
+      .toBe('85% to failure');
+  });
+
+  it('failure_load ariaLabel reads aloud (no symbols)', () => {
+    const meta = REASON_CHIP_REGISTRY.failure_load;
+    const aria = meta.ariaLabel({ kind: 'failure_load', muscle: 'delts', share: 0.85, muscle_count: 4 });
+    expect(aria).not.toMatch(/%/);
+    expect(aria).toMatch(/percent/);
+    expect(aria).toMatch(/4 priority muscles/);
+  });
+
+  it('failure_load explanation names the effective-set blind spot', () => {
+    const meta = REASON_CHIP_REGISTRY.failure_load;
+    const text = meta.explanation({ kind: 'failure_load', muscle: 'delts', share: 0.85, muscle_count: 4 });
+    expect(text).toMatch(/RIR 0 and RIR 2 identically/);
   });
 
   it('hrv_low label uses sigma value', () => {

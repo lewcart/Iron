@@ -114,3 +114,21 @@ export function buildAnchorLiftTrend(
 
   return { status: 'ok', sessions, delta_kg, delta_pct };
 }
+
+// ── Slope classification (prescription-engine input) ────────────────────
+
+/** Percent change within which an anchor lift is called flat rather than
+ *  up/down. The engine treats 'flat' and 'down' alike (both stagnation) and
+ *  only 'up' unlocks a PUSH, so this band is the guard against reading noise
+ *  as progress over an ~8-week window. */
+export const ANCHOR_SLOPE_FLAT_BAND_PCT = 2.0;
+
+export type AnchorSlope = 'up' | 'flat' | 'down';
+
+/** Map a completed trend to the engine's coarse slope enum. */
+export function anchorSlopeFromTrend(trend: AnchorLiftTrend): AnchorSlope | null {
+  if (trend.status !== 'ok') return null;
+  if (trend.delta_pct > ANCHOR_SLOPE_FLAT_BAND_PCT) return 'up';
+  if (trend.delta_pct < -ANCHOR_SLOPE_FLAT_BAND_PCT) return 'down';
+  return 'flat';
+}

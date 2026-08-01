@@ -20,6 +20,8 @@ import {
   primarySecondaryCredit,
   effectiveSetContribution,
   aggregateMuscleHits,
+  failureShare,
+  isFailureLoadWarning,
   frequencyZone,
   resolveVolumeRange,
   resolveFrequencyFloor,
@@ -580,5 +582,131 @@ describe('aggregateMuscleHits — working_set_count drop collapse (UC4/UC7)', ()
     for (const r of rows) {
       expect(r.working_set_count).toBe(r.set_count);
     }
+  });
+});
+
+// ── Failure load ─────────────────────────────────────────────────────────
+
+describe('failureShare — coverage guard', () => {
+  it('returns null below the minimum logged-set floor', () => {
+    // 3 logged sets, all failure — still not enough to call it.
+    expect(failureShare(3, 3, 3)).toBeNull();
+  });
+
+  it('returns null when RIR coverage is too thin to represent the week', () => {
+    // 2 of 20 working sets logged, both at failure. Naively 100%; actually
+    // unknown. This is the case a naive denominator gets dangerously wrong.
+    expect(failureShare(2, 2, 20)).toBeNull();
+  });
+
+  it('returns null when the muscle has no working sets', () => {
+    expect(failureShare(0, 0, 0)).toBeNull();
+  });
+
+  it('divides by RIR-logged sets, not all working sets', () => {
+    // 8 of 10 working sets logged; 4 of those at failure → 0.5, not 0.4.
+    expect(failureShare(4, 8, 10)).toBe(0.5);
+  });
+
+  it('healthy baseline (June: ~43% to failure) is below threshold', () => {
+    const share = failureShare(43, 100, 100)!;
+    expect(share).toBeCloseTo(0.43, 5);
+    expect(isFailureLoadWarning(share)).toBe(false);
+  });
+
+  it('runaway state (week of 2026-07-20: 85% to failure) trips the warning', () => {
+    const share = failureShare(85, 100, 100)!;
+    expect(share).toBeCloseTo(0.85, 5);
+    expect(isFailureLoadWarning(share)).toBe(true);
+  });
+
+  it('null share is never a warning — unknown is not bad', () => {
+    expect(isFailureLoadWarning(null)).toBe(false);
+  });
+});
+
+describe('aggregateMuscleHits — failure counts (SQL conformance)', () => {
+  it('counts RIR 0 working sets, and only RIR-logged sets in the denominator', () => {
+    const rows = aggregateMuscleHits([
+      set({ set_uuid: 's1', primary_muscles: ['glutes'], rir: 0 }),
+      set({ set_uuid: 's2', primary_muscles: ['glutes'], rir: 0 }),
+      set({ set_uuid: 's3', primary_muscles: ['glutes'], rir: 2 }),
+      set({ set_uuid: 's4', primary_muscles: ['glutes'], rir: null }),
+    ]);
+    const glutes = findMuscle(rows, 'glutes')!;
+    expect(glutes.working_set_count).toBe(4);
+    expect(glutes.failure_set_count).toBe(2);
+    expect(glutes.rir_logged_set_count).toBe(3); // the null is excluded
+  });
+
+  it('drop-tagged sets are excluded from both failure counts', () => {
+    // Parent at failure + 3 drops also at failure = one trip to failure.
+    const rows = aggregateMuscleHits([
+      set({ set_uuid: 'p', primary_muscles: ['delts'], rir: 0 }),
+      set({ set_uuid: 'd1', primary_muscles: ['delts'], rir: 0, tag: 'dropSet' }),
+      set({ set_uuid: 'd2', primary_muscles: ['delts'], rir: 0, tag: 'dropSet' }),
+      set({ set_uuid: 'd3', primary_muscles: ['delts'], rir: 0, tag: 'dropSet' }),
+    ]);
+    const delts = findMuscle(rows, 'delts')!;
+    expect(delts.set_count).toBe(4);           // raw audit count keeps drops
+    expect(delts.working_set_count).toBe(1);
+    expect(delts.failure_set_count).toBe(1);
+    expect(delts.rir_logged_set_count).toBe(1);
+  });
+
+  it("tag 'failure' is a working set, not a drop", () => {
+    const rows = aggregateMuscleHits([
+      set({ set_uuid: 's1', primary_muscles: ['quads'], rir: 0, tag: 'failure' }),
+    ]);
+    const quads = findMuscle(rows, 'quads')!;
+    expect(quads.working_set_count).toBe(1);
+    expect(quads.failure_set_count).toBe(1);
+  });
+
+  it('a set hitting two muscles counts once toward each', () => {
+    const rows = aggregateMuscleHits([
+      set({ set_uuid: 's1', primary_muscles: ['hamstrings'], secondary_muscles: ['glutes'], rir: 0 }),
+    ]);
+    expect(findMuscle(rows, 'hamstrings')!.failure_set_count).toBe(1);
+    expect(findMuscle(rows, 'glutes')!.failure_set_count).toBe(1);
+  });
+
+  it('invariant: failure_set_count <= rir_logged_set_count <= working_set_count', () => {
+    const rows = aggregateMuscleHits([
+      set({ set_uuid: 's1', primary_muscles: ['chest'], rir: 0 }),
+      set({ set_uuid: 's2', primary_muscles: ['chest'], rir: 4 }),
+      set({ set_uuid: 's3', primary_muscles: ['chest'], rir: null }),
+      set({ set_uuid: 's4', primary_muscles: ['chest'], rir: 0, tag: 'dropSet' }),
+    ]);
+    for (const r of rows) {
+      expect(r.failure_set_count).toBeLessThanOrEqual(r.rir_logged_set_count);
+      expect(r.rir_logged_set_count).toBeLessThanOrEqual(r.working_set_count);
+    }
+  });
+});
+
+describe('aggregateMuscleHits — days_touched', () => {
+  it('counts distinct local dates', () => {
+    const rows = aggregateMuscleHits([
+      set({ set_uuid: 's1', primary_muscles: ['glutes'], local_date: '2026-07-20' }),
+      set({ set_uuid: 's2', primary_muscles: ['glutes'], local_date: '2026-07-20' }),
+      set({ set_uuid: 's3', primary_muscles: ['glutes'], local_date: '2026-07-22' }),
+      set({ set_uuid: 's4', primary_muscles: ['glutes'], local_date: '2026-07-24' }),
+    ]);
+    expect(findMuscle(rows, 'glutes')!.days_touched).toBe(3);
+  });
+
+  it('is 0 when callers do not supply dates (planned-set projection path)', () => {
+    const rows = aggregateMuscleHits([
+      set({ set_uuid: 's1', primary_muscles: ['glutes'] }),
+    ]);
+    expect(findMuscle(rows, 'glutes')!.days_touched).toBe(0);
+  });
+
+  it('counts the day even for drop-tagged sets — the session still happened', () => {
+    const rows = aggregateMuscleHits([
+      set({ set_uuid: 'd1', primary_muscles: ['delts'], tag: 'dropSet', local_date: '2026-07-20' }),
+    ]);
+    expect(findMuscle(rows, 'delts')!.days_touched).toBe(1);
   });
 });

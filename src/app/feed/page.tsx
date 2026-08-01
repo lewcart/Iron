@@ -19,7 +19,7 @@ import {
   type WeekFacts,
   type WeekFactsAnchorSetInput,
 } from '@/lib/api/week-facts';
-import { resolveWeekTiles, type WeekTile } from '@/lib/api/resolveWeekTiles';
+import { resolveWeekTiles, anchorSlopesByMuscle, type WeekTile } from '@/lib/api/resolveWeekTiles';
 import {
   ANCHOR_LIFTS,
   resolveAnchorLift,
@@ -43,6 +43,9 @@ import { AdherenceGap } from '@/components/AdherenceGap';
 import { PhotoCadenceFooter } from '@/components/week/PhotoCadenceFooter';
 import { prescriptionsFor, type PrescriptionMuscleFact } from '@/lib/training/prescription-engine';
 import { deriveHrtContext, type HrtTimelinePeriodInput } from '@/lib/training/hrt-context';
+import { landmarkFor, zoneFor, type Frequency, type Zone } from '@/lib/training/volume-landmarks';
+import { failureShare } from '@/lib/training/volume-math';
+import { buildRirDrift, rirDriftBySlug, type RirDriftSetInput } from '@/lib/training/rir-drift';
 import { photoCadenceState } from '@/lib/training/photo-cadence';
 import { computeEwma } from '@/lib/training/ewma';
 import { estimate1RM } from '@/lib/pr';
@@ -570,6 +573,69 @@ export default function WeekPage() {
     [],
   );
 
+  // ── Per-muscle RIR drift inputs, last 14d (Dexie) ──────────────────
+  // Two 7-day windows for `buildRirDrift`. Same workouts → exercises → sets
+  // walk as the RIR-quality query above, but keyed by muscle rather than by
+  // week. Unlike `anchorSets` this spans the whole catalog: drift matters
+  // for every priority muscle, not just the ones with an anchor lift.
+  const rirDriftSets = useLiveQuery(
+    async (): Promise<RirDriftSetInput[]> => {
+      if (!catalog || catalog.length === 0) return [];
+
+      const cutoffIso = new Date(Date.now() - 2 * WEEK_MS).toISOString();
+      const workouts = await db.workouts
+        .filter(w => !w._deleted && w.start_time >= cutoffIso && w.end_time != null)
+        .toArray();
+      if (workouts.length === 0) return [];
+
+      const workoutDate = new Map(workouts.map(w => [w.uuid, w.start_time.slice(0, 10)]));
+      const allWE = await db.workout_exercises
+        .filter(e => !e._deleted && workoutDate.has(e.workout_uuid))
+        .toArray();
+      if (allWE.length === 0) return [];
+
+      const musclesByExercise = new Map<string, string[]>();
+      for (const ex of catalog) {
+        const slugs = [
+          ...(ex.primary_muscles ?? []),
+          ...(ex.secondary_muscles ?? []),
+        ]
+          .map(m => resolveMuscleSlug(m))
+          .filter((m): m is NonNullable<typeof m> => m != null);
+        musclesByExercise.set(ex.uuid, slugs as string[]);
+      }
+
+      const weMeta = new Map<string, { date: string; muscles: string[] }>();
+      for (const e of allWE) {
+        const date = workoutDate.get(e.workout_uuid);
+        const muscles = musclesByExercise.get(e.exercise_uuid);
+        if (!date || !muscles || muscles.length === 0) continue;
+        weMeta.set(e.uuid, { date, muscles });
+      }
+
+      const sets = await db.workout_sets
+        .filter(s => !s._deleted && weMeta.has(s.workout_exercise_uuid))
+        .toArray();
+
+      const out: RirDriftSetInput[] = [];
+      for (const s of sets) {
+        const isWorking = s.is_completed
+          && (((s.repetitions ?? 0) >= 1) || ((s.duration_seconds ?? 0) > 0));
+        if (!isWorking || s.rir == null) continue;
+        const meta = weMeta.get(s.workout_exercise_uuid)!;
+        out.push({
+          local_date: meta.date,
+          rir: s.rir,
+          muscles: meta.muscles,
+          tag: s.tag === 'dropSet' ? 'dropSet' : null,
+        });
+      }
+      return out;
+    },
+    [catalog],
+    [],
+  );
+
   // ── 12-week priority-muscle effective sets (Dexie) ─────────────────
   // For each priority muscle, return a vector of 12 weekly effective-set
   // counts (oldest → newest). Reuses the canonical muscle taxonomy (each
@@ -867,9 +933,12 @@ export default function WeekPage() {
   // ── v1.1 prescription engine wiring ───────────────────────────────────
   // Build the engine input from existing facts. Per-muscle 8-week history
   // isn't gathered today (would need a separate Dexie scan); we approximate
-  // using rirByWeek.length capped at 8. RIR drift per-muscle is set null for
-  // first ship — engine treats null as "no drift" gracefully. Anchor slope
-  // per muscle is derived from the existing anchor-lift trend data.
+  // using rirByWeek.length capped at 8.
+  //
+  // `zone`, `rir_drift` and `anchor_slope` were all stubbed on first ship,
+  // which left every branch of the engine unreachable — the card rendered
+  // nothing, and the fatigue guard on PUSH passed unconditionally because
+  // `(null ?? 0) < threshold` is always true. All three are wired now.
   const hrtContext = useMemo(
     () => deriveHrtContext(hrtPeriods ?? [], facts.today),
     [hrtPeriods, facts.today],
@@ -910,22 +979,41 @@ export default function WeekPage() {
     // Refined per-muscle history is a v1.2 follow-up.
     const weeksWithDataApprox = Math.min(8, facts.rirByWeek.length);
 
+    // Fatigue + progress signals. Both return sparse maps: a missing entry
+    // means "no signal", which the engine reads as null rather than as an
+    // all-clear.
+    const driftBySlug = rirDriftBySlug(buildRirDrift(rirDriftSets ?? [], facts.today));
+    const anchorSlopeBySlug = anchorSlopesByMuscle(facts);
+
     // Build per-muscle facts from setsByMuscle, restricted to priority muscles.
     const setsBySlug = new Map(facts.setsByMuscle.map(r => [r.slug, r]));
     const muscles: PrescriptionMuscleFact[] = [];
     priorityMuscles.forEach((slug, rank) => {
       const row = setsBySlug.get(slug);
-      // Zone needs to be re-derived (server's status uses raw set_count, not
-      // effective). For simplicity: 'in-zone' default; engine still gates on
-      // weeks_with_data and requires explicit signals to fire PUSH/REDUCE.
+      const effective = row?.effective_set_count ?? 0;
+
+      // Zone: MRV is frequency-dependent, so feed the week's actual training
+      // days through `mrvAt` via zoneFor. Clamp into the tabulated 2..5 band.
+      // Muscles with no landmark fall back to 'in-zone' — the conservative
+      // value this whole block used before, so they behave exactly as before
+      // rather than acquiring a verdict the landmark table can't support.
+      const landmark = landmarkFor(slug);
+      const freq = Math.min(5, Math.max(2, row?.days_touched ?? 2)) as Frequency;
+      const zone: Zone = landmark ? zoneFor(effective, freq, landmark) : 'in-zone';
+
       muscles.push({
         muscle: slug,
-        effective_sets: row?.effective_set_count ?? 0,
-        zone: 'in-zone', // conservative — gates above prevent false positives
+        effective_sets: effective,
+        zone,
         weeks_with_data: weeksWithDataApprox,
-        rir_drift: null,        // v1.2 — per-muscle aggregation
-        anchor_slope: null,     // v1.2 — wire from anchor-lift trend
-        anchor_lift_name: null,
+        rir_drift: driftBySlug.get(slug)?.drift ?? null,
+        failure_share: failureShare(
+          row?.failure_set_count ?? 0,
+          row?.rir_logged_set_count ?? 0,
+          row?.working_set_count ?? row?.set_count ?? 0,
+        ),
+        anchor_slope: anchorSlopeBySlug.get(slug)?.slope ?? null,
+        anchor_lift_name: anchorSlopeBySlug.get(slug)?.lift ?? null,
         build_emphasis_rank: rank,
       });
     });
@@ -939,7 +1027,7 @@ export default function WeekPage() {
       },
       hrtContext,
     );
-  }, [isLoading, facts, hrtContext]);
+  }, [isLoading, facts, hrtContext, rirDriftSets]);
 
   // Photo cadence state for the footer.
   const photoCadence = useMemo(

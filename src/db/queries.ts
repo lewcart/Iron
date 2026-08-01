@@ -1526,6 +1526,16 @@ export async function getWeekSetsPerMuscle(weekOffset: number = 0, tz: string = 
   /** Primary/secondary × RIR weighting. Drop-tagged sets contribute 0
    *  (per UC7 final-gate decision: drops do not add new stimulus). */
   effective_set_count: number;
+  /** Working sets taken to failure (rir=0), drops excluded. Numerator for
+   *  failure share — see `failureShare()` in training/volume-math.ts. */
+  failure_set_count: number;
+  /** Working sets carrying any non-null RIR, drops excluded. Denominator
+   *  for failure share, and the coverage signal gating whether it means
+   *  anything (NULL rir is "unknown", not "not failure"). */
+  rir_logged_set_count: number;
+  /** Distinct local dates this muscle was trained this week. Feeds
+   *  frequency-aware MRV via `mrvAt()`. */
+  days_touched: number;
   kg_volume: number;
   coverage: 'none' | 'tagged';
 }[]> {
@@ -1545,6 +1555,7 @@ export async function getWeekSetsPerMuscle(weekOffset: number = 0, tz: string = 
         ws.repetitions,
         ws.rir,
         ws.tag,
+        (w.start_time AT TIME ZONE $2)::date AS local_date,
         e.primary_muscles,
         e.secondary_muscles,
         e.secondary_weights
@@ -1568,7 +1579,7 @@ export async function getWeekSetsPerMuscle(weekOffset: number = 0, tz: string = 
       -- appearing in both arrays produces two rows here; muscle_hits below
       -- takes MAX(credit) so primary wins.
       SELECT ws.set_uuid, v.muscle_slug, 1.0::numeric AS credit,
-             ws.weight, ws.repetitions, ws.rir, ws.tag
+             ws.weight, ws.repetitions, ws.rir, ws.tag, ws.local_date
       FROM week_sets ws,
            LATERAL (
              SELECT jsonb_array_elements_text(COALESCE(ws.primary_muscles, '[]'::jsonb)) AS muscle_slug
@@ -1590,7 +1601,7 @@ export async function getWeekSetsPerMuscle(weekOffset: number = 0, tz: string = 
                END,
                0.5
              )::numeric AS credit,
-             ws.weight, ws.repetitions, ws.rir, ws.tag
+             ws.weight, ws.repetitions, ws.rir, ws.tag, ws.local_date
       FROM week_sets ws,
            LATERAL (
              SELECT jsonb_array_elements_text(COALESCE(ws.secondary_muscles, '[]'::jsonb)) AS muscle_slug
@@ -1606,7 +1617,8 @@ export async function getWeekSetsPerMuscle(weekOffset: number = 0, tz: string = 
         MAX(weight)        AS weight,
         MAX(repetitions)   AS repetitions,
         MAX(rir)           AS rir,
-        MAX(tag)           AS tag
+        MAX(tag)           AS tag,
+        MAX(local_date)    AS local_date
       FROM muscle_hits_raw
       GROUP BY set_uuid, muscle_slug
     ),
@@ -1634,6 +1646,20 @@ export async function getWeekSetsPerMuscle(weekOffset: number = 0, tz: string = 
             ELSE 0.0
           END
         ) FILTER (WHERE tag IS DISTINCT FROM 'dropSet'), 0)::numeric AS effective_set_count,
+        -- Failure load — the fatigue counterpart to effective_set_count.
+        -- effective_set_count deliberately cannot distinguish RIR 0 from
+        -- RIR 2 (same stimulus); these two counts carry the cost side.
+        -- Drops excluded, mirroring working_set_count: a drop extends the
+        -- parent's set rather than being a separate trip to failure.
+        -- Mirrors src/lib/training/volume-math.ts aggregateMuscleHits().
+        COUNT(DISTINCT set_uuid) FILTER (
+          WHERE rir = 0 AND tag IS DISTINCT FROM 'dropSet'
+        ) AS failure_set_count,
+        COUNT(DISTINCT set_uuid) FILTER (
+          WHERE rir IS NOT NULL AND tag IS DISTINCT FROM 'dropSet'
+        ) AS rir_logged_set_count,
+        -- Training frequency this week — feeds frequency-aware MRV (mrvAt).
+        COUNT(DISTINCT local_date) AS days_touched,
         COALESCE(
           SUM(weight * repetitions) FILTER (WHERE weight IS NOT NULL AND repetitions IS NOT NULL),
           0
@@ -1663,6 +1689,9 @@ export async function getWeekSetsPerMuscle(weekOffset: number = 0, tz: string = 
       COALESCE(ma.set_count, 0)::int                                AS set_count,
       COALESCE(ma.working_set_count, 0)::int                        AS working_set_count,
       COALESCE(ma.effective_set_count, 0)::numeric                  AS effective_set_count,
+      COALESCE(ma.failure_set_count, 0)::int                        AS failure_set_count,
+      COALESCE(ma.rir_logged_set_count, 0)::int                     AS rir_logged_set_count,
+      COALESCE(ma.days_touched, 0)::int                             AS days_touched,
       COALESCE(ma.kg_volume, 0)::numeric                            AS kg_volume,
       CASE WHEN mc.muscle_slug IS NULL THEN 'none' ELSE 'tagged' END AS coverage
     FROM muscles m
@@ -1681,6 +1710,9 @@ export async function getWeekSetsPerMuscle(weekOffset: number = 0, tz: string = 
     set_count: Number(r.set_count),
     working_set_count: Number(r.working_set_count),
     effective_set_count: Number(r.effective_set_count),
+    failure_set_count: Number(r.failure_set_count),
+    rir_logged_set_count: Number(r.rir_logged_set_count),
+    days_touched: Number(r.days_touched),
     kg_volume: Number(r.kg_volume),
     coverage: r.coverage as 'none' | 'tagged',
   }));

@@ -37,6 +37,10 @@ export const landmarkFor = _landmarkFor;
  *
  * Note: RIR 0 (failure) is NOT bonus-weighted above 1.0 — same hypertrophy
  * stimulus as RIR 1–3, extra fatigue cost. Don't "fix" upward.
+ *
+ * The fatigue cost that comment names is tracked separately — see
+ * `failureShare()` below. Stimulus and fatigue are two different questions;
+ * this ladder only answers the first.
  */
 export function rirCredit(rir: number | null | undefined): number {
   if (rir == null) return 1.0;
@@ -44,6 +48,49 @@ export function rirCredit(rir: number | null | undefined): number {
   if (rir === 4) return 0.5;
   if (rir === 5) return 0.25;
   return 0.0; // RIR 6+
+}
+
+// ── Failure load ────────────────────────────────────────────────────────
+
+/** Share of RIR-logged working sets at RIR 0 above which a muscle is
+ *  carrying too much failure load. Between the observed healthy baseline
+ *  (~0.43) and the runaway state (~0.85) that motivated the metric. */
+export const FAILURE_SHARE_THRESHOLD = 0.65;
+
+/** Minimum RIR-logged working sets before a share is meaningful at all. */
+export const FAILURE_SHARE_MIN_LOGGED = 4;
+
+/** Minimum fraction of working sets that must carry RIR for the share to be
+ *  trustworthy. Below this, the logged sets are too unrepresentative. */
+export const FAILURE_SHARE_MIN_COVERAGE = 0.5;
+
+/**
+ * Share of a muscle's working sets taken to failure (RIR 0), or `null` when
+ * RIR coverage is too thin to say.
+ *
+ * The denominator is RIR-*logged* sets, not all working sets: `rir = NULL`
+ * means "unknown", not "not failure". Dividing by every working set would
+ * systematically understate failure load whenever RIR logging is patchy —
+ * exactly the case where a false all-clear is most harmful.
+ *
+ * Counterpart to `rirCredit()`: that measures stimulus and is deliberately
+ * blind to the difference between RIR 0 and RIR 2. This measures the cost.
+ */
+export function failureShare(
+  failureSetCount: number,
+  rirLoggedSetCount: number,
+  workingSetCount: number,
+): number | null {
+  if (rirLoggedSetCount < FAILURE_SHARE_MIN_LOGGED) return null;
+  if (workingSetCount <= 0) return null;
+  if (rirLoggedSetCount / workingSetCount < FAILURE_SHARE_MIN_COVERAGE) return null;
+  return failureSetCount / rirLoggedSetCount;
+}
+
+/** True when a muscle's failure load is high enough to flag. `null` share
+ *  (insufficient coverage) is never a warning — unknown is not bad. */
+export function isFailureLoadWarning(share: number | null): boolean {
+  return share != null && share >= FAILURE_SHARE_THRESHOLD;
 }
 
 // ── Primary/secondary credit ────────────────────────────────────────────
@@ -111,6 +158,10 @@ export interface SetForAggregation {
    *  one) per UC4/UC7 final-gate decision. Undefined / null / 'failure'
    *  all count as working sets. */
   tag?: 'dropSet' | 'failure' | null;
+  /** Session date in the user's local TZ (YYYY-MM-DD), used for
+   *  `days_touched`. Optional: callers that don't track per-set dates (e.g.
+   *  the planned-set projection) leave it undefined and get days_touched 0. */
+  local_date?: string | null;
 }
 
 export interface MuscleAggregate {
@@ -129,9 +180,15 @@ export interface MuscleAggregate {
    *  included here because the kg moved is real, even if the stimulus is
    *  attributed to the parent. */
   kg_volume: number;
-  /** Number of distinct days (set_uuid groupings can carry day metadata
-   *  upstream; this aggregator does NOT compute days_touched — that's done
-   *  by the projection layer with day-keyed sets). */
+  /** Working sets taken to failure (rir === 0). Drops excluded, same as
+   *  working_set_count — a drop is not an independent trip to failure. */
+  failure_set_count: number;
+  /** Working sets carrying ANY non-null RIR. Denominator for failure share;
+   *  also the coverage signal that says whether the share means anything. */
+  rir_logged_set_count: number;
+  /** Distinct local dates on which this muscle was trained. 0 when callers
+   *  don't supply `local_date`. Feeds frequency-aware MRV via `mrvAt()`. */
+  days_touched: number;
 }
 
 /**
@@ -152,6 +209,9 @@ export function aggregateMuscleHits(sets: readonly SetForAggregation[]): MuscleA
   const buckets = new Map<string, {
     setUuids: Set<string>;
     workingSetUuids: Set<string>;
+    failureSetUuids: Set<string>;
+    rirLoggedSetUuids: Set<string>;
+    days: Set<string>;
     effective: number;
     kg: number;
   }>();
@@ -175,15 +235,32 @@ export function aggregateMuscleHits(sets: readonly SetForAggregation[]): MuscleA
     for (const [muscle, role] of muscleRoles) {
       let bucket = buckets.get(muscle);
       if (!bucket) {
-        bucket = { setUuids: new Set(), workingSetUuids: new Set(), effective: 0, kg: 0 };
+        bucket = {
+          setUuids: new Set(),
+          workingSetUuids: new Set(),
+          failureSetUuids: new Set(),
+          rirLoggedSetUuids: new Set(),
+          days: new Set(),
+          effective: 0,
+          kg: 0,
+        };
         buckets.set(muscle, bucket);
       }
       // Once per set (the Set<string> dedupes if a muscle somehow appears twice).
       if (!bucket.setUuids.has(set.set_uuid)) {
         bucket.setUuids.add(set.set_uuid);
         bucket.kg += kgPerSet;
+        if (set.local_date) bucket.days.add(set.local_date);
         // Drops do not contribute to working set count.
-        if (!isDrop) bucket.workingSetUuids.add(set.set_uuid);
+        if (!isDrop) {
+          bucket.workingSetUuids.add(set.set_uuid);
+          // Failure load mirrors working-set semantics: a drop extends the
+          // parent's set, so it is not a separate trip to failure.
+          if (set.rir != null) {
+            bucket.rirLoggedSetUuids.add(set.set_uuid);
+            if (set.rir === 0) bucket.failureSetUuids.add(set.set_uuid);
+          }
+        }
       }
       // Per-exercise secondary weight (v1.1) overrides the flat 0.5 default
       // for secondary muscles. Primary credit ignores this value.
@@ -201,6 +278,9 @@ export function aggregateMuscleHits(sets: readonly SetForAggregation[]): MuscleA
     working_set_count: b.workingSetUuids.size,
     effective_set_count: b.effective,
     kg_volume: b.kg,
+    failure_set_count: b.failureSetUuids.size,
+    rir_logged_set_count: b.rirLoggedSetUuids.size,
+    days_touched: b.days.size,
   }));
 }
 

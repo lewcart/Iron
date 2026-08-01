@@ -67,6 +67,16 @@ export interface SetsByMuscleRow {
    *  junk-set warning when effective_set_count / set_count < 0.6 AND most
    *  sets in the muscle's week have RIR logged. */
   effective_set_count: number;
+  /** RP-aligned working-set count — drop-tagged sets contribute 0. */
+  working_set_count: number;
+  /** Working sets taken to failure (RIR 0), drops excluded. */
+  failure_set_count: number;
+  /** Working sets carrying any RIR at all, drops excluded. Denominator for
+   *  failure share AND the coverage gate — a thin sample makes the share
+   *  meaningless, so `failureShare()` returns null rather than guessing. */
+  rir_logged_set_count: number;
+  /** Distinct days this muscle was trained this week (frequency-aware MRV). */
+  days_touched: number;
   optimal_min: number;
   optimal_max: number;
   display_order: number;

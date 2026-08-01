@@ -4,6 +4,10 @@ All notable changes to Rebirth are documented here.
 
 ## [Unreleased]
 
+### Added
+
+- **Failure-share + RIR-drift fatigue signals.** `failure_share` (failure sets ÷ RIR-logged sets, non-drop working sets; null = unknown, never "fine") ships on every `get_sets_per_muscle` / `get_weekly_summary.by_muscle` row alongside `failure_set_count` and `rir_logged_set_count`. Above `FAILURE_SHARE_THRESHOLD` (0.65) the /feed Muscles This Week tile shows a red `N% FAIL` badge — the mirror of JUNK. Two+ priority muscles over threshold triggers a whole-body DELOAD verdict on the /feed prescription card, independent of HRV (which can be absent or too noisy to gate on). `rir_drift` (`src/lib/training/rir-drift.ts`) adds the rate signal — mean RIR prior-7d minus recent-7d per muscle — pairing with failure_share's level so sustained failure training doesn't go blind when the rate flattens. `days_touched` feeds frequency-aware MRV via `mrvAt()`. Full docs in CLAUDE.md's strength-workflow section.
+
 ### Changed
 
 - **InBody scan detail mirrors the printed 570 sheet.** Sections now render in printout order (Body Composition / Muscle-Fat / Calculated / Segmental Lean / Body Water / Segmental Fat on the left; Weight Control / Segmental Circumference / Research Parameters / Body Balance / Impedance on the right) so a scan can be compared line-by-line against a fresh sheet. Segmental rows show kg and % combined ("2.74 kg · 101.0%") — segmental lean % was previously never displayed. Weight Control values render signed (+4.0), the raw impedance Z(Ω) table is shown (3 frequencies × RA/LA/TR/RL/LL), and height/age appear in the header. Layout is driven by `SHEET_SECTIONS` in `src/lib/inbody.ts` with row keys typed as `keyof InbodyScan` so a typo'd column fails typecheck instead of rendering "—". Norm/goal badges unchanged.

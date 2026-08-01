@@ -15,12 +15,17 @@
  * Decision rules (full plan in
  *   ~/.gstack/projects/lewcart-Iron/feat-week-v1.1-plan-20260503-160000.md):
  *
- *   DELOAD (whole-body, supersedes per-muscle):
- *     HRV ≥1σ below 28d baseline
- *     AND (RIR drift ≥0.5 unit on ≥1 priority muscle
- *          OR e1RM stagnation across ≥2 priority muscles)
- *     UNLESS recent HRT protocol change (<4 wks) — e1RM stagnation is then
- *     suppressed as a DELOAD trigger (only HRV+RIR can fire).
+ *   DELOAD (whole-body, supersedes per-muscle) — either path fires:
+ *     (a) HRV ≥1σ below 28d baseline
+ *         AND (RIR drift ≥0.5 unit on ≥1 priority muscle
+ *              OR e1RM stagnation across ≥2 priority muscles)
+ *         UNLESS recent HRT protocol change (<4 wks) — e1RM stagnation is
+ *         then suppressed as a DELOAD trigger (only HRV+RIR can fire).
+ *     (b) Failure share over threshold on ≥2 priority muscles, independent
+ *         of HRV. Path (a) is blind whenever HRV is healthy, absent, or too
+ *         noisy to trust, and `rir_drift` flattens once failure training has
+ *         been sustained for a few weeks (the ceiling effect) — so a
+ *         level-based signal is needed alongside the rate-based one.
  *
  *   REDUCE (per-muscle): muscle in `risk` zone (≥MRV) OR muscle's RIR
  *     drift ≥1.0 unit. Delta: -1 to -2 sets next week.
@@ -52,6 +57,7 @@ import type { ReasonChip } from './reason-chip-registry';
 import { sortChipsBySeverity } from './reason-chip-registry';
 import type { HrtContext } from './hrt-context';
 import { isRecentProtocolChange, hrtContextNote } from './hrt-context';
+import { isFailureLoadWarning } from './volume-math';
 
 // ── Public API types ────────────────────────────────────────────────────
 
@@ -90,6 +96,12 @@ export interface PrescriptionMuscleFact {
   /** Mean RIR delta vs prior 7-day window (positive = drift toward failure).
    *  Null when not enough RIR-logged sets exist to compute. */
   rir_drift: number | null;
+  /** Share of this week's RIR-logged working sets taken to failure, 0..1.
+   *  Null when RIR coverage is too thin to say (see `failureShare()` in
+   *  volume-math.ts). This is the LEVEL of failure training; `rir_drift` is
+   *  the RATE. They diverge — someone pinned at failure for weeks shows an
+   *  extreme level and a flat rate — so both are needed. */
+  failure_share: number | null;
   /** Anchor-lift e1RM slope direction over last 14d. Null when no anchor or
    *  insufficient data. */
   anchor_slope: 'up' | 'flat' | 'down' | null;
@@ -127,6 +139,9 @@ const HRV_LOW_SIGMA = 1.0;            // ≥1σ below baseline → "low"
 const RIR_DRIFT_REDUCE_THRESHOLD = 1.0;  // per-muscle REDUCE
 const RIR_DRIFT_DELOAD_THRESHOLD = 0.5;  // contributes to DELOAD
 const STAGNATION_MUSCLE_COUNT_FOR_DELOAD = 2;
+/** Priority muscles over FAILURE_SHARE_THRESHOLD needed for the
+ *  HRV-independent DELOAD. Mirrors the stagnation count above. */
+const FAILURE_LOAD_MUSCLE_COUNT_FOR_DELOAD = 2;
 
 // ── Engine ──────────────────────────────────────────────────────────────
 
@@ -221,6 +236,49 @@ export function prescriptionsFor(
         totalSetsAdded: 0,
       };
     }
+  }
+
+  // ── DELOAD trigger: sustained failure load (HRV-independent) ──────────
+  // The HRV-gated branch above cannot fire when HRV is healthy, missing, or
+  // — as with wrist spot-readings rather than overnight capture — too noisy
+  // to trust. Failure load is measured directly from logged RIR, so it keeps
+  // working regardless. It is also the only signal that survives the ceiling
+  // effect: once several weeks are spent at failure, `rir_drift` flattens
+  // toward zero while the actual load stays maximal.
+  const severeFailureMuscles = eligibleMuscles
+    .filter(m => isFailureLoadWarning(m.failure_share))
+    .sort((a, b) => (b.failure_share ?? 0) - (a.failure_share ?? 0));
+
+  if (severeFailureMuscles.length >= FAILURE_LOAD_MUSCLE_COUNT_FOR_DELOAD) {
+    const worst = severeFailureMuscles[0];
+    const meanShare =
+      severeFailureMuscles.reduce((s, m) => s + (m.failure_share ?? 0), 0) /
+      severeFailureMuscles.length;
+    const reasons: ReasonChip[] = [
+      {
+        kind: 'failure_load',
+        muscle: worst.muscle,
+        share: meanShare,
+        muscle_count: severeFailureMuscles.length,
+      },
+    ];
+    // Only mention HRV when it actually corroborates — this path exists
+    // precisely for the case where it doesn't.
+    if (hrvLow) reasons.push({ kind: 'hrv_low', sigma: round1(facts.hrv.sigma_below) });
+    return {
+      prescriptions: [
+        {
+          muscle: 'whole-body',
+          action: 'DELOAD',
+          delta: {},
+          reasons: sortChipsBySeverity(reasons),
+          confidence: 'high',
+        },
+      ],
+      eligibility,
+      hrtContextNotes: hrtNotes,
+      totalSetsAdded: 0,
+    };
   }
 
   // ── Per-muscle prescriptions (PUSH / REDUCE; HOLD filtered) ──────────

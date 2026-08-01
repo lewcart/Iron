@@ -18,6 +18,7 @@ import {
 import { computeCardioWeek } from '@/lib/server/health-data';
 import { getWeekSetsPerMuscle, getExercisePRs, recomputePRFlagsForExercise } from '@/db/queries';
 import { resolveMuscleSlug, MUSCLE_SLUGS } from '@/lib/muscles';
+import { failureShare } from '@/lib/training/volume-math';
 import { APP_TZ, resolveTz } from '@/lib/app-tz';
 import { planMetadataMoves } from '@/lib/supersetGrouping';
 
@@ -914,6 +915,8 @@ async function getWeeklySummary(args: Record<string, unknown> = {}) {
   //     parent). Use this for MEV/MAV comparisons + prescription verdicts.
   //   set_count = raw rows (every set credits 1), kept for audit / display.
   //   effective_set_count = RIR-weighted, drops excluded (UC7 final-gate).
+  //   failure_share = fatigue counterpart; effective_set_count cannot see it
+  //     (RIR 0 and RIR 2 score identically by design).
   // Status uses working_set_count so the headline matches RP convention.
   const byMuscle = byMuscleRows.map(m => ({
     slug: m.slug,
@@ -921,6 +924,12 @@ async function getWeeklySummary(args: Record<string, unknown> = {}) {
     working_set_count: m.working_set_count,
     set_count: m.set_count,
     effective_set_count: Math.round(m.effective_set_count * 10) / 10,
+    failure_set_count: m.failure_set_count,
+    rir_logged_set_count: m.rir_logged_set_count,
+    failure_share: roundShare(
+      failureShare(m.failure_set_count, m.rir_logged_set_count, m.working_set_count),
+    ),
+    days_touched: m.days_touched,
     optimal_min: m.optimal_sets_min,
     optimal_max: m.optimal_sets_max,
     status: muscleStatusOf(m.working_set_count, m.optimal_sets_min, m.optimal_sets_max),
@@ -957,6 +966,11 @@ function muscleStatusOf(setCount: number, min: number, max: number): 'zero' | 'u
   return 'optimal';
 }
 
+/** Round a 0..1 share to 2dp for the wire, preserving null (= unknown). */
+function roundShare(share: number | null): number | null {
+  return share == null ? null : Math.round(share * 100) / 100;
+}
+
 // ── Sets per muscle ───────────────────────────────────────────────────────────
 
 async function getSetsPerMuscle(args: Record<string, unknown> = {}) {
@@ -978,6 +992,10 @@ async function getSetsPerMuscle(args: Record<string, unknown> = {}) {
     working_set_count: number;
     set_count: number;
     effective_set_count: number;
+    failure_set_count: number;
+    rir_logged_set_count: number;
+    failure_share: number | null;
+    days_touched: number;
     optimal_min: number;
     optimal_max: number;
     status: 'zero' | 'under' | 'optimal' | 'over';
@@ -989,12 +1007,23 @@ async function getSetsPerMuscle(args: Record<string, unknown> = {}) {
   // parent). set_count is the raw audit count. effective_set_count is
   // RIR-weighted with drops excluded. Status uses working_set_count so MEV/
   // MAV bands stay honest when drop chains are present.
+  //
+  // failure_share is the fatigue counterpart to effective_set_count, which
+  // is deliberately blind to it: RIR 0 and RIR 2 both score 1.0 because the
+  // hypertrophy stimulus really is the same. The recovery cost is not, and
+  // that difference lives here. null = RIR coverage too thin to judge.
   const rows: MuscleOut[] = muscles.map(m => ({
     slug: m.slug,
     display_name: m.display_name,
     working_set_count: m.working_set_count,
     set_count: m.set_count,
     effective_set_count: Math.round(m.effective_set_count * 10) / 10,
+    failure_set_count: m.failure_set_count,
+    rir_logged_set_count: m.rir_logged_set_count,
+    failure_share: roundShare(
+      failureShare(m.failure_set_count, m.rir_logged_set_count, m.working_set_count),
+    ),
+    days_touched: m.days_touched,
     optimal_min: m.optimal_sets_min,
     optimal_max: m.optimal_sets_max,
     status: muscleStatusOf(m.working_set_count, m.optimal_sets_min, m.optimal_sets_max),
@@ -4007,6 +4036,11 @@ export const tools: MCPTool[] = [
       '(1) primary/secondary credit — primary=1.0, secondary-only=0.5, in-both=1.0 (RP/Helms convention); ' +
       '(2) RIR credit — RIR 0–3 counts 1.0, RIR 4 counts 0.5, RIR 5+ counts 0.0, RIR=NULL gets the charitable default of 1.0. ' +
       'Example: an RDL set @ RIR 4 contributes 0.25 effective sets to glutes (secondary 0.5 × RIR 0.5), and 0.5 effective sets to hamstrings (primary 1.0 × RIR 0.5). ' +
+      'failure_share (0..1, or null) is the FATIGUE counterpart that effective_set_count structurally cannot express: RIR 0 and RIR 2 both score 1.0 there because the hypertrophy stimulus is genuinely the same, but the recovery cost is not. ' +
+      'It is failure_set_count / rir_logged_set_count over non-drop working sets — i.e. the share of sets taken to RIR 0. The denominator is RIR-LOGGED sets, not all working sets, because rir=NULL means "unknown", not "not failure". ' +
+      'null means RIR coverage is too thin to judge (fewer than 4 logged sets, or RIR on under half the working sets) — treat null as "no data", never as "fine". ' +
+      'Sustained shares above ~0.65 mean near-maximum fatigue for no extra stimulus; use it alongside effective_set_count when a muscle looks well-dosed on volume but its lifts are stalling or regressing. ' +
+      'days_touched is distinct training days that week (frequency-aware MRV input). ' +
       'Working set = is_completed=true AND (reps>=1 OR duration>0); warm-ups and uncompleted sets excluded. Drop sets count as 1 each. ' +
       'Optimal range defaults to 10-20 sets/muscle/week (Schoenfeld 2021), tunable per-muscle in the muscles table — rotator_cuff and forearms ship with tighter bands. ' +
       'Returns all canonical muscles in display order; pass include_zero=false to drop muscles with zero sets. ' +

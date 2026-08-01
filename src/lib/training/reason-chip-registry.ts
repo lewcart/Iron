@@ -24,6 +24,7 @@
 export type ReasonChipKind =
   | 'hrv_low'
   | 'rir_drift'
+  | 'failure_load'
   | 'e1rm_stagnant'
   | 'zone_over'
   | 'zone_risk';
@@ -44,6 +45,19 @@ export interface RirDriftChip extends ReasonChipBase {
   /** RIR delta (positive = drifting toward failure). */
   delta: number;
 }
+/** Distinct from `rir_drift`. Drift is the RATE of change ("RIR fell by N
+ *  this week"); this is the LEVEL ("N% of sets went to failure"). Once
+ *  someone has trained at failure for several weeks the rate flattens while
+ *  the level stays extreme, so only this chip fires in that state. */
+export interface FailureLoadChip extends ReasonChipBase {
+  kind: 'failure_load';
+  /** Muscle slug carrying the load, or 'whole-body' for the aggregate case. */
+  muscle: string;
+  /** Share of RIR-logged working sets taken to failure, 0..1. */
+  share: number;
+  /** How many priority muscles are over the threshold. */
+  muscle_count: number;
+}
 export interface E1rmStagnantChip extends ReasonChipBase {
   kind: 'e1rm_stagnant';
   /** Display name of the anchor lift. */
@@ -61,6 +75,7 @@ export interface ZoneRiskChip extends ReasonChipBase {
 export type ReasonChip =
   | HrvLowChip
   | RirDriftChip
+  | FailureLoadChip
   | E1rmStagnantChip
   | ZoneOverChip
   | ZoneRiskChip;
@@ -95,6 +110,19 @@ export const REASON_CHIP_REGISTRY: Record<ReasonChipKind, ReasonChipMeta> = {
       `Average RIR (reps in reserve) on ${(c as RirDriftChip).muscle} sets dropped by ${(c as RirDriftChip).delta.toFixed(1)} units this week. ` +
       `You're closer to failure than you were a week ago — usually a sign of accumulated fatigue or under-recovery.`,
     severity: 2,
+  },
+  failure_load: {
+    label: c => `${Math.round((c as FailureLoadChip).share * 100)}% to failure`,
+    ariaLabel: c =>
+      `${Math.round((c as FailureLoadChip).share * 100)} percent of logged sets taken to failure ` +
+      `across ${(c as FailureLoadChip).muscle_count} priority muscles`,
+    explanation: c =>
+      `${Math.round((c as FailureLoadChip).share * 100)}% of your RIR-logged working sets were taken to failure (RIR 0), ` +
+      `across ${(c as FailureLoadChip).muscle_count} priority muscles. Training to failure produces about the same ` +
+      `hypertrophy as stopping 1–3 reps short, but costs substantially more recovery — so this is near-maximum ` +
+      `fatigue for near-zero extra stimulus. Note your effective-set count cannot show this: it credits RIR 0 and ` +
+      `RIR 2 identically, by design.`,
+    severity: 3,
   },
   e1rm_stagnant: {
     label: () => `lift slope ↘`,

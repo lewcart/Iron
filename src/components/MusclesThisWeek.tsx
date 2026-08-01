@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import type { SetsByMuscleRow } from '@/lib/api/feed-types';
+import { failureShare, isFailureLoadWarning } from '@/lib/training/volume-math';
 
 /**
  * /feed "Muscles This Week" card.
@@ -14,9 +15,16 @@ import type { SetsByMuscleRow } from '@/lib/api/feed-types';
  * Status colors:
  *   under   → amber  (clear miss)
  *   optimal → green  (in range)
- *   over    → violet (noted, watch recovery — NOT red, that's reserved for
- *                     Phase 3 junk-set / RIR-derived recovery debt)
+ *   over    → violet (noted, watch recovery — NOT red, red is the
+ *                     RIR-derived recovery-debt badges below)
  *   zero    → neutral grey
+ *
+ * Two red badges sit at opposite ends of the same RIR axis:
+ *   JUNK         → most sets too FAR from failure to drive growth
+ *   FAILURE LOAD → most sets taken TO failure; near-max fatigue for
+ *                  no extra stimulus. Invisible to effective_set_count,
+ *                  which credits RIR 0 and RIR 2 the same by design.
+ * They are mutually exclusive in practice, but both can render.
  */
 
 type View = 'sets' | 'volume';
@@ -82,6 +90,9 @@ interface MuscleTileProps {
   display_name: string;
   set_count: number;
   effective_set_count: number;
+  working_set_count: number;
+  failure_set_count: number;
+  rir_logged_set_count: number;
   optimal_min: number;
   optimal_max: number;
   status: Status;
@@ -90,7 +101,7 @@ interface MuscleTileProps {
   expanded?: boolean;
 }
 
-function MuscleTile({ display_name, set_count, effective_set_count, optimal_min, optimal_max, status, kg_volume, view, expanded }: MuscleTileProps) {
+function MuscleTile({ display_name, set_count, effective_set_count, working_set_count, failure_set_count, rir_logged_set_count, optimal_min, optimal_max, status, kg_volume, view, expanded }: MuscleTileProps) {
   // Progress bar: fill = min(set_count / optimal_max, 1.2) capped, tick at min/max ratio.
   const fillRatio = Math.min(set_count / optimal_max, 1.2);
   const effectiveFillRatio = Math.min(effective_set_count / optimal_max, 1.2);
@@ -98,6 +109,8 @@ function MuscleTile({ display_name, set_count, effective_set_count, optimal_min,
   const headline = view === 'sets' ? String(set_count) : formatVolume(kg_volume);
   const subline = view === 'sets' && set_count > 0 ? `${optimal_min}–${optimal_max} optimal` : '';
   const junk = isJunkWarning(set_count, effective_set_count);
+  const share = failureShare(failure_set_count, rir_logged_set_count, working_set_count);
+  const failureLoad = isFailureLoadWarning(share);
 
   return (
     <div className={`rounded-lg border p-3 flex flex-col gap-2 transition-colors ${statusBg(status)} ${expanded ? 'ring-1 ring-primary' : ''}`}>
@@ -110,6 +123,14 @@ function MuscleTile({ display_name, set_count, effective_set_count, optimal_min,
               title={`Effective sets ${effective_set_count.toFixed(1)} / ${set_count} — most sets logged too far from failure to drive hypertrophy`}
             >
               JUNK
+            </span>
+          )}
+          {view === 'sets' && failureLoad && (
+            <span
+              className="text-[9px] font-bold px-1 leading-[14px] rounded-full text-rose-700 bg-rose-100 dark:text-rose-200 dark:bg-rose-950/60 border border-rose-300 dark:border-rose-800 whitespace-nowrap"
+              title={`${failure_set_count}/${rir_logged_set_count} logged sets taken to failure (${Math.round(share! * 100)}%) — near-maximum fatigue cost for no extra hypertrophy stimulus`}
+            >
+              {Math.round(share! * 100)}% FAIL
             </span>
           )}
         </span>
@@ -168,6 +189,13 @@ export function MusclesThisWeek({ setsByMuscle }: MusclesThisWeekProps) {
     const totalVolume = children.reduce((s, c) => s + c.kg_volume, 0);
     const sumMin = children.reduce((s, c) => s + c.optimal_min, 0);
     const sumMax = children.reduce((s, c) => s + c.optimal_max, 0);
+    // Failure counts roll up by summation. A set hitting two muscles in the
+    // same group is double-counted here, exactly as set_count already is —
+    // the ratio stays right because numerator and denominator inflate
+    // together.
+    const totalWorking = children.reduce((s, c) => s + c.working_set_count, 0);
+    const totalFailure = children.reduce((s, c) => s + c.failure_set_count, 0);
+    const totalRirLogged = children.reduce((s, c) => s + c.rir_logged_set_count, 0);
     return {
       key: g.key,
       label: g.label,
@@ -175,6 +203,9 @@ export function MusclesThisWeek({ setsByMuscle }: MusclesThisWeekProps) {
       totalSets,
       totalEffective,
       totalVolume,
+      totalWorking,
+      totalFailure,
+      totalRirLogged,
       optimal_min: sumMin,
       optimal_max: sumMax,
       status: rollupStatus(children),
@@ -216,6 +247,9 @@ export function MusclesThisWeek({ setsByMuscle }: MusclesThisWeekProps) {
               display_name={g.label}
               set_count={g.totalSets}
               effective_set_count={g.totalEffective}
+              working_set_count={g.totalWorking}
+              failure_set_count={g.totalFailure}
+              rir_logged_set_count={g.totalRirLogged}
               optimal_min={g.optimal_min}
               optimal_max={g.optimal_max}
               status={g.status}
@@ -236,6 +270,9 @@ export function MusclesThisWeek({ setsByMuscle }: MusclesThisWeekProps) {
                 display_name={child.display_name}
                 set_count={child.set_count}
                 effective_set_count={child.effective_set_count}
+                working_set_count={child.working_set_count}
+                failure_set_count={child.failure_set_count}
+                rir_logged_set_count={child.rir_logged_set_count}
                 optimal_min={child.optimal_min}
                 optimal_max={child.optimal_max}
                 status={child.status}
